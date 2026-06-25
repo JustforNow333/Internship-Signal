@@ -1,0 +1,51 @@
+{
+  "name": "Cornell CS student",
+  "school": "Cornell University",
+  "skills": [
+    "python",
+    "flask",
+    "sqlalchemy",
+    "rest api",
+    "api",
+    "sql",
+    "postgres",
+    "postgresql",
+    "mysql",
+    "data ingestion",
+    "etl",
+    "pandas",
+    "numpy",
+    "scikit-learn",
+    "machine learning",
+    "data analysis",
+    "git",
+    "docker",
+    "linux"
+  ],
+  "interests": [
+    "backend",
+    "data science",
+    "ml/ai",
+    "quant",
+    "startup engineering"
+  ],
+  "role_affinity": {
+    "swe": 90,
+    "data_science": 90,
+    "ml_ai": 95,
+    "quant": 85,
+    "product": 55,
+    "it": 35,
+    "non_technical": 10,
+    "unknown": 40
+  },
+  "preferred_locations": [
+    "ithaca",
+    "new york",
+    "nyc",
+    "remote",
+    "boston"
+  ],
+  "min_acceptable_hourly_usd": 15,
+  "goal": "Real technical experience \u2014 not unpaid busywork."
+}
