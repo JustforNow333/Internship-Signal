@@ -1,0 +1,94 @@
+[
+  {
+    "active": true,
+    "category": "Software Engineering",
+    "company_name": "GitHub",
+    "company_url": "",
+    "date_posted": 1761799753,
+    "date_updated": 1761799753,
+    "degrees": [
+      "Bachelor's"
+    ],
+    "id": "433d8967-2378-4af2-87a5-e3011130f79c",
+    "is_visible": true,
+    "locations": [
+      "Remote in USA"
+    ],
+    "source": "angie-hue",
+    "sponsorship": "Other",
+    "terms": [
+      "Summer 2026"
+    ],
+    "title": "Software Engineering Intern",
+    "url": "https://githubinc.jibeapply.com/jobs/4640"
+  },
+  {
+    "active": false,
+    "category": "Data Science, AI & Machine Learning",
+    "company_name": "Thermo Fisher Scientific",
+    "company_url": "",
+    "date_posted": 1761799841,
+    "date_updated": 1762902653,
+    "degrees": [
+      "Master's"
+    ],
+    "id": "63b59e61-7414-4e4c-ba1c-8a8a36f8089f",
+    "is_visible": true,
+    "locations": [
+      "Remote in USA"
+    ],
+    "source": "angie-hue",
+    "sponsorship": "Other",
+    "terms": [
+      "Summer 2026"
+    ],
+    "title": "Data Science Intern",
+    "url": "https://thermofisher.wd5.myworkdayjobs.com/en-US/thermofishercareers/job/Durham-North-Carolina-USA/Data-Science-Intern_R-01328092"
+  },
+  {
+    "active": true,
+    "category": "Software",
+    "company_name": "Tesla",
+    "company_url": "https://simplify.jobs/c/Tesla",
+    "date_posted": 1782263415,
+    "date_updated": 1782264280,
+    "degrees": [
+      "Bachelor's"
+    ],
+    "id": "cd64a5ea-e39f-46da-9968-2118ff190093",
+    "is_visible": true,
+    "locations": [
+      "Fremont, CA"
+    ],
+    "source": "Simplify",
+    "sponsorship": "Other",
+    "terms": [
+      "Fall 2026"
+    ],
+    "title": "Product Management Intern - Product Engineer - Applications Engineering",
+    "url": "https://www.tesla.com/careers/search/job/274754"
+  },
+  {
+    "active": true,
+    "category": "AI/ML/Data",
+    "company_name": "Institute of Foundation Models",
+    "company_url": "https://simplify.jobs/c/Institute-Of-Foundation-Models",
+    "date_posted": 1782349745,
+    "date_updated": 1782349921,
+    "degrees": [
+      "Bachelor's"
+    ],
+    "id": "324aa2c0-3a5a-4d8d-a507-c9236e03d463",
+    "is_visible": true,
+    "locations": [
+      "Sunnyvale, CA"
+    ],
+    "source": "Simplify",
+    "sponsorship": "Other",
+    "terms": [
+      "Summer 2026"
+    ],
+    "title": "Inference Optimization Intern - Performance Modeling",
+    "url": "https://jobs.lever.co/ifm-us/1a09231e-44f2-4c82-a7a1-793bd159d68d/apply"
+  }
+]
