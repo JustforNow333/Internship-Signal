@@ -1,0 +1,40 @@
+from watcher.filters import filter_matches, is_internship, is_open
+
+
+def job(**overrides):
+    base = {
+        "title": "Software Engineer Intern",
+        "description": "Build backend services with Python.",
+        "internship_type": "",
+        "deadline_days_left": None,
+        "role_classification": {"role": "swe"},
+        "score": {"total": 60},
+        "extra": {},
+    }
+    base.update(overrides)
+    return base
+
+
+def test_filters_keep_swe_internship_open_jobs():
+    assert filter_matches([job()]) == [job()]
+
+
+def test_filters_drop_non_swe_roles():
+    assert filter_matches([job(role_classification={"role": "data_science"})]) == []
+
+
+def test_filters_drop_new_grad_full_time_titles():
+    assert not is_internship(job(title="Software Engineer New Grad"))
+    assert filter_matches([job(title="Software Engineer New Grad")]) == []
+
+
+def test_filters_drop_expired_or_inactive_jobs():
+    assert not is_open(job(deadline_days_left=-1))
+    assert not is_open(job(extra={"active": False}))
+    assert filter_matches([job(deadline_days_left=-1), job(extra={"active": False})]) == []
+
+
+def test_filters_optional_score_gate():
+    assert filter_matches([job(score={"total": 69})], min_score=70) == []
+    assert filter_matches([job(score={"total": 70})], min_score=70)
+

@@ -17,8 +17,18 @@ class GitHubListingsSource:
     url = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"
     required_keys = {"company_name", "title", "locations", "url", "date_posted", "active", "terms"}
 
+    def fetch_payload(self):
+        return fetch_json(self.url, self.name)
+
     def fetch(self, company: CompanyCfg) -> list[dict]:
-        return self.parse(fetch_json(self.url, self.name), company)
+        return self.parse(self.fetch_payload(), company)
+
+    def fetch_many(self, companies: list[CompanyCfg] | tuple[CompanyCfg, ...]) -> list[dict]:
+        payload = self.fetch_payload()
+        rows = []
+        for company in companies:
+            rows.extend(self.parse(payload, company))
+        return rows
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
         listings = ensure_list(payload, self.name, "payload")
@@ -79,4 +89,3 @@ def _terms_match(source_terms: list, configured_terms: Any) -> bool:
     terms = {str(term).strip().lower() for term in source_terms if str(term).strip()}
     wanted = {str(term).strip().lower() for term in configured_terms if str(term).strip()}
     return not wanted or bool(terms & wanted)
-

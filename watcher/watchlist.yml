@@ -1,0 +1,18 @@
+defaults:
+  terms: ["Summer 2026"]
+  target_roles: ["swe"]
+  min_score:
+
+companies:
+  - name: "Astera Labs"
+    ats: greenhouse
+    token: "asteraearlycareer2026"
+    aliases: ["AsteraLabs"]
+
+  - name: "Institute of Foundation Models"
+    ats: lever
+    token: "ifm-us"
+    aliases: ["IFM"]
+
+  - name: "GitHub"
+    ats: github_only
