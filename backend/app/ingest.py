@@ -1,8 +1,7 @@
 """CSV ingestion pipeline: parse -> normalize -> dedupe -> analyze -> score.
 
-`process_csv` is the single orchestrator the API calls. It accepts raw CSV
-text and an optional fixed `today` (tests pass one for determinism) and
-returns {jobs, cleaning_report, summary}.
+`process_csv` is the CSV orchestrator the API calls. `analyze_rows` is the
+shared analysis path for already-built canonical row dicts.
 """
 
 import csv
@@ -38,51 +37,17 @@ def _read_csv(csv_text: str):
     return headers, rows
 
 
-def process_csv(csv_text: str, today: date | None = None) -> dict:
+def _analyze_rows_with_report(rows: list[dict], today: date | None = None) -> tuple[list[dict], list]:
+    """Shared analysis engine plus dedupe report for CSV cleaning metadata."""
     today = today or date.today()
-    headers, raw_rows = _read_csv(csv_text)
-    if not headers:
-        raise ValueError("No header row found in the CSV.")
-
-    mapping, column_report = map_headers(headers)
-    if not any(mapping.get(h) in ("company", "title") for h in headers):
-        raise ValueError(
-            "Couldn't find a company or title column. "
-            f"Headers seen: {', '.join(h.strip() for h in headers if h)}"
-        )
-
     profile = load_profile()
     known = config.load_known_companies()
 
-    # --- normalize ---------------------------------------------------------
-    rows = []
-    inferred_counter: Counter = Counter()
-    warnings: list = []
-    for i, raw in enumerate(raw_rows, start=1):
-        row = build_row(raw, mapping)
-        row["_row_number"] = i
-        row["_inferred"] = infer_fields(row)
-        for field in row["_inferred"]:
-            inferred_counter[field] += 1
-        if not row.get("company") and not row.get("title"):
-            warnings.append(f"Row {i} has neither company nor title — kept, but it will score poorly.")
-        rows.append(row)
-
-    # --- dedupe -------------------------------------------------------------
     unique_rows, dup_report = dedupe(rows)
 
-    # --- analyze + score ----------------------------------------------------
     jobs = []
-    salary_stats = {"parsed": 0, "unparsed": 0, "period_assumed": 0}
     for row in unique_rows:
         comp = parse_compensation(row.get("compensation", ""))
-        if comp["usd_hourly_min"] is not None or comp["kind"] in ("unpaid", "equity_only", "commission_only"):
-            salary_stats["parsed"] += 1
-        else:
-            salary_stats["unparsed"] += 1
-        if comp.get("period_assumed"):
-            salary_stats["period_assumed"] += 1
-
         role_cls = classify_role(row)
         company_cls = classify_company(row, known, role_is_technical=role_cls["role"] in TECHNICAL_ROLES)
         red_flags = detect_red_flags(row, comp, role_cls, company_cls)
@@ -116,6 +81,64 @@ def process_csv(csv_text: str, today: date | None = None) -> dict:
         })
 
     jobs.sort(key=lambda j: -j["score"]["total"])
+    return jobs, dup_report
+
+
+def analyze_rows(rows: list[dict], today: date | None = None, *, include_dedupe_report: bool = False):
+    """Dedupe, analyze, and score already-built canonical rows.
+
+    By default this returns only the scored jobs. `process_csv` asks for the
+    dedupe report too so its cleaning report can keep the existing shape.
+    """
+    jobs, dup_report = _analyze_rows_with_report(rows, today=today)
+    if include_dedupe_report:
+        return jobs, dup_report
+    return jobs
+
+
+def _salary_stats_from_jobs(jobs: list[dict]) -> dict:
+    salary_stats = {"parsed": 0, "unparsed": 0, "period_assumed": 0}
+    for job in jobs:
+        comp = job["compensation"]
+        if comp["usd_hourly_min"] is not None or comp["kind"] in ("unpaid", "equity_only", "commission_only"):
+            salary_stats["parsed"] += 1
+        else:
+            salary_stats["unparsed"] += 1
+        if comp.get("period_assumed"):
+            salary_stats["period_assumed"] += 1
+    return salary_stats
+
+
+def process_csv(csv_text: str, today: date | None = None) -> dict:
+    today = today or date.today()
+    headers, raw_rows = _read_csv(csv_text)
+    if not headers:
+        raise ValueError("No header row found in the CSV.")
+
+    mapping, column_report = map_headers(headers)
+    if not any(mapping.get(h) in ("company", "title") for h in headers):
+        raise ValueError(
+            "Couldn't find a company or title column. "
+            f"Headers seen: {', '.join(h.strip() for h in headers if h)}"
+        )
+
+    # --- normalize ---------------------------------------------------------
+    rows = []
+    inferred_counter: Counter = Counter()
+    warnings: list = []
+    for i, raw in enumerate(raw_rows, start=1):
+        row = build_row(raw, mapping)
+        row["_row_number"] = i
+        row["_inferred"] = infer_fields(row)
+        for field in row["_inferred"]:
+            inferred_counter[field] += 1
+        if not row.get("company") and not row.get("title"):
+            warnings.append(f"Row {i} has neither company nor title — kept, but it will score poorly.")
+        rows.append(row)
+
+    # --- analyze + score ----------------------------------------------------
+    jobs, dup_report = analyze_rows(rows, today=today, include_dedupe_report=True)
+    salary_stats = _salary_stats_from_jobs(jobs)
 
     cleaning_report = {
         "rows_in": len(raw_rows),
