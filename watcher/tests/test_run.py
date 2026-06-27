@@ -104,6 +104,25 @@ def test_collect_rows_logs_source_failure_and_keeps_going():
     assert errors == ["BrokenCo: boom"]
 
 
+def test_collect_rows_skips_bespoke_and_github_only_for_direct_fetch():
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(name="BespokeCo", ats="bespoke"),
+            CompanyCfg(name="GitHub", ats="github_only"),
+        )
+    )
+    github_rows = [row("GitHub", "Software Engineering Intern", source="github")]
+
+    rows, errors = collect_rows(
+        config,
+        direct_sources={},
+        github_source=FakeGithub(github_rows),
+    )
+
+    assert rows == github_rows
+    assert errors == []
+
+
 def test_print_report_for_matches_and_empty(capsys):
     result = type("Result", (), {
         "errors": [],
@@ -127,4 +146,3 @@ def test_print_report_for_matches_and_empty(capsys):
     empty = type("Result", (), {"errors": [], "new_matches": []})()
     print_report(empty)
     assert "No new matches." in capsys.readouterr().out
-

@@ -20,6 +20,12 @@ def test_norm_url_strips_tracking_and_slash():
     assert a == b
 
 
+def test_norm_url_sorts_query_params():
+    a = norm_url("https://example.com/job?department=eng&id=123")
+    b = norm_url("https://example.com/job?id=123&department=eng")
+    assert a == b
+
+
 def test_exact_duplicate_removed_and_reported():
     r1 = _row(1, company="Stripe", title="Backend Intern", location="New York, NY")
     r2 = _row(2, company="Stripe", title="Backend Intern", location="New York, NY")
@@ -52,6 +58,21 @@ def test_duplicate_fills_missing_fields_on_kept_row():
     assert kept[0]["compensation"] == "$48/hr"
     assert kept[0]["deadline"] == "2026-07-01"
     assert set(report[0]["merged_fields"]) == {"compensation", "deadline"}
+
+
+def test_dedupe_indexes_fields_filled_from_duplicate():
+    r1 = _row(1, company="Plaid", title="SWE Intern", location="SF")
+    r2 = _row(2, company="Plaid", title="SWE Intern", location="SF",
+              source_url="https://example.com/jobs/plaid-swe")
+    r3 = _row(3, company="Plaid", title="Software Intern", location="SF",
+              source_url="https://example.com/jobs/plaid-swe?utm_source=board")
+
+    kept, report = dedupe([r1, r2, r3])
+
+    assert kept == [r1]
+    assert kept[0]["source_url"] == "https://example.com/jobs/plaid-swe"
+    assert [entry["row_number"] for entry in report] == [2, 3]
+    assert report[1]["matched_on"] == "source_url"
 
 
 def test_blank_key_rows_are_not_collapsed_together():

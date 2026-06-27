@@ -4,15 +4,412 @@ defaults:
   min_score:
 
 companies:
-  - name: "Astera Labs"
-    ats: greenhouse
-    token: "asteraearlycareer2026"
-    aliases: ["AsteraLabs"]
+  - name: "Capital One"
+    ats: workday
+    token: "capitalone"
+    workday_shard: "wd12"
+    workday_site: "Capital_One"
+    alumni_match: ["capital one"]
+    source_url: "https://capitalone.wd12.myworkdayjobs.com/Capital_One/job/Toronto-ON/Intern--Backend-Software-Engineer---Summer-2026_R232315-1"
 
-  - name: "Institute of Foundation Models"
-    ats: lever
-    token: "ifm-us"
-    aliases: ["IFM"]
+  - name: "Arm"
+    ats: bespoke
+    module: "arm"
+    alumni_match: ["arm"]
+    source_url: "https://careers.arm.com/"
+    note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
 
-  - name: "GitHub"
+  - name: "Workday"
+    ats: workday
+    token: "workday"
+    workday_shard: "wd5"
+    workday_site: "Workday_Early_Career"
+    alumni_match: ["workday"]
+    source_url: "https://workday.wd5.myworkdayjobs.com/Workday_Early_Career/job/USA-CA-Pleasanton/Analytics-Engineer-Intern_JR-0101608"
+
+  - name: "Bloomberg"
+    ats: bespoke
+    module: "bloomberg"
+    alumni_match: ["bloomberg"]
+    source_url: "https://www.bloomberg.com/company/careers/"
+    note: "known company-hosted careers portal"
+
+  - name: "Epic"
+    ats: bespoke
+    module: "epic"
+    alumni_match: ["epic"]
+    source_url: "https://careers.epic.com/"
+    note: "company-hosted careers portal"
+
+  - name: "Google"
+    ats: bespoke
+    module: "google"
+    alumni_match: ["google"]
+    source_url: "https://www.google.com/about/careers/"
+    note: "known company-hosted careers portal"
+
+  - name: "PayPal"
+    ats: workday
+    token: "paypal"
+    workday_shard: "wd1"
+    workday_site: "jobs"
+    alumni_match: ["paypal"]
+    source_url: "https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/San-Jose-California-United-States-of-America/Machine-Learning-Engineer-PhD-Intern_R0130591"
+
+  - name: "Salesforce"
+    ats: workday
+    token: "salesforce"
+    workday_shard: "wd12"
+    workday_site: "Futureforce_Internships"
+    alumni_match: ["salesforce"]
+    source_url: "https://salesforce.wd12.myworkdayjobs.com/Futureforce_Internships/job/California---San-Francisco/Summer-2026-Intern---AI---Data-Science-Analyst_JR340354"
+
+  - name: "JHU Applied Physics Laboratory"
+    ats: bespoke
+    module: "jhu_applied_physics_laboratory"
+    aliases: ["JHU Applied Physics", "JHU APL", "Applied Physics Laboratory"]
+    alumni_match: ["jhu applied physics laboratory", "jhu applied physics", "jhu apl", "applied physics laboratory"]
+    source_url: "https://careers.jhuapl.edu/jobs"
+    note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
+
+  - name: "Morgan Stanley"
+    ats: workday
+    token: "ms"
+    workday_shard: "wd5"
+    workday_site: "External"
+    alumni_match: ["morgan stanley"]
+    source_url: "https://ms.wd5.myworkdayjobs.com/External/job/New-York-New-York-United-States-of-America/Machine-Learning-Research-Associate-Program---PhD_JR020171"
+
+  - name: "NewVolt Solutions"
+    ats: bespoke
+    module: "newvolt_solutions"
+    aliases: ["Newvolt"]
+    alumni_match: ["newvolt solutions", "newvolt"]
+    source_url: "https://www.newvoltsolutions.com/careers"
+    note: "company-hosted careers portal"
+
+  - name: "Ab Initio Software"
     ats: github_only
+    aliases: ["Ab Initio"]
+    alumni_match: ["ab initio software", "ab initio"]
+    note: "no confident supported ATS or active careers portal found"
+
+  - name: "Adobe"
+    ats: workday
+    token: "adobe"
+    workday_shard: "wd5"
+    workday_site: "external_experienced"
+    alumni_match: ["adobe"]
+    source_url: "https://adobe.wd5.myworkdayjobs.com/external_experienced/job/San-Jose/XMLNAME-2026-AI-ML-Intern---Software-Engineer-Intern_R160473"
+
+  - name: "Amass Insights"
+    ats: bespoke
+    module: "amass_insights"
+    alumni_match: ["amass insights"]
+    source_url: "https://amass.com/careers"
+    note: "company-hosted careers portal"
+
+  - name: "Amazon"
+    ats: bespoke
+    module: "amazon"
+    alumni_match: ["amazon"]
+    source_url: "https://amazon.jobs/en/"
+    note: "known company-hosted careers portal"
+
+  - name: "American Express"
+    ats: bespoke
+    module: "american_express"
+    alumni_match: ["american express"]
+    source_url: "https://aexp.eightfold.ai/careers"
+    note: "Eightfold portal; unsupported by current watchlist schema"
+
+  - name: "Anduril Industries"
+    ats: greenhouse
+    token: "andurilindustries"
+    aliases: ["Anduril"]
+    alumni_match: ["anduril industries", "anduril"]
+    source_url: "https://boards.greenhouse.io/andurilindustries/jobs/4802172007?gh_jid=4802172007"
+
+  - name: "Balyasny Asset Management"
+    ats: bespoke
+    module: "balyasny_asset_management"
+    aliases: ["Balyasny"]
+    alumni_match: ["balyasny asset management", "balyasny"]
+    source_url: "https://www.bamfunds.com/careers/internships"
+    note: "company-hosted Salesforce Experience portal"
+
+  - name: "BlackLine"
+    ats: bespoke
+    module: "blackline"
+    alumni_match: ["blackline"]
+    source_url: "https://careers.blackline.com/careers-home/"
+    note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
+
+  - name: "Bosch"
+    ats: smartrecruiters
+    token: "BoschGroup"
+    alumni_match: ["bosch"]
+    source_url: "https://jobs.smartrecruiters.com/BoschGroup/744000092298605"
+
+  - name: "Canary Technologies"
+    ats: lever
+    token: "canarytechnologies"
+    aliases: ["Canary"]
+    alumni_match: ["canary technologies", "canary"]
+    source_url: "https://jobs.lever.co/canarytechnologies/29b23afa-a3fb-4a1b-8b5b-a6210de38047"
+
+  - name: "Cell Systems Logic"
+    ats: github_only
+    alumni_match: ["cell systems logic"]
+    note: "no confident company careers page or supported ATS URL found"
+
+  - name: "Chainalysis"
+    ats: ashby
+    token: "chainalysis-careers"
+    alumni_match: ["chainalysis"]
+    source_url: "https://jobs.ashbyhq.com/chainalysis-careers/02989a06-0562-4074-8f64-963716ae9801"
+
+  - name: "Cogni Dao"
+    ats: github_only
+    alumni_match: ["cogni dao"]
+    note: "no confident company careers page or supported ATS URL found"
+
+  - name: "Compass"
+    ats: bespoke
+    module: "compass"
+    alumni_match: ["compass"]
+    source_url: "https://www.compass.com/careers/"
+    note: "company-hosted careers portal"
+
+  - name: "Coursedog"
+    ats: bespoke
+    module: "coursedog"
+    alumni_match: ["coursedog"]
+    source_url: "https://coursedog.pinpointhq.com/"
+    note: "Pinpoint portal; unsupported by current watchlist schema"
+
+  - name: "FanAmp"
+    ats: github_only
+    alumni_match: ["fanamp"]
+    note: "no confident company careers page or supported ATS URL found"
+
+  - name: "FanDuel"
+    ats: greenhouse
+    token: "fanduel"
+    alumni_match: ["fanduel"]
+    source_url: "https://www.fanduel.careers/open-positions?gh_jid=8017555"
+
+  - name: "Grayscale Investments"
+    ats: greenhouse
+    token: "grayscaleinvestments"
+    aliases: ["Grayscale"]
+    alumni_match: ["grayscale investments", "grayscale"]
+    source_url: "https://job-boards.greenhouse.io/grayscaleinvestments/jobs/7751081003"
+
+  - name: "HackerRank"
+    ats: greenhouse
+    token: "hackerrank"
+    alumni_match: ["hackerrank"]
+    source_url: "https://job-boards.greenhouse.io/hackerrank/jobs/7567121"
+
+  - name: "HubSpot"
+    ats: greenhouse
+    token: "hubspotjobs"
+    alumni_match: ["hubspot"]
+    source_url: "https://www.hubspot.com/careers/jobs/7005836?gh_jid=7005836"
+
+  - name: "IBM"
+    ats: bespoke
+    module: "ibm"
+    alumni_match: ["ibm"]
+    source_url: "https://www.ibm.com/careers"
+    note: "known company-hosted careers portal"
+
+  - name: "ICEYE"
+    ats: workable
+    token: "iceye"
+    alumni_match: ["iceye"]
+    source_url: "https://apply.workable.com/iceye/"
+
+  - name: "Indeed"
+    ats: bespoke
+    module: "indeed"
+    alumni_match: ["indeed"]
+    source_url: "https://www.indeed.com/careers"
+    note: "known company-hosted careers portal"
+
+  - name: "InterSystems"
+    ats: greenhouse
+    token: "intersystems"
+    alumni_match: ["intersystems"]
+    source_url: "https://www.intersystems.com/careers/careers-search/?gh_jid=7723402003"
+
+  - name: "IQVIA"
+    ats: workday
+    token: "iqvia"
+    workday_shard: "wd1"
+    workday_site: "IQVIA"
+    alumni_match: ["iqvia"]
+    source_url: "https://iqvia.wd1.myworkdayjobs.com/en-US/IQVIA/job/Wayne-PA-United-States-of-America/Data-Science-Intern---Summer-2026--Remote-_R1525168"
+
+  - name: "Justworks"
+    ats: greenhouse
+    token: "justworks"
+    alumni_match: ["justworks"]
+    source_url: "https://boards.greenhouse.io/justworks/jobs/7814842?gh_jid=7814842"
+
+  - name: "Launch Potato"
+    ats: greenhouse
+    token: "launchpotato"
+    alumni_match: ["launch potato"]
+    source_url: "https://launchpotato.com/careers-list?gh_jid=6099315004"
+
+  - name: "LinkedIn"
+    ats: smartrecruiters
+    token: "LinkedIn3"
+    alumni_match: ["linkedin"]
+    source_url: "https://jobs.smartrecruiters.com/LinkedIn3/744000095054345"
+
+  - name: "Maximal"
+    ats: github_only
+    alumni_match: ["maximal"]
+    note: "ambiguous search results; no confident ATS or exact company careers page found"
+
+  - name: "MercuryVote"
+    ats: github_only
+    alumni_match: ["mercuryvote"]
+    note: "no confident company careers page or supported ATS URL found"
+
+  - name: "MIT Lincoln Laboratory"
+    ats: bespoke
+    module: "mit_lincoln_laboratory"
+    aliases: ["MIT Lincoln", "MIT Lincoln Lab"]
+    alumni_match: ["mit lincoln laboratory", "mit lincoln", "mit lincoln lab"]
+    source_url: "https://careers.ll.mit.edu/"
+    note: "SuccessFactors portal; unsupported by current watchlist schema"
+
+  - name: "Morph Systems"
+    ats: bespoke
+    module: "morph_systems"
+    aliases: ["Morph"]
+    alumni_match: ["morph systems", "morph"]
+    source_url: "https://morph.systems/careers"
+    note: "company-hosted careers portal"
+
+  - name: "Northrop Grumman"
+    ats: workday
+    token: "ngc"
+    workday_shard: "wd1"
+    workday_site: "Northrop_Grumman_External_Site"
+    alumni_match: ["northrop grumman"]
+    source_url: "https://ngc.wd1.myworkdayjobs.com/Northrop_Grumman_External_Site/job/United-States-Maryland-Baltimore/XMLNAME-2026-Software-Engineer-Intern---Baltimore-MD_R10213606"
+
+  - name: "OnePay"
+    ats: ashby
+    token: "oneapp"
+    alumni_match: ["onepay"]
+    source_url: "https://jobs.ashbyhq.com/oneapp/0b20348f-78ed-4738-8d6d-25936c5430b5"
+
+  - name: "OpenAI"
+    ats: ashby
+    token: "openai"
+    alumni_match: ["openai"]
+    source_url: "https://jobs.ashbyhq.com/openai/1f3353ed-78eb-4a01-b783-c44b1c086711/application"
+
+  - name: "Oracle"
+    ats: bespoke
+    module: "oracle"
+    alumni_match: ["oracle"]
+    source_url: "https://www.oracle.com/careers/"
+    note: "known company-hosted Oracle HCM careers portal"
+
+  - name: "Premise Health"
+    ats: bespoke
+    module: "premise_health"
+    alumni_match: ["premise health"]
+    source_url: "https://jobs.premisehealth.com/"
+    note: "company-hosted careers portal"
+
+  - name: "Procutre Analytics"
+    ats: bespoke
+    module: "procutre_analytics"
+    aliases: ["Procutre"]
+    alumni_match: ["procutre analytics", "procutre"]
+    source_url: "https://procureanalytics.com/careers-culture/"
+    note: "input appears to be Procure Analytics; Paylocity portal unsupported by current watchlist schema"
+
+  - name: "Progenic Labs"
+    ats: github_only
+    aliases: ["Progenic"]
+    alumni_match: ["progenic labs", "progenic"]
+    note: "no confident exact company careers page or supported ATS URL found"
+
+  - name: "Rec Technologies"
+    ats: github_only
+    aliases: ["Rec"]
+    alumni_match: ["rec technologies", "rec"]
+    note: "no confident exact company careers page or supported ATS URL found"
+
+  - name: "Ridgeline"
+    ats: greenhouse
+    token: "ridgeline"
+    alumni_match: ["ridgeline"]
+    source_url: "https://boards.greenhouse.io/ridgeline/jobs/7629126003?gh_jid=7629126003"
+
+  - name: "Rune technologies"
+    ats: ashby
+    token: "runetech"
+    aliases: ["Rune"]
+    alumni_match: ["rune technologies", "rune"]
+    source_url: "https://jobs.ashbyhq.com/runetech/2448463b-1a37-4b5a-9cc6-4fa1b18bc9c9"
+
+  - name: "Spotify"
+    ats: lever
+    token: "spotify"
+    alumni_match: ["spotify"]
+    source_url: "https://jobs.lever.co/spotify/69f52b9b-9e73-4134-b366-7e9e77ac192d/apply"
+
+  - name: "Teads"
+    ats: greenhouse
+    token: "teads1"
+    alumni_match: ["teads"]
+    source_url: "https://job-boards.eu.greenhouse.io/teads1/jobs/4816378101"
+
+  - name: "Tenovi"
+    ats: bespoke
+    module: "tenovi"
+    alumni_match: ["tenovi"]
+    source_url: "https://www.tenovi.com/careers/"
+    note: "company-hosted careers portal"
+
+  - name: "thrive holdings"
+    ats: github_only
+    aliases: ["Thrive"]
+    alumni_match: ["thrive holdings", "thrive"]
+    note: "no confident exact company careers page or supported ATS URL found"
+
+  - name: "Trillium Surveyor"
+    ats: greenhouse
+    token: "trilliumsurveyor"
+    alumni_match: ["trillium surveyor"]
+    source_url: "https://job-boards.greenhouse.io/trilliumsurveyor/jobs/4827524007"
+
+  - name: "Twilio"
+    ats: greenhouse
+    token: "twilio"
+    alumni_match: ["twilio"]
+    source_url: "https://job-boards.greenhouse.io/twilio/jobs/7560246"
+
+  - name: "Uber"
+    ats: bespoke
+    module: "uber"
+    alumni_match: ["uber"]
+    source_url: "https://www.uber.com/global/en/careers/"
+    note: "known company-hosted careers portal with iCIMS university portal"
+
+  - name: "ZS"
+    ats: bespoke
+    module: "zs"
+    alumni_match: ["zs"]
+    source_url: "https://jobs.zs.com/jobs"
+    note: "company-hosted iCIMS portal; unsupported by current watchlist schema"

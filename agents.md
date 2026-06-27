@@ -21,21 +21,45 @@ Current watcher fetch layer:
   `watchlist.yml` loader. The loader intentionally supports the simple
   top-level `defaults` + `companies` YAML shape used by this repo; there is no
   PyYAML dependency.
-- Implemented adapters: Greenhouse, Lever, and SimplifyJobs GitHub listings.
+- The config schema accepts the §3 ATS values
+  (`greenhouse`, `lever`, `ashby`, `smartrecruiters`, `workable`, `workday`,
+  `bespoke`, `github_only`) plus generated metadata fields like
+  `workday_shard`, `workday_site`, `module`, `alumni_match`, `source_url`,
+  and `note`. Workday entries require tenant `token`, `workday_shard`
+  (example: `wd12`), and `workday_site`.
+- Implemented adapters: Greenhouse, Lever, Ashby, SmartRecruiters, Workable,
+  Workday, and SimplifyJobs GitHub listings.
 - Adapters return canonical-shaped rows plus `extra.source` (`direct` or
   `github`) and `extra.source_adapter`.
 - Adapter tests parse saved fixtures only; tests must never hit the network.
 - For future adapter work, verify the live endpoint first, save representative
   real responses under `watcher/tests/fixtures/`, and parse fixtures in tests.
+- Workday uses POST
+  `https://{tenant}.{workday_shard}.myworkdayjobs.com/wday/cxs/{tenant}/{workday_site}/jobs`
+  with JSON pagination. Capital One rejected limits above 20, so the adapter
+  uses `limit: 20`. Some Workday URLs from the generated watchlist currently
+  return Workday maintenance/refresh HTML instead of JSON; the adapter treats
+  that as a fetch failure rather than a silent empty result.
+- Workable uses the current public careers API
+  `POST https://apply.workable.com/api/v3/accounts/{token}/jobs`. ICEYE's
+  live board currently reports zero openings.
+- `watcher/detect.py` is a self-contained convenience tool, runnable as
+  `python -m watcher.detect "Company Name"`. It may hit the network, but it is
+  not part of the scheduled run path and must never fabricate ATS tokens. The
+  generated priority-company research report lives at
+  `watcher/detect_report.md`.
+- The detector should only resolve Workday when it has tenant, shard, and site;
+  report output should show Workday as `tenant/shard/site`.
 
 Current watcher run core:
 
 - `watcher/run.py` is runnable with `python -m watcher.run`.
-- The default tiny live watchlist is `watcher/watchlist.yml` with Astera Labs
-  (Greenhouse), Institute of Foundation Models (Lever), and GitHub
-  (`github_only`).
-- The run loop fetches direct rows first, then the GitHub backstop. This order
-  is intentional: backend dedupe keeps the first duplicate row's `extra`, so
+- The default `watcher/watchlist.yml` is now the generated starter priority
+  watchlist. It contains resolved direct ATS entries, `bespoke` entries for
+  non-standard portals, and `github_only` entries for unresolved companies.
+- The run loop skips `bespoke` and `github_only` entries for direct fetching,
+  fetches direct rows first, then the GitHub backstop. This order is
+  intentional: backend dedupe keeps the first duplicate row's `extra`, so
   direct rows win the source tag without changing backend dedupe.
 - The run loop calls `backend.app.ingest.analyze_rows`; watcher code must not
   compute scores or ids itself.
@@ -75,6 +99,20 @@ To run backend tests plus watcher tests from the repo root:
 
 ```bash
 PYTHONPATH=.:backend backend/venv/Scripts/python.exe -m pytest backend/tests watcher/tests -q
+```
+
+Also run a syntax pass after broad Python edits:
+
+```bash
+PYTHONPATH=.:backend python3 -m compileall -q backend watcher
+```
+
+For frontend changes:
+
+```bash
+cd frontend
+npm test
+npm run build
 ```
 
 To run the watcher once from the repo root:

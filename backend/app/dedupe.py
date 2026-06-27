@@ -45,7 +45,11 @@ def norm_url(url: str) -> str:
         parts = urlsplit(url if "://" in url else "https://" + url)
     except ValueError:
         return url.lower()
-    query = [(k, v) for k, v in parse_qsl(parts.query) if not k.lower().startswith("utm_") and k.lower() != "ref"]
+    query = sorted(
+        (k, v)
+        for k, v in parse_qsl(parts.query)
+        if not k.lower().startswith("utm_") and k.lower() != "ref"
+    )
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), urlencode(query), ""))
 
 
@@ -73,6 +77,14 @@ def dedupe(rows):
     by_url = {}
     report = []
 
+    def index_row(row: dict) -> None:
+        key = canonical_key(row)
+        url = norm_url(row.get("source_url", ""))
+        if key.strip("|"):
+            by_key.setdefault(key, row)
+        if url:
+            by_url.setdefault(url, row)
+
     for row in rows:
         key = canonical_key(row)
         url = norm_url(row.get("source_url", ""))
@@ -86,10 +98,7 @@ def dedupe(rows):
 
         if existing is None:
             kept.append(row)
-            if key.strip("|"):
-                by_key[key] = row
-            if url:
-                by_url[url] = row
+            index_row(row)
             continue
 
         merged_fields = []
@@ -97,6 +106,8 @@ def dedupe(rows):
             if not existing.get(col) and row.get(col):
                 existing[col] = row[col]
                 merged_fields.append(col)
+        if merged_fields:
+            index_row(existing)
         report.append({
             "row_number": row.get("_row_number"),
             "duplicate_of": existing.get("_row_number"),

@@ -5,7 +5,17 @@ import pytest
 
 from backend.app.normalize import CANONICAL_COLUMNS
 from watcher.config import CompanyCfg
-from watcher.sources import GitHubListingsSource, GreenhouseSource, LeverSource, SourceSchemaError
+from watcher.sources import (
+    AshbySource,
+    GitHubListingsSource,
+    GreenhouseSource,
+    LeverSource,
+    SourceError,
+    SmartRecruitersSource,
+    SourceSchemaError,
+    WorkableSource,
+    WorkdaySource,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -105,6 +115,135 @@ def test_lever_fixture_to_canonical_rows():
 def test_lever_unexpected_shape_raises():
     with pytest.raises(SourceSchemaError, match="list"):
         LeverSource().parse({"postings": []}, CompanyCfg(name="Institute of Foundation Models", token="ifm-us"))
+
+
+def test_workday_fixture_to_canonical_rows():
+    payload = load_fixture("workday_capitalone_intern.json")
+    company = CompanyCfg(
+        name="Capital One",
+        ats="workday",
+        token="capitalone",
+        workday_shard="wd12",
+        workday_site="Capital_One",
+    )
+
+    rows = WorkdaySource().parse(payload, company)
+
+    assert len(rows) == 5
+    first = rows[0]
+    assert_canonical_row(first)
+    assert first["company"] == "Capital One"
+    assert first["title"] == "Lead Data Engineer"
+    assert first["location"] == "3 Locations"
+    assert first["source_url"] == "https://capitalone.wd12.myworkdayjobs.com/Capital_One/job/Richmond-VA/Lead-Data-Engineer_R241466-1"
+    assert first["date_posted"] == "Posted Yesterday"
+    assert first["internship_type"] == ""
+    assert first["extra"]["source"] == "direct"
+    assert first["extra"]["source_adapter"] == "workday"
+    assert first["extra"]["workday_tenant"] == "capitalone"
+    assert first["extra"]["workday_shard"] == "wd12"
+    assert first["extra"]["workday_site"] == "Capital_One"
+    assert first["extra"]["time_type"] == "Full time"
+
+
+def test_workday_unexpected_shape_raises():
+    company = CompanyCfg(
+        name="Capital One",
+        ats="workday",
+        token="capitalone",
+        workday_shard="wd12",
+        workday_site="Capital_One",
+    )
+    with pytest.raises(SourceSchemaError, match="jobPostings"):
+        WorkdaySource().parse({"jobs": []}, company)
+
+
+def test_workday_missing_shard_fails_loudly():
+    payload = load_fixture("workday_capitalone_intern.json")
+    company = CompanyCfg(name="Capital One", ats="workday", token="capitalone", workday_site="Capital_One")
+
+    with pytest.raises(SourceError, match="workday_shard"):
+        WorkdaySource().parse(payload, company)
+
+
+def test_ashby_fixture_to_canonical_rows():
+    payload = load_fixture("ashby_chainalysis_careers.json")
+    company = CompanyCfg(name="Chainalysis", ats="ashby", token="chainalysis-careers")
+
+    rows = AshbySource().parse(payload, company)
+
+    assert len(rows) == 47
+    first = rows[0]
+    assert_canonical_row(first)
+    assert first["company"] == "Chainalysis"
+    assert first["title"] == "Senior Manager, Engineering-Clustering & Exposure"
+    assert first["location"] == "Aarhus Office, Denmark Copenhagen"
+    assert first["source_url"] == "https://jobs.ashbyhq.com/chainalysis-careers/02989a06-0562-4074-8f64-963716ae9801/application"
+    assert first["date_posted"] == "2026-06-24"
+    assert first["remote_status"] == "Hybrid"
+    assert first["internship_type"] == "FullTime"
+    assert first["extra"]["source_adapter"] == "ashby"
+    assert "Chainalysis" in first["description"]
+
+
+def test_ashby_unexpected_shape_raises():
+    with pytest.raises(SourceSchemaError, match="jobs"):
+        AshbySource().parse({"postings": []}, CompanyCfg(name="OpenAI", ats="ashby", token="openai"))
+
+
+def test_smartrecruiters_fixture_to_canonical_rows():
+    payload = load_fixture("smartrecruiters_boschgroup_page.json")
+    company = CompanyCfg(name="Bosch", ats="smartrecruiters", token="BoschGroup")
+
+    rows = SmartRecruitersSource().parse(payload, company)
+
+    assert len(rows) == 5
+    first = rows[0]
+    assert_canonical_row(first)
+    assert first["company"] == "Bosch"
+    assert first["title"] == "ADAS车载通讯专家_XC"
+    assert first["location"] == "Suzhou, Jiangsu, China"
+    assert first["source_url"] == "https://jobs.smartrecruiters.com/BoschGroup/744000134596109-adas-xc"
+    assert first["date_posted"] == "2026-06-27"
+    assert first["extra"]["source_adapter"] == "smartrecruiters"
+    assert first["extra"]["smartrecruiters_company"] == "Bosch Group"
+
+
+def test_smartrecruiters_unexpected_shape_raises():
+    with pytest.raises(SourceSchemaError, match="content"):
+        SmartRecruitersSource().parse({"postings": []}, CompanyCfg(name="Bosch", ats="smartrecruiters", token="BoschGroup"))
+
+
+def test_workable_fixture_to_canonical_rows():
+    payload = load_fixture("workable_huggingface_jobs.json")
+    company = CompanyCfg(name="Hugging Face", ats="workable", token="huggingface")
+
+    rows = WorkableSource().parse(payload, company)
+
+    assert len(rows) == 7
+    first = rows[0]
+    assert_canonical_row(first)
+    assert first["company"] == "Hugging Face"
+    assert first["title"] == "Senior Python Software Engineer/Open-Source Contributor - US Remote"
+    assert first["location"] == "United States"
+    assert first["source_url"] == "https://apply.workable.com/huggingface/j/F8427A442D/"
+    assert first["date_posted"] == "2026-06-02"
+    assert first["remote_status"] == "Remote"
+    assert first["internship_type"] == "full"
+    assert first["extra"]["source_adapter"] == "workable"
+    assert first["extra"]["shortcode"] == "F8427A442D"
+
+
+def test_workable_watchlist_company_with_no_openings_parses_empty_real_response():
+    payload = load_fixture("workable_iceye_empty.json")
+    rows = WorkableSource().parse(payload, CompanyCfg(name="ICEYE", ats="workable", token="iceye"))
+
+    assert rows == []
+
+
+def test_workable_unexpected_shape_raises():
+    with pytest.raises(SourceSchemaError, match="results"):
+        WorkableSource().parse({"jobs": []}, CompanyCfg(name="ICEYE", ats="workable", token="iceye"))
 
 
 def test_github_listings_fixture_filters_active_company_and_terms():

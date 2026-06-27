@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.ingest import process_csv
 from tests.conftest import SAMPLE
 
 client = TestClient(app)
@@ -89,6 +90,13 @@ def test_ingest_multipart_upload():
 def test_ingest_rejects_empty_and_junk():
     assert client.post("/api/ingest", json={"csv_text": ""}).status_code == 400
     assert client.post("/api/ingest", json={"csv_text": "no,recognizable\nheaders,here"}).status_code == 400
+
+
+def test_ingest_tolerates_extra_cells_in_csv_rows():
+    result = process_csv("Company,Title\nAcme,Software Engineer Intern,unexpected extra\n")
+
+    assert result["summary"]["total"] == 1
+    assert result["jobs"][0]["company"] == "Acme"
 
 
 def test_profile_endpoint():

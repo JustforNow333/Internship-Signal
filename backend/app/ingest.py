@@ -33,8 +33,14 @@ def _read_csv(csv_text: str):
         dialect = csv.excel  # default comma
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
     headers = reader.fieldnames or []
-    rows = [r for r in reader if any((v or "").strip() for v in r.values())]
+    rows = [r for r in reader if any(_cell_has_text(v) for v in r.values())]
     return headers, rows
+
+
+def _cell_has_text(value) -> bool:
+    if isinstance(value, list):
+        return any(str(item or "").strip() for item in value)
+    return bool(str(value or "").strip())
 
 
 def _analyze_rows_with_report(rows: list[dict], today: date | None = None) -> tuple[list[dict], list]:

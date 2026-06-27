@@ -18,7 +18,16 @@ from backend.app.ingest import analyze_rows
 from watcher.config import DEFAULT_WATCHLIST_PATH, WatcherConfig, load_watchlist
 from watcher.filters import filter_matches
 from watcher.seen_store import SeenStore
-from watcher.sources import GitHubListingsSource, GreenhouseSource, LeverSource, SourceError
+from watcher.sources import (
+    AshbySource,
+    GitHubListingsSource,
+    GreenhouseSource,
+    LeverSource,
+    SmartRecruitersSource,
+    SourceError,
+    WorkableSource,
+    WorkdaySource,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +77,7 @@ def collect_rows(
     errors: list[str] = []
 
     for company in config.companies:
-        if company.ats == "github_only":
+        if company.ats in {"bespoke", "github_only"}:
             continue
         source = direct_sources.get(company.ats)
         if source is None:
@@ -148,8 +157,12 @@ def main(argv: list[str] | None = None) -> int:
 
 def _default_direct_sources() -> dict[str, object]:
     return {
+        "ashby": AshbySource(),
         "greenhouse": GreenhouseSource(),
         "lever": LeverSource(),
+        "smartrecruiters": SmartRecruitersSource(),
+        "workable": WorkableSource(),
+        "workday": WorkdaySource(),
     }
 
 

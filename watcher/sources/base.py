@@ -88,6 +88,37 @@ def fetch_json(url: str, source_name: str, timeout: int = DEFAULT_TIMEOUT_SECOND
         raise SourceFetchError(f"{source_name} returned invalid JSON: {url}") from exc
 
 
+def post_json(
+    url: str,
+    payload: dict,
+    source_name: str,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> Any:
+    body = json.dumps(payload).encode("utf-8")
+    request = Request(
+        url,
+        data=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            response_body = response.read()
+    except HTTPError as exc:
+        raise SourceFetchError(f"{source_name} POST failed with HTTP {exc.code}: {url}") from exc
+    except (TimeoutError, URLError, OSError) as exc:
+        raise SourceFetchError(f"{source_name} POST failed: {url}") from exc
+
+    try:
+        return json.loads(response_body.decode("utf-8"))
+    except (UnicodeDecodeError, JSONDecodeError) as exc:
+        raise SourceFetchError(f"{source_name} returned invalid JSON: {url}") from exc
+
+
 def html_to_text(value: Any) -> str:
     text = unescape(str(value or ""))
     text = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", text)
@@ -120,4 +151,3 @@ def ensure_list(value: Any, source_name: str, field: str) -> list:
     if not isinstance(value, list):
         raise SourceSchemaError(f"{source_name} expected {field} to be a list")
     return value
-

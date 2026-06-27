@@ -1,0 +1,462 @@
+{
+  "total": 810,
+  "jobPostings": [
+    {
+      "title": "Lead Data Engineer",
+      "externalPath": "/job/Richmond-VA/Lead-Data-Engineer_R241466-1",
+      "timeType": "Full time",
+      "locationsText": "3 Locations",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": [
+        "R241466"
+      ]
+    },
+    {
+      "title": "Principal Associate, Software Engineer -  International Card Tech - Mobile",
+      "externalPath": "/job/Toronto-ON/Principal-Associate--Software-Engineer----International-Card-Tech---Mobile_R245339-1",
+      "timeType": "Full time",
+      "locationsText": "Toronto, ON",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": [
+        "R245339"
+      ]
+    },
+    {
+      "title": "Distinguished Engineer - Card Tech",
+      "externalPath": "/job/Richmond-VA/Distinguished-Engineer---Card-Tech_R245438-1",
+      "timeType": "Full time",
+      "locationsText": "2 Locations",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": [
+        "R245438"
+      ]
+    },
+    {
+      "title": "Lead Software Engineer (Python, Kubernetes)",
+      "externalPath": "/job/McLean-VA/Lead-Software-Engineer--Python--Kubernetes-_R244053-1",
+      "timeType": "Full time",
+      "locationsText": "McLean, VA",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": [
+        "R244053"
+      ]
+    },
+    {
+      "title": "Lead Software Engineer, Full Stack",
+      "externalPath": "/job/Chicago-IL/Lead-Software-Engineer--Full-Stack_R243833-1",
+      "timeType": "Full time",
+      "locationsText": "3 Locations",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": [
+        "R243833"
+      ]
+    }
+  ],
+  "facets": [
+    {
+      "facetParameter": "timeType",
+      "descriptor": "Full/Part-time",
+      "values": [
+        {
+          "descriptor": "Full time",
+          "id": "2ed180e199081055c65d9d6853aa022d",
+          "count": 809
+        },
+        {
+          "descriptor": "Part time",
+          "id": "2ed180e199081055c65d9d6618d9022c",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "facetParameter": "workerSubType",
+      "descriptor": "Job Type",
+      "values": [
+        {
+          "descriptor": "Defined Term Contractor (Fixed Term)",
+          "id": "a12c70bf789e10572aab95b63d0419b2",
+          "count": 1
+        },
+        {
+          "descriptor": "Direct Contract (Fixed Term)",
+          "id": "a12c70bf789e10572aab922fccf119b0",
+          "count": 1
+        },
+        {
+          "descriptor": "Regular",
+          "id": "a12c70bf789e10572aab8e8909a619ae",
+          "count": 808
+        }
+      ]
+    },
+    {
+      "facetParameter": "jobFamilyGroup",
+      "descriptor": "Job Category",
+      "values": [
+        {
+          "descriptor": "Analysis",
+          "id": "a12c70bf789e105802e9caf800542991",
+          "count": 47
+        },
+        {
+          "descriptor": "Brand",
+          "id": "a12c70bf789e105802e9d188fa7e2997",
+          "count": 24
+        },
+        {
+          "descriptor": "Business Banking",
+          "id": "a12c70bf789e105802e9d5b44218299b",
+          "count": 3
+        },
+        {
+          "descriptor": "Client-Development",
+          "id": "a12c70bf789e105802e9d9f2a41c299f",
+          "count": 10
+        },
+        {
+          "descriptor": "Commercial",
+          "id": "a12c70bf789e105802e9dc16b1ef29a1",
+          "count": 16
+        },
+        {
+          "descriptor": "Finance",
+          "id": "a12c70bf789e105802e9de2c3b5f29a3",
+          "count": 20
+        },
+        {
+          "descriptor": "Global Payment Network",
+          "id": "30fda0218e6b10018ebf10262f7f0000",
+          "count": 7
+        },
+        {
+          "descriptor": "Global Workplace Services",
+          "id": "a12c70bf789e105802ea070bb56829c9",
+          "count": 2
+        },
+        {
+          "descriptor": "Governance",
+          "id": "a12c70bf789e105802e9e041c73d29a5",
+          "count": 10
+        },
+        {
+          "descriptor": "Human Resources",
+          "id": "a12c70bf789e105802e9cd5dd4a72993",
+          "count": 25
+        },
+        {
+          "descriptor": "Legal",
+          "id": "a12c70bf789e105802e9ebe1fe7b29af",
+          "count": 13
+        },
+        {
+          "descriptor": "Operations & Call Center",
+          "id": "a12c70bf789e105802e9f01e573d29b3",
+          "count": 11
+        },
+        {
+          "descriptor": "Process/Project Mgmt",
+          "id": "a12c70bf789e105802e9f233f4f829b5",
+          "count": 54
+        },
+        {
+          "descriptor": "Product",
+          "id": "a12c70bf789e105802e9f44b764529b7",
+          "count": 54
+        },
+        {
+          "descriptor": "Risk-Management",
+          "id": "a12c70bf789e105802e9f66cbd7d29b9",
+          "count": 57
+        },
+        {
+          "descriptor": "Sale",
+          "id": "a12c70bf789e105802e9fcad399829bf",
+          "count": 14
+        },
+        {
+          "descriptor": "Shared Support",
+          "id": "a12c70bf789e105802e9feb2e30529c1",
+          "count": 4
+        },
+        {
+          "descriptor": "Special-JC",
+          "id": "a12c70bf789e105802ea00c91dfd29c3",
+          "count": 1
+        },
+        {
+          "descriptor": "Technology",
+          "id": "a12c70bf789e105802e9e79458dc29ab",
+          "count": 436
+        },
+        {
+          "descriptor": "Vendor Management",
+          "id": "a12c70bf789e105802ea0505747429c7",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "facetParameter": "locationMainGroup",
+      "values": [
+        {
+          "facetParameter": "locations",
+          "descriptor": "Locations",
+          "values": [
+            {
+              "descriptor": "Alabang, Muntinlupa City",
+              "id": "5303cb0ddb47102d5fab580903990962",
+              "count": 14
+            },
+            {
+              "descriptor": "Alpharetta, GA",
+              "id": "5303cb0ddb47102d5faa8f97795608a1",
+              "count": 1
+            },
+            {
+              "descriptor": "Anytown, DE",
+              "id": "5303cb0ddb47102d5fab37f344110944",
+              "count": 1
+            },
+            {
+              "descriptor": "Anytown, IL",
+              "id": "62f0394a62dd014de92ccde309192688",
+              "count": 1
+            },
+            {
+              "descriptor": "Atlanta, GA",
+              "id": "3b0d3024e0af103d6c1fbaf19fe50f01",
+              "count": 1
+            },
+            {
+              "descriptor": "Bangalore, In",
+              "id": "0f0572524957105948f71e0c0ba44c1d",
+              "count": 15
+            },
+            {
+              "descriptor": "Birmingham, AL",
+              "id": "3b0d3024e0af103d6c1fceeee6c40f21",
+              "count": 1
+            },
+            {
+              "descriptor": "Bloomington, MN",
+              "id": "218eed1f1ca4010a420a9733d2e50000",
+              "count": 1
+            },
+            {
+              "descriptor": "Cambridge, MA",
+              "id": "5303cb0ddb47102d5fa09b17c10b0201",
+              "count": 28
+            },
+            {
+              "descriptor": "Charlotte, NC",
+              "id": "3b0d3024e0af103d6c1fe54732970f46",
+              "count": 21
+            },
+            {
+              "descriptor": "Chesapeake, VA",
+              "id": "5303cb0ddb47102d5f9e7254d8b90048",
+              "count": 1
+            },
+            {
+              "descriptor": "Chicago, IL",
+              "id": "5303cb0ddb47102d5fa910ad457f0722",
+              "count": 110
+            },
+            {
+              "descriptor": "Chicago, IL",
+              "id": "3b0d3024e0af103d6c1fe8eecb650f4b",
+              "count": 4
+            },
+            {
+              "descriptor": "Columbus, OH",
+              "id": "76d487f51ab410018ed851dfa1e70000",
+              "count": 1
+            },
+            {
+              "descriptor": "Dallas, TX",
+              "id": "3b0d3024e0af103d6c1ffa9b3c5f0f69",
+              "count": 3
+            },
+            {
+              "descriptor": "Downers Grove, IL",
+              "id": "5303cb0ddb47102d5fa8ff839bf90704",
+              "count": 2
+            },
+            {
+              "descriptor": "Edison, NJ",
+              "id": "5303cb0ddb47102d5f999c3d6125feb9",
+              "count": 2
+            },
+            {
+              "descriptor": "Fairfax, VA",
+              "id": "3b0d3024e0af103d6c200c1638dd0f87",
+              "count": 1
+            },
+            {
+              "descriptor": "Houston, TX",
+              "id": "5303cb0ddb47102d5fa3a5d52da00518",
+              "count": 34
+            },
+            {
+              "descriptor": "Houston, TX",
+              "id": "3b0d3024e0af103d6c20216fc80b0faa",
+              "count": 1
+            },
+            {
+              "descriptor": "Indianapolis, IN",
+              "id": "3b0d3024e0af103d6c20271def780fb4",
+              "count": 1
+            },
+            {
+              "descriptor": "Jericho, NY",
+              "id": "320f3ffe57171005b54fbabc79300000",
+              "count": 2
+            },
+            {
+              "descriptor": "Lafayette, LA",
+              "id": "3b0d3024e0af103d6c203c7a40590fd7",
+              "count": 2
+            },
+            {
+              "descriptor": "Las Vegas, NV",
+              "id": "2045ed53737510011268fa35f2db0000",
+              "count": 1
+            },
+            {
+              "descriptor": "Lexington, KY",
+              "id": "3b0d3024e0af103d6c20421d3d470fe1",
+              "count": 1
+            },
+            {
+              "descriptor": "Little Rock, AR",
+              "id": "ef0cfac725f301542426299d5e0c6ed9",
+              "count": 1
+            },
+            {
+              "descriptor": "London, Eng",
+              "id": "5303cb0ddb47102d5fab4d8e01a10958",
+              "count": 14
+            },
+            {
+              "descriptor": "Mandeville, LA",
+              "id": "5303cb0ddb47102d5faa75808d5e0888",
+              "count": 3
+            },
+            {
+              "descriptor": "McLean, VA",
+              "id": "3b0d3024e0af103d6c20cfc6ce1110d2",
+              "count": 524
+            },
+            {
+              "descriptor": "Mexico City, Mexico",
+              "id": "efcd44ba933e10015a5709324fcb0000",
+              "count": 19
+            },
+            {
+              "descriptor": "Miami, FL",
+              "id": "3b0d3024e0af103d6c2058b70b0d1004",
+              "count": 3
+            },
+            {
+              "descriptor": "Newport Beach, CA",
+              "id": "5303cb0ddb47102d5fab005766b30912",
+              "count": 1
+            },
+            {
+              "descriptor": "New York, NY",
+              "id": "5303cb0ddb47102d5fa0be27262f0227",
+              "count": 223
+            },
+            {
+              "descriptor": "New York, NY",
+              "id": "3b0d3024e0af103d6c20dba04f9310e6",
+              "count": 11
+            },
+            {
+              "descriptor": "Nottingham,  Eng",
+              "id": "5303cb0ddb47102d5fab52acfe35095d",
+              "count": 28
+            },
+            {
+              "descriptor": "Philadelphia, PA",
+              "id": "5303cb0ddb47102d5f9f1cd4406100f1",
+              "count": 6
+            },
+            {
+              "descriptor": "Phoenix, AZ",
+              "id": "76d487f51ab410018ed9333a18870000",
+              "count": 1
+            },
+            {
+              "descriptor": "Plano, TX",
+              "id": "5303cb0ddb47102d5fa3abc17b27051d",
+              "count": 116
+            },
+            {
+              "descriptor": "Plano, TX",
+              "id": "3b0d3024e0af103d6c20cc98d0cf10cd",
+              "count": 3
+            },
+            {
+              "descriptor": "Richmond, VA",
+              "id": "5303cb0ddb47102d5f9e830551de0057",
+              "count": 354
+            },
+            {
+              "descriptor": "Richmond, VA",
+              "id": "3b0d3024e0af103d6c20d5f37e1810dc",
+              "count": 20
+            },
+            {
+              "descriptor": "Riverwoods, IL",
+              "id": "3f143733e9e01000c96329c7a6c80000",
+              "count": 97
+            },
+            {
+              "descriptor": "Salt Lake City, UT",
+              "id": "3b0d3024e0af103d6c208cc9f5e2105e",
+              "count": 1
+            },
+            {
+              "descriptor": "San Francisco,  CA",
+              "id": "5303cb0ddb47102d5faaf60602b20908",
+              "count": 25
+            },
+            {
+              "descriptor": "San Jose, CA",
+              "id": "3b0d3024e0af103d6c209ca2d6351077",
+              "count": 15
+            },
+            {
+              "descriptor": "Tampa, FL",
+              "id": "5303cb0ddb47102d5faa999c8c6308ab",
+              "count": 1
+            },
+            {
+              "descriptor": "Toronto, ON",
+              "id": "5303cb0ddb47102d5fab484784240953",
+              "count": 43
+            },
+            {
+              "descriptor": "US Remote",
+              "id": "af51744fb4fc010ca9b81af56b6b0000",
+              "count": 35
+            },
+            {
+              "descriptor": "Wilmington, DE",
+              "id": "3b0d3024e0af103d6c20c31f5c8010b8",
+              "count": 27
+            },
+            {
+              "descriptor": "Wilmington, DE",
+              "id": "442eec3ef173100113a3990839e00000",
+              "count": 2
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "userAuthenticated": false
+}

@@ -11,7 +11,16 @@ from typing import Sequence
 WATCHER_DIR = Path(__file__).resolve().parent
 DEFAULT_WATCHLIST_PATH = WATCHER_DIR / "watchlist.yml"
 DEFAULT_SEEN_DB_PATH = Path(os.getenv("WATCHER_SEEN_DB", WATCHER_DIR / "seen.sqlite"))
-SUPPORTED_ATS = {"greenhouse", "lever", "github_only"}
+SUPPORTED_ATS = {
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "workable",
+    "workday",
+    "bespoke",
+    "github_only",
+}
 
 
 class ConfigError(ValueError):
@@ -25,7 +34,11 @@ class CompanyCfg:
     name: str
     ats: str = ""
     token: str = ""
+    workday_shard: str = ""
+    workday_site: str = ""
+    module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)
+    alumni_match: Sequence[str] = field(default_factory=tuple)
     terms: Sequence[str] = field(default_factory=lambda: ("Summer 2026",))
 
     def match_names(self) -> tuple[str, ...]:
@@ -89,13 +102,26 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         raise ConfigError("company entry missing name")
     if ats not in SUPPORTED_ATS:
         raise ConfigError(f"{name}: unsupported ats '{ats}'")
-    if ats in {"greenhouse", "lever"} and not token:
+    if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "workable"} and not token:
         raise ConfigError(f"{name}: {ats} entries require token")
+    workday_site = str(entry.get("workday_site") or "").strip()
+    workday_shard = str(entry.get("workday_shard") or "").strip()
+    if ats == "workday":
+        if not token:
+            raise ConfigError(f"{name}: workday entries require token")
+        if not workday_shard:
+            raise ConfigError(f"{name}: workday entries require workday_shard")
+        if not workday_site:
+            raise ConfigError(f"{name}: workday entries require workday_site")
     return CompanyCfg(
         name=name,
         ats=ats,
         token=token,
+        workday_shard=workday_shard,
+        workday_site=workday_site,
+        module=str(entry.get("module") or "").strip(),
         aliases=_string_tuple(entry.get("aliases", ())),
+        alumni_match=_string_tuple(entry.get("alumni_match", ())),
         terms=_string_tuple(entry.get("terms", default_terms)),
     )
 

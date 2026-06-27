@@ -1,0 +1,236 @@
+{
+  "total": 7,
+  "results": [
+    {
+      "id": 5856207,
+      "shortcode": "F8427A442D",
+      "title": "Senior Python Software Engineer/Open-Source Contributor - US Remote",
+      "remote": true,
+      "location": {
+        "country": "United States",
+        "countryCode": "US",
+        "city": "",
+        "region": null
+      },
+      "locations": [
+        {
+          "country": "United States",
+          "countryCode": "US",
+          "city": "",
+          "region": null,
+          "hidden": false
+        }
+      ],
+      "state": "published",
+      "isInternal": false,
+      "code": null,
+      "published": "2026-06-02T00:00:00.000Z",
+      "type": "full",
+      "language": "en",
+      "department": [
+        "Product"
+      ],
+      "accountUid": "940cf17f-c078-40ac-95e8-07704e754048",
+      "approvalStatus": "approved",
+      "workplace": "remote"
+    },
+    {
+      "id": 5856269,
+      "shortcode": "CB1DEFE6CE",
+      "title": "Senior Python Software Engineer/Open-Source Contributor - EMEA Remote",
+      "remote": true,
+      "location": {
+        "country": "France",
+        "countryCode": "FR",
+        "city": "",
+        "region": null
+      },
+      "locations": [
+        {
+          "country": "France",
+          "countryCode": "FR",
+          "city": "",
+          "region": null,
+          "hidden": false
+        }
+      ],
+      "state": "published",
+      "isInternal": false,
+      "code": null,
+      "published": "2026-06-02T00:00:00.000Z",
+      "type": "full",
+      "language": "en",
+      "department": [
+        "Product"
+      ],
+      "accountUid": "940cf17f-c078-40ac-95e8-07704e754048",
+      "approvalStatus": "approved",
+      "workplace": "remote"
+    },
+    {
+      "id": 5851115,
+      "shortcode": "97904BAC90",
+      "title": "Data/Infrastructure Advocate Engineer - EMEA Remote",
+      "remote": true,
+      "location": {
+        "country": "France",
+        "countryCode": "FR",
+        "city": "Paris",
+        "region": "Île-de-France"
+      },
+      "locations": [
+        {
+          "country": "France",
+          "countryCode": "FR",
+          "city": "Paris",
+          "region": "Île-de-France",
+          "hidden": false
+        }
+      ],
+      "state": "published",
+      "isInternal": false,
+      "code": "",
+      "published": "2026-05-29T00:00:00.000Z",
+      "type": "full",
+      "language": "en",
+      "department": [
+        "Product"
+      ],
+      "accountUid": "940cf17f-c078-40ac-95e8-07704e754048",
+      "approvalStatus": "approved",
+      "workplace": "remote"
+    },
+    {
+      "id": 5851125,
+      "shortcode": "CEACA06A2D",
+      "title": "Data/Infrastructure Advocate Engineer - US Remote",
+      "remote": true,
+      "location": {
+        "country": "United States",
+        "countryCode": "US",
+        "city": "New York",
+        "region": "New York"
+      },
+      "locations": [
+        {
+          "country": "United States",
+          "countryCode": "US",
+          "city": "New York",
+          "region": "New York",
+          "hidden": false
+        }
+      ],
+      "state": "published",
+      "isInternal": false,
+      "code": "",
+      "published": "2026-05-29T00:00:00.000Z",
+      "type": "full",
+      "language": "en",
+      "department": [
+        "Product"
+      ],
+      "accountUid": "940cf17f-c078-40ac-95e8-07704e754048",
+      "approvalStatus": "approved",
+      "workplace": "remote"
+    },
+    {
+      "id": 5851144,
+      "shortcode": "19A136F8E2",
+      "title": "Open-Source Machine Learning Engineer - US Remote",
+      "remote": true,
+      "location": {
+        "country": "United States",
+        "countryCode": "US",
+        "city": "New York",
+        "region": "New York"
+      },
+      "locations": [
+        {
+          "country": "United States",
+          "countryCode": "US",
+          "city": "New York",
+          "region": "New York",
+          "hidden": false
+        }
+      ],
+      "state": "published",
+      "isInternal": false,
+      "code": "",
+      "published": "2026-05-29T00:00:00.000Z",
+      "type": "full",
+      "language": "en",
+      "department": [
+        "Open Source"
+      ],
+      "accountUid": "940cf17f-c078-40ac-95e8-07704e754048",
+      "approvalStatus": "approved",
+      "workplace": "remote"
+    },
+    {
+      "id": 5851152,
+      "shortcode": "81B46579FE",
+      "title": "Open-Source Machine Learning Engineer - EMEA Remote",
+      "remote": true,
+      "location": {
+        "country": "France",
+        "countryCode": "FR",
+        "city": "Paris",
+        "region": "Île-de-France"
+      },
+      "locations": [
+        {
+          "country": "France",
+          "countryCode": "FR",
+          "city": "Paris",
+          "region": "Île-de-France",
+          "hidden": false
+        }
+      ],
+      "state": "published",
+      "isInternal": false,
+      "code": "",
+      "published": "2026-05-29T00:00:00.000Z",
+      "type": "full",
+      "language": "en",
+      "department": [
+        "Open Source"
+      ],
+      "accountUid": "940cf17f-c078-40ac-95e8-07704e754048",
+      "approvalStatus": "approved",
+      "workplace": "remote"
+    },
+    {
+      "id": 2769505,
+      "shortcode": "0BD8C06DB3",
+      "title": "Wild Card",
+      "remote": true,
+      "location": {
+        "country": "United States",
+        "countryCode": "US",
+        "city": "",
+        "region": null
+      },
+      "locations": [
+        {
+          "country": "United States",
+          "countryCode": "US",
+          "city": "",
+          "region": null,
+          "hidden": false
+        }
+      ],
+      "state": "published",
+      "isInternal": false,
+      "code": "",
+      "published": "2024-10-17T00:00:00.000Z",
+      "type": "full",
+      "language": "en",
+      "department": [
+        "Wild Card"
+      ],
+      "accountUid": "940cf17f-c078-40ac-95e8-07704e754048",
+      "approvalStatus": "approved",
+      "workplace": "remote"
+    }
+  ]
+}
