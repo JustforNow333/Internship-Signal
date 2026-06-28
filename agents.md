@@ -69,13 +69,28 @@ Current watcher run core:
 - `watcher/seen_store.py` is the SQLite seen-store. It keys on the existing
   analyzed job `id`, which comes from `backend.app.dedupe.job_id`. A job seen
   via GitHub is not new later via direct, and vice versa.
+- `watcher/alumni.py` loads the private gitignored `watcher/alumni.csv`,
+  indexes alumni by `backend.app.dedupe.norm_company(Employer)`, and annotates
+  matches with `alumni` after filtering. Alumni data is additive only; it must
+  never drop, reorder, gate, or rescore a posting.
+- `watcher/notify.py` renders one plain-text email digest for genuinely new
+  matches. `render_digest(matches)` is pure and offline-tested. `send_digest`
+  dry-runs to stdout unless `WATCHER_SEND_EMAIL` is truthy; live Gmail SMTP
+  requires `SMTP_USER`, `SMTP_APP_PASSWORD`, and `EMAIL_TO` from env.
+- The run loop marks jobs seen only after `send_digest` reports a successful
+  live send. Dry-run digest previews do not advance the seen-store.
+- Digest decisions are settled: no score gate, sort by score descending with
+  company/title tie-breaks, and send nothing when there are zero new matches.
 - Local seen-store files are ignored by `.gitignore`; pass `--seen-db` in tests
   or manual runs when you want an isolated store.
 
 Scope guardrails:
 
-- Do not add email, scheduling, alumni joins, GitHub Actions, or extra adapters
-  unless the task explicitly asks for those steps.
+- Do not add scheduling, GitHub Actions, or extra adapters unless the task
+  explicitly asks for those steps.
+- Do not change scoring, classification, salary parsing, filters, the
+  seen-store, source adapters, source dispatch, alumni matching, or digest
+  decisions unless the task explicitly asks for that exact layer.
 - Preserve `process_csv` public behavior: return keys, job shape, cleaning
   report, summary, scoring, and ordering must remain compatible.
 - Keep secrets out of the repo.

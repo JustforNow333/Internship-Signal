@@ -25,6 +25,16 @@ class FakeGithub:
         return self.rows
 
 
+class FakeDigestSender:
+    def __init__(self, *, sent=True):
+        self.sent = sent
+        self.calls = []
+
+    def __call__(self, matches):
+        self.calls.append(list(matches))
+        return self.sent
+
+
 def row(company, title, *, source="direct", url=None, deadline="", description="Build Python APIs with React."):
     return make_row(
         source=source,
@@ -57,6 +67,7 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
         row("DirectCo", "Software Engineer Intern", source="github", url=duplicate_url, description=""),
         row("GitHub", "Software Engineering Intern", source="github", description=""),
     ]
+    digest_sender = FakeDigestSender(sent=True)
 
     with SeenStore(tmp_path / "seen.sqlite") as store:
         first = run_once(
@@ -64,6 +75,7 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
             seen_store=store,
             direct_sources={"greenhouse": FakeSource({"DirectCo": direct_rows})},
             github_source=FakeGithub(github_rows),
+            digest_sender=digest_sender,
             today=date(2026, 6, 9),
             seen_at=datetime(2026, 6, 9, tzinfo=timezone.utc),
         )
@@ -72,6 +84,7 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
             seen_store=store,
             direct_sources={"greenhouse": FakeSource({"DirectCo": direct_rows})},
             github_source=FakeGithub(github_rows),
+            digest_sender=digest_sender,
             today=date(2026, 6, 9),
             seen_at=datetime(2026, 6, 9, tzinfo=timezone.utc),
         )
@@ -83,6 +96,35 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
     assert first.new_matches[0]["extra"]["source"] == "direct"
     assert first.new_matches[1]["extra"]["source"] == "github"
     assert second.new_matches == []
+    assert [len(call) for call in digest_sender.calls] == [2, 0]
+
+
+def test_run_once_does_not_mark_seen_when_digest_not_sent(tmp_path):
+    config = WatcherConfig(companies=(CompanyCfg(name="DirectCo", ats="greenhouse", token="directco"),))
+    direct_rows = [row("DirectCo", "Software Engineer Intern")]
+    digest_sender = FakeDigestSender(sent=False)
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        first = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"DirectCo": direct_rows})},
+            github_source=FakeGithub([]),
+            digest_sender=digest_sender,
+            today=date(2026, 6, 9),
+        )
+        second = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"DirectCo": direct_rows})},
+            github_source=FakeGithub([]),
+            digest_sender=digest_sender,
+            today=date(2026, 6, 9),
+        )
+
+    assert [job["title"] for job in first.new_matches] == ["Software Engineer Intern"]
+    assert [job["title"] for job in second.new_matches] == ["Software Engineer Intern"]
+    assert [len(call) for call in digest_sender.calls] == [1, 1]
 
 
 def test_collect_rows_logs_source_failure_and_keeps_going():

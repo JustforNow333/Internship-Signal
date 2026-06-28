@@ -1,7 +1,7 @@
 """Runnable watcher core.
 
-This step intentionally stops at printing new matches. Email, alumni joins,
-and scheduling are later layers.
+This step intentionally stops at printing new matches. Scheduling is a later
+layer.
 """
 
 from __future__ import annotations
@@ -12,11 +12,13 @@ import sys
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import TextIO
+from typing import Callable, TextIO
 
 from backend.app.ingest import analyze_rows
+from watcher.alumni import AlumniIndex, attach_alumni, load_default_alumni_index
 from watcher.config import DEFAULT_WATCHLIST_PATH, WatcherConfig, load_watchlist
 from watcher.filters import filter_matches
+from watcher.notify import send_digest
 from watcher.seen_store import SeenStore
 from watcher.sources import (
     AshbySource,
@@ -47,14 +49,19 @@ def run_once(
     seen_store: SeenStore,
     direct_sources: dict[str, object] | None = None,
     github_source: object | None = None,
+    alumni_index: AlumniIndex | None = None,
+    digest_sender: Callable[[list[dict]], bool] | None = None,
     today: date | None = None,
     seen_at: datetime | None = None,
 ) -> RunResult:
     rows, errors = collect_rows(config, direct_sources=direct_sources, github_source=github_source)
     jobs = analyze_rows(rows, today=today)
     matches = filter_matches(jobs, target_roles=config.target_roles, min_score=config.min_score)
+    matches = attach_alumni(matches, alumni_index if alumni_index is not None else load_default_alumni_index())
     new_matches = seen_store.unseen(matches)
-    seen_store.mark_many_seen(new_matches, seen_at=seen_at or datetime.now(timezone.utc))
+    digest_sent = (digest_sender or send_digest)(new_matches)
+    if digest_sent:
+        seen_store.mark_many_seen(new_matches, seen_at=seen_at or datetime.now(timezone.utc))
     return RunResult(
         rows_fetched=len(rows),
         jobs_scored=len(jobs),

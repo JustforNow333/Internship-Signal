@@ -6,9 +6,10 @@ punctuation, extra whitespace, and corporate suffixes, so
 "  DATADOG Inc. | software engineer intern " matches
 "Datadog | Software Engineer Intern".
 
-When duplicates collide we keep the more complete row and copy any fields
-the kept row was missing — duplicates often disagree on which columns
-they bothered to fill in.
+When duplicates collide we keep the first row and copy any fields the kept row
+was missing — duplicates often disagree on which columns they bothered to fill
+in. The first-row rule is intentional because watcher direct-source rows are
+fed before GitHub backstop rows, preserving the direct source tag.
 """
 
 import hashlib

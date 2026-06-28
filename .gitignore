@@ -36,3 +36,6 @@ yarn-error.log*
 .env.*
 !.env.example
 .DS_Store
+
+# Local private watcher data
+watcher/alumni.csv
