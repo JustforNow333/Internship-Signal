@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import os
+import logging
 import smtplib
 import sys
 from email.message import EmailMessage
 from typing import Sequence, TextIO
 
+LOGGER = logging.getLogger(__name__)
+
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
+SMTP_TIMEOUT_SECONDS = 30
 DRY_RUN_HEADER = "[DRY RUN - not sent]"
 COMPENSATION_UNCLEAR_LABEL = "Compensation unclear or unstated"
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "y", "on"}
@@ -77,9 +81,11 @@ def send_digest(matches: Sequence[dict], *, output: TextIO | None = None) -> boo
     message["To"] = env["EMAIL_TO"]
     message.set_content(body)
 
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as smtp:
+    LOGGER.info("Sending email digest to %s via %s:%s...", env["EMAIL_TO"], SMTP_HOST, SMTP_PORT)
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS) as smtp:
         smtp.login(env["SMTP_USER"], env["SMTP_APP_PASSWORD"])
         smtp.send_message(message)
+    LOGGER.info("Email digest sent.")
     return True
 
 

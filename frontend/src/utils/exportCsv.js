@@ -7,7 +7,7 @@ const esc = (v) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-export function jobsToCsv(jobs) {
+function jobsToCsv(jobs) {
   const head = [
     "company", "title", "location", "remote_status", "score", "bucket",
     "action", "pay", "usd_hourly_mid", "deadline", "days_left", "role",

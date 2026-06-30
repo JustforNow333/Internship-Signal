@@ -1,4 +1,4 @@
-from watcher.notify import render_digest
+from watcher.notify import SMTP_TIMEOUT_SECONDS, render_digest, send_digest
 
 
 def match(
@@ -86,3 +86,36 @@ def test_render_digest_sorts_includes_backstop_and_alumni():
 
 def test_render_digest_zero_matches_returns_no_email_sentinel():
     assert render_digest([]) == ("", "")
+
+
+def test_send_digest_uses_timeout_for_live_smtp(monkeypatch):
+    calls = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, *, timeout):
+            calls["host"] = host
+            calls["port"] = port
+            calls["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def login(self, user, password):
+            calls["login"] = (user, password)
+
+        def send_message(self, message):
+            calls["to"] = message["To"]
+
+    monkeypatch.setenv("WATCHER_SEND_EMAIL", "1")
+    monkeypatch.setenv("SMTP_USER", "from@example.com")
+    monkeypatch.setenv("SMTP_APP_PASSWORD", "app-password")
+    monkeypatch.setenv("EMAIL_TO", "to@example.com")
+    monkeypatch.setattr("watcher.notify.smtplib.SMTP_SSL", FakeSMTP)
+
+    assert send_digest([match("DirectCo", "Software Engineer Intern", 80)]) is True
+    assert calls["timeout"] == SMTP_TIMEOUT_SECONDS
+    assert calls["login"] == ("from@example.com", "app-password")
+    assert calls["to"] == "to@example.com"

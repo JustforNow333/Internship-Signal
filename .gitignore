@@ -5,9 +5,19 @@
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pyre/
+.tox/
+.nox/
+.ipynb_checkpoints/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
+*.egg-info/
+.eggs/
+build/
+pip-wheel-metadata/
+__pypackages__/
 *.log
 *.tmp
 tmp/
@@ -19,6 +29,8 @@ tmp/
 *.db-*
 .venv/
 venv/
+env/
+ENV/
 
 # Frontend
 node_modules/
@@ -27,15 +39,28 @@ dist/
 coverage/
 playwright-report/
 test-results/
+.nyc_output/
+*.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # Local env / OS
 .env
 .env.*
 !.env.example
+.envrc
 .DS_Store
+Thumbs.db
+desktop.ini
+*Zone.Identifier
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # Local private watcher data
 watcher/alumni.csv

@@ -63,10 +63,6 @@ def job_id(row: dict) -> str:
     return hashlib.sha1(canonical_key(row).encode("utf-8")).hexdigest()[:10]
 
 
-def _completeness(row: dict) -> int:
-    return sum(1 for c in CANONICAL_COLUMNS if row.get(c))
-
-
 def dedupe(rows):
     """Returns (unique_rows, duplicate_report_entries).
 

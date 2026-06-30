@@ -54,14 +54,22 @@ def run_once(
     today: date | None = None,
     seen_at: datetime | None = None,
 ) -> RunResult:
+    LOGGER.info("Collecting watcher rows...")
     rows, errors = collect_rows(config, direct_sources=direct_sources, github_source=github_source)
+    LOGGER.info("Analyzing %d fetched row(s)...", len(rows))
     jobs = analyze_rows(rows, today=today)
+    LOGGER.info("Filtering %d scored job(s)...", len(jobs))
     matches = filter_matches(jobs, target_roles=config.target_roles, min_score=config.min_score)
     matches = attach_alumni(matches, alumni_index if alumni_index is not None else load_default_alumni_index())
     new_matches = seen_store.unseen(matches)
+    LOGGER.info("%d match(es), %d new.", len(matches), len(new_matches))
+    LOGGER.info("Sending digest if needed...")
     digest_sent = (digest_sender or send_digest)(new_matches)
     if digest_sent:
         seen_store.mark_many_seen(new_matches, seen_at=seen_at or datetime.now(timezone.utc))
+        LOGGER.info("Digest sent; marked %d job(s) seen.", len(new_matches))
+    else:
+        LOGGER.info("Digest not sent; seen-store unchanged.")
     return RunResult(
         rows_fetched=len(rows),
         jobs_scored=len(jobs),
@@ -85,24 +93,30 @@ def collect_rows(
 
     for company in config.companies:
         if company.ats in {"bespoke", "github_only"}:
+            LOGGER.info("Skipping direct fetch for %s (%s).", company.name, company.ats)
             continue
         source = direct_sources.get(company.ats)
         if source is None:
             _record_error(errors, f"{company.name}: no source registered for ats '{company.ats}'")
             continue
         try:
-            direct_rows.extend(source.fetch(company))
+            LOGGER.info("Fetching %s via %s...", company.name, company.ats)
+            rows = source.fetch(company)
+            direct_rows.extend(rows)
+            LOGGER.info("Fetched %d direct row(s) for %s.", len(rows), company.name)
         except SourceError as exc:
             _record_error(errors, f"{company.name}: {exc}")
         except Exception as exc:  # defensive run-loop boundary
             _record_error(errors, f"{company.name}: unexpected {type(exc).__name__}: {exc}")
 
     try:
+        LOGGER.info("Fetching GitHub listings backstop...")
         if hasattr(github_source, "fetch_many"):
             github_rows.extend(github_source.fetch_many(config.companies))
         else:
             for company in config.companies:
                 github_rows.extend(github_source.fetch(company))
+        LOGGER.info("Fetched %d GitHub backstop row(s).", len(github_rows))
     except SourceError as exc:
         _record_error(errors, f"github listings: {exc}")
     except Exception as exc:  # defensive run-loop boundary

@@ -4,11 +4,74 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
 WATCHER_DIR = Path(__file__).resolve().parent
+REPO_ROOT = WATCHER_DIR.parent
+DEFAULT_DOTENV_PATH = REPO_ROOT / ".env"
+
+
+def load_dotenv(path: str | Path = DEFAULT_DOTENV_PATH) -> None:
+    """Load simple .env assignments without adding a dependency.
+
+    Supports normal dotenv lines (`KEY=value`) and the PowerShell form currently
+    documented in `.env.example` (`$env:KEY = "value"`). Existing process env
+    values are left alone so explicit shell settings win.
+    """
+
+    path = Path(path)
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        parsed = _parse_env_assignment(raw_line)
+        if parsed is None:
+            continue
+        key, value = parsed
+        os.environ.setdefault(key, value)
+
+
+def _parse_env_assignment(line: str) -> tuple[str, str] | None:
+    line = _strip_env_comment(line).strip()
+    if not line:
+        return None
+
+    match = re.fullmatch(r"\$env:([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)", line)
+    if not match:
+        match = re.fullmatch(r"(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)", line)
+    if not match:
+        return None
+    return match.group(1), _parse_env_value(match.group(2).strip())
+
+
+def _parse_env_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        try:
+            parsed = ast.literal_eval(value)
+        except (SyntaxError, ValueError):
+            return value[1:-1]
+        return str(parsed)
+    return value
+
+
+def _strip_env_comment(line: str) -> str:
+    in_single = False
+    in_double = False
+    for index, char in enumerate(line):
+        if char == "'" and not in_double:
+            in_single = not in_single
+        elif char == '"' and not in_single:
+            in_double = not in_double
+        elif char == "#" and not in_single and not in_double:
+            return line[:index]
+    return line
+
+
+load_dotenv()
+
 DEFAULT_WATCHLIST_PATH = WATCHER_DIR / "watchlist.yml"
 DEFAULT_SEEN_DB_PATH = Path(os.getenv("WATCHER_SEEN_DB", WATCHER_DIR / "seen.sqlite"))
 SUPPORTED_ATS = {

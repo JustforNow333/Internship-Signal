@@ -95,6 +95,8 @@ Scope guardrails:
   report, summary, scoring, and ordering must remain compatible.
 - Keep secrets out of the repo.
 - Keep all text file reads/writes explicit about UTF-8.
+- Keep watcher progress notes in the root `WATCHER_PROGRESS.md` only. Do not
+  recreate stale duplicate handoff files under `watcher/`.
 
 Validation:
 

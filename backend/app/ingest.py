@@ -10,7 +10,6 @@ from collections import Counter
 from datetime import date
 
 from . import config
-from .ask import ask  # noqa: F401  (re-exported for the API layer)
 from .classify import TECHNICAL_ROLES, classify_company, classify_role
 from .dedupe import dedupe, job_id
 from .normalize import build_row, infer_fields, map_headers
