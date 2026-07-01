@@ -41,6 +41,8 @@ class RunResult:
     matches: list[dict]
     new_matches: list[dict]
     errors: list[str]
+    digest_sent: bool
+    seen_marked: int
 
 
 def run_once(
@@ -53,6 +55,7 @@ def run_once(
     digest_sender: Callable[[list[dict]], bool] | None = None,
     today: date | None = None,
     seen_at: datetime | None = None,
+    mark_seen_without_send: bool = False,
 ) -> RunResult:
     LOGGER.info("Collecting watcher rows...")
     rows, errors = collect_rows(config, direct_sources=direct_sources, github_source=github_source)
@@ -65,9 +68,14 @@ def run_once(
     LOGGER.info("%d match(es), %d new.", len(matches), len(new_matches))
     LOGGER.info("Sending digest if needed...")
     digest_sent = (digest_sender or send_digest)(new_matches)
-    if digest_sent:
+    should_mark_seen = digest_sent or (mark_seen_without_send and bool(new_matches))
+    seen_marked = len(new_matches) if should_mark_seen else 0
+    if should_mark_seen:
         seen_store.mark_many_seen(new_matches, seen_at=seen_at or datetime.now(timezone.utc))
-        LOGGER.info("Digest sent; marked %d job(s) seen.", len(new_matches))
+        if digest_sent:
+            LOGGER.info("Digest sent; marked %d job(s) seen.", seen_marked)
+        else:
+            LOGGER.info("Digest not sent; priming mode marked %d job(s) seen.", seen_marked)
     else:
         LOGGER.info("Digest not sent; seen-store unchanged.")
     return RunResult(
@@ -76,6 +84,8 @@ def run_once(
         matches=matches,
         new_matches=new_matches,
         errors=errors,
+        digest_sent=digest_sent,
+        seen_marked=seen_marked,
     )
 
 
@@ -159,10 +169,31 @@ def print_report(result: RunResult, *, output: TextIO | None = None) -> None:
         print(f"  url: {job.get('source_url', '')}", file=output)
 
 
+def print_heartbeat(result: RunResult, *, output: TextIO | None = None) -> None:
+    output = output or sys.stdout
+    sent = "yes" if result.digest_sent else "no"
+    print(
+        "HEARTBEAT: ran, "
+        f"rows_fetched={result.rows_fetched}, "
+        f"jobs_scored={result.jobs_scored}, "
+        f"matches={len(result.matches)}, "
+        f"new={len(result.new_matches)}, "
+        f"errors={len(result.errors)}, "
+        f"sent={sent}, "
+        f"seen_marked={result.seen_marked}",
+        file=output,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the internship watcher once and print new matches.")
     parser.add_argument("--watchlist", default=str(DEFAULT_WATCHLIST_PATH), help="Path to watchlist.yml")
     parser.add_argument("--seen-db", help="Path to SQLite seen-store")
+    parser.add_argument(
+        "--mark-seen-without-send",
+        action="store_true",
+        help="Mark new matches seen even when the digest dry-runs; intended for CI priming.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -171,8 +202,9 @@ def main(argv: list[str] | None = None) -> int:
         config = replace(config, seen_db_path=Path(args.seen_db))
 
     with SeenStore(config.seen_db_path) as seen_store:
-        result = run_once(config, seen_store=seen_store)
+        result = run_once(config, seen_store=seen_store, mark_seen_without_send=args.mark_seen_without_send)
     print_report(result)
+    print_heartbeat(result)
     return 0
 
 

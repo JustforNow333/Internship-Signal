@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 from watcher.config import CompanyCfg, WatcherConfig
-from watcher.run import collect_rows, print_report, run_once
+from watcher.run import collect_rows, print_heartbeat, print_report, run_once
 from watcher.seen_store import SeenStore
 from watcher.sources.base import SourceError, make_row
 
@@ -96,6 +96,8 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
     assert first.new_matches[0]["extra"]["source"] == "direct"
     assert first.new_matches[1]["extra"]["source"] == "github"
     assert second.new_matches == []
+    assert first.digest_sent is True
+    assert first.seen_marked == 2
     assert [len(call) for call in digest_sender.calls] == [2, 0]
 
 
@@ -124,7 +126,41 @@ def test_run_once_does_not_mark_seen_when_digest_not_sent(tmp_path):
 
     assert [job["title"] for job in first.new_matches] == ["Software Engineer Intern"]
     assert [job["title"] for job in second.new_matches] == ["Software Engineer Intern"]
+    assert first.digest_sent is False
+    assert first.seen_marked == 0
     assert [len(call) for call in digest_sender.calls] == [1, 1]
+
+
+def test_run_once_can_prime_seen_store_without_sending(tmp_path):
+    config = WatcherConfig(companies=(CompanyCfg(name="DirectCo", ats="greenhouse", token="directco"),))
+    direct_rows = [row("DirectCo", "Software Engineer Intern")]
+    digest_sender = FakeDigestSender(sent=False)
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        first = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"DirectCo": direct_rows})},
+            github_source=FakeGithub([]),
+            digest_sender=digest_sender,
+            today=date(2026, 6, 9),
+            mark_seen_without_send=True,
+        )
+        second = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"DirectCo": direct_rows})},
+            github_source=FakeGithub([]),
+            digest_sender=digest_sender,
+            today=date(2026, 6, 9),
+            mark_seen_without_send=True,
+        )
+
+    assert [job["title"] for job in first.new_matches] == ["Software Engineer Intern"]
+    assert second.new_matches == []
+    assert first.digest_sent is False
+    assert first.seen_marked == 1
+    assert [len(call) for call in digest_sender.calls] == [1, 0]
 
 
 def test_collect_rows_logs_source_failure_and_keeps_going():
@@ -188,3 +224,22 @@ def test_print_report_for_matches_and_empty(capsys):
     empty = type("Result", (), {"errors": [], "new_matches": []})()
     print_report(empty)
     assert "No new matches." in capsys.readouterr().out
+
+
+def test_print_heartbeat(capsys):
+    result = type("Result", (), {
+        "rows_fetched": 3,
+        "jobs_scored": 2,
+        "matches": [{}, {}],
+        "new_matches": [{}],
+        "errors": ["BrokenCo: boom"],
+        "digest_sent": False,
+        "seen_marked": 1,
+    })()
+
+    print_heartbeat(result)
+
+    assert capsys.readouterr().out == (
+        "HEARTBEAT: ran, rows_fetched=3, jobs_scored=2, matches=2, "
+        "new=1, errors=1, sent=no, seen_marked=1\n"
+    )

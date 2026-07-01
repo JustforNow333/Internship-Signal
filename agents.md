@@ -78,11 +78,29 @@ Current watcher run core:
   dry-runs to stdout unless `WATCHER_SEND_EMAIL` is truthy; live Gmail SMTP
   requires `SMTP_USER`, `SMTP_APP_PASSWORD`, and `EMAIL_TO` from env.
 - The run loop marks jobs seen only after `send_digest` reports a successful
-  live send. Dry-run digest previews do not advance the seen-store.
+  live send by default. Dry-run digest previews do not advance the seen-store
+  unless `python -m watcher.run --mark-seen-without-send` is used for the
+  explicit GitHub Actions priming flow.
 - Digest decisions are settled: no score gate, sort by score descending with
   company/title tie-breaks, and send nothing when there are zero new matches.
 - Local seen-store files are ignored by `.gitignore`; pass `--seen-db` in tests
-  or manual runs when you want an isolated store.
+  or manual runs when you want an isolated store. The default seen-store path is
+  `watcher/seen.sqlite`, configurable with `WATCHER_SEEN_DB`.
+- `.github/workflows/watcher.yml` runs the watcher hourly and by manual
+  dispatch. It restores `seen.sqlite` from the orphan `watcher-data` branch into
+  the path named by `WATCHER_SEEN_DB`, runs `python -m watcher.run`, then commits
+  and pushes the DB back to `watcher-data`.
+- Workflow dispatch input `send_email=false` is the priming path: it unsets
+  `WATCHER_SEND_EMAIL`, prints a dry-run digest, marks the new matches seen with
+  `--mark-seen-without-send`, and persists that DB so the first later send does
+  not email the whole backlog. Scheduled runs read the repo Actions variable
+  `WATCHER_SEND_EMAIL`; live sends require the repo secrets `SMTP_USER`,
+  `SMTP_APP_PASSWORD`, and `EMAIL_TO`.
+- The watcher prints a run heartbeat, and the workflow prints a final heartbeat
+  including run counts, source-error count, seen-store load/save counts, send
+  result, and persistence status. Source adapter failures are logged and
+  surfaced as warnings; seen-store load corruption or push failure is a hard
+  workflow failure.
 
 Scope guardrails:
 
@@ -116,6 +134,13 @@ To run backend tests plus watcher tests from the repo root:
 
 ```bash
 PYTHONPATH=.:backend backend/venv/Scripts/python.exe -m pytest backend/tests watcher/tests -q
+```
+
+When launching the checked-in Windows virtualenv from WSL and inline env vars do
+not cross into the Windows process, use the Windows shell to set `PYTHONPATH`:
+
+```bash
+cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
 Also run a syntax pass after broad Python edits:

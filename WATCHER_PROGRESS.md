@@ -16,6 +16,8 @@ This file tracks completed watcher steps and the next handoff target.
   gitignored `watcher/alumni.csv` roster. Alumni annotations are additive only.
 - `watcher/notify.py` is built for the email digest. Dry-run is the default;
   live Gmail SMTP is opt-in via env.
+- `.github/workflows/watcher.yml` is built for hourly/manual GitHub Actions
+  runs with SQLite seen-store persistence on the orphan `watcher-data` branch.
 
 ## Done
 
@@ -47,18 +49,60 @@ This file tracks completed watcher steps and the next handoff target.
      score descending.
    - Digest rows show score, recommendation, top reason, red flags, apply URL,
      source tag, and alumni annotations.
-   - Current suite: `141 passed, 1 warning`.
+   - Scheduler handoff suite after later additions: `147 passed, 1 warning`.
+4. Scheduler + seen-store persistence:
+   - `.github/workflows/watcher.yml` runs hourly plus `workflow_dispatch`.
+   - The watcher runs as `python -m watcher.run` with `PYTHONPATH=.:backend`,
+     Python 3.11, and dependencies from `backend/requirements.txt`.
+   - The workflow points the app at `.watcher-state/seen.sqlite` through
+     `WATCHER_SEEN_DB`. The app default remains `watcher/seen.sqlite`, also
+     configurable with `WATCHER_SEEN_DB` or `--seen-db`.
+   - The persisted DB is committed as `seen.sqlite` on the orphan branch
+     `watcher-data`, never on `main`.
+   - Load logs either `SEEN-STORE: bootstrapping empty (no prior data branch)`
+     or `SEEN-STORE: loaded N seen ids`. Corrupt persisted DBs fail the job
+     during load.
+   - Save commits and pushes back to `watcher-data`; push rejection triggers a
+     bounded three-attempt fetch/reset/retry loop. Final push failure is a hard
+     workflow failure.
+   - Workflow dispatch input `send_email=false` is the priming mode: it unsets
+     `WATCHER_SEND_EMAIL`, prints the dry-run digest, marks new matches seen via
+     `--mark-seen-without-send`, and saves the DB. This prevents the first later
+     send from emailing the whole backlog.
+   - Scheduled runs read the repository Actions variable `WATCHER_SEND_EMAIL`;
+     live sends require repository secrets `SMTP_USER`, `SMTP_APP_PASSWORD`, and
+     `EMAIL_TO`.
+   - The workflow uses concurrency group `watcher-seen-store` with
+     `cancel-in-progress: false` to serialize data-branch writes.
+   - The app prints a run heartbeat:
+     `HEARTBEAT: ran, rows_fetched=..., jobs_scored=..., matches=..., new=..., errors=..., sent=..., seen_marked=...`.
+   - The workflow prints a final heartbeat including seen-store state:
+     `HEARTBEAT: ran, rows_fetched=..., jobs_scored=..., matches=..., new=..., errors=..., seen_loaded=..., seen_saved=..., sent=..., seen_store=...`.
+   - Live validation by actual GitHub manual dispatch remains for the user to
+     run.
 
 ## Next
 
-4. Scheduler:
-   - Add GitHub Actions hourly cron plus manual dispatch.
-   - Preserve the SQLite seen-store across ephemeral runners.
-   - Use repository secrets for SMTP env vars.
-   - Surface partial failures loudly so scraper breakage is visible.
+- Run the first manual GitHub Actions priming dispatch with `send_email=false`.
+- After confirming the data branch exists and the heartbeat looks right, set the
+  repo Actions variable `WATCHER_SEND_EMAIL=true` to enable scheduled sends.
 
 ## Validation Command
 
 ```bash
 PYTHONPATH=.:backend backend/venv/Scripts/python.exe -m pytest backend/tests watcher/tests -q
+```
+
+When launching the checked-in Windows venv from WSL, inline WSL env assignments
+may not cross into the Windows process. The verified equivalent command from
+WSL is:
+
+```bash
+cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
+```
+
+Latest local validation for scheduler work:
+
+```text
+147 passed, 1 warning in 1.82s
 ```

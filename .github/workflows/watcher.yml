@@ -1,0 +1,256 @@
+name: Internship Watcher
+
+"on":
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      send_email:
+        description: "Send the live email digest. Leave off for a priming dry-run."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: watcher-seen-store
+  cancel-in-progress: false
+
+jobs:
+  watcher:
+    runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: "3.11"
+      DATA_BRANCH: watcher-data
+      DATA_DB_FILE: seen.sqlite
+      SEEN_DB_PATH: ${{ github.workspace }}/.watcher-state/seen.sqlite
+      ACTIONS_WATCHER_SEND_EMAIL: ${{ vars.WATCHER_SEND_EMAIL }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Resolve send mode and validate secrets
+        id: mode
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for secret_value in "${SMTP_USER:-}" "${SMTP_APP_PASSWORD:-}" "${EMAIL_TO:-}"; do
+            if [ -n "$secret_value" ]; then
+              echo "::add-mask::$secret_value"
+            fi
+          done
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            raw_send="${{ inputs.send_email }}"
+          else
+            raw_send="${ACTIONS_WATCHER_SEND_EMAIL:-}"
+          fi
+
+          normalized="$(printf '%s' "$raw_send" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          case "$normalized" in
+            1|true|yes|y|on) send_email=true ;;
+            *) send_email=false ;;
+          esac
+
+          if [ "$send_email" = "true" ]; then
+            missing=()
+            [ -n "${SMTP_USER:-}" ] || missing+=("SMTP_USER")
+            [ -n "${SMTP_APP_PASSWORD:-}" ] || missing+=("SMTP_APP_PASSWORD")
+            [ -n "${EMAIL_TO:-}" ] || missing+=("EMAIL_TO")
+            if [ "${#missing[@]}" -gt 0 ]; then
+              joined="$(IFS=', '; echo "${missing[*]}")"
+              echo "::error::WATCHER_SEND_EMAIL is enabled but required secret(s) are missing: $joined"
+              exit 1
+            fi
+          fi
+
+          echo "send_email=$send_email" >> "$GITHUB_OUTPUT"
+          echo "SEND-MODE: send_email=$send_email"
+
+      - name: Restore seen-store from data branch
+        id: load_seen
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$SEEN_DB_PATH")"
+
+          if git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null 2>&1; then
+            git fetch --quiet origin "$DATA_BRANCH:refs/remotes/origin/$DATA_BRANCH"
+            if git cat-file -e "origin/$DATA_BRANCH:$DATA_DB_FILE" 2>/dev/null; then
+              git show "origin/$DATA_BRANCH:$DATA_DB_FILE" > "$SEEN_DB_PATH"
+              loaded="$(
+                python -c 'import os, sqlite3; con = sqlite3.connect(os.environ["SEEN_DB_PATH"]); print(con.execute("select count(*) from seen").fetchone()[0]); con.close()'
+              )"
+              echo "SEEN-STORE: loaded $loaded seen ids"
+              echo "loaded=$loaded" >> "$GITHUB_OUTPUT"
+              echo "load_status=loaded" >> "$GITHUB_OUTPUT"
+            else
+              echo "SEEN-STORE: bootstrapping empty (no DB file on watcher-data)"
+              echo "loaded=0" >> "$GITHUB_OUTPUT"
+              echo "load_status=bootstrap-no-file" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "SEEN-STORE: bootstrapping empty (no prior data branch)"
+            echo "loaded=0" >> "$GITHUB_OUTPUT"
+            echo "load_status=bootstrap-no-branch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run watcher
+        id: run_watcher
+        shell: bash
+        env:
+          PYTHONPATH: .:backend
+          WATCHER_SEEN_DB: ${{ env.SEEN_DB_PATH }}
+        run: |
+          set -u -o pipefail
+
+          args=()
+          if [ "${{ steps.mode.outputs.send_email }}" = "true" ]; then
+            export WATCHER_SEND_EMAIL=1
+          else
+            unset WATCHER_SEND_EMAIL
+            args+=(--mark-seen-without-send)
+          fi
+
+          set +e
+          python -m watcher.run "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/watcher-run.log"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          heartbeat="$(grep '^HEARTBEAT:' "$RUNNER_TEMP/watcher-run.log" | tail -n 1 || true)"
+          extract_count() {
+            printf '%s\n' "$heartbeat" | sed -n "s/.*$1=\([0-9][0-9]*\).*/\1/p"
+          }
+
+          sent="$(printf '%s\n' "$heartbeat" | sed -n 's/.*sent=\(yes\|no\).*/\1/p')"
+          rows="$(extract_count rows_fetched)"
+          jobs="$(extract_count jobs_scored)"
+          matches="$(extract_count matches)"
+          new="$(extract_count new)"
+          errors="$(extract_count errors)"
+          marked="$(extract_count seen_marked)"
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "rows_fetched=${rows:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "jobs_scored=${jobs:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "matches=${matches:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "new=${new:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "errors=${errors:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "sent=${sent:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "seen_marked=${marked:-unknown}" >> "$GITHUB_OUTPUT"
+
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+
+      - name: Save seen-store to data branch
+        id: save_seen
+        if: steps.run_watcher.outputs.status == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$SEEN_DB_PATH" ]; then
+            echo "::error::SEEN-STORE: expected DB file is missing at $SEEN_DB_PATH"
+            exit 1
+          fi
+
+          saved="$(
+            python -c 'import os, sqlite3; con = sqlite3.connect(os.environ["SEEN_DB_PATH"]); print(con.execute("select count(*) from seen").fetchone()[0]); con.close()'
+          )"
+          echo "saved=$saved" >> "$GITHUB_OUTPUT"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          data_worktree="$RUNNER_TEMP/watcher-data-worktree"
+          rm -rf "$data_worktree"
+
+          if git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null 2>&1; then
+            branch_exists=true
+            git fetch --quiet origin "$DATA_BRANCH"
+            git worktree add -B "$DATA_BRANCH" "$data_worktree" "origin/$DATA_BRANCH"
+          else
+            branch_exists=false
+            git worktree add --detach "$data_worktree" HEAD
+            git -C "$data_worktree" checkout --orphan "$DATA_BRANCH"
+            git -C "$data_worktree" rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          for attempt in 1 2 3; do
+            if [ "$branch_exists" = "true" ]; then
+              git -C "$data_worktree" fetch --quiet origin "$DATA_BRANCH"
+              # Keep the data worktree pinned to the remote tip before retrying.
+              git -C "$data_worktree" reset --hard "origin/$DATA_BRANCH"
+            fi
+
+            cp "$SEEN_DB_PATH" "$data_worktree/$DATA_DB_FILE"
+            git -C "$data_worktree" add "$DATA_DB_FILE"
+
+            if git -C "$data_worktree" diff --cached --quiet; then
+              echo "SEEN-STORE: no DB changes to commit on attempt $attempt"
+            else
+              git -C "$data_worktree" commit -m "Update watcher seen store"
+            fi
+
+            if git -C "$data_worktree" push origin "HEAD:$DATA_BRANCH"; then
+              echo "SEEN-STORE: saved, pushed to watcher-data"
+              echo "save_status=pushed" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "::warning::SEEN-STORE: push attempt $attempt failed; fetching watcher-data and retrying"
+            branch_exists=true
+            sleep $((attempt * 5))
+          done
+
+          echo "::error::SEEN-STORE: failed to push watcher-data after retries"
+          exit 1
+
+      - name: Final heartbeat
+        if: always()
+        shell: bash
+        env:
+          ROWS_FETCHED: ${{ steps.run_watcher.outputs.rows_fetched }}
+          JOBS_SCORED: ${{ steps.run_watcher.outputs.jobs_scored }}
+          MATCHES: ${{ steps.run_watcher.outputs.matches }}
+          NEW_MATCHES: ${{ steps.run_watcher.outputs.new }}
+          ERRORS: ${{ steps.run_watcher.outputs.errors }}
+          DIGEST_SENT: ${{ steps.run_watcher.outputs.sent }}
+          SEEN_LOADED: ${{ steps.load_seen.outputs.loaded }}
+          LOAD_STATUS: ${{ steps.load_seen.outputs.load_status }}
+          SEEN_SAVED: ${{ steps.save_seen.outputs.saved }}
+          SAVE_STATUS: ${{ steps.save_seen.outputs.save_status }}
+        run: |
+          set -euo pipefail
+
+          save_status="${SAVE_STATUS:-skipped-or-failed}"
+          echo "HEARTBEAT: ran, rows_fetched=${ROWS_FETCHED:-unknown}, jobs_scored=${JOBS_SCORED:-unknown}, matches=${MATCHES:-unknown}, new=${NEW_MATCHES:-unknown}, errors=${ERRORS:-unknown}, seen_loaded=${SEEN_LOADED:-unknown}, seen_saved=${SEEN_SAVED:-unknown}, sent=${DIGEST_SENT:-unknown}, seen_store=${LOAD_STATUS:-unknown}/$save_status"
+
+          case "${ERRORS:-unknown}" in
+            ''|unknown) ;;
+            *)
+              if [ "$ERRORS" -gt 0 ]; then
+                echo "::warning::Watcher completed with $ERRORS source error(s); inspect the run log."
+              fi
+              ;;
+          esac

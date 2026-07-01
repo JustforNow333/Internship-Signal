@@ -64,3 +64,4 @@ desktop.ini
 
 # Local private watcher data
 watcher/alumni.csv
+.watcher-state/
