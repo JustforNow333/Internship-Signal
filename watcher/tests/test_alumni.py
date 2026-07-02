@@ -1,6 +1,7 @@
 import copy
 import logging
 
+from watcher.config import CompanyCfg
 from watcher.alumni import attach_alumni, load_alumni, match_alumni
 
 
@@ -108,3 +109,50 @@ def test_multiple_alumni_return_all_records(tmp_path):
     matches = match_alumni("OpenAI", index)
 
     assert [match["name"] for match in matches] == ["Ada Exact", "Dennis Exact"]
+
+
+def test_attach_alumni_uses_watchlist_alumni_match_aliases(tmp_path):
+    path = tmp_path / "alumni.csv"
+    path.write_text(
+        """First Name,Last Name,Occupation,Employer,LinkedIn URL
+Ada,Alias,Software Engineer,Ab Initio,https://www.linkedin.com/in/fake-abinitio
+""",
+        encoding="utf-8",
+    )
+    index = load_alumni(path)
+    jobs = [{"company": "Ab Initio Software", "title": "Software Engineer Intern"}]
+    companies = (
+        CompanyCfg(
+            name="Ab Initio Software",
+            ats="github_only",
+            alumni_match=("ab initio",),
+        ),
+    )
+
+    annotated = attach_alumni(jobs, index, companies=companies)
+
+    assert [record["name"] for record in annotated[0]["alumni"]] == ["Ada Alias"]
+
+
+def test_attach_alumni_uses_watchlist_alias_to_find_company_then_alumni_match(tmp_path):
+    path = tmp_path / "alumni.csv"
+    path.write_text(
+        """First Name,Last Name,Occupation,Employer,LinkedIn URL
+Grace,APL,Research Engineer,JHU Applied Physics Laboratory,https://www.linkedin.com/in/fake-apl
+""",
+        encoding="utf-8",
+    )
+    index = load_alumni(path)
+    jobs = [{"company": "JHU APL", "title": "Software Engineer Intern"}]
+    companies = (
+        CompanyCfg(
+            name="Johns Hopkins University Applied Physics Laboratory",
+            ats="github_only",
+            aliases=("JHU APL",),
+            alumni_match=("jhu applied physics laboratory",),
+        ),
+    )
+
+    annotated = attach_alumni(jobs, index, companies=companies)
+
+    assert [record["name"] for record in annotated[0]["alumni"]] == ["Grace APL"]

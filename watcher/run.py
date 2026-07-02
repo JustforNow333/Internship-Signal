@@ -63,7 +63,11 @@ def run_once(
     jobs = analyze_rows(rows, today=today)
     LOGGER.info("Filtering %d scored job(s)...", len(jobs))
     matches = filter_matches(jobs, target_roles=config.target_roles, min_score=config.min_score)
-    matches = attach_alumni(matches, alumni_index if alumni_index is not None else load_default_alumni_index())
+    matches = attach_alumni(
+        matches,
+        alumni_index if alumni_index is not None else load_default_alumni_index(),
+        companies=config.companies,
+    )
     new_matches = seen_store.unseen(matches)
     LOGGER.info("%d match(es), %d new.", len(matches), len(new_matches))
     LOGGER.info("Sending digest if needed...")

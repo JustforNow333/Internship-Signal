@@ -163,6 +163,41 @@ def test_run_once_can_prime_seen_store_without_sending(tmp_path):
     assert [len(call) for call in digest_sender.calls] == [1, 0]
 
 
+def test_run_once_passes_watchlist_aliases_to_alumni_join(tmp_path):
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="AliasCo Software",
+                ats="greenhouse",
+                token="aliasco",
+                alumni_match=("ShortCo",),
+            ),
+        )
+    )
+    direct_rows = [row("AliasCo Software", "Software Engineer Intern")]
+    alumni_index = {
+        "shortco": [{
+            "name": "Ada Alias",
+            "occupation": "Software Engineer",
+            "linkedin_url": "https://www.linkedin.com/in/fake-ada-alias",
+            "employer": "ShortCo",
+        }]
+    }
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"AliasCo Software": direct_rows})},
+            github_source=FakeGithub([]),
+            alumni_index=alumni_index,
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 6, 9),
+        )
+
+    assert [record["name"] for record in result.matches[0]["alumni"]] == ["Ada Alias"]
+
+
 def test_collect_rows_logs_source_failure_and_keeps_going():
     config = WatcherConfig(
         companies=(

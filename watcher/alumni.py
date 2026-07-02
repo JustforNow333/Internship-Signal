@@ -63,6 +63,17 @@ def load_alumni(path: str | Path = ALUMNI_CSV_PATH) -> AlumniIndex:
 def match_alumni(company: str, index: Mapping[str, Sequence[AlumniRecord]]) -> list[AlumniRecord]:
     """Return alumni for a posting company using exact, alias, then fuzzy match."""
 
+    return _match_alumni(company, index, allow_fuzzy=True)
+
+
+def _match_alumni(
+    company: str,
+    index: Mapping[str, Sequence[AlumniRecord]],
+    *,
+    allow_fuzzy: bool,
+) -> list[AlumniRecord]:
+    """Return alumni for a single company string."""
+
     company_name = str(company or "").strip()
     key = norm_company(company_name)
     if not key:
@@ -82,6 +93,9 @@ def match_alumni(company: str, index: Mapping[str, Sequence[AlumniRecord]]) -> l
     alias_records = _alias_records_for(key, index)
     if alias_records:
         return alias_records
+
+    if not allow_fuzzy:
+        return []
 
     fuzzy_matches = []
     for employer_key in sorted(index):
@@ -119,15 +133,84 @@ def _alias_label(alias_key: str, records: Sequence[AlumniRecord]) -> str:
     return alias_key
 
 
-def attach_alumni(jobs: Sequence[dict], index: Mapping[str, Sequence[AlumniRecord]]) -> list[dict]:
+def attach_alumni(
+    jobs: Sequence[dict],
+    index: Mapping[str, Sequence[AlumniRecord]],
+    companies: Sequence[object] = (),
+) -> list[dict]:
     """Attach an `alumni` list to each job without filtering or changing fields."""
 
+    watchlist = _watchlist_lookup(companies)
     annotated = []
     for job in jobs:
         next_job = dict(job)
-        next_job["alumni"] = match_alumni(str(job.get("company") or ""), index)
+        next_job["alumni"] = match_alumni_for_watchlist_company(
+            str(job.get("company") or ""),
+            index,
+            watchlist,
+        )
         annotated.append(next_job)
     return annotated
+
+
+def match_alumni_for_watchlist_company(
+    company: str,
+    index: Mapping[str, Sequence[AlumniRecord]],
+    watchlist: Mapping[str, object],
+) -> list[AlumniRecord]:
+    """Match alumni using the posting company plus watchlist aliases."""
+
+    matches: list[AlumniRecord] = []
+    _extend_unique(matches, match_alumni(company, index))
+
+    cfg = watchlist.get(norm_company(company))
+    if cfg is None:
+        return matches
+
+    for alias in _watchlist_alumni_names(cfg):
+        alias_matches = _match_alumni(alias, index, allow_fuzzy=False)
+        if alias_matches:
+            LOGGER.info("WATCHLIST_ALIAS %s -> %s", company, alias)
+            _extend_unique(matches, alias_matches)
+    return matches
+
+
+def _watchlist_lookup(companies: Sequence[object]) -> dict[str, object]:
+    lookup: dict[str, object] = {}
+    for company in companies:
+        for name in _watchlist_alumni_names(company):
+            key = norm_company(name)
+            if key:
+                lookup.setdefault(key, company)
+    return lookup
+
+
+def _watchlist_alumni_names(company: object) -> tuple[str, ...]:
+    values = (
+        str(getattr(company, "name", "") or ""),
+        *(str(value or "") for value in getattr(company, "aliases", ()) or ()),
+        *(str(value or "") for value in getattr(company, "alumni_match", ()) or ()),
+    )
+    return tuple(value.strip() for value in values if value.strip())
+
+
+def _extend_unique(target: list[AlumniRecord], records: Sequence[AlumniRecord]) -> None:
+    seen = {_record_key(record) for record in target}
+    for record in records:
+        key = _record_key(record)
+        if key in seen:
+            continue
+        target.append(record)
+        seen.add(key)
+
+
+def _record_key(record: Mapping[str, str]) -> tuple[str, str, str, str]:
+    return (
+        str(record.get("name") or ""),
+        str(record.get("occupation") or ""),
+        str(record.get("linkedin_url") or ""),
+        str(record.get("employer") or ""),
+    )
 
 
 def load_default_alumni_index() -> AlumniIndex:

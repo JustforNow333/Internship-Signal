@@ -65,3 +65,4 @@ desktop.ini
 # Local private watcher data
 watcher/alumni.csv
 .watcher-state/
+make_alumni_b64.py
