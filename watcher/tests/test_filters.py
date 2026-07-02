@@ -38,3 +38,19 @@ def test_filters_optional_score_gate():
     assert filter_matches([job(score={"total": 69})], min_score=70) == []
     assert filter_matches([job(score={"total": 70})], min_score=70)
 
+
+def test_full_time_title_with_intern_boilerplate_is_not_internship():
+    # Full-time/senior title, but description mentions interns -> must NOT match.
+    assert not is_internship(job(
+        title="Staff Software Engineer",
+        description="We also run a Summer 2026 internship program.",
+    ))
+    assert filter_matches([job(
+        title="Staff Software Engineer",
+        description="We also run a Summer 2026 internship program.",
+    )]) == []
+
+
+def test_title_based_internship_still_matches():
+    assert is_internship(job(title="Software Engineer Intern - Summer 2026"))
+    assert is_internship(job(title="Data Science Co-op"))

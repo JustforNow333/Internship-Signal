@@ -44,14 +44,11 @@ def is_target_role(job: dict, *, target_roles: set[str] | frozenset[str] = TARGE
 
 def is_internship(job: dict) -> bool:
     title = job.get("title", "")
-    blob = " ".join([
-        title,
-        job.get("internship_type", ""),
-        job.get("description", ""),
-    ])
     if FULL_TIME_RE.search(title):
         return False
-    return bool(job.get("internship_type") or INTERNSHIP_RE.search(blob))
+    # Internship signal must come from the title or a structured field. The
+    # free-text description is boilerplate-heavy and produced false positives.
+    return bool(job.get("internship_type") or INTERNSHIP_RE.search(title))
 
 
 def is_open(job: dict) -> bool:
@@ -60,4 +57,3 @@ def is_open(job: dict) -> bool:
         return False
     days_left = job.get("deadline_days_left")
     return days_left is None or days_left >= 0
-
