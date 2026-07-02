@@ -46,9 +46,12 @@ def is_internship(job: dict) -> bool:
     title = job.get("title", "")
     if FULL_TIME_RE.search(title):
         return False
-    # Internship signal must come from the title or a structured field. The
-    # free-text description is boilerplate-heavy and produced false positives.
-    return bool(job.get("internship_type") or INTERNSHIP_RE.search(title))
+    # internship_type holds the ATS's generic employment-type STRING
+    # (e.g. "FullTime", "full", "Contract", "Intern"), not a boolean flag,
+    # so a plain truthiness check matched nearly everything. Only count it
+    # as an internship signal when the string itself says intern/co-op.
+    itype = job.get("internship_type", "")
+    return bool(INTERNSHIP_RE.search(itype) or INTERNSHIP_RE.search(title))
 
 
 def is_open(job: dict) -> bool:

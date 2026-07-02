@@ -54,3 +54,17 @@ def test_full_time_title_with_intern_boilerplate_is_not_internship():
 def test_title_based_internship_still_matches():
     assert is_internship(job(title="Software Engineer Intern - Summer 2026"))
     assert is_internship(job(title="Data Science Co-op"))
+
+
+def test_truthy_non_intern_employment_type_is_not_internship():
+    # Adapters store the ATS employment-type string in internship_type;
+    # a plain truthiness check wrongly matched all of them.
+    assert not is_internship(job(title="Security Reliability Engineer", internship_type="FullTime"))
+    assert not is_internship(job(title="Web-App developer", internship_type="full"))
+    assert not is_internship(job(title="Senior DevOps Engineer", internship_type="Contract"))
+    assert filter_matches([job(title="Security Reliability Engineer", internship_type="FullTime")]) == []
+
+
+def test_intern_employment_type_string_still_matches():
+    assert is_internship(job(title="Software Engineer", internship_type="Intern"))
+    assert is_internship(job(title="Backend Engineer", internship_type="internship"))
