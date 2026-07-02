@@ -66,3 +66,11 @@ desktop.ini
 watcher/alumni.csv
 .watcher-state/
 make_alumni_b64.py
+
+# Local watcher scratch artifacts
+check_alumni_coverage.py
+watcher/add_company_batch.txt
+watcher/additions_detect.json
+watcher/additions_report.md
+watcher/additions_watchlist.yml
+watcher/WATCHER_PROGRESS*.md

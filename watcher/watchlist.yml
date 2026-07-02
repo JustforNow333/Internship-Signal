@@ -413,3 +413,135 @@ companies:
     alumni_match: ["zs"]
     source_url: "https://jobs.zs.com/jobs"
     note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
+
+  - name: "DoorDash"
+    ats: greenhouse
+    token: "doordashusa"
+    alumni_match: ["doordash"]
+    source_url: "https://job-boards.greenhouse.io/doordashusa"
+
+  - name: "Tesla"
+    ats: bespoke
+    module: "tesla"
+    alumni_match: ["tesla"]
+    source_url: "https://www.tesla.com/careers/search"
+    note: "company-hosted careers portal; unsupported by current watcher adapters"
+
+  - name: "ASML"
+    ats: smartrecruiters
+    token: "ASML1"
+    alumni_match: ["asml"]
+    source_url: "https://careers.smartrecruiters.com/ASML1"
+
+  - name: "HP"
+    ats: workday
+    token: "hp"
+    workday_shard: "wd5"
+    workday_site: "ExternalCareerSite"
+    aliases: ["HP Inc", "Hewlett Packard", "Hewlett-Packard"]
+    alumni_match: ["hp", "hp inc", "hewlett packard", "hewlett-packard"]
+    source_url: "https://hp.wd5.myworkdayjobs.com/ExternalCareerSite"
+
+  - name: "ZoomInfo"
+    ats: greenhouse
+    token: "zoominfo"
+    aliases: ["ZoomInfo Technologies"]
+    alumni_match: ["zoominfo", "zoominfo technologies"]
+    source_url: "https://boards.greenhouse.io/zoominfo"
+
+  - name: "Intuitive Surgical"
+    ats: workday
+    token: "intuitive"
+    workday_shard: "wd1"
+    workday_site: "irtc_careers"
+    aliases: ["Intuitive"]
+    alumni_match: ["intuitive surgical", "intuitive"]
+    source_url: "https://intuitive.wd1.myworkdayjobs.com/irtc_careers"
+
+  - name: "Whatnot"
+    ats: bespoke
+    module: "whatnot"
+    alumni_match: ["whatnot"]
+    source_url: "https://jobs.ashbyhq.com/whatnot"
+    note: "Ashby-hosted careers page verified, but current Ashby posting API returns 404 for this board; adapter follow-up needed"
+
+  - name: "Augury"
+    ats: greenhouse
+    token: "augury"
+    alumni_match: ["augury"]
+    source_url: "https://boards.greenhouse.io/augury"
+
+  - name: "Goldman Sachs"
+    ats: bespoke
+    module: "goldman_sachs"
+    aliases: ["Goldman", "The Goldman Sachs Group"]
+    alumni_match: ["goldman sachs", "goldman", "the goldman sachs group"]
+    source_url: "https://www.goldmansachs.com/careers"
+    note: "company-hosted careers portal; unsupported by current watcher adapters"
+
+  - name: "JPMorgan Chase"
+    ats: bespoke
+    module: "jpmorgan_chase"
+    aliases: ["J.P. Morgan", "JP Morgan", "JPMorgan", "JPMC", "Chase"]
+    alumni_match: ["jpmorgan chase", "j.p. morgan", "jp morgan", "jpmorgan", "jpmc", "chase"]
+    source_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"
+    note: "Oracle HCM portal; unsupported by current watcher adapters"
+
+  - name: "Barclays"
+    ats: bespoke
+    module: "barclays"
+    alumni_match: ["barclays"]
+    source_url: "https://barclays.wd3.myworkdayjobs.com/External_Career_Site_Barclays"
+    note: "Workday board verified, but current adapter fails this board's schema; adapter follow-up needed"
+
+  - name: "UBS"
+    ats: bespoke
+    module: "ubs"
+    alumni_match: ["ubs"]
+    source_url: "https://jobs.ubs.com/TGnewUI/Search/Home/Home?partnerid=25008&siteid=5131"
+    note: "Taleo-style early careers portal; unsupported by current watcher adapters"
+
+  - name: "Nomura"
+    ats: bespoke
+    module: "nomura"
+    alumni_match: ["nomura"]
+    source_url: "https://careers.nomura.com/Nomura/?locale=en_US"
+    note: "SuccessFactors portal; unsupported by current watcher adapters"
+
+  - name: "BlackRock"
+    ats: workday
+    token: "blackrock"
+    workday_shard: "wd1"
+    workday_site: "BlackRock_Professional"
+    alumni_match: ["blackrock"]
+    source_url: "https://blackrock.wd1.myworkdayjobs.com/BlackRock_Professional"
+
+  - name: "AQR Capital"
+    ats: greenhouse
+    token: "aqr"
+    aliases: ["AQR", "AQR Capital Management"]
+    alumni_match: ["aqr capital", "aqr", "aqr capital management"]
+    source_url: "https://boards.greenhouse.io/aqr"
+
+  - name: "Federal Reserve Bank of New York"
+    ats: bespoke
+    module: "federal_reserve_bank_of_new_york"
+    aliases: ["New York Fed", "FRBNY"]
+    alumni_match: ["federal reserve bank of new york", "new york fed", "frbny"]
+    source_url: "https://rb.wd5.myworkdayjobs.com/FRS"
+    note: "Federal Reserve System Workday board verified, but current adapter cannot safely scope to New York Fed; adapter follow-up needed"
+
+  - name: "KPMG"
+    ats: bespoke
+    module: "kpmg"
+    alumni_match: ["kpmg"]
+    source_url: "https://www.kpmguscareers.com/job-search/"
+    note: "company-hosted careers portal; unsupported by current watcher adapters"
+
+  - name: "EY"
+    ats: bespoke
+    module: "ey"
+    aliases: ["Ernst & Young", "Ernst and Young"]
+    alumni_match: ["ey", "ernst & young", "ernst and young"]
+    source_url: "https://careers.ey.com/"
+    note: "SuccessFactors portal; unsupported by current watcher adapters"

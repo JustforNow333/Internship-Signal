@@ -57,6 +57,13 @@ Current watcher run core:
 - The default `watcher/watchlist.yml` is now the generated starter priority
   watchlist. It contains resolved direct ATS entries, `bespoke` entries for
   non-standard portals, and `github_only` entries for unresolved companies.
+- The July 2026 alumni-company watchlist expansion added DoorDash, Tesla,
+  ASML, HP, ZoomInfo, Intuitive Surgical, Whatnot, Augury, Goldman Sachs,
+  JPMorgan Chase, Barclays, UBS, Nomura, BlackRock, AQR Capital, Federal
+  Reserve Bank of New York, KPMG, and EY. Direct entries were added only where
+  live public endpoints matched existing adapters; custom, unsupported, or
+  unsafe-to-scope portals are marked `bespoke` with notes rather than
+  fabricated adapter settings.
 - The run loop skips `bespoke` and `github_only` entries for direct fetching,
   fetches direct rows first, then the GitHub backstop. This order is
   intentional: backend dedupe keeps the first duplicate row's `extra`, so

@@ -18,6 +18,9 @@ This file tracks completed watcher steps and the next handoff target.
   live Gmail SMTP is opt-in via env.
 - `.github/workflows/watcher.yml` is built for hourly/manual GitHub Actions
   runs with SQLite seen-store persistence on the orphan `watcher-data` branch.
+- The July 2026 alumni-company watchlist expansion is built with 18 additional
+  targets, using direct adapters only where live endpoints matched current
+  source support and `bespoke` notes for unsupported or unsafe-to-scope portals.
 
 ## Done
 
@@ -80,6 +83,19 @@ This file tracks completed watcher steps and the next handoff target.
      `HEARTBEAT: ran, rows_fetched=..., jobs_scored=..., matches=..., new=..., errors=..., seen_loaded=..., seen_saved=..., sent=..., seen_store=...`.
    - Live validation by actual GitHub manual dispatch remains for the user to
      run.
+5. Alumni-company watchlist expansion:
+   - Added DoorDash, Tesla, ASML, HP, ZoomInfo, Intuitive Surgical, Whatnot,
+     Augury, Goldman Sachs, JPMorgan Chase, Barclays, UBS, Nomura, BlackRock,
+     AQR Capital, Federal Reserve Bank of New York, KPMG, and EY.
+   - Verified direct endpoints for DoorDash, ASML, HP, ZoomInfo, Intuitive
+     Surgical, Augury, BlackRock, and AQR Capital. Barclays' Workday board is
+     reachable but fails the current Workday adapter schema, so it is marked
+     `bespoke` until adapter follow-up is approved.
+   - Unsupported custom, Oracle HCM, Taleo-style, SuccessFactors, and unsafe
+     broad Workday portals are documented as `bespoke` rather than direct ATS
+     entries.
+   - Local throwaway dry-run completed with:
+     `HEARTBEAT: ran, rows_fetched=14576, jobs_scored=13514, matches=69, new=69, errors=0, sent=no, seen_marked=0`.
 
 ## Next
 
@@ -101,8 +117,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation for scheduler work:
+Latest local validation after watchlist expansion:
 
 ```text
-147 passed, 1 warning in 1.82s
+154 passed, 1 warning in 0.74s
 ```
