@@ -1,4 +1,4 @@
-name: Internship Watcher
+name: watcher
 
 "on":
   schedule:
@@ -155,11 +155,11 @@ jobs:
 
           stats="$(
             PYTHONPATH=.:backend WATCHER_ALUMNI_CSV="$roster_path" python - <<'PY'
-from watcher.alumni import load_default_alumni
+          from watcher.alumni import load_default_alumni
 
-_index, status = load_default_alumni()
-print(f"{status.status} {status.records_loaded} {status.employers_indexed}")
-PY
+          _index, status = load_default_alumni()
+          print(f"{status.status} {status.records_loaded} {status.employers_indexed}")
+          PY
           )"
           read -r loaded_status records employers <<< "$stats"
 
