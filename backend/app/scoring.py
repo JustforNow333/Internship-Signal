@@ -65,6 +65,49 @@ BACKEND_FIT_RE = re.compile(
     re.I,
 )
 PRODUCTION_CODE_RE = re.compile(r"production code|code review|ship (real )?(code|features?)|own .*service|building services?", re.I)
+NEAR_PERFECT_TRACKS = {"backend", "full_stack", "data_engineering", "ml_ai", "general_swe"}
+CORE_RESUME_STACK_RE = re.compile(
+    r"\bpython\b|\bjava\b(?!\s*script)|\bsql\b|\bjavascript\b|\btypescript\b|"
+    r"\bfastapi\b|\bflask\b|\bsqlalchemy\b|\breact\b|\bnext\.?js\b|"
+    r"\bpandas\b|\bpostgres(?:ql)?\b|\bsqlite\b",
+    re.I,
+)
+RESUME_STRONG_SKILL_PATTERNS = [
+    ("Python", r"\bpython\b"),
+    ("Java", r"\bjava\b(?!\s*script)"),
+    ("SQL", r"\bsql\b"),
+    ("JavaScript", r"\bjava\s*script\b|\bjavascript\b|\bjs\b"),
+    ("TypeScript", r"\btype\s*script\b|\btypescript\b|\bts\b"),
+    ("FastAPI", r"\bfastapi\b|fast api"),
+    ("Flask", r"\bflask\b"),
+    ("SQLAlchemy", r"\bsqlalchemy\b|sql alchemy"),
+    ("Next.js", r"\bnext\.?js\b"),
+    ("React", r"\breact(?:\.js)?\b"),
+    ("Pandas", r"\bpandas\b"),
+    ("PostgreSQL", r"\bpostgres(?:ql)?\b"),
+    ("SQLite", r"\bsqlite\b"),
+    ("REST/API/backend service work", r"\brest(?:ful)?\b|\bapis?\b|\bback[- ]?end\b|\bserver[- ]side\b|\bservices?\b|\bmicroservices?\b"),
+    ("data ingestion/pipelines", r"\bdata ingestion\b|\betl\b|\bdata pipelines?\b|\bmarket data pipelines?\b|\bpipelines?\b"),
+    ("data analytics", r"\bdata analy(tics|sis)\b|\banalytics\b"),
+    ("spreadsheet/data apps", r"\bspreadsheet\b|\bdata apps?\b|\bdashboards?\b"),
+    ("full-stack web apps", r"\bfull[- ]?stack\b|\bweb apps?\b"),
+    ("Pytest/testing/evals", r"\bpytest\b|\btesting\b|\bunit tests?\b|\bevals?\b|\bevaluations?\b"),
+]
+SMALL_FIT_BONUS_PATTERNS = [
+    ("Git/GitHub", r"\bgit\b|\bgithub\b", 2),
+    ("OpenAI API/LLM app work", r"\bopenai api\b|\bllm\b|\blarge language model", 2),
+    ("Vercel/Render deployment", r"\bvercel\b|\brender\b|\bdeploy(ment|ed)?\b", 2),
+    ("finance/data app relevance", r"\bfinance\b|\bmarket data\b|\btrading data\b|\bspreadsheet\b|\bdata apps?\b", 2),
+]
+CPLUS_RE = re.compile(r"\bc\+\+\b|\bcpp\b", re.I)
+GO_RUST_RE = re.compile(r"\bgolang\b|\brust\b|\bgo\b", re.I)
+LOW_LEVEL_RE = re.compile(r"low[- ]level|kernel|driver|firmware|embedded|robotics?|hardware|electrical|mechanical|manufactur|cad\b", re.I)
+OPS_HEAVY_RE = re.compile(r"\bsre\b|site reliability|on[- ]call|incident|ci/cd|terraform|kubernetes|cloud operations?|infrastructure operations?", re.I)
+PRODUCT_DEV_RE = re.compile(r"product feature|user-facing feature|backend product|application|apis?|services?|platform services?", re.I)
+ANALYTICS_REPORTING_RE = re.compile(r"\banalytics\b|\breporting\b|\breports?\b|\bdashboards?\b|business intelligence", re.I)
+DATA_SOFTWARE_RE = re.compile(r"data engineer|pipeline|etl|software|python|sql|pandas|model|machine learning|ml\b|api", re.I)
+VAGUE_TITLE_RE = re.compile(r"\btechnical intern\b|\btechnical co[- ]?op\b", re.I)
+COMMERCIAL_SUPPORT_RE = re.compile(r"commercial|customer[- ]facing|customer support|technical support|solutions?|sales|pre[- ]?sales|implementation consultant", re.I)
 
 
 def _clamp(x, lo=0, hi=100):
@@ -124,55 +167,82 @@ def score_role_relevance(row, role_cls, pmatch, profile):
         label = role_cls.get("role_track_label") or track.replace("_", " ")
         return min(base, 20), f"{label} is visible as a low-priority adjacent track, capped at 20."
 
-    matched_skills = pmatch.get("matched_skills") or []
     score = float(base)
-    parts = [f"{role_cls.get('role_track_label') or role_cls.get('label')} role-track base {base}"]
+    strong_matches = _pattern_labels(RESUME_STRONG_SKILL_PATTERNS, text)
+    strong_bonus = min(len(strong_matches) * 4, 16) if track in SOFTWARE_FIT_TRACKS else 0
+    score += strong_bonus
 
-    if backend_hit and track in {"backend", "full_stack", "platform_infra", "data_engineering", "general_swe"}:
-        score += 10
-        parts.append(f"+10 backend/API/data-services evidence ({backend_hit.group(0)})")
+    small_matches = []
+    small_bonus = 0
+    for label, pattern, amount in SMALL_FIT_BONUS_PATTERNS:
+        if re.search(pattern, text, re.I):
+            small_matches.append(label)
+            small_bonus += amount
+    small_bonus = min(small_bonus, 6)
+    score += small_bonus
 
-    language_context = False
-    if re.search(r"\b(java|python|sql)\b", text, re.I) and (
-        backend_hit or track in {"backend", "data_engineering", "platform_infra", "ml_ai"}
-    ):
-        language_context = True
-        score += 6
-        parts.append("+6 Java/Python/SQL in software/backend/data context")
-
-    if PRODUCTION_CODE_RE.search(text) and track in SOFTWARE_FIT_TRACKS:
-        score += 5
-        parts.append("+5 production code/services ownership")
-
-    if track == "platform_infra" and not backend_hit:
-        score += 4
-        parts.append("+4 platform/infrastructure software focus")
-
-    skill_bonus = min(len(matched_skills) * 2, 8) if track in SOFTWARE_FIT_TRACKS else 0
-    if skill_bonus:
-        score += skill_bonus
-        parts.append(f"+{skill_bonus} for {len(matched_skills)} matched profile skills")
-
-    penalties = {
-        "cloud": 15,
-        "devops": 15,
-        "embedded_software": 20,
-        "firmware": 22,
-        "sdet_qa_automation": 30,
-        "frontend": 15,
-    }
-    penalty = penalties.get(track, 0)
-    if penalty:
-        if track in {"cloud", "devops"} and (backend_hit or language_context or PRODUCTION_CODE_RE.search(text)):
-            penalty = max(5, penalty - 8)
-        score -= penalty
-        parts.append(f"-{penalty} adjacent-track penalty versus backend")
+    penalties: list[str] = []
+    has_core_resume_overlap = bool(CORE_RESUME_STACK_RE.search(text))
+    if CPLUS_RE.search(text) and not has_core_resume_overlap:
+        score -= 6
+        penalties.append("C++ stack with no Python/Java/SQL/JS/TS overlap (-6)")
+    if GO_RUST_RE.search(text) and not has_core_resume_overlap:
+        score -= 8
+        penalties.append("Go/Rust stack with no Python/Java/SQL/JS/TS overlap (-8)")
+    if LOW_LEVEL_RE.search(text) or track in {"embedded_software", "firmware"}:
+        score -= 10
+        penalties.append("low-level/embedded/hardware-heavy context (-10)")
+    if track in {"devops", "cloud"} and OPS_HEAVY_RE.search(text) and not PRODUCT_DEV_RE.search(text):
+        score -= 10
+        penalties.append("ops/cloud/SRE work without backend product development (-10)")
+    if ANALYTICS_REPORTING_RE.search(text) and not DATA_SOFTWARE_RE.search(text):
+        score -= 8
+        penalties.append("analytics/reporting without data-engineering or software evidence (-8)")
+    if VAGUE_TITLE_RE.search(row.get("title", "")) and len(strong_matches) < 2:
+        score -= 12
+        penalties.append("vague technical title with unclear software duties (-12)")
+    if COMMERCIAL_SUPPORT_RE.search(text):
+        score -= 15
+        penalties.append("commercial/customer-facing/support orientation (-15)")
 
     if role_cls.get("confidence", 1) < 0.5:
         score -= 10
-        parts.append("-10 low classification confidence")
+        penalties.append("low classification confidence (-10)")
 
-    return _clamp(round(score)), "; ".join(parts) + "."
+    near_perfect_candidate = track in NEAR_PERFECT_TRACKS and len(strong_matches) >= 4
+    if score > 94 and not near_perfect_candidate:
+        score = 94
+
+    score = _clamp(round(score))
+    return score, _fit_explanation(role_cls, strong_matches, small_matches, penalties, score)
+
+
+def _pattern_labels(patterns, text: str) -> list[str]:
+    labels = []
+    for label, pattern in patterns:
+        if re.search(pattern, text, re.I):
+            labels.append(label)
+    return labels
+
+
+def _fit_explanation(role_cls, strong_matches: list[str], small_matches: list[str], penalties: list[str], score: int) -> str:
+    track_label = role_cls.get("role_track_label") or role_cls.get("label") or "Eligible role"
+    if strong_matches:
+        top = ", ".join(strong_matches[:5])
+        prefix = f"{track_label} with resume overlap in {top}"
+        if len(strong_matches) > 5:
+            prefix += f", plus {len(strong_matches) - 5} more"
+    else:
+        prefix = f"{track_label}, but limited direct resume stack overlap"
+
+    details = []
+    if small_matches:
+        details.append("smaller positives: " + ", ".join(small_matches[:3]))
+    if penalties:
+        details.append("penalties: " + "; ".join(penalties[:3]))
+    if score >= 95:
+        details.append("near-perfect fit requires multiple direct resume matches")
+    return prefix + ("; " + "; ".join(details) if details else "") + "."
 
 
 def score_compensation(comp, profile):

@@ -226,3 +226,168 @@ def test_non_swe_top_reason_does_not_claim_strong_software_relevance():
 
     assert not any("software engineering role" in reason.lower() for reason in score["reasons"])
     assert not any("strong role relevance" in reason.lower() for reason in score["reasons"])
+
+
+def test_not_every_eligible_swe_role_gets_perfect_fit_score():
+    rows = [
+        _scored("Backend Engineer Intern", description="Build Java REST APIs.", requirements="Java, SQL, Git"),
+        _scored("Software Engineer Intern", description="Build simulation infrastructure.", requirements="Rust, Go, C++"),
+        _scored("Cloud Developer Internship", description="Build cloud APIs and platform services in Python.", requirements="AWS, Python"),
+        _scored("Embedded Software Engineer Intern", description="Write embedded software for robotics hardware.", requirements="C++, Linux, Git"),
+        _scored("Software Engineer Assistant", description="Assist with bug fixes.", requirements="Git"),
+    ]
+    fits = [row["score"]["fit_score"] for row in rows if row["score"]["watcher_eligible"]]
+
+    assert len(fits) == 5
+    assert any(score < 85 for score in fits)
+    assert len(set(fits)) >= 4
+    assert fits.count(100) <= 1
+
+
+def test_anduril_style_rust_go_cpp_swe_is_eligible_but_not_perfect():
+    result = _scored(
+        "2027 Software Engineer Intern",
+        company="Anduril Industries",
+        description="Build simulation infrastructure for autonomous systems.",
+        requirements="Rust, Go, C++",
+    )
+    score = result["score"]
+
+    assert result["role"]["role_track"] == "general_swe"
+    assert score["watcher_eligible"] is True
+    assert score["fit_score"] < 85
+    assert "Go/Rust" in score["fit_explanation"]
+
+
+def test_backend_java_beats_generic_rust_go_cpp_swe():
+    backend_java = _scored(
+        "Backend Java Intern",
+        description="Build backend REST APIs and database-backed services.",
+        requirements="Java, SQL, Git",
+    )["score"]
+    generic_systems = _scored(
+        "Software Engineer Intern",
+        description="Build low-level systems infrastructure.",
+        requirements="Rust, Go, C++",
+    )["score"]
+
+    assert backend_java["fit_score"] > generic_systems["fit_score"]
+    assert backend_java["fit_score"] <= 96
+    assert generic_systems["fit_score"] < 85
+
+
+def test_python_fastapi_postgres_full_stack_roles_receive_highest_fit_scores():
+    near_perfect = _scored(
+        "Backend Engineer Intern",
+        description="Build Python FastAPI services with Flask, SQLAlchemy, PostgreSQL and RESTful APIs.",
+        requirements="Python, FastAPI, Flask, SQLAlchemy, SQL, PostgreSQL, GitHub, Pytest",
+    )["score"]
+    full_stack = _scored(
+        "Full Stack Engineer Intern",
+        description="Build full-stack web apps with React, TypeScript, Next.js, Python APIs, SQL and Postgres.",
+        requirements="React, TypeScript, Next.js, Python, SQL, PostgreSQL, GitHub",
+    )["score"]
+    backend_java = _scored(
+        "Backend Java Intern",
+        description="Build backend REST APIs and database-backed services.",
+        requirements="Java, SQL, Git",
+    )["score"]
+
+    assert near_perfect["fit_score"] == 100
+    assert full_stack["fit_score"] >= 95
+    assert near_perfect["fit_score"] >= full_stack["fit_score"] > backend_java["fit_score"]
+
+
+def test_technical_intern_is_not_perfect_without_clear_duties_or_stack():
+    result = _scored(
+        "Technical Intern",
+        description="Assist the engineering team with technical tasks.",
+        requirements="Linux",
+    )
+    score = result["score"]
+
+    assert score["fit_score"] == 0
+    assert score["watcher_eligible"] is False
+    assert score["watcher_action"] == "skip"
+
+
+def test_analytics_reporting_does_not_score_like_data_engineering_without_software_evidence():
+    reporting = _scored(
+        "Data Analytics Intern",
+        description="Create analytics reports and dashboards for stakeholders.",
+        requirements="Excel, PowerPoint",
+    )["score"]
+    pipeline = _scored(
+        "Data Analytics Intern",
+        description="Build Python data pipelines and analytics apps with Pandas.",
+        requirements="Python, Pandas, SQL, Pytest",
+    )["score"]
+
+    assert reporting["watcher_eligible"] is True
+    assert reporting["fit_score"] < 90
+    assert reporting["fit_score"] < pipeline["fit_score"] <= 94
+
+
+def test_commercial_and_product_coops_require_clear_software_focus():
+    commercial = _scored(
+        "Commercial Co-op",
+        description="Support client proposals and commercial strategy.",
+        requirements="Excel",
+    )["score"]
+    product = _scored(
+        "Product Development Co-op",
+        description="Coordinate product requirements and user interviews.",
+        requirements="Roadmaps, communication",
+    )["score"]
+    software_product = _scored(
+        "Product Development Co-op",
+        description="Build product features in React, TypeScript, and backend APIs.",
+        requirements="React, TypeScript, SQL, GitHub",
+    )["score"]
+
+    assert commercial["watcher_eligible"] is False
+    assert product["watcher_eligible"] is False
+    assert software_product["watcher_eligible"] is True
+    assert software_product["fit_score"] >= 85
+
+
+def test_top_ten_fit_scores_have_spread_not_all_perfect():
+    rows = [
+        _scored("Backend Engineer Intern", description="Build Python FastAPI services with PostgreSQL REST APIs.", requirements="Python, FastAPI, SQL, PostgreSQL, GitHub"),
+        _scored("Full Stack Engineer Intern", description="Build React TypeScript full-stack web apps with Python APIs.", requirements="React, TypeScript, Next.js, Python, SQL"),
+        _scored("Backend Java Intern", description="Build Java REST APIs and database-backed services.", requirements="Java, SQL, Git"),
+        _scored("Data Engineer Intern", description="Build Python data ingestion pipelines with Pandas.", requirements="Python, SQL, Pandas"),
+        _scored("Software Engineer Intern", description="Build product features.", requirements="JavaScript, Git"),
+        _scored("Frontend Engineer Intern", description="Build React UI components.", requirements="React, TypeScript"),
+        _scored("Cloud Developer Internship", description="Build cloud APIs and platform services in Python.", requirements="AWS, Python"),
+        _scored("DevOps Engineering Intern", description="Own developer tooling and automation code for backend services.", requirements="Python, Docker"),
+        _scored("Embedded Software Engineer Intern", description="Write embedded software for robotics hardware.", requirements="C++, Linux, Git"),
+        _scored("Software Engineer Assistant", description="Assist with bug fixes.", requirements="Git"),
+    ]
+    fits = sorted((row["score"]["fit_score"] for row in rows), reverse=True)[:10]
+
+    assert fits.count(100) <= 1
+    assert len(set(fits)) >= 6
+
+
+def test_fit_score_100_requires_strong_resume_overlap_and_target_track():
+    perfect = _scored(
+        "Backend Engineer Intern",
+        description="Build Python FastAPI REST APIs with SQL and PostgreSQL, deployed on Render.",
+        requirements="Python, FastAPI, SQL, PostgreSQL, GitHub",
+    )
+    two_match_backend = _scored(
+        "Backend Engineer Intern",
+        description="Build backend APIs.",
+        requirements="FastAPI, GitHub",
+    )
+    cloud_many_matches = _scored(
+        "Cloud Developer Internship",
+        description="Build cloud APIs and platform services with Python, SQL, React, TypeScript and GitHub.",
+        requirements="AWS, Python, SQL, React, TypeScript, GitHub",
+    )
+
+    assert perfect["score"]["fit_score"] == 100
+    assert perfect["role"]["role_track"] in {"backend", "full_stack", "data_engineering", "ml_ai", "general_swe"}
+    assert two_match_backend["score"]["fit_score"] < 100
+    assert cloud_many_matches["score"]["fit_score"] < 100

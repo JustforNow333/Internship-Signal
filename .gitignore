@@ -61,6 +61,9 @@ desktop.ini
 .vscode/
 *.swp
 *.swo
+*.bak
+*.orig
+*.rej
 
 # Local private watcher data
 watcher/alumni.csv
@@ -73,6 +76,13 @@ watcher/add_company_batch.txt
 watcher/additions_detect.json
 watcher/additions_report.md
 watcher/additions_watchlist.yml
+# Keep canonical agents.md/AGENTS.md files trackable; ignore local copies.
+agents.local.md
+agents.*.md
+agents (*).md
+AGENTS.local.md
+AGENTS.*.md
+AGENTS (*).md
 # Keep the canonical root WATCHER_PROGRESS.md tracked; ignore local copies.
 WATCHER_PROGRESS.local.md
 WATCHER_PROGRESS.*.md

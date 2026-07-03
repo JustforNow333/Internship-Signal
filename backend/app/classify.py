@@ -233,7 +233,7 @@ SOFTWARE_TITLE_PATTERNS = [
     ("full_stack", r"\bfull[- ]?stack\b"),
     ("frontend", r"\bfront[- ]?end\b|\bui engineer\b|\bweb developer\b"),
     ("platform_infra", r"\bplatform software\b|\binfrastructure software\b|\bsite reliability\b|\bsre\b"),
-    ("data_engineering", r"\bdata engineer(ing)?\b|\bdata science\b|\bdata infrastructure\b|\bdata pipeline"),
+    ("data_engineering", r"\bdata engineer(ing)?\b|\bdata science\b|\bdata analy(st|tics)\b|\bdata infrastructure\b|\bdata pipeline"),
     ("ml_ai", r"machine[- ]learning (engineer|engineering|intern)|\bml\b|\bml engineer\b|\bai engineer\b|deep learning|computer vision|\bnlp\b|\bllms?\b|\bpytorch\b|\btensorflow\b"),
     ("quant_dev", r"\bquant(itative)? (developer|engineer|trading|research)|\bquantitative trading intern\b|\btrading intern\b"),
     ("embedded_software", r"\bembedded software\b"),
@@ -253,7 +253,8 @@ NON_SWE_TITLE_PATTERNS = [
     ("civil_structural", r"civil engineer|structural engineer"),
     ("quality_test", r"quality engineer|test engineer|validation engineer|verification engineer"),
     ("factory_automation", r"factory automation engineer|automation engineer|plc|plant automation|manufacturing automation"),
-    ("product", r"product manage(r|ment)|\bpm intern\b|\bproduct intern\b"),
+    ("product", r"product manage(r|ment)|\bpm intern\b|\bproduct intern\b|product development (co[- ]?op|intern)"),
+    ("non_technical", r"commercial (co[- ]?op|intern(ship)?)"),
     ("non_technical", r"data entry|\bmarketing\b|\bsales\b|business development|\bhr\b|human resources|recruit(ing|er)|social media|\bcontent\b|\bbrand\b|administrative|operations intern|accounting|activities intern|cold[- ]call|copywrit"),
 ]
 
@@ -366,6 +367,22 @@ def classify_role(row: dict) -> dict:
 
     if title_non_swe_hits:
         track, hit = title_non_swe_hits[0]
+        can_rescue_business_title = track == "product" or (
+            track == "non_technical" and re.search(r"commercial (co[- ]?op|intern(ship)?)", title, re.I)
+        )
+        if can_rescue_business_title and strong_software and re.search(
+            r"software|developer|back[- ]?end|front[- ]?end|full[- ]?stack|apis?|production code|programming|coding",
+            full,
+            re.I,
+        ):
+            rescue_track = "backend" if BACKEND_CONTEXT_RE.search(full) else "full_stack" if re.search(r"full[- ]?stack|react|typescript|next\.?js", full, re.I) else "general_swe"
+            return _finish_role(
+                rescue_track,
+                0.7,
+                [f'non-SWE title signal "{hit}" overridden by clear software duties'],
+                software_evidence,
+                non_swe_evidence,
+            )
         # Non-SWE engineering can be rescued only by explicit software/firmware
         # context, never by "engineer", generic Python/Linux/cloud, or prestige.
         if track == "quality_test" and re.search(r"\bsdet\b|qa automation|software test automation|automated testing framework", full, re.I):

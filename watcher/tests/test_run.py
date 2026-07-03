@@ -401,3 +401,72 @@ def test_synthetic_digest_excludes_non_swe_engineering_and_ranks_backend_java(tm
 
     assert body.index("IT Internship (BackEnd, Java)") < body.index("Cloud Developer Internship")
     assert body.index("IT Internship (BackEnd, Java)") < body.index("DevOps Engineering Intern")
+
+
+def test_mixed_digest_reserves_above_94_fit_for_near_perfect_resume_matches(tmp_path):
+    config = WatcherConfig(companies=(CompanyCfg(name="FitCo", ats="greenhouse", token="fitco"),))
+    direct_rows = {
+        "FitCo": [
+            row(
+                "FitCo",
+                "Backend Engineer Intern",
+                description="Build Python FastAPI REST APIs with SQLAlchemy and PostgreSQL.",
+                requirements="Python, FastAPI, SQLAlchemy, SQL, PostgreSQL, GitHub, Pytest",
+            ),
+            row(
+                "FitCo",
+                "Full Stack Engineer Intern",
+                description="Build full-stack web apps with React, TypeScript, Next.js, Python APIs and SQL.",
+                requirements="React, TypeScript, Next.js, Python, SQL, GitHub",
+            ),
+            row(
+                "FitCo",
+                "Data Engineer Intern",
+                description="Build Python data ingestion pipelines and data analytics apps with Pandas.",
+                requirements="Python, SQL, Pandas, Pytest",
+            ),
+            row(
+                "FitCo",
+                "Backend Java Intern",
+                description="Build backend REST APIs and database-backed services.",
+                requirements="Java, SQL, Git",
+            ),
+            row(
+                "FitCo",
+                "Cloud Developer Internship",
+                description="Build cloud APIs and platform services in Python.",
+                requirements="AWS, Python, Docker",
+            ),
+            row(
+                "FitCo",
+                "Software Engineer Intern",
+                description="Build simulation infrastructure.",
+                requirements="Rust, Go, C++",
+            ),
+        ]
+    }
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource(direct_rows)},
+            github_source=FakeGithub([]),
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 6, 9),
+        )
+
+    subject, body = render_digest(result.new_matches)
+    high_fit_titles = {
+        job["title"]
+        for job in result.new_matches
+        if job["score"]["fit_score"] > 94
+    }
+
+    assert subject == "Internship Watcher: 6 new SWE-intern matches"
+    assert high_fit_titles == {
+        "Backend Engineer Intern",
+        "Full Stack Engineer Intern",
+    }
+    assert body.index("Backend Engineer Intern") < body.index("Backend Java Intern")
+    assert body.index("Backend Java Intern") < body.index("Cloud Developer Internship")

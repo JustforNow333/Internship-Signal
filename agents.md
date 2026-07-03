@@ -70,9 +70,35 @@ Current watcher run core:
   direct rows win the source tag without changing backend dedupe.
 - The run loop calls `backend.app.ingest.analyze_rows`; watcher code must not
   compute scores or ids itself.
-- `watcher/filters.py` filters after scoring using existing job fields:
-  target role defaults to `swe`, internships/co-ops only, open/non-expired only,
-  optional `min_score` default off.
+- Backend role classification now includes a narrow `role_track` plus
+  `software_evidence` and `non_swe_evidence`. Generic `engineer` or
+  `engineering intern` text must not imply SWE without strong software context.
+  Electrical, mechanical, manufacturing, hardware/RF, civil/structural,
+  factory automation, customer experience/support, commercial, and generic
+  non-SWE engineering roles should be ineligible for the watcher unless clear
+  software/backend/data/ML/platform evidence overrides the ambiguity.
+- Backend scoring emits watcher-specific fields on `score`: `fit_score`,
+  `watcher_eligible`, `watcher_ineligible_reason`, `fit_explanation`,
+  `role_track`, `watcher_action`, and `watcher_action_label`. Watcher code uses
+  these fields; it must not infer its own fit score.
+- `fit_score` is calibrated against the resume/profile, not role-track
+  eligibility alone. A score of 100 should be rare and requires several direct
+  resume-skill matches in a target track. Strongest resume skills include
+  Python, Java, SQL, JavaScript/TypeScript, FastAPI, Flask, SQLAlchemy,
+  Next.js, React, Pandas, OpenAI API, Git/GitHub, PostgreSQL, SQLite, REST,
+  RESTful APIs, backend APIs, data ingestion, data analytics,
+  spreadsheet/data apps, market/data pipelines, full-stack web apps, and
+  testing/evals/Pytest. Rust, Go, C/C++, embedded/firmware, robotics hardware,
+  CAD/mechanical, Kubernetes/Terraform/cloud ops, low-level distributed
+  systems, SRE/DevOps, and mobile are weaker or missing profile matches.
+- IT support, quality/test, and solutions engineering are deliberate
+  low-priority exceptions: they may remain watcher-visible, but their
+  `fit_score` should be capped around 20 unless a later task changes that
+  policy.
+- `watcher/filters.py` filters after scoring using watcher eligibility:
+  `watcher_eligible=true`, positive `fit_score`, target role defaults to
+  `swe`, internships/co-ops only, open/non-expired only, optional `min_score`
+  default off and applied to `fit_score`.
 - `watcher/seen_store.py` is the SQLite seen-store. It keys on the existing
   analyzed job `id`, which comes from `backend.app.dedupe.job_id`. A job seen
   via GitHub is not new later via direct, and vice versa.
@@ -88,8 +114,11 @@ Current watcher run core:
   live send by default. Dry-run digest previews do not advance the seen-store
   unless `python -m watcher.run --mark-seen-without-send` is used for the
   explicit GitHub Actions priming flow.
-- Digest decisions are settled: no score gate, sort by score descending with
+- Digest decisions are settled: no score gate, exclude watcher-ineligible jobs,
+  sort by `fit_score` descending, then generic score, role-track priority, and
   company/title tie-breaks, and send nothing when there are zero new matches.
+  The digest should show score, fit score, role track, fit reason,
+  recommendation, red flags, apply URL, source tag, and alumni annotations.
 - Local seen-store files are ignored by `.gitignore`; pass `--seen-db` in tests
   or manual runs when you want an isolated store. The default seen-store path is
   `watcher/seen.sqlite`, configurable with `WATCHER_SEEN_DB`.
