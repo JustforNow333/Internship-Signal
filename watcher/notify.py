@@ -79,7 +79,7 @@ def render_digest(matches: Sequence[dict], *, alumni_summary: Mapping[str, objec
                 f"   red flags: {_red_flags(job.get('red_flags') or [])}",
                 f"   apply URL: {job.get('source_url') or '(not listed)'}",
                 f"   source tag: {_source_tag(job)}",
-                f"   alumni you know there: {_alumni_line(job.get('alumni') or [])}",
+                f"   alumni you know there: {_alumni_line(job.get('alumni') or [], alumni_summary)}",
                 "",
             ]
         )
@@ -199,9 +199,18 @@ def _source_tag(job: dict) -> str:
     return f"{label} ({adapter})" if adapter else label
 
 
-def _alumni_line(alumni: Sequence[dict]) -> str:
+def _alumni_line(alumni: Sequence[dict], summary: Mapping[str, object] | None = None) -> str:
     if not alumni:
-        return "No alumni on file"
+        status = str((summary or {}).get("status") or "unknown")
+        if status == "missing":
+            return "Alumni matching disabled; roster not loaded"
+        if status == "error":
+            return "Alumni matching disabled; roster could not be read"
+        if status == "empty":
+            return "Alumni roster loaded but empty"
+        if status == "loaded":
+            return "No matching alumni in loaded roster"
+        return "No alumni matched; alumni index status unknown"
     return "; ".join(_format_alum(record) for record in alumni)
 
 

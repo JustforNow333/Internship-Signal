@@ -66,9 +66,14 @@ desktop.ini
 *.rej
 
 # Local private watcher data
+alumni.csv
+alumni.csv.b64
 watcher/alumni.csv
+watcher/alumni.csv.b64
+watcher/alumni.b64
 .watcher-state/
 make_alumni_b64.py
+watcher/make_alumni_b64.py
 
 # Local watcher scratch artifacts
 check_alumni_coverage.py

@@ -279,4 +279,4 @@ Ada,Exact,Software Engineer,OpenAI,https://www.linkedin.com/in/fake-ada
     )
 
     assert "Alumni index: 1 records across 1 employers" in body
-    assert "alumni you know there: No alumni on file" in body
+    assert "alumni you know there: No matching alumni in loaded roster" in body

@@ -119,6 +119,10 @@ Current watcher run core:
   `alumni_csv_status=missing` and the digest says that no alumni matching was
   performed. Set `WATCHER_REQUIRE_ALUMNI=1` when a missing or malformed private
   roster should hard-fail the run.
+- In GitHub Actions, the private roster is restored from repository secret
+  `WATCHER_ALUMNI_CSV_B64` into a temp file and exported as
+  `WATCHER_ALUMNI_CSV`. Live sends require a usable restored roster; the
+  workflow should fail rather than send an email with disabled alumni matching.
 - Alumni matching order is exact normalized employer match first, then
   hard-coded common aliases, then watchlist `aliases` and `alumni_match` values,
   with fuzzy matching only as a fallback. Keep private contact data out of the
@@ -140,8 +144,10 @@ Current watcher run core:
   company/title tie-breaks, and send nothing when there are zero new matches.
   The digest should show score, fit score, role track, fit reason,
   recommendation, red flags, apply URL, source tag, alumni index summary, and
-  alumni annotations. Graduate-level excluded roles may appear in debug output
-  but must never appear in the email digest.
+  alumni annotations. Do not print an unqualified `No alumni on file` fallback:
+  distinguish `Alumni matching disabled; roster not loaded` from `No matching
+  alumni in loaded roster`. Graduate-level excluded roles may appear in debug
+  output but must never appear in the email digest.
 - Local seen-store files are ignored by `.gitignore`; pass `--seen-db` in tests
   or manual runs when you want an isolated store. The default seen-store path is
   `watcher/seen.sqlite`, configurable with `WATCHER_SEEN_DB`.

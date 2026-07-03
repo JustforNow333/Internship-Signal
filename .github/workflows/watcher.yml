@@ -114,6 +114,65 @@ jobs:
             echo "load_status=bootstrap-no-branch" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Restore private alumni roster
+        id: alumni
+        shell: bash
+        env:
+          WATCHER_ALUMNI_CSV_B64: ${{ secrets.WATCHER_ALUMNI_CSV_B64 }}
+          WATCHER_ALUMNI_CSV_TEXT: ${{ secrets.WATCHER_ALUMNI_CSV_TEXT }}
+          SEND_EMAIL: ${{ steps.mode.outputs.send_email }}
+        run: |
+          set -euo pipefail
+
+          roster_path="$RUNNER_TEMP/watcher-alumni.csv"
+          status=missing
+
+          if [ -n "${WATCHER_ALUMNI_CSV_B64:-}" ]; then
+            printf '%s' "$WATCHER_ALUMNI_CSV_B64" | base64 --decode > "$roster_path"
+            status=restored-b64
+          elif [ -n "${WATCHER_ALUMNI_CSV_TEXT:-}" ]; then
+            printf '%s' "$WATCHER_ALUMNI_CSV_TEXT" > "$roster_path"
+            status=restored-text
+          elif [ -f watcher/alumni.csv ]; then
+            roster_path="$PWD/watcher/alumni.csv"
+            status=local-file
+          fi
+
+          if [ "$status" = "missing" ]; then
+            echo "::warning::ALUMNI-CSV: no roster found. Set secret WATCHER_ALUMNI_CSV_B64 to the base64-encoded private watcher/alumni.csv."
+            echo "status=missing" >> "$GITHUB_OUTPUT"
+            echo "records=0" >> "$GITHUB_OUTPUT"
+            echo "employers=0" >> "$GITHUB_OUTPUT"
+            if [ "$SEND_EMAIL" = "true" ]; then
+              echo "::error::Live email requested but alumni roster is unavailable; refusing to send a digest with missing alumni matches."
+              exit 1
+            fi
+            exit 0
+          fi
+
+          chmod 600 "$roster_path"
+          echo "WATCHER_ALUMNI_CSV=$roster_path" >> "$GITHUB_ENV"
+
+          stats="$(
+            PYTHONPATH=.:backend WATCHER_ALUMNI_CSV="$roster_path" python - <<'PY'
+from watcher.alumni import load_default_alumni
+
+_index, status = load_default_alumni()
+print(f"{status.status} {status.records_loaded} {status.employers_indexed}")
+PY
+          )"
+          read -r loaded_status records employers <<< "$stats"
+
+          if [ "$loaded_status" != "loaded" ]; then
+            echo "::error::ALUMNI-CSV: restored roster is not usable (status=$loaded_status)"
+            exit 1
+          fi
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "records=$records" >> "$GITHUB_OUTPUT"
+          echo "employers=$employers" >> "$GITHUB_OUTPUT"
+          echo "ALUMNI-CSV: status=$status records=$records employers=$employers"
+
       - name: Run watcher
         id: run_watcher
         shell: bash
@@ -126,6 +185,7 @@ jobs:
           args=()
           if [ "${{ steps.mode.outputs.send_email }}" = "true" ]; then
             export WATCHER_SEND_EMAIL=1
+            export WATCHER_REQUIRE_ALUMNI=1
           else
             unset WATCHER_SEND_EMAIL
             args+=(--mark-seen-without-send)
@@ -142,11 +202,14 @@ jobs:
           }
 
           sent="$(printf '%s\n' "$heartbeat" | sed -n 's/.*sent=\(yes\|no\).*/\1/p')"
+          alumni_csv_status="$(printf '%s\n' "$heartbeat" | sed -n 's/.*alumni_csv_status=\([^,]*\).*/\1/p')"
           rows="$(extract_count rows_fetched)"
           jobs="$(extract_count jobs_scored)"
           matches="$(extract_count matches)"
           new="$(extract_count new)"
           errors="$(extract_count errors)"
+          alumni_records="$(extract_count alumni_records_loaded)"
+          alumni_employers="$(extract_count alumni_employers_indexed)"
           marked="$(extract_count seen_marked)"
 
           echo "status=$status" >> "$GITHUB_OUTPUT"
@@ -155,6 +218,9 @@ jobs:
           echo "matches=${matches:-unknown}" >> "$GITHUB_OUTPUT"
           echo "new=${new:-unknown}" >> "$GITHUB_OUTPUT"
           echo "errors=${errors:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "alumni_csv_status=${alumni_csv_status:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "alumni_records_loaded=${alumni_records:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "alumni_employers_indexed=${alumni_employers:-unknown}" >> "$GITHUB_OUTPUT"
           echo "sent=${sent:-unknown}" >> "$GITHUB_OUTPUT"
           echo "seen_marked=${marked:-unknown}" >> "$GITHUB_OUTPUT"
 
@@ -235,6 +301,9 @@ jobs:
           MATCHES: ${{ steps.run_watcher.outputs.matches }}
           NEW_MATCHES: ${{ steps.run_watcher.outputs.new }}
           ERRORS: ${{ steps.run_watcher.outputs.errors }}
+          ALUMNI_CSV_STATUS: ${{ steps.run_watcher.outputs.alumni_csv_status }}
+          ALUMNI_RECORDS_LOADED: ${{ steps.run_watcher.outputs.alumni_records_loaded }}
+          ALUMNI_EMPLOYERS_INDEXED: ${{ steps.run_watcher.outputs.alumni_employers_indexed }}
           DIGEST_SENT: ${{ steps.run_watcher.outputs.sent }}
           SEEN_LOADED: ${{ steps.load_seen.outputs.loaded }}
           LOAD_STATUS: ${{ steps.load_seen.outputs.load_status }}
@@ -244,7 +313,7 @@ jobs:
           set -euo pipefail
 
           save_status="${SAVE_STATUS:-skipped-or-failed}"
-          echo "HEARTBEAT: ran, rows_fetched=${ROWS_FETCHED:-unknown}, jobs_scored=${JOBS_SCORED:-unknown}, matches=${MATCHES:-unknown}, new=${NEW_MATCHES:-unknown}, errors=${ERRORS:-unknown}, seen_loaded=${SEEN_LOADED:-unknown}, seen_saved=${SEEN_SAVED:-unknown}, sent=${DIGEST_SENT:-unknown}, seen_store=${LOAD_STATUS:-unknown}/$save_status"
+          echo "HEARTBEAT: ran, rows_fetched=${ROWS_FETCHED:-unknown}, jobs_scored=${JOBS_SCORED:-unknown}, matches=${MATCHES:-unknown}, new=${NEW_MATCHES:-unknown}, errors=${ERRORS:-unknown}, alumni_csv_status=${ALUMNI_CSV_STATUS:-unknown}, alumni_records_loaded=${ALUMNI_RECORDS_LOADED:-unknown}, alumni_employers_indexed=${ALUMNI_EMPLOYERS_INDEXED:-unknown}, seen_loaded=${SEEN_LOADED:-unknown}, seen_saved=${SEEN_SAVED:-unknown}, sent=${DIGEST_SENT:-unknown}, seen_store=${LOAD_STATUS:-unknown}/$save_status"
 
           case "${ERRORS:-unknown}" in
             ''|unknown) ;;

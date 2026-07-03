@@ -96,7 +96,7 @@ def test_render_digest_sorts_includes_backstop_and_alumni():
     assert "role track: backend" in body
     assert "fit reason: backend role fit" in body
     assert "source tag: github backstop (github_listings)" in body
-    assert "alumni you know there: No alumni on file" in body
+    assert "alumni you know there: No alumni matched; alumni index status unknown" in body
     assert "Ada Example - Software Engineer - https://www.linkedin.com/in/fake-ada-example" in body
     assert "Grace Fixture - Recruiter - https://www.linkedin.com/in/fake-grace-fixture" in body
     assert "top reason: Strong role match" in body
@@ -148,6 +148,18 @@ def test_render_digest_shows_alumni_index_summary():
 
     assert subject == "Internship Watcher: 1 new SWE-intern match"
     assert "Alumni index: 124 records across 80 employers" in body
+    assert "alumni you know there: No matching alumni in loaded roster" in body
+
+
+def test_render_digest_does_not_claim_no_alumni_when_roster_missing():
+    _subject, body = render_digest(
+        [match("Bosch", "IT Internship (BackEnd, Java)", 82, fit_score=90, role_track="backend")],
+        alumni_summary={"status": "missing", "records_loaded": 0, "employers_indexed": 0},
+    )
+
+    assert "Alumni index missing, no alumni matching was performed" in body
+    assert "alumni you know there: Alumni matching disabled; roster not loaded" in body
+    assert "No alumni on file" not in body
 
 
 def test_send_digest_uses_timeout_for_live_smtp(monkeypatch):
