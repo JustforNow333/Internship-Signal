@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -13,14 +15,36 @@ from backend.app.dedupe import norm_company
 LOGGER = logging.getLogger(__name__)
 
 ALUMNI_CSV_PATH = Path(__file__).resolve().parent / "alumni.csv"
+ALUMNI_CSV_ENV = "WATCHER_ALUMNI_CSV"
+REQUIRE_ALUMNI_ENV = "WATCHER_REQUIRE_ALUMNI"
+SEND_EMAIL_ENV = "WATCHER_SEND_EMAIL"
+TRUTHY_ENV_VALUES = {"1", "true", "yes", "y", "on"}
 REQUIRED_COLUMNS = ("First Name", "Last Name", "Occupation", "Employer", "LinkedIn URL")
 FUZZY_THRESHOLD = 0.88
 
 # Known roster/watchlist spelling variants that exact matching misses and
 # fuzzy matching should not be relied on to catch.
 ALIAS_MAP = {
+    norm_company("Bosch Group"): norm_company("Bosch"),
+    norm_company("Robert Bosch"): norm_company("Bosch"),
+    norm_company("BoschGroup"): norm_company("Bosch"),
+    norm_company("Tesla Motors"): norm_company("Tesla"),
+    norm_company("Google LLC"): norm_company("Google"),
     norm_company("Capital One Financial"): norm_company("Capital One"),
     norm_company("Capitol One"): norm_company("Capital One"),
+    norm_company("J.P. Morgan"): norm_company("JPMorgan Chase"),
+    norm_company("JP Morgan"): norm_company("JPMorgan Chase"),
+    norm_company("JPMorgan"): norm_company("JPMorgan Chase"),
+    norm_company("JPMC"): norm_company("JPMorgan Chase"),
+    norm_company("HP Inc"): norm_company("HP"),
+    norm_company("Hewlett Packard"): norm_company("HP"),
+    norm_company("Hewlett-Packard"): norm_company("HP"),
+    norm_company("Intuitive"): norm_company("Intuitive Surgical"),
+    norm_company("ASML US"): norm_company("ASML"),
+    norm_company("WhatNot"): norm_company("Whatnot"),
+    norm_company("KPMG US"): norm_company("KPMG"),
+    norm_company("Ernst & Young"): norm_company("EY"),
+    norm_company("Ernst and Young"): norm_company("EY"),
 }
 
 AlumniRecord = dict[str, str]
@@ -29,6 +53,26 @@ AlumniIndex = dict[str, list[AlumniRecord]]
 
 class AlumniError(ValueError):
     """Raised when the alumni roster file is missing or malformed."""
+
+
+@dataclass(frozen=True)
+class AlumniLoadStatus:
+    """Operational status for the alumni roster used by a watcher run."""
+
+    status: str
+    path: str
+    records_loaded: int = 0
+    employers_indexed: int = 0
+    message: str = ""
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "path": self.path,
+            "records_loaded": self.records_loaded,
+            "employers_indexed": self.employers_indexed,
+            "message": self.message,
+        }
 
 
 def load_alumni(path: str | Path = ALUMNI_CSV_PATH) -> AlumniIndex:
@@ -60,6 +104,63 @@ def load_alumni(path: str | Path = ALUMNI_CSV_PATH) -> AlumniIndex:
     return index
 
 
+def alumni_index_stats(index: Mapping[str, Sequence[AlumniRecord]]) -> tuple[int, int]:
+    """Return (record count, employer count) for a loaded alumni index."""
+
+    return sum(len(records) for records in index.values()), len(index)
+
+
+def load_default_alumni(
+    path: str | Path | None = None,
+    *,
+    require: bool | None = None,
+) -> tuple[AlumniIndex, AlumniLoadStatus]:
+    """Load the configured alumni roster and report whether matching is active."""
+
+    roster_path = Path(path or os.getenv(ALUMNI_CSV_ENV) or ALUMNI_CSV_PATH)
+    require = _env_truthy(REQUIRE_ALUMNI_ENV) if require is None else require
+
+    if not roster_path.exists():
+        message = "Alumni CSV missing, alumni matching disabled."
+        status = AlumniLoadStatus("missing", str(roster_path), message=message)
+        if require:
+            raise AlumniError(f"{message} Expected file: {roster_path}")
+        _log_missing_roster(status)
+        return {}, status
+
+    try:
+        index = load_alumni(roster_path)
+    except Exception as exc:
+        message = f"Alumni CSV error, alumni matching disabled: {exc}"
+        status = AlumniLoadStatus("error", str(roster_path), message=message)
+        if require:
+            raise AlumniError(message) from exc
+        LOGGER.error(message)
+        return {}, status
+
+    records_loaded, employers_indexed = alumni_index_stats(index)
+    if records_loaded == 0:
+        status = AlumniLoadStatus(
+            "empty",
+            str(roster_path),
+            records_loaded=0,
+            employers_indexed=0,
+            message="Alumni CSV loaded but contained no usable employer records.",
+        )
+        LOGGER.warning(status.message)
+        return index, status
+
+    status = AlumniLoadStatus(
+        "loaded",
+        str(roster_path),
+        records_loaded=records_loaded,
+        employers_indexed=employers_indexed,
+        message=f"Alumni CSV loaded: {records_loaded} records across {employers_indexed} employers.",
+    )
+    LOGGER.info(status.message)
+    return index, status
+
+
 def match_alumni(company: str, index: Mapping[str, Sequence[AlumniRecord]]) -> list[AlumniRecord]:
     """Return alumni for a posting company using exact, alias, then fuzzy match."""
 
@@ -89,6 +190,10 @@ def _match_alumni(
         if alias_records is not None:
             LOGGER.info("ALIAS %s -> %s", company_name, alias_key)
             return list(alias_records)
+        alias_records = _alias_records_for(alias_key, index)
+        if alias_records:
+            LOGGER.info("ALIAS %s -> %s", company_name, alias_key)
+            return alias_records
 
     alias_records = _alias_records_for(key, index)
     if alias_records:
@@ -161,17 +266,19 @@ def match_alumni_for_watchlist_company(
     """Match alumni using the posting company plus watchlist aliases."""
 
     matches: list[AlumniRecord] = []
-    _extend_unique(matches, match_alumni(company, index))
+    _extend_unique(matches, _match_alumni(company, index, allow_fuzzy=False))
 
     cfg = watchlist.get(norm_company(company))
-    if cfg is None:
-        return matches
+    if cfg is not None:
+        for alias in _watchlist_alumni_names(cfg):
+            alias_matches = _match_alumni(alias, index, allow_fuzzy=False)
+            if alias_matches:
+                LOGGER.info("WATCHLIST_ALIAS %s -> %s", company, alias)
+                _extend_unique(matches, alias_matches)
 
-    for alias in _watchlist_alumni_names(cfg):
-        alias_matches = _match_alumni(alias, index, allow_fuzzy=False)
-        if alias_matches:
-            LOGGER.info("WATCHLIST_ALIAS %s -> %s", company, alias)
-            _extend_unique(matches, alias_matches)
+    if matches:
+        return matches
+    _extend_unique(matches, _match_alumni(company, index, allow_fuzzy=True))
     return matches
 
 
@@ -216,10 +323,39 @@ def _record_key(record: Mapping[str, str]) -> tuple[str, str, str, str]:
 def load_default_alumni_index() -> AlumniIndex:
     """Load the default roster when present; otherwise keep the join additive."""
 
-    if not ALUMNI_CSV_PATH.exists():
-        LOGGER.warning("Alumni CSV not found; continuing with empty alumni index: %s", ALUMNI_CSV_PATH)
-        return {}
-    return load_alumni(ALUMNI_CSV_PATH)
+    index, _status = load_default_alumni()
+    return index
+
+
+def status_for_injected_index(index: Mapping[str, Sequence[AlumniRecord]]) -> AlumniLoadStatus:
+    """Build a status object for tests or callers that inject an alumni index."""
+
+    records_loaded, employers_indexed = alumni_index_stats(index)
+    status = "loaded" if records_loaded else "empty"
+    message = (
+        f"Alumni index injected: {records_loaded} records across {employers_indexed} employers."
+        if records_loaded
+        else "Alumni index injected but empty."
+    )
+    return AlumniLoadStatus(
+        status,
+        "(injected)",
+        records_loaded=records_loaded,
+        employers_indexed=employers_indexed,
+        message=message,
+    )
+
+
+def _env_truthy(name: str) -> bool:
+    return str(os.getenv(name) or "").strip().lower() in TRUTHY_ENV_VALUES
+
+
+def _log_missing_roster(status: AlumniLoadStatus) -> None:
+    message = f"{status.message} Expected file: {status.path}"
+    if _env_truthy(SEND_EMAIL_ENV):
+        LOGGER.error(message)
+    else:
+        LOGGER.warning(message)
 
 
 def _record(row: Mapping[str, str]) -> AlumniRecord:

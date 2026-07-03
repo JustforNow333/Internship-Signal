@@ -290,6 +290,9 @@ def test_print_heartbeat(capsys):
         "matches": [{}, {}],
         "new_matches": [{}],
         "errors": ["BrokenCo: boom"],
+        "alumni_csv_status": "loaded",
+        "alumni_records_loaded": 124,
+        "alumni_employers_indexed": 80,
         "digest_sent": False,
         "seen_marked": 1,
     })()
@@ -298,7 +301,8 @@ def test_print_heartbeat(capsys):
 
     assert capsys.readouterr().out == (
         "HEARTBEAT: ran, rows_fetched=3, jobs_scored=2, matches=2, "
-        "new=1, errors=1, sent=no, seen_marked=1\n"
+        "new=1, errors=1, alumni_csv_status=loaded, alumni_records_loaded=124, "
+        "alumni_employers_indexed=80, sent=no, seen_marked=1\n"
     )
 
 
@@ -401,6 +405,130 @@ def test_synthetic_digest_excludes_non_swe_engineering_and_ranks_backend_java(tm
 
     assert body.index("IT Internship (BackEnd, Java)") < body.index("Cloud Developer Internship")
     assert body.index("IT Internship (BackEnd, Java)") < body.index("DevOps Engineering Intern")
+
+
+def test_synthetic_digest_excludes_graduate_roles_and_attaches_alumni(tmp_path):
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="Bosch",
+                ats="greenhouse",
+                token="bosch",
+                aliases=("Bosch Group",),
+                alumni_match=("bosch group",),
+            ),
+            CompanyCfg(
+                name="Tesla",
+                ats="greenhouse",
+                token="tesla",
+                aliases=("Tesla Motors",),
+                alumni_match=("tesla", "tesla motors"),
+            ),
+            CompanyCfg(name="ResearchCo", ats="greenhouse", token="researchco"),
+            CompanyCfg(name="UndergradCo", ats="greenhouse", token="undergradco"),
+        )
+    )
+    direct_rows = {
+        "Bosch": [
+            row(
+                "Bosch",
+                "IT Internship (BackEnd, Java)",
+                description="Build BackEnd services and REST APIs in Java.",
+                requirements="Java, SQL, Git",
+            ),
+            row(
+                "Bosch",
+                "Machine Learning Engineer PhD Intern",
+                description="Build Python ML services and data pipelines.",
+                requirements="Python, SQL, Pandas",
+            ),
+        ],
+        "Tesla": [
+            row(
+                "Tesla",
+                "Fullstack Software Engineer Intern",
+                description="Build full-stack web apps with React, TypeScript, Python APIs, and SQL.",
+                requirements="React, TypeScript, Python, SQL, GitHub",
+            ),
+            row(
+                "Tesla",
+                "Software Engineer Intern - Masters",
+                description="Build Python backend APIs with SQL.",
+                requirements="Python, SQL, REST APIs",
+            ),
+        ],
+        "ResearchCo": [
+            row(
+                "ResearchCo",
+                "Graduate Research Intern",
+                description="Research software systems.",
+                requirements="Python, SQL",
+            ),
+            row(
+                "ResearchCo",
+                "Postdoctoral Research Intern",
+                description="Research ML systems.",
+                requirements="Python, SQL",
+            ),
+        ],
+        "UndergradCo": [
+            row(
+                "UndergradCo",
+                "Undergraduate Software Engineer Intern",
+                description="Build Python backend services and REST APIs.",
+                requirements="Python, SQL, REST APIs, Git",
+            ),
+        ],
+    }
+    alumni_index = {
+        "bosch group": [{
+            "name": "Ada Bosch",
+            "occupation": "Backend Engineer",
+            "linkedin_url": "https://www.linkedin.com/in/fake-bosch",
+            "employer": "Bosch Group",
+        }],
+        "tesla": [{
+            "name": "Nikola Tesla",
+            "occupation": "Software Engineer",
+            "linkedin_url": "https://www.linkedin.com/in/fake-tesla",
+            "employer": "Tesla",
+        }],
+    }
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource(direct_rows)},
+            github_source=FakeGithub([]),
+            alumni_index=alumni_index,
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 6, 9),
+        )
+
+    subject, body = render_digest(
+        result.new_matches,
+        alumni_summary={
+            "status": result.alumni_csv_status,
+            "records_loaded": result.alumni_records_loaded,
+            "employers_indexed": result.alumni_employers_indexed,
+        },
+    )
+
+    assert subject == "Internship Watcher: 3 new SWE-intern matches"
+    assert "IT Internship (BackEnd, Java)" in body
+    assert "Fullstack Software Engineer Intern" in body
+    assert "Undergraduate Software Engineer Intern" in body
+    assert "Ada Bosch - Backend Engineer - https://www.linkedin.com/in/fake-bosch" in body
+    assert "Nikola Tesla - Software Engineer - https://www.linkedin.com/in/fake-tesla" in body
+    assert "Alumni index: 2 records across 2 employers" in body
+    for excluded in (
+        "Machine Learning Engineer PhD Intern",
+        "Software Engineer Intern - Masters",
+        "Graduate Research Intern",
+        "Postdoctoral Research Intern",
+    ):
+        assert excluded not in body
 
 
 def test_mixed_digest_reserves_above_94_fit_for_near_perfect_resume_matches(tmp_path):

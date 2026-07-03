@@ -123,3 +123,23 @@ def test_low_priority_it_quality_and_solutions_pass_with_low_fit_score():
         "Quality Engineer Intern",
         "Solutions Engineer Intern",
     ]
+
+
+def test_filters_drop_degree_ineligible_jobs_even_with_positive_fit_score():
+    grad = job(
+        title="Machine Learning Engineer PhD Intern",
+        degree_level="phd",
+        degree_eligible=False,
+        degree_ineligible_reason="Graduate/PhD-level internship outside undergraduate target.",
+        role_classification={"role": "swe", "role_track": "ml_ai"},
+        score={
+            "total": 94,
+            "fit_score": 91,
+            "watcher_eligible": True,
+            "role_track": "ml_ai",
+            "degree_eligible": False,
+            "degree_ineligible_reason": "Graduate/PhD-level internship outside undergraduate target.",
+        },
+    )
+
+    assert filter_matches([grad]) == []

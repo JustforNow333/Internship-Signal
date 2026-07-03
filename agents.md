@@ -81,6 +81,14 @@ Current watcher run core:
   `watcher_eligible`, `watcher_ineligible_reason`, `fit_explanation`,
   `role_track`, `watcher_action`, and `watcher_action_label`. Watcher code uses
   these fields; it must not infer its own fit score.
+- Backend scoring also emits degree-level watcher fields on `score` and on each
+  analyzed job: `degree_level`, `degree_eligible`, and
+  `degree_ineligible_reason`. Masters, PhD/doctoral, MBA, graduate-student,
+  advanced-degree, and postdoc internships are outside the undergraduate target
+  and must have `watcher_eligible=false`, `fit_score=0`, and digest exclusion
+  even when the stack is otherwise a strong SWE match. Normal undergraduate,
+  bachelor's/BS/BA, sophomore/junior/senior, college-student, or unspecified
+  internships should not be excluded by the degree gate.
 - `fit_score` is calibrated against the resume/profile, not role-track
   eligibility alone. A score of 100 should be rare and requires several direct
   resume-skill matches in a target track. Strongest resume skills include
@@ -103,13 +111,26 @@ Current watcher run core:
   analyzed job `id`, which comes from `backend.app.dedupe.job_id`. A job seen
   via GitHub is not new later via direct, and vice versa.
 - `watcher/alumni.py` loads the private gitignored `watcher/alumni.csv`,
-  indexes alumni by `backend.app.dedupe.norm_company(Employer)`, and annotates
-  matches with `alumni` after filtering. Alumni data is additive only; it must
-  never drop, reorder, gate, or rescore a posting.
+  or the path named by `WATCHER_ALUMNI_CSV`, indexes alumni by
+  `backend.app.dedupe.norm_company(Employer)`, and annotates matches with
+  `alumni` after filtering. Alumni data is additive only; it must never drop,
+  reorder, gate, or rescore a posting. Missing private alumni data must not be
+  treated as a normal empty roster in live watcher mode: the run reports
+  `alumni_csv_status=missing` and the digest says that no alumni matching was
+  performed. Set `WATCHER_REQUIRE_ALUMNI=1` when a missing or malformed private
+  roster should hard-fail the run.
+- Alumni matching order is exact normalized employer match first, then
+  hard-coded common aliases, then watchlist `aliases` and `alumni_match` values,
+  with fuzzy matching only as a fallback. Keep private contact data out of the
+  repo; use a local file, GitHub Actions secret/data branch, or another private
+  loading path.
 - `watcher/notify.py` renders one plain-text email digest for genuinely new
-  matches. `render_digest(matches)` is pure and offline-tested. `send_digest`
-  dry-runs to stdout unless `WATCHER_SEND_EMAIL` is truthy; live Gmail SMTP
-  requires `SMTP_USER`, `SMTP_APP_PASSWORD`, and `EMAIL_TO` from env.
+  matches. `render_digest(matches, alumni_summary=...)` is pure and
+  offline-tested. The digest header should include alumni index status such as
+  `Alumni index: 124 records across 80 employers` or `Alumni index missing, no
+  alumni matching was performed`. `send_digest` dry-runs to stdout unless
+  `WATCHER_SEND_EMAIL` is truthy; live Gmail SMTP requires `SMTP_USER`,
+  `SMTP_APP_PASSWORD`, and `EMAIL_TO` from env.
 - The run loop marks jobs seen only after `send_digest` reports a successful
   live send by default. Dry-run digest previews do not advance the seen-store
   unless `python -m watcher.run --mark-seen-without-send` is used for the
@@ -118,7 +139,9 @@ Current watcher run core:
   sort by `fit_score` descending, then generic score, role-track priority, and
   company/title tie-breaks, and send nothing when there are zero new matches.
   The digest should show score, fit score, role track, fit reason,
-  recommendation, red flags, apply URL, source tag, and alumni annotations.
+  recommendation, red flags, apply URL, source tag, alumni index summary, and
+  alumni annotations. Graduate-level excluded roles may appear in debug output
+  but must never appear in the email digest.
 - Local seen-store files are ignored by `.gitignore`; pass `--seen-db` in tests
   or manual runs when you want an isolated store. The default seen-store path is
   `watcher/seen.sqlite`, configurable with `WATCHER_SEEN_DB`.
@@ -133,10 +156,12 @@ Current watcher run core:
   `WATCHER_SEND_EMAIL`; live sends require the repo secrets `SMTP_USER`,
   `SMTP_APP_PASSWORD`, and `EMAIL_TO`.
 - The watcher prints a run heartbeat, and the workflow prints a final heartbeat
-  including run counts, source-error count, seen-store load/save counts, send
-  result, and persistence status. Source adapter failures are logged and
-  surfaced as warnings; seen-store load corruption or push failure is a hard
-  workflow failure.
+  including run counts, source-error count, alumni CSV status
+  (`alumni_csv_status=loaded/missing/empty/error`,
+  `alumni_records_loaded=<n>`, `alumni_employers_indexed=<n>`), seen-store
+  load/save counts, send result, and persistence status. Source adapter
+  failures are logged and surfaced as warnings; seen-store load corruption or
+  push failure is a hard workflow failure.
 
 Scope guardrails:
 

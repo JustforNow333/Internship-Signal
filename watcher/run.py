@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable, TextIO
 
 from backend.app.ingest import analyze_rows
-from watcher.alumni import AlumniIndex, attach_alumni, load_default_alumni_index
+from watcher.alumni import AlumniIndex, attach_alumni, load_default_alumni, status_for_injected_index
 from watcher.config import DEFAULT_WATCHLIST_PATH, WatcherConfig, load_watchlist
 from watcher.filters import filter_matches
 from watcher.notify import send_digest
@@ -43,6 +43,10 @@ class RunResult:
     errors: list[str]
     digest_sent: bool
     seen_marked: int
+    alumni_csv_status: str
+    alumni_records_loaded: int
+    alumni_employers_indexed: int
+    alumni_status_message: str = ""
 
 
 def run_once(
@@ -63,15 +67,28 @@ def run_once(
     jobs = analyze_rows(rows, today=today)
     LOGGER.info("Filtering %d scored job(s)...", len(jobs))
     matches = filter_matches(jobs, target_roles=config.target_roles, min_score=config.min_score)
+    if alumni_index is None:
+        alumni_index, alumni_status = load_default_alumni()
+    else:
+        alumni_status = status_for_injected_index(alumni_index)
+    LOGGER.info(
+        "Alumni CSV status: alumni_csv_status=%s alumni_records_loaded=%d alumni_employers_indexed=%d",
+        alumni_status.status,
+        alumni_status.records_loaded,
+        alumni_status.employers_indexed,
+    )
     matches = attach_alumni(
         matches,
-        alumni_index if alumni_index is not None else load_default_alumni_index(),
+        alumni_index,
         companies=config.companies,
     )
     new_matches = seen_store.unseen(matches)
     LOGGER.info("%d match(es), %d new.", len(matches), len(new_matches))
     LOGGER.info("Sending digest if needed...")
-    digest_sent = (digest_sender or send_digest)(new_matches)
+    if digest_sender is None:
+        digest_sent = send_digest(new_matches, alumni_summary=alumni_status.as_dict())
+    else:
+        digest_sent = digest_sender(new_matches)
     should_mark_seen = digest_sent or (mark_seen_without_send and bool(new_matches))
     seen_marked = len(new_matches) if should_mark_seen else 0
     if should_mark_seen:
@@ -95,6 +112,10 @@ def run_once(
         errors=errors,
         digest_sent=digest_sent,
         seen_marked=seen_marked,
+        alumni_csv_status=alumni_status.status,
+        alumni_records_loaded=alumni_status.records_loaded,
+        alumni_employers_indexed=alumni_status.employers_indexed,
+        alumni_status_message=alumni_status.message,
     )
 
 
@@ -192,6 +213,9 @@ def print_heartbeat(result: RunResult, *, output: TextIO | None = None) -> None:
         f"matches={len(result.matches)}, "
         f"new={len(result.new_matches)}, "
         f"errors={len(result.errors)}, "
+        f"alumni_csv_status={getattr(result, 'alumni_csv_status', 'unknown')}, "
+        f"alumni_records_loaded={getattr(result, 'alumni_records_loaded', 0)}, "
+        f"alumni_employers_indexed={getattr(result, 'alumni_employers_indexed', 0)}, "
         f"sent={sent}, "
         f"seen_marked={result.seen_marked}",
         file=output,

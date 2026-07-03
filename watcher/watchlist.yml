@@ -9,7 +9,8 @@ companies:
     token: "capitalone"
     workday_shard: "wd12"
     workday_site: "Capital_One"
-    alumni_match: ["capital one"]
+    aliases: ["Capital One Financial"]
+    alumni_match: ["capital one", "capital one financial"]
     source_url: "https://capitalone.wd12.myworkdayjobs.com/Capital_One/job/Toronto-ON/Intern--Backend-Software-Engineer---Summer-2026_R232315-1"
 
   - name: "Arm"
@@ -44,7 +45,8 @@ companies:
   - name: "Google"
     ats: bespoke
     module: "google"
-    alumni_match: ["google"]
+    aliases: ["Google LLC"]
+    alumni_match: ["google", "google llc"]
     source_url: "https://www.google.com/about/careers/"
     note: "known company-hosted careers portal"
 
@@ -148,7 +150,8 @@ companies:
   - name: "Bosch"
     ats: smartrecruiters
     token: "BoschGroup"
-    alumni_match: ["bosch"]
+    aliases: ["Bosch Group", "Robert Bosch", "BoschGroup"]
+    alumni_match: ["bosch", "bosch group", "robert bosch", "boschgroup"]
     source_url: "https://jobs.smartrecruiters.com/BoschGroup/744000092298605"
 
   - name: "Canary Technologies"
@@ -423,14 +426,16 @@ companies:
   - name: "Tesla"
     ats: bespoke
     module: "tesla"
-    alumni_match: ["tesla"]
+    aliases: ["Tesla Motors"]
+    alumni_match: ["tesla", "tesla motors"]
     source_url: "https://www.tesla.com/careers/search"
     note: "company-hosted careers portal; unsupported by current watcher adapters"
 
   - name: "ASML"
     ats: smartrecruiters
     token: "ASML1"
-    alumni_match: ["asml"]
+    aliases: ["ASML US"]
+    alumni_match: ["asml", "asml us"]
     source_url: "https://careers.smartrecruiters.com/ASML1"
 
   - name: "HP"
@@ -461,6 +466,7 @@ companies:
   - name: "Whatnot"
     ats: bespoke
     module: "whatnot"
+    aliases: ["WhatNot"]
     alumni_match: ["whatnot"]
     source_url: "https://jobs.ashbyhq.com/whatnot"
     note: "Ashby-hosted careers page verified, but current Ashby posting API returns 404 for this board; adapter follow-up needed"
@@ -534,7 +540,8 @@ companies:
   - name: "KPMG"
     ats: bespoke
     module: "kpmg"
-    alumni_match: ["kpmg"]
+    aliases: ["KPMG US"]
+    alumni_match: ["kpmg", "kpmg us"]
     source_url: "https://www.kpmguscareers.com/job-search/"
     note: "company-hosted careers portal; unsupported by current watcher adapters"
 

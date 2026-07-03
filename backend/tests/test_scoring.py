@@ -391,3 +391,59 @@ def test_fit_score_100_requires_strong_resume_overlap_and_target_track():
     assert perfect["role"]["role_track"] in {"backend", "full_stack", "data_engineering", "ml_ai", "general_swe"}
     assert two_match_backend["score"]["fit_score"] < 100
     assert cloud_many_matches["score"]["fit_score"] < 100
+
+
+def test_graduate_level_internships_are_watcher_ineligible():
+    for title in (
+        "Machine Learning Engineer PhD Intern",
+        "Ph.D. Intern",
+        "Software Engineer Intern - Masters",
+        "Software Engineer Intern - M.S.",
+        "MBA Intern",
+        "Graduate Student Intern",
+        "Postdoctoral Research Intern",
+        "Graduate Research Intern",
+    ):
+        result = _scored(
+            title,
+            description="Build Python FastAPI services with SQL, PostgreSQL, React, TypeScript, and REST APIs.",
+            requirements="Python, FastAPI, SQL, PostgreSQL, React, TypeScript, GitHub",
+        )
+        score = result["score"]
+
+        assert score["degree_eligible"] is False
+        assert score["watcher_eligible"] is False
+        assert score["fit_score"] == 0
+        assert score["watcher_action"] == "skip"
+        assert "Graduate/PhD-level" in score["watcher_ineligible_reason"]
+
+
+def test_undergraduate_or_unspecified_software_internships_are_not_degree_excluded():
+    for title in (
+        "Software Engineer Intern",
+        "Software Engineering Intern - Bachelor's students",
+        "Backend Engineer Intern - undergraduate",
+    ):
+        result = _scored(
+            title,
+            description="Build backend REST APIs with Python and SQL.",
+            requirements="Python, SQL, Git",
+        )
+        score = result["score"]
+
+        assert score["degree_eligible"] is True
+        assert score["watcher_eligible"] is True
+        assert score["fit_score"] > 0
+
+
+def test_phd_internship_with_near_perfect_stack_still_has_zero_watcher_fit():
+    score = _scored(
+        "Machine Learning Engineer PhD Intern",
+        description="Build Python FastAPI REST APIs with Flask, SQLAlchemy, PostgreSQL, React, TypeScript, Pandas, and Pytest.",
+        requirements="Python, FastAPI, Flask, SQLAlchemy, SQL, PostgreSQL, React, TypeScript, Pandas, Pytest",
+    )["score"]
+
+    assert score["degree_level"] == "phd"
+    assert score["degree_eligible"] is False
+    assert score["watcher_eligible"] is False
+    assert score["fit_score"] == 0

@@ -2,7 +2,8 @@ import copy
 import logging
 
 from watcher.config import CompanyCfg
-from watcher.alumni import attach_alumni, load_alumni, match_alumni
+from watcher.alumni import attach_alumni, load_alumni, load_default_alumni, match_alumni
+from watcher.notify import render_digest
 
 
 CSV_TEXT = """First Name,Last Name,Occupation,Employer,LinkedIn URL
@@ -18,6 +19,26 @@ def fake_index(tmp_path):
     path = tmp_path / "alumni.csv"
     path.write_text(CSV_TEXT, encoding="utf-8")
     return load_alumni(path)
+
+
+def digest_job(company="Bosch", title="IT Internship (BackEnd, Java)"):
+    return {
+        "company": company,
+        "title": title,
+        "source_url": "https://example.com/job",
+        "score": {
+            "total": 82,
+            "fit_score": 90,
+            "watcher_eligible": True,
+            "role_track": "backend",
+            "fit_explanation": "Backend Java role with API/database overlap.",
+            "watcher_action_label": "Apply now",
+            "reasons": ["Role fit: Backend Java role"],
+        },
+        "role_classification": {"role": "swe", "role_track": "backend"},
+        "red_flags": [],
+        "extra": {"source": "direct", "source_adapter": "fake"},
+    }
 
 
 def test_exact_match_returns_record(tmp_path):
@@ -156,3 +177,106 @@ Grace,APL,Research Engineer,JHU Applied Physics Laboratory,https://www.linkedin.
     annotated = attach_alumni(jobs, index, companies=companies)
 
     assert [record["name"] for record in annotated[0]["alumni"]] == ["Grace APL"]
+
+
+def test_bosch_exact_alumni_appears_in_digest(tmp_path):
+    path = tmp_path / "alumni.csv"
+    path.write_text(
+        """First Name,Last Name,Occupation,Employer,LinkedIn URL
+Ada,Bosch,Backend Engineer,Bosch,https://www.linkedin.com/in/fake-bosch
+""",
+        encoding="utf-8",
+    )
+    index = load_alumni(path)
+    annotated = attach_alumni([digest_job("Bosch")], index)
+
+    _subject, body = render_digest(
+        annotated,
+        alumni_summary={"status": "loaded", "records_loaded": 1, "employers_indexed": 1},
+    )
+
+    assert "Alumni index: 1 records across 1 employers" in body
+    assert "Ada Bosch - Backend Engineer - https://www.linkedin.com/in/fake-bosch" in body
+
+
+def test_bosch_group_alias_matches_bosch_job(tmp_path):
+    path = tmp_path / "alumni.csv"
+    path.write_text(
+        """First Name,Last Name,Occupation,Employer,LinkedIn URL
+Grace,Bosch,Software Engineer,Bosch Group,https://www.linkedin.com/in/fake-bosch-group
+""",
+        encoding="utf-8",
+    )
+    index = load_alumni(path)
+
+    matches = match_alumni("Bosch", index)
+
+    assert [record["name"] for record in matches] == ["Grace Bosch"]
+
+
+def test_common_alias_to_alias_match_works_before_fuzzy(tmp_path):
+    path = tmp_path / "alumni.csv"
+    path.write_text(
+        """First Name,Last Name,Occupation,Employer,LinkedIn URL
+Ada,Bosch,Software Engineer,Bosch Group,https://www.linkedin.com/in/fake-bosch-group
+""",
+        encoding="utf-8",
+    )
+    index = load_alumni(path)
+
+    matches = match_alumni("Robert Bosch", index)
+
+    assert [record["name"] for record in matches] == ["Ada Bosch"]
+
+
+def test_tesla_exact_alumni_appears_for_tesla_job(tmp_path):
+    path = tmp_path / "alumni.csv"
+    path.write_text(
+        """First Name,Last Name,Occupation,Employer,LinkedIn URL
+Nikola,Tesla,Software Engineer,Tesla,https://www.linkedin.com/in/fake-tesla
+""",
+        encoding="utf-8",
+    )
+    index = load_alumni(path)
+    annotated = attach_alumni([digest_job("Tesla", "Fullstack Software Engineer Intern")], index)
+
+    _subject, body = render_digest(
+        annotated,
+        alumni_summary={"status": "loaded", "records_loaded": 1, "employers_indexed": 1},
+    )
+
+    assert "Nikola Tesla - Software Engineer - https://www.linkedin.com/in/fake-tesla" in body
+
+
+def test_missing_alumni_csv_in_live_mode_is_not_quiet_empty_roster(tmp_path, monkeypatch, caplog):
+    missing_path = tmp_path / "missing.csv"
+    monkeypatch.setenv("WATCHER_SEND_EMAIL", "1")
+    caplog.set_level(logging.ERROR, logger="watcher.alumni")
+
+    index, status = load_default_alumni(missing_path)
+    _subject, body = render_digest([digest_job("Bosch")], alumni_summary=status.as_dict())
+
+    assert index == {}
+    assert status.status == "missing"
+    assert "Alumni CSV missing, alumni matching disabled." in caplog.text
+    assert "Alumni index missing, no alumni matching was performed" in body
+
+
+def test_loaded_alumni_with_true_no_match_can_say_no_alumni_on_file(tmp_path):
+    path = tmp_path / "alumni.csv"
+    path.write_text(
+        """First Name,Last Name,Occupation,Employer,LinkedIn URL
+Ada,Exact,Software Engineer,OpenAI,https://www.linkedin.com/in/fake-ada
+""",
+        encoding="utf-8",
+    )
+    index = load_alumni(path)
+    annotated = attach_alumni([digest_job("No Match Co")], index)
+
+    _subject, body = render_digest(
+        annotated,
+        alumni_summary={"status": "loaded", "records_loaded": 1, "employers_indexed": 1},
+    )
+
+    assert "Alumni index: 1 records across 1 employers" in body
+    assert "alumni you know there: No alumni on file" in body

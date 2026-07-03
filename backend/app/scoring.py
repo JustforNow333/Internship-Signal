@@ -108,10 +108,61 @@ ANALYTICS_REPORTING_RE = re.compile(r"\banalytics\b|\breporting\b|\breports?\b|\
 DATA_SOFTWARE_RE = re.compile(r"data engineer|pipeline|etl|software|python|sql|pandas|model|machine learning|ml\b|api", re.I)
 VAGUE_TITLE_RE = re.compile(r"\btechnical intern\b|\btechnical co[- ]?op\b", re.I)
 COMMERCIAL_SUPPORT_RE = re.compile(r"commercial|customer[- ]facing|customer support|technical support|solutions?|sales|pre[- ]?sales|implementation consultant", re.I)
+PHD_TERM = r"(?:ph\.?\s*d\.?|phd|doctoral|doctorate)"
+MASTERS_TERM = r"(?:master(?:['\u2019])?s|masters|m\.s\.|master of science)"
+PHD_INTERNSHIP_RE = re.compile(
+    rf"\b{PHD_TERM}(?=\W|$).{{0,60}}\b(intern(ship)?|co[- ]?op|university grad)\b|"
+    rf"\b(intern(ship)?|co[- ]?op|research intern|engineer)\b.{{0,60}}\b{PHD_TERM}(?=\W|$)|"
+    r"\bphd university grad\b",
+    re.I,
+)
+MASTERS_INTERNSHIP_RE = re.compile(
+    rf"\b{MASTERS_TERM}(?=\W|$).{{0,60}}\b(intern(ship)?|co[- ]?op|students?|candidates?)\b|"
+    rf"\b(intern(ship)?|co[- ]?op)\b.{{0,60}}\b{MASTERS_TERM}(?=\W|$)|"
+    r"\bms intern(ship)?\b",
+    re.I,
+)
+MBA_INTERNSHIP_RE = re.compile(
+    r"\bmba\b.{0,60}\b(intern(ship)?|co[- ]?op|students?|candidates?)\b|"
+    r"\b(intern(ship)?|co[- ]?op)\b.{0,60}\bmba\b",
+    re.I,
+)
+GRADUATE_INTERNSHIP_RE = re.compile(
+    r"\bgraduate student intern(ship)?\b|\bgraduate intern(ship)?\b|"
+    r"\bgraduate\b.{0,40}\b(intern(ship)?|co[- ]?op)\b|"
+    r"\bintern(ship)?\b.{0,60}\bgraduate students?\b|"
+    r"\badvanced degree intern(ship)?\b|\badvanced degree candidates?\b",
+    re.I,
+)
+POSTDOC_RE = re.compile(r"\bpost\s*doc(?:toral)?\b|\bpostdoctoral\b", re.I)
+UNDERGRAD_RE = re.compile(
+    r"\bundergraduate\b|\bbachelor(?:['\u2019])?s\b|\bbachelors\b|\bbs\b|\bba\b|"
+    r"\bsophomore\b|\bjunior\b|\bsenior\b",
+    re.I,
+)
 
 
 def _clamp(x, lo=0, hi=100):
     return max(lo, min(hi, x))
+
+
+def detect_degree_eligibility(row) -> tuple[str, bool, str | None]:
+    """Return watcher degree eligibility for undergraduate-targeted internships."""
+
+    text = " ".join([row.get("title", ""), row.get("description", ""), row.get("requirements", "")])
+    if POSTDOC_RE.search(text):
+        return "postdoctoral", False, "Graduate/PhD-level internship outside undergraduate target."
+    if PHD_INTERNSHIP_RE.search(text):
+        return "phd", False, "Graduate/PhD-level internship outside undergraduate target."
+    if MASTERS_INTERNSHIP_RE.search(text):
+        return "masters", False, "Graduate/PhD-level internship outside undergraduate target."
+    if MBA_INTERNSHIP_RE.search(text):
+        return "mba", False, "Graduate/PhD-level internship outside undergraduate target."
+    if GRADUATE_INTERNSHIP_RE.search(text):
+        return "graduate", False, "Graduate/PhD-level internship outside undergraduate target."
+    if UNDERGRAD_RE.search(text):
+        return "undergraduate", True, None
+    return "unspecified", True, None
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +448,7 @@ def score_deadline(row, today):
 
 def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, profile, tools, today=None):
     today = today or date.today()
+    degree_level, degree_eligible, degree_ineligible_reason = detect_degree_eligibility(row)
 
     cat = {}
     cat["role_relevance"] = score_role_relevance(row, role_cls, pmatch, profile)
@@ -415,10 +467,14 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
     }
     total = round(sum(c["score"] * c["weight"] for c in categories.values()))
     fit_score = categories["role_relevance"]["score"]
-    watcher_eligible = fit_score > 0
+    if not degree_eligible:
+        fit_score = 0
+    watcher_eligible = fit_score > 0 and degree_eligible
     fit_explanation = categories["role_relevance"]["explanation"]
-    watcher_ineligible_reason = _watcher_ineligible_reason(role_cls, profile) or (
-        fit_explanation if not watcher_eligible else None
+    watcher_ineligible_reason = (
+        degree_ineligible_reason
+        if not degree_eligible
+        else _watcher_ineligible_reason(role_cls, profile) or (fit_explanation if not watcher_eligible else None)
     )
 
     has_critical = any(f["severity"] == "critical" for f in red_flags)
@@ -481,6 +537,9 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
         "watcher_ineligible_reason": None if watcher_eligible else watcher_ineligible_reason,
         "fit_explanation": fit_explanation,
         "role_track": role_cls.get("role_track", "unknown"),
+        "degree_level": degree_level,
+        "degree_eligible": bool(degree_eligible),
+        "degree_ineligible_reason": degree_ineligible_reason,
         "watcher_action": watcher_action,
         "watcher_action_label": ACTION_LABELS[watcher_action],
         "bucket": bucket,

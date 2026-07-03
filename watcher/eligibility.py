@@ -36,6 +36,19 @@ def determine_watcher_eligibility(job: dict, target_roles: set[str] | frozenset[
     role = role_cls.get("role")
     role_track = score.get("role_track") or role_cls.get("role_track") or role or "unknown"
     fit_score = _int_score(score.get("fit_score", score.get("total", 0)))
+    degree_eligible = job.get("degree_eligible", score.get("degree_eligible", True))
+    if degree_eligible is False:
+        reason = (
+            job.get("degree_ineligible_reason")
+            or score.get("degree_ineligible_reason")
+            or "Graduate/PhD-level internship outside undergraduate target."
+        )
+        return {
+            "watcher_eligible": False,
+            "fit_score": 0,
+            "eligible_reason": None,
+            "ineligible_reason": reason,
+        }
     scorer_eligible = bool(score.get("watcher_eligible", fit_score > 0))
 
     target_match = role in target_roles

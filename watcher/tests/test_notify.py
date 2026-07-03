@@ -125,6 +125,31 @@ def test_render_digest_excludes_watcher_ineligible_matches():
     assert "Electrical Engineer Intern" not in body
 
 
+def test_render_digest_excludes_degree_ineligible_matches():
+    backend = match("Bosch", "IT Internship (BackEnd, Java)", 82, fit_score=90, role_track="backend")
+    phd = match("ResearchCo", "Machine Learning Engineer PhD Intern", 98, fit_score=0, role_track="ml_ai")
+    phd["degree_eligible"] = False
+    phd["degree_ineligible_reason"] = "Graduate/PhD-level internship outside undergraduate target."
+    phd["score"]["degree_eligible"] = False
+    phd["score"]["degree_ineligible_reason"] = "Graduate/PhD-level internship outside undergraduate target."
+
+    subject, body = render_digest([phd, backend])
+
+    assert subject == "Internship Watcher: 1 new SWE-intern match"
+    assert "IT Internship (BackEnd, Java)" in body
+    assert "Machine Learning Engineer PhD Intern" not in body
+
+
+def test_render_digest_shows_alumni_index_summary():
+    subject, body = render_digest(
+        [match("Bosch", "IT Internship (BackEnd, Java)", 82, fit_score=90, role_track="backend")],
+        alumni_summary={"status": "loaded", "records_loaded": 124, "employers_indexed": 80},
+    )
+
+    assert subject == "Internship Watcher: 1 new SWE-intern match"
+    assert "Alumni index: 124 records across 80 employers" in body
+
+
 def test_send_digest_uses_timeout_for_live_smtp(monkeypatch):
     calls = {}
 

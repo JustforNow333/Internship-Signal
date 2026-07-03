@@ -7,7 +7,7 @@ import logging
 import smtplib
 import sys
 from email.message import EmailMessage
-from typing import Sequence, TextIO
+from typing import Mapping, Sequence, TextIO
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class NotifyConfigError(RuntimeError):
     """Raised when live email sending is enabled but env config is incomplete."""
 
 
-def render_digest(matches: Sequence[dict]) -> tuple[str, str]:
+def render_digest(matches: Sequence[dict], *, alumni_summary: Mapping[str, object] | None = None) -> tuple[str, str]:
     """Return the digest subject and plain-text body, or empty strings for no email."""
 
     eligible_matches = [job for job in matches if _digest_eligible(job)]
@@ -57,8 +57,11 @@ def render_digest(matches: Sequence[dict]) -> tuple[str, str]:
         subject,
         "",
         f"{count} new watched-company SWE-intern {posting_word}, sorted by fit score.",
-        "",
     ]
+    summary_line = _alumni_summary_line(alumni_summary)
+    if summary_line:
+        lines.append(summary_line)
+    lines.append("")
 
     for index, job in enumerate(sorted_matches, start=1):
         score = job.get("score", {})
@@ -83,10 +86,15 @@ def render_digest(matches: Sequence[dict]) -> tuple[str, str]:
     return subject, "\n".join(lines).rstrip() + "\n"
 
 
-def send_digest(matches: Sequence[dict], *, output: TextIO | None = None) -> bool:
+def send_digest(
+    matches: Sequence[dict],
+    *,
+    output: TextIO | None = None,
+    alumni_summary: Mapping[str, object] | None = None,
+) -> bool:
     """Render and send the digest. Dry-run stdout output is the default."""
 
-    subject, body = render_digest(matches)
+    subject, body = render_digest(matches, alumni_summary=alumni_summary)
     if not subject:
         return False
 
@@ -126,9 +134,29 @@ def _digest_eligible(job: dict) -> bool:
     score = job.get("score") or {}
     if score.get("watcher_eligible") is False:
         return False
+    if score.get("degree_eligible") is False or job.get("degree_eligible") is False:
+        return False
     if "fit_score" in score and _int_score(score.get("fit_score")) <= 0:
         return False
     return True
+
+
+def _alumni_summary_line(summary: Mapping[str, object] | None) -> str:
+    if not summary:
+        return ""
+    status = str(summary.get("status") or "unknown")
+    records = _int_score(summary.get("records_loaded"))
+    employers = _int_score(summary.get("employers_indexed"))
+    if status == "loaded":
+        return f"Alumni index: {records} records across {employers} employers"
+    if status == "empty":
+        return "Alumni index: 0 records across 0 employers"
+    if status == "missing":
+        return "Alumni index missing, no alumni matching was performed"
+    if status == "error":
+        message = str(summary.get("message") or "alumni matching disabled")
+        return f"Alumni index error, no alumni matching was performed: {message}"
+    return f"Alumni index status: {status} ({records} records across {employers} employers)"
 
 
 def _int_score(value) -> int:
