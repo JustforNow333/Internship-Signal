@@ -73,4 +73,9 @@ watcher/add_company_batch.txt
 watcher/additions_detect.json
 watcher/additions_report.md
 watcher/additions_watchlist.yml
+# Keep the canonical root WATCHER_PROGRESS.md tracked; ignore local copies.
+WATCHER_PROGRESS.local.md
+WATCHER_PROGRESS.*.md
+WATCHER_PROGRESS (*).md
 watcher/WATCHER_PROGRESS*.md
+watcher/WATCHER_PROGRESS (*).md

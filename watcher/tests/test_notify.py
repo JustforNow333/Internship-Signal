@@ -13,6 +13,10 @@ def match(
     red_flags=None,
     alumni=None,
     description="",
+    fit_score=None,
+    role_track="general_swe",
+    watcher_eligible=True,
+    fit_explanation=None,
 ):
     return {
         "company": company,
@@ -21,10 +25,16 @@ def match(
         "source_url": f"https://example.com/{company}/{title}".replace(" ", "-"),
         "score": {
             "total": score,
+            "fit_score": score if fit_score is None else fit_score,
+            "watcher_eligible": watcher_eligible,
+            "role_track": role_track,
+            "fit_explanation": fit_explanation or f"{role_track} role fit",
+            "watcher_action_label": action_label,
             "action_label": action_label,
             "action": action_label.lower().replace(" ", "_"),
             "reasons": reasons if reasons is not None else ["Strong role match", "Secondary reason"],
         },
+        "role_classification": {"role": "swe", "role_track": role_track},
         "red_flags": red_flags if red_flags is not None else [],
         "extra": {"source": source, "source_adapter": adapter},
         "alumni": alumni if alumni is not None else [],
@@ -36,6 +46,8 @@ def test_render_digest_sorts_includes_backstop_and_alumni():
         "OpenAI",
         "Software Engineer Intern",
         92,
+        fit_score=92,
+        role_track="general_swe",
         source="direct",
         adapter="ashby",
         alumni=[
@@ -55,6 +67,8 @@ def test_render_digest_sorts_includes_backstop_and_alumni():
         "ThinData Co",
         "Software Engineering Intern",
         31,
+        fit_score=31,
+        role_track="general_swe",
         action_label="Research more",
         source="github",
         adapter="github_listings",
@@ -66,16 +80,21 @@ def test_render_digest_sorts_includes_backstop_and_alumni():
         "MutedFlag Co",
         "Backend Intern",
         65,
+        fit_score=100,
+        role_track="backend",
         red_flags=[{"label": "Compensation unclear or unstated", "severity": "minor"}],
     )
 
     subject, body = render_digest([github_backstop, comp_unclear_only, direct])
 
     assert subject == "Internship Watcher: 3 new SWE-intern matches"
-    assert "3 new watched-company SWE-intern postings, sorted by score." in body
-    assert body.index("1. OpenAI - Software Engineer Intern") < body.index("2. MutedFlag Co - Backend Intern")
-    assert body.index("2. MutedFlag Co - Backend Intern") < body.index("3. ThinData Co - Software Engineering Intern")
+    assert "3 new watched-company SWE-intern postings, sorted by fit score." in body
+    assert body.index("1. MutedFlag Co - Backend Intern") < body.index("2. OpenAI - Software Engineer Intern")
+    assert body.index("2. OpenAI - Software Engineer Intern") < body.index("3. ThinData Co - Software Engineering Intern")
     assert "score: 31" in body
+    assert "fit score: 100" in body
+    assert "role track: backend" in body
+    assert "fit reason: backend role fit" in body
     assert "source tag: github backstop (github_listings)" in body
     assert "alumni you know there: No alumni on file" in body
     assert "Ada Example - Software Engineer - https://www.linkedin.com/in/fake-ada-example" in body
@@ -86,6 +105,24 @@ def test_render_digest_sorts_includes_backstop_and_alumni():
 
 def test_render_digest_zero_matches_returns_no_email_sentinel():
     assert render_digest([]) == ("", "")
+
+
+def test_render_digest_excludes_watcher_ineligible_matches():
+    backend = match("Bosch", "IT Internship (BackEnd, Java)", 82, fit_score=100, role_track="backend")
+    electrical = match(
+        "Anduril",
+        "Electrical Engineer Intern",
+        95,
+        fit_score=0,
+        role_track="electrical_hardware",
+        watcher_eligible=False,
+    )
+
+    subject, body = render_digest([electrical, backend])
+
+    assert subject == "Internship Watcher: 1 new SWE-intern match"
+    assert "IT Internship (BackEnd, Java)" in body
+    assert "Electrical Engineer Intern" not in body
 
 
 def test_send_digest_uses_timeout_for_live_smtp(monkeypatch):

@@ -9,6 +9,8 @@ import json
 import os
 from pathlib import Path
 
+from .dedupe import norm_company
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
 
@@ -26,14 +28,14 @@ CORS_ORIGINS = [
 # Scoring weights (must sum to 1.0 — enforced by a unit test)
 # ---------------------------------------------------------------------------
 SCORE_WEIGHTS = {
-    "role_relevance": 0.22,
-    "compensation": 0.16,
-    "legitimacy": 0.16,
+    "role_relevance": 0.40,
+    "compensation": 0.14,
+    "legitimacy": 0.08,
     "learning_value": 0.14,
-    "technical_depth": 0.12,
-    "effort_vs_value": 0.08,
-    "location_convenience": 0.06,
-    "deadline_urgency": 0.06,
+    "technical_depth": 0.14,
+    "effort_vs_value": 0.04,
+    "location_convenience": 0.03,
+    "deadline_urgency": 0.03,
 }
 
 BUCKET_THRESHOLDS = {"high": 70, "maybe": 45}  # low = anything below "maybe"
@@ -96,5 +98,9 @@ def load_known_companies() -> dict:
     data = _load_json(KNOWN_COMPANIES_PATH, _DEFAULT_KNOWN)
     out = {}
     for key in ("tech", "non_tech", "reputable"):
-        out[key] = {str(x).strip().lower() for x in data.get(key, _DEFAULT_KNOWN.get(key, []))}
+        out[key] = {
+            normalized
+            for value in data.get(key, _DEFAULT_KNOWN.get(key, []))
+            if (normalized := norm_company(str(value)))
+        }
     return out

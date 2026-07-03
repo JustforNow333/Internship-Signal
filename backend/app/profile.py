@@ -28,6 +28,33 @@ DEFAULT_PROFILE = {
         "non_technical": 10,
         "unknown": 40,
     },
+    "role_track_affinity": {
+        "backend": 100,
+        "full_stack": 92,
+        "general_swe": 90,
+        "platform_infra": 88,
+        "data_engineering": 88,
+        "ml_ai": 90,
+        "quant_dev": 88,
+        "frontend": 78,
+        "cloud": 70,
+        "devops": 66,
+        "embedded_software": 62,
+        "firmware": 58,
+        "sdet_qa_automation": 55,
+        "it_support": 20,
+        "quality_test": 20,
+        "solutions_engineering": 20,
+        "product": 0,
+        "customer_experience": 0,
+        "electrical_hardware": 0,
+        "mechanical_manufacturing": 0,
+        "civil_structural": 0,
+        "factory_automation": 0,
+        "other_engineering": 0,
+        "non_technical": 0,
+        "unknown": 0,
+    },
     # Lowercase substrings matched against the posting location.
     "preferred_locations": ["ithaca", "new york", "nyc", "remote", "boston"],
     "min_acceptable_hourly_usd": 15,
@@ -40,8 +67,8 @@ def load_profile() -> dict:
     profile = dict(DEFAULT_PROFILE)
     if isinstance(data, dict):
         for k, v in data.items():
-            if k == "role_affinity" and isinstance(v, dict):
-                merged = dict(DEFAULT_PROFILE["role_affinity"])
+            if k in {"role_affinity", "role_track_affinity"} and isinstance(v, dict):
+                merged = dict(DEFAULT_PROFILE[k])
                 merged.update(v)
                 profile[k] = merged
             else:

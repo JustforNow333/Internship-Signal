@@ -1,3 +1,8 @@
+import json
+
+import pytest
+
+from app import config
 from app.classify import classify_company, classify_role
 
 
@@ -13,6 +18,21 @@ def test_known_list_beats_everything():
     c = classify_company(_row(company="Stripe", description="bakery retail boutique"))
     assert c["category"] == "tech" and c["confidence"] >= 0.9
     assert any("known tech-company list" in e for e in c["evidence"])
+
+
+def test_known_company_overrides_use_same_normalization(tmp_path, monkeypatch):
+    path = tmp_path / "known_companies.json"
+    path.write_text(
+        json.dumps({"tech": ["Acme, Inc."], "non_tech": [], "reputable": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "KNOWN_COMPANIES_PATH", path)
+
+    known = config.load_known_companies()
+    assert "acme" in known["tech"]
+
+    c = classify_company(_row(company="Acme"), known)
+    assert c["category"] == "tech"
 
 
 def test_name_token_ai():
@@ -97,3 +117,93 @@ def test_data_entry_is_not_data_science():
 def test_unclassifiable_title_is_unknown():
     got = classify_role(_row(title="Team Member"))
     assert got["role"] == "unknown" and got["confidence"] <= 0.3
+
+
+@pytest.mark.parametrize(
+    ("title", "track"),
+    [
+        ("2027 Electrical Engineer Intern", "electrical_hardware"),
+        ("2027 Manufacturing Engineer Intern", "mechanical_manufacturing"),
+        ("Mechanical Design Engineer", "mechanical_manufacturing"),
+        ("Industrial Engineer Intern", "mechanical_manufacturing"),
+        ("Hardware Engineer Intern", "electrical_hardware"),
+        ("RF Engineer Intern", "electrical_hardware"),
+        ("Test Engineer Intern", "quality_test"),
+        ("Quality Engineer Intern", "quality_test"),
+        ("Process Engineer Intern", "mechanical_manufacturing"),
+        ("Factory Automation Engineering Intern", "factory_automation"),
+        ("Civil Engineer Intern", "civil_structural"),
+        ("Customer Experience Engineer - Intern", "customer_experience"),
+        ("IT Support Intern", "it_support"),
+    ],
+)
+def test_non_swe_engineering_titles_are_not_broad_swe(title, track):
+    got = classify_role(_row(title=title))
+
+    assert got["role"] != "swe"
+    assert got["role_track"] == track
+    assert got["non_swe_evidence"]
+
+
+@pytest.mark.parametrize(
+    ("title", "track", "role"),
+    [
+        ("2027 Software Engineer Intern", "general_swe", "swe"),
+        ("Software Engineer Intern", "general_swe", "swe"),
+        ("Backend Engineer Intern", "backend", "swe"),
+        ("Full Stack Engineer Intern", "full_stack", "swe"),
+        ("Frontend Engineer Intern", "frontend", "swe"),
+        ("Platform Software Engineer Intern", "platform_infra", "swe"),
+        ("Infrastructure Software Engineer Intern", "platform_infra", "swe"),
+        ("Data Engineer Intern", "data_engineering", "data_science"),
+        ("Machine Learning Engineer Intern", "ml_ai", "ml_ai"),
+        ("Quant Developer Intern", "quant_dev", "quant"),
+        ("Embedded Software Engineer Intern", "embedded_software", "swe"),
+        ("Firmware Software Engineer Intern", "firmware", "swe"),
+        ("SDET Intern", "sdet_qa_automation", "swe"),
+        ("Software QA Automation Intern", "sdet_qa_automation", "swe"),
+    ],
+)
+def test_software_adjacent_titles_get_specific_role_tracks(title, track, role):
+    got = classify_role(_row(title=title))
+
+    assert got["role"] == role
+    assert got["role_track"] == track
+    assert got["software_evidence"]
+
+
+def test_it_backend_java_is_rescued_by_strong_backend_evidence():
+    got = classify_role(_row(
+        title="IT Internship (BackEnd, Java)",
+        description="Build BackEnd services and REST APIs in Java.",
+        requirements="Java, SQL, Git",
+    ))
+
+    assert got["role"] == "swe"
+    assert got["role_track"] == "backend"
+    assert any("java" in item.lower() for item in got["software_evidence"])
+
+
+def test_plain_embedded_engineer_is_not_automatically_software():
+    got = classify_role(_row(title="Embedded Engineer Intern"))
+
+    assert got["role"] != "swe"
+    assert got["role_track"] == "electrical_hardware"
+
+
+def test_cloud_and_devops_need_software_ownership_evidence():
+    cloud = classify_role(_row(title="Cloud Developer Internship"))
+    cloud_with_context = classify_role(_row(
+        title="Cloud Developer Internship",
+        description="Build cloud APIs and platform services in Python.",
+    ))
+    devops = classify_role(_row(title="DevOps Engineering Intern"))
+    devops_with_context = classify_role(_row(
+        title="DevOps Engineering Intern",
+        description="Own developer tooling and automation code for backend infrastructure APIs.",
+    ))
+
+    assert cloud["role_track"] == "cloud"
+    assert cloud_with_context["role_track"] == "cloud"
+    assert devops["role_track"] == "devops"
+    assert devops_with_context["role_track"] == "devops"

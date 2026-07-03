@@ -48,6 +48,22 @@ OWNERSHIP = re.compile(r"\bown(ership)? (a|an|the|your)\b|end[- ]to[- ]end|ship 
 CONVERSION = re.compile(r"return offer|full[- ]time (offer|conversion|role)|new[- ]grad pipeline|convert to full[- ]time", re.I)
 STRUCTURED = re.compile(r"\b(8|10|12|16)[- ]week\b|summer (intern(ship)? )?program|structured (intern(ship)? )?program|intern cohort|cohort", re.I)
 
+SOFTWARE_SIGNAL_TRACKS = {
+    "backend",
+    "full_stack",
+    "frontend",
+    "general_swe",
+    "platform_infra",
+    "data_engineering",
+    "ml_ai",
+    "quant_dev",
+    "cloud",
+    "devops",
+    "embedded_software",
+    "firmware",
+    "sdet_qa_automation",
+}
+
 
 def _flag(fid, label, severity, evidence):
     return {"id": fid, "label": label, "severity": severity, "evidence": evidence}
@@ -140,6 +156,8 @@ def detect_positive_signals(row, comp, role_cls, company_cls, profile, known):
     text = " ".join([row.get("description", ""), row.get("requirements", "")])
     title = row.get("title", "")
     signals = []
+    role_track = role_cls.get("role_track") or role_cls.get("role")
+    is_software_track = role_track in SOFTWARE_SIGNAL_TRACKS
 
     mid = hourly_mid(comp)
     if comp["kind"] == "paid" and mid is not None:
@@ -149,9 +167,9 @@ def detect_positive_signals(row, comp, role_cls, company_cls, profile, known):
             signals.append(_signal("paid", f"Paid (~${mid:.0f}/hr equivalent)", 2, comp["raw"]))
 
     matched = matched_skills(row, profile)
-    if len(matched) >= 2:
+    if is_software_track and len(matched) >= 2:
         signals.append(_signal("stack_match", "Tech stack overlaps your experience", 3, ", ".join(matched[:6])))
-    elif len(matched) == 1:
+    elif is_software_track and len(matched) == 1:
         signals.append(_signal("stack_match", "Some stack overlap with your experience", 1, matched[0]))
 
     if OWNERSHIP.search(text):
@@ -168,10 +186,12 @@ def detect_positive_signals(row, comp, role_cls, company_cls, profile, known):
         signals.append(_signal("reputable", "Well-known employer", 2, row.get("company", "")))
 
     tools = count_tech_tools(row.get("requirements", "") + " " + row.get("description", ""))
-    if len(tools) >= 3:
+    if is_software_track and len(tools) >= 3:
         signals.append(_signal("specific_tech", "Names a concrete technical stack", 2, ", ".join(tools[:6])))
 
-    if BACKEND_TERMS.search(title + " " + text) and role_cls["role"] in ("swe", "data_science", "ml_ai", "quant"):
+    if BACKEND_TERMS.search(title + " " + text) and role_track in {
+        "backend", "full_stack", "general_swe", "platform_infra", "data_engineering", "ml_ai", "quant_dev"
+    }:
         signals.append(_signal("backend_focus", "Backend / data infrastructure focus", 2, BACKEND_TERMS.search(title + " " + text).group(0)))
 
     if company_cls.get("is_startup"):

@@ -91,3 +91,138 @@ def test_blank_row_lands_in_research_not_apply():
     s = analyze_row({"company": "Orchid", "title": "Software Intern"})["score"]
     assert s["action"] in ("research_more", "skip")
     assert s["bucket"] != "high"
+
+
+def _scored(title, **overrides):
+    row = {
+        "company": "ExampleCo",
+        "title": title,
+        "location": "New York, NY",
+        "compensation": "$35/hr",
+        "description": "Structured internship with mentorship and code review.",
+        "requirements": "Python, Java, SQL, REST APIs, Git",
+    }
+    row.update(overrides)
+    return analyze_row(row)
+
+
+def test_watcher_score_fields_are_present_for_strong_backend_role():
+    s = _scored(
+        "IT Internship (BackEnd, Java)",
+        description="Build BackEnd services and REST APIs in Java.",
+    )["score"]
+
+    assert s["watcher_eligible"] is True
+    assert s["fit_score"] >= 90
+    assert s["role_track"] == "backend"
+    assert "backend" in s["fit_explanation"].lower()
+
+
+def test_non_swe_engineering_roles_have_zero_watcher_fit():
+    for title in (
+        "2027 Electrical Engineer Intern",
+        "2027 Manufacturing Engineer Intern",
+        "Mechanical Design Engineer",
+        "Factory Automation Engineering Intern",
+        "Customer Experience Engineer - Intern",
+    ):
+        result = _scored(title, company="Anduril Industries")
+        score = result["score"]
+
+        assert result["role"]["role"] != "swe"
+        assert score["watcher_eligible"] is False
+        assert score["fit_score"] == 0
+        assert score["watcher_action"] == "skip"
+        assert score["watcher_action_label"] == "Skip"
+        assert score["watcher_ineligible_reason"]
+
+
+def test_low_priority_it_quality_and_solutions_are_visible_but_capped():
+    for title, track in (
+        ("IT Support Intern", "it_support"),
+        ("Quality Engineer Intern", "quality_test"),
+        ("Solutions Engineer Intern", "solutions_engineering"),
+    ):
+        result = _scored(title, requirements="Python, Linux")
+        score = result["score"]
+
+        assert result["role"]["role_track"] == track
+        assert score["watcher_eligible"] is True
+        assert score["fit_score"] == 20
+        assert score["watcher_action"] == "research_more"
+
+
+def test_backend_java_ranks_above_adjacent_software_tracks():
+    backend = _scored(
+        "IT Internship (BackEnd, Java)",
+        description="Build BackEnd services and REST APIs in Java.",
+    )["score"]
+    cloud = _scored(
+        "Cloud Developer Internship",
+        description="Build cloud APIs and platform services in Python.",
+        requirements="AWS, Python, Docker",
+    )["score"]
+    devops = _scored(
+        "DevOps Engineering Intern",
+        description="Own developer tooling and automation code for backend infrastructure APIs.",
+        requirements="Python, Docker, Linux",
+    )["score"]
+    embedded = _scored(
+        "Embedded Software Engineer Intern",
+        description="Write embedded software for devices.",
+        requirements="C++, Linux, Git",
+    )["score"]
+
+    assert backend["fit_score"] > cloud["fit_score"]
+    assert backend["fit_score"] > devops["fit_score"]
+    assert backend["fit_score"] > embedded["fit_score"]
+
+
+def test_vague_cloud_and_devops_are_not_watcher_eligible():
+    cloud = _scored("Cloud Developer Internship", description="", requirements="AWS, Linux")["score"]
+    devops = _scored("DevOps Engineering Intern", description="", requirements="Docker, Linux")["score"]
+
+    assert cloud["watcher_eligible"] is False
+    assert cloud["fit_score"] == 0
+    assert "lacks clear" in cloud["watcher_ineligible_reason"]
+    assert devops["watcher_eligible"] is False
+    assert devops["fit_score"] == 0
+
+
+def test_prestige_mentorship_and_pay_do_not_rescue_customer_or_hardware_roles():
+    backend = _scored(
+        "Backend Engineer Intern",
+        company="SmallCo",
+        compensation="$20/hr",
+        description="Build backend APIs in Java.",
+    )["score"]
+    customer = _scored(
+        "Customer Experience Engineer - Intern",
+        company="Stripe",
+        compensation="$60/hr",
+        description="Mentorship, structured program, and support for customer issues.",
+        requirements="Python, SQL",
+    )["score"]
+    electrical = _scored(
+        "Electrical Engineer Intern",
+        company="Stripe",
+        compensation="$60/hr",
+        description="Mentorship and structured program.",
+        requirements="Python, Linux",
+    )["score"]
+
+    assert backend["fit_score"] > customer["fit_score"]
+    assert backend["fit_score"] > electrical["fit_score"]
+    assert customer["watcher_eligible"] is False
+    assert electrical["watcher_eligible"] is False
+
+
+def test_non_swe_top_reason_does_not_claim_strong_software_relevance():
+    score = _scored(
+        "Electrical Engineer Intern",
+        description="Mentorship and great pay.",
+        requirements="Python, Linux",
+    )["score"]
+
+    assert not any("software engineering role" in reason.lower() for reason in score["reasons"])
+    assert not any("strong role relevance" in reason.lower() for reason in score["reasons"])

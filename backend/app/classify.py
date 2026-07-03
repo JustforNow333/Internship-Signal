@@ -150,52 +150,6 @@ def classify_company(row: dict, known: dict | None = None, role_is_technical: bo
 # Role classification
 # ---------------------------------------------------------------------------
 
-ROLE_PATTERNS = {
-    "quant": [
-        (r"\bquant(itative)?\b", 5), (r"\btrading\b", 3), (r"market[- ]mak", 3),
-        (r"\balpha (research|signals?)\b", 3), (r"\bderivatives?\b", 2),
-    ],
-    "ml_ai": [
-        (r"machine[- ]learning", 4), (r"\bml\b", 3), (r"deep learning", 4),
-        (r"\bnlp\b", 3), (r"computer vision", 3), (r"\bllms?\b", 3),
-        (r"\bpytorch\b|\btensorflow\b", 2), (r"\brag\b", 2), (r"fine[- ]tun", 2),
-        (r"\bai\b", 2),
-    ],
-    "data_science": [
-        (r"data scien", 5), (r"data analy", 4), (r"data engineer", 4),
-        (r"\banalytics\b", 2), (r"\bstatistic", 2), (r"\bpandas\b|scikit|numpy", 2),
-        (r"\ba/b test", 2), (r"business intelligence", 2), (r"\bdbt\b", 2),
-        (r"\bsql\b", 1), (r"\bairflow\b", 2),
-    ],
-    "swe": [
-        (r"software (engineer|developer|engineering)", 4), (r"\bswe\b", 4),
-        (r"\bback[- ]?end\b", 4), (r"\bfront[- ]?end\b", 3), (r"full[- ]stack", 4),
-        (r"\bdevops\b", 3), (r"\bmobile\b|\bios\b|\bandroid\b", 2),
-        (r"\bdeveloper\b", 3), (r"\bengineering intern\b", 2), (r"\bembedded\b", 3),
-        (r"\bfounding engineer\b", 4), (r"\bengineer\b", 2),
-        (r"infrastructure|platform engineer|site reliability", 3),
-        (r"\bapis?\b", 1), (r"\bdistributed systems?\b", 2),
-    ],
-    "product": [
-        (r"product manage(r|ment)", 5), (r"\bpm intern\b", 4), (r"\bproduct intern\b", 3),
-        (r"\broadmap\b", 1), (r"user (stories|interviews)", 1), (r"\bspecs?\b", 1),
-    ],
-    "it": [
-        (r"\bit support\b", 5), (r"help[- ]?desk", 5), (r"\bsysadmin\b|systems? admin", 4),
-        (r"network admin", 4), (r"desktop support", 4), (r"\bit intern\b", 4),
-        (r"password resets?", 2), (r"\bticketing\b|\btickets\b", 1),
-    ],
-    "non_technical": [
-        (r"data entry", 6), (r"\bmarketing\b", 4), (r"\bsales\b", 4),
-        (r"business development", 4), (r"\bhr\b|human resources|recruit(ing|er)", 4),
-        (r"social media", 4), (r"\bcontent\b", 2), (r"\bbrand\b", 2),
-        (r"administrative|admin(istrative)? assistant", 3),
-        (r"(investment|financial) analyst", 3), (r"operations intern", 3),
-        (r"\baccounting\b", 3), (r"\bactivities\b", 2), (r"cold[- ]call", 3),
-        (r"\bcopywrit", 3),
-    ],
-}
-
 ROLE_LABELS = {
     "swe": "Software engineering",
     "data_science": "Data science / analytics",
@@ -207,43 +161,280 @@ ROLE_LABELS = {
     "unknown": "Unknown",
 }
 
+ROLE_TRACK_LABELS = {
+    "backend": "Backend software",
+    "full_stack": "Full-stack software",
+    "frontend": "Frontend software",
+    "general_swe": "Software engineering",
+    "platform_infra": "Platform / infrastructure software",
+    "data_engineering": "Data engineering / analytics",
+    "ml_ai": "ML / AI engineering",
+    "quant_dev": "Quant development",
+    "devops": "DevOps / developer tooling",
+    "cloud": "Cloud software",
+    "embedded_software": "Embedded software",
+    "firmware": "Firmware",
+    "sdet_qa_automation": "SDET / QA automation",
+    "it_support": "IT support",
+    "customer_experience": "Customer experience engineering",
+    "solutions_engineering": "Solutions engineering",
+    "electrical_hardware": "Electrical / hardware engineering",
+    "mechanical_manufacturing": "Mechanical / manufacturing engineering",
+    "civil_structural": "Civil / structural engineering",
+    "quality_test": "Quality / test engineering",
+    "factory_automation": "Factory automation engineering",
+    "other_engineering": "Other engineering",
+    "product": "Product",
+    "non_technical": "Non-technical",
+    "unknown": "Unknown",
+}
+
+SOFTWARE_ROLE_TRACKS = {
+    "backend",
+    "full_stack",
+    "frontend",
+    "general_swe",
+    "platform_infra",
+    "data_engineering",
+    "ml_ai",
+    "quant_dev",
+    "devops",
+    "cloud",
+    "embedded_software",
+    "firmware",
+    "sdet_qa_automation",
+}
+
+LOW_PRIORITY_WATCHER_TRACKS = {"it_support", "quality_test", "solutions_engineering"}
+
+ROLE_TRACK_TO_ROLE = {
+    "backend": "swe",
+    "full_stack": "swe",
+    "frontend": "swe",
+    "general_swe": "swe",
+    "platform_infra": "swe",
+    "devops": "swe",
+    "cloud": "swe",
+    "embedded_software": "swe",
+    "firmware": "swe",
+    "sdet_qa_automation": "swe",
+    "data_engineering": "data_science",
+    "ml_ai": "ml_ai",
+    "quant_dev": "quant",
+    "product": "product",
+    "it_support": "it",
+    "non_technical": "non_technical",
+}
+
 TECHNICAL_ROLES = {"swe", "data_science", "ml_ai", "quant"}
-_TIEBREAK = ["quant", "ml_ai", "data_science", "swe", "product", "it", "non_technical"]
+
+SOFTWARE_TITLE_PATTERNS = [
+    ("backend", r"\bback[- ]?end\b|\bserver[- ]side\b"),
+    ("full_stack", r"\bfull[- ]?stack\b"),
+    ("frontend", r"\bfront[- ]?end\b|\bui engineer\b|\bweb developer\b"),
+    ("platform_infra", r"\bplatform software\b|\binfrastructure software\b|\bsite reliability\b|\bsre\b"),
+    ("data_engineering", r"\bdata engineer(ing)?\b|\bdata science\b|\bdata infrastructure\b|\bdata pipeline"),
+    ("ml_ai", r"machine[- ]learning (engineer|engineering|intern)|\bml\b|\bml engineer\b|\bai engineer\b|deep learning|computer vision|\bnlp\b|\bllms?\b|\bpytorch\b|\btensorflow\b"),
+    ("quant_dev", r"\bquant(itative)? (developer|engineer|trading|research)|\bquantitative trading intern\b|\btrading intern\b"),
+    ("embedded_software", r"\bembedded software\b"),
+    ("firmware", r"\bfirmware\b"),
+    ("sdet_qa_automation", r"\bsdet\b|software qa automation|qa automation|software test automation|test automation framework"),
+    ("general_swe", r"\bsoftware (engineer|engineering|developer|development)\b|\bswe\b|\bdeveloper intern\b|\bfounding engineer\b"),
+    ("cloud", r"\bcloud developer\b|\bcloud software\b"),
+    ("devops", r"\bdevops\b|developer tooling|build engineer"),
+]
+
+NON_SWE_TITLE_PATTERNS = [
+    ("customer_experience", r"customer experience engineer|customer support engineer|technical support engineer"),
+    ("solutions_engineering", r"solutions? engineer|sales engineer|forward deployed engineer"),
+    ("it_support", r"\bit (support|intern(ship)?)\b|help[- ]?desk|desktop support|sysadmin|systems administrator|network administrator"),
+    ("electrical_hardware", r"electrical engineer|hardware engineer|\brf engineer|fpga engineer|pcb|circuit"),
+    ("mechanical_manufacturing", r"mechanical engineer|mechanical design engineer|manufacturing engineer|industrial engineer|process engineer|aerospace engineer"),
+    ("civil_structural", r"civil engineer|structural engineer"),
+    ("quality_test", r"quality engineer|test engineer|validation engineer|verification engineer"),
+    ("factory_automation", r"factory automation engineer|automation engineer|plc|plant automation|manufacturing automation"),
+    ("product", r"product manage(r|ment)|\bpm intern\b|\bproduct intern\b"),
+    ("non_technical", r"data entry|\bmarketing\b|\bsales\b|business development|\bhr\b|human resources|recruit(ing|er)|social media|\bcontent\b|\bbrand\b|administrative|operations intern|accounting|activities intern|cold[- ]call|copywrit"),
+]
+
+BACKEND_CONTEXT_RE = re.compile(
+    r"\bback[- ]?end\b|\bserver[- ]side\b|\bapis?\b|\brest(ful)?\b|"
+    r"\bmicroservices?\b|\bservices?\b|\bdistributed systems?\b|"
+    r"\bdatabases?\b|\bsql\b|\bpostgres(ql)?\b|\bmysql\b|\bspring\b",
+    re.I,
+)
+SOFTWARE_CONTEXT_RE = re.compile(
+    r"\bsoftware\b|\bdeveloper\b|\bweb app\b|\bapis?\b|\brest(ful)?\b|"
+    r"\bmicroservices?\b|\bdistributed systems?\b|\bproduction code\b|"
+    r"\bcode review\b|\bbuild(ing)? services?\b|\bprogramming\b|\bcoding\b|"
+    r"\bplatform software\b|\binfrastructure software\b|\bdata engineer(ing)?\b|"
+    r"\bml engineer\b|machine learning|\bsdet\b|qa automation|software test automation|"
+    r"\bembedded software\b|\bfirmware\b",
+    re.I,
+)
+GENERIC_TECH_RE = re.compile(r"\bpython\b|\bjava\b|\bsql\b|\blinux\b|\bc\+\+\b|\bcloud\b|\baws\b|\bgcp\b|\bazure\b", re.I)
+MANUFACTURING_CONTEXT_RE = re.compile(r"manufactur|factory|plant|plc|mechanical|electrical|hardware|industrial|process", re.I)
+
+
+def _hits(patterns, text: str) -> list[tuple[str, str]]:
+    found = []
+    for track, pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            found.append((track, match.group(0).strip()))
+    return found
+
+
+def _software_context_evidence(title: str, description: str, requirements: str) -> list[str]:
+    full = " ".join([title, description, requirements])
+    evidence = []
+    for match in SOFTWARE_CONTEXT_RE.finditer(full):
+        evidence.append(match.group(0).strip())
+        if len(evidence) >= 5:
+            break
+    if re.search(r"\bjava\b", full, re.I) and BACKEND_CONTEXT_RE.search(full):
+        evidence.append("Java with backend/API context")
+    if re.search(r"\bpython\b", full, re.I) and re.search(r"back[- ]?end|api|data|machine learning|ml|pipeline|service", full, re.I):
+        evidence.append("Python with software/data context")
+    if re.search(r"\bsql\b", full, re.I) and re.search(r"back[- ]?end|data engineer|pipeline|database|service", full, re.I):
+        evidence.append("SQL with backend/data context")
+    if re.search(r"\b(aws|gcp|azure|cloud)\b", full, re.I) and re.search(r"code|api|service|platform|developer|software|automation framework", full, re.I):
+        evidence.append("cloud with software/platform context")
+    return list(dict.fromkeys(evidence))
+
+
+def has_strong_software_context(title: str, description: str = "", requirements: str = "") -> bool:
+    """Return true only for explicit software context, not generic tools alone."""
+
+    full = " ".join([title, description, requirements])
+    if SOFTWARE_CONTEXT_RE.search(full):
+        return True
+    if re.search(r"\b(java|python|sql)\b", full, re.I) and BACKEND_CONTEXT_RE.search(full):
+        return True
+    if re.search(r"\b(aws|gcp|azure|cloud)\b", full, re.I) and re.search(r"code|api|service|platform|developer|software", full, re.I):
+        return True
+    if GENERIC_TECH_RE.search(full):
+        return False
+    return False
+
+
+def _finish_role(track: str, confidence: float, evidence: list[str], software_evidence: list[str], non_swe_evidence: list[str]) -> dict:
+    role = ROLE_TRACK_TO_ROLE.get(track, "unknown")
+    return {
+        "role": role,
+        "label": ROLE_LABELS[role],
+        "confidence": round(min(confidence, 0.95), 2),
+        "evidence": evidence[:5] or ["No clear role signals in the title or description."],
+        "role_track": track,
+        "role_track_label": ROLE_TRACK_LABELS[track],
+        "software_evidence": software_evidence[:6],
+        "non_swe_evidence": non_swe_evidence[:6],
+    }
 
 
 def classify_role(row: dict) -> dict:
     title = row.get("title", "")
-    body = " ".join([row.get("requirements", ""), row.get("description", "")])
+    description = row.get("description", "")
+    requirements = row.get("requirements", "")
+    body = " ".join([description, requirements])
+    full = " ".join([title, body])
 
-    scores = {}
-    evidence = {}
-    for role, patterns in ROLE_PATTERNS.items():
-        total = 0
-        hits = []
-        for pat, weight in patterns:
-            if re.search(pat, title, re.I):
-                total += weight * 3
-                hits.append(f'title: "{re.search(pat, title, re.I).group(0)}"')
-            elif re.search(pat, body, re.I):
-                total += weight
-                hits.append(f'"{re.search(pat, body, re.I).group(0)}"')
-        scores[role] = total
-        evidence[role] = hits
+    title_software_hits = _hits(SOFTWARE_TITLE_PATTERNS, title)
+    body_software_hits = _hits(SOFTWARE_TITLE_PATTERNS, body)
+    title_non_swe_hits = _hits(NON_SWE_TITLE_PATTERNS, title)
+    body_non_swe_hits = _hits(NON_SWE_TITLE_PATTERNS, body)
+    software_evidence = _software_context_evidence(title, description, requirements)
+    non_swe_evidence = [f"{track}: {hit}" for track, hit in [*title_non_swe_hits, *body_non_swe_hits]]
+    strong_software = has_strong_software_context(title, description, requirements)
 
-    # "Data entry" is clerical work, not data science — a strong title hit
-    # for it should not be diluted by an incidental "data" elsewhere.
+    # Clerical "data entry" must not be diluted by incidental data words.
     if re.search(r"data entry", title, re.I):
-        scores["data_science"] = 0
+        return _finish_role(
+            "non_technical",
+            0.9,
+            ['title: "data entry"'],
+            software_evidence,
+            non_swe_evidence or ["data entry"],
+        )
 
-    best = max(_TIEBREAK, key=lambda r: (scores[r], -_TIEBREAK.index(r)))
-    if scores[best] < 3:
-        return {"role": "unknown", "label": ROLE_LABELS["unknown"], "confidence": 0.2,
-                "evidence": ["No clear role signals in the title or description."]}
+    if title_software_hits:
+        track, hit = title_software_hits[0]
+        evidence = [f'title: "{hit}"']
+        if body_software_hits:
+            evidence.append(f'"{body_software_hits[0][1]}"')
+        return _finish_role(track, 0.82 + (0.05 if software_evidence else 0), evidence, software_evidence or [hit], non_swe_evidence)
 
-    confidence = round(min(0.95, 0.3 + 0.05 * scores[best]), 2)
-    return {
-        "role": best,
-        "label": ROLE_LABELS[best],
-        "confidence": confidence,
-        "evidence": evidence[best][:5],
-    }
+    if title_non_swe_hits:
+        track, hit = title_non_swe_hits[0]
+        # Non-SWE engineering can be rescued only by explicit software/firmware
+        # context, never by "engineer", generic Python/Linux/cloud, or prestige.
+        if track == "quality_test" and re.search(r"\bsdet\b|qa automation|software test automation|automated testing framework", full, re.I):
+            return _finish_role(
+                "sdet_qa_automation",
+                0.82,
+                [f'title: "{hit}"', "software QA automation context"],
+                software_evidence or ["software QA automation"],
+                non_swe_evidence,
+            )
+        if track == "factory_automation" and strong_software and not MANUFACTURING_CONTEXT_RE.search(title):
+            return _finish_role(
+                "platform_infra",
+                0.72,
+                [f'title: "{hit}"', "software automation context"],
+                software_evidence,
+                non_swe_evidence,
+            )
+        if track in {"electrical_hardware", "mechanical_manufacturing", "factory_automation", "quality_test"}:
+            if re.search(r"embedded software|firmware|software engineer|software developer|back[- ]?end|full[- ]?stack|platform software|infrastructure software", full, re.I):
+                rescue_track = "firmware" if re.search(r"\bfirmware\b", full, re.I) else "embedded_software" if re.search(r"embedded software", full, re.I) else "general_swe"
+                return _finish_role(
+                    rescue_track,
+                    0.74,
+                    [f'non-SWE title signal "{hit}" overridden by explicit software context'],
+                    software_evidence,
+                    non_swe_evidence,
+                )
+        return _finish_role(
+            track,
+            0.82,
+            [f'title: "{hit}"'],
+            software_evidence,
+            non_swe_evidence or [hit],
+        )
+
+    if re.search(r"\bcloud\b", title, re.I):
+        track = "cloud" if strong_software else "other_engineering"
+        evidence = ['title: "cloud"', "software/platform context"] if strong_software else ['title: "cloud" without software ownership context']
+        return _finish_role(track, 0.68, evidence, software_evidence, non_swe_evidence)
+
+    if re.search(r"\bdevops\b", title, re.I):
+        track = "devops" if strong_software else "other_engineering"
+        evidence = ['title: "DevOps"', "developer tooling/software context"] if strong_software else ['title: "DevOps" without software ownership context']
+        return _finish_role(track, 0.68, evidence, software_evidence, non_swe_evidence)
+
+    if re.search(r"\bembedded engineer", title, re.I):
+        track = "embedded_software" if re.search(r"firmware|embedded software|software|production code|programming|coding", full, re.I) else "electrical_hardware"
+        evidence = ['title: "embedded engineer"']
+        return _finish_role(track, 0.7, evidence, software_evidence, non_swe_evidence)
+
+    if re.search(r"\b(engineer|engineering intern)\b", title, re.I):
+        if strong_software:
+            track = "backend" if BACKEND_CONTEXT_RE.search(full) else "general_swe"
+            return _finish_role(track, 0.68, ['generic engineer title with strong software context'], software_evidence, non_swe_evidence)
+        return _finish_role(
+            "other_engineering",
+            0.66,
+            ['generic engineer title without strong software context'],
+            software_evidence,
+            non_swe_evidence,
+        )
+
+    if body_software_hits or strong_software:
+        track = body_software_hits[0][0] if body_software_hits else "general_swe"
+        return _finish_role(track, 0.58, [f'"{body_software_hits[0][1]}"'] if body_software_hits else ["strong software context"], software_evidence, non_swe_evidence)
+
+    if body_non_swe_hits:
+        track, hit = body_non_swe_hits[0]
+        return _finish_role(track, 0.55, [f'"{hit}"'], software_evidence, non_swe_evidence)
+
+    return _finish_role("unknown", 0.2, ["No clear role signals in the title or description."], software_evidence, non_swe_evidence)

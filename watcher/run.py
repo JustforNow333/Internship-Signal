@@ -75,7 +75,12 @@ def run_once(
     should_mark_seen = digest_sent or (mark_seen_without_send and bool(new_matches))
     seen_marked = len(new_matches) if should_mark_seen else 0
     if should_mark_seen:
-        seen_store.mark_many_seen(new_matches, seen_at=seen_at or datetime.now(timezone.utc))
+        timestamp = seen_at or datetime.now(timezone.utc)
+        seen_store.mark_many_seen(
+            new_matches,
+            seen_at=timestamp,
+            emailed_at=timestamp if digest_sent else None,
+        )
         if digest_sent:
             LOGGER.info("Digest sent; marked %d job(s) seen.", seen_marked)
         else:
@@ -160,10 +165,14 @@ def print_report(result: RunResult, *, output: TextIO | None = None) -> None:
         red_flags = job.get("red_flags") or []
         print(f"[{source}] {job.get('company', '')} - {job.get('title', '')}", file=output)
         print(f"  location: {job.get('location', '') or '(not listed)'}", file=output)
+        print(f"  role track: {score.get('role_track') or job.get('role_classification', {}).get('role_track', 'unknown')}", file=output)
         print(
-            f"  score: {score.get('total', 0)} ({score.get('action_label') or score.get('action', 'unknown')})",
+            f"  score: {score.get('total', 0)}, fit: {score.get('fit_score', score.get('total', 0))} "
+            f"({score.get('watcher_action_label') or score.get('action_label') or score.get('action', 'unknown')})",
             file=output,
         )
+        if score.get("fit_explanation"):
+            print(f"  fit reason: {score['fit_explanation']}", file=output)
         print(f"  top reason: {reasons[0] if reasons else '(none)'}", file=output)
         if red_flags:
             labels = ", ".join(flag.get("label", str(flag)) for flag in red_flags)

@@ -11,6 +11,7 @@ Hard rules sit on top of the weighted sum:
 """
 
 from datetime import date
+import re
 
 from .config import BUCKET_THRESHOLDS, SCORE_WEIGHTS
 from .normalize import days_until
@@ -23,6 +24,48 @@ ACTION_LABELS = {
     "skip": "Skip",
 }
 
+SOFTWARE_FIT_TRACKS = {
+    "backend",
+    "full_stack",
+    "frontend",
+    "general_swe",
+    "platform_infra",
+    "data_engineering",
+    "ml_ai",
+    "quant_dev",
+    "cloud",
+    "devops",
+    "embedded_software",
+    "firmware",
+    "sdet_qa_automation",
+}
+LOW_PRIORITY_FIT_TRACKS = {"it_support", "quality_test", "solutions_engineering"}
+ROLE_TRACK_PRIORITY = {
+    "backend": 0,
+    "full_stack": 1,
+    "general_swe": 2,
+    "platform_infra": 3,
+    "data_engineering": 4,
+    "ml_ai": 5,
+    "quant_dev": 6,
+    "frontend": 7,
+    "cloud": 8,
+    "devops": 9,
+    "embedded_software": 10,
+    "firmware": 11,
+    "sdet_qa_automation": 12,
+    "it_support": 50,
+    "quality_test": 51,
+    "solutions_engineering": 52,
+}
+BACKEND_FIT_RE = re.compile(
+    r"\bback[- ]?end\b|\bserver[- ]side\b|\bapis?\b|\brest(ful)?\b|"
+    r"\bservices?\b|\bmicroservices?\b|\bdistributed systems?\b|"
+    r"\bdatabases?\b|\bsql\b|\bpostgres(ql)?\b|\bmysql\b|\bspring\b",
+    re.I,
+)
+PRODUCTION_CODE_RE = re.compile(r"production code|code review|ship (real )?(code|features?)|own .*service|building services?", re.I)
+
 
 def _clamp(x, lo=0, hi=100):
     return max(lo, min(hi, x))
@@ -32,17 +75,104 @@ def _clamp(x, lo=0, hi=100):
 # Category scorers — each returns (score, explanation)
 # ---------------------------------------------------------------------------
 
-def score_role_relevance(role_cls, pmatch, profile):
-    base = profile["role_affinity"].get(role_cls["role"], 40)
-    bonus = min(len(pmatch["matched_skills"]) * 3, 12)
-    score = _clamp(base + bonus)
-    expl = f"{role_cls['label']} role (base {base} for your interests)"
-    if bonus:
-        expl += f", +{bonus} for {len(pmatch['matched_skills'])} matched skills"
-    if role_cls["confidence"] < 0.5:
-        score = _clamp(score - 10)
-        expl += "; low classification confidence (-10)"
-    return score, expl + "."
+def _role_track_affinity(role_cls, profile):
+    track = role_cls.get("role_track") or role_cls.get("role") or "unknown"
+    track_affinity = profile.get("role_track_affinity", {})
+    if track in track_affinity:
+        return int(track_affinity.get(track) or 0)
+    return int(profile.get("role_affinity", {}).get(role_cls.get("role"), 0) or 0)
+
+
+def _watcher_ineligible_reason(role_cls, profile) -> str | None:
+    track = role_cls.get("role_track") or "unknown"
+    if _role_track_affinity(role_cls, profile) > 0:
+        return None
+    label = role_cls.get("role_track_label") or role_cls.get("label") or track.replace("_", " ")
+    if track == "unknown":
+        return "Role lacks strong software/backend/data/ML/quant evidence for the SWE watcher."
+    return f"{label} role outside the target SWE/software-adjacent watcher track."
+
+
+def _watcher_action(fit_score: int, eligible: bool, expired: bool) -> str:
+    if expired or not eligible or fit_score <= 0:
+        return "skip"
+    if fit_score >= 75:
+        return "apply_now"
+    if fit_score >= 45:
+        return "apply_later"
+    return "research_more"
+
+
+def score_role_relevance(row, role_cls, pmatch, profile):
+    track = role_cls.get("role_track") or role_cls.get("role") or "unknown"
+    base = _role_track_affinity(role_cls, profile)
+    if base <= 0:
+        reason = _watcher_ineligible_reason(role_cls, profile) or "Role is outside the watcher target track."
+        return 0, reason
+
+    text = " ".join([row.get("title", ""), row.get("description", ""), row.get("requirements", "")])
+    backend_hit = BACKEND_FIT_RE.search(text)
+    adjacent_software_ownership = bool(
+        backend_hit
+        or PRODUCTION_CODE_RE.search(text)
+        or re.search(r"developer tooling|automation code|platform services?|cloud APIs?|software ownership", text, re.I)
+    )
+    if track in {"cloud", "devops"} and not adjacent_software_ownership:
+        return 0, f"{role_cls.get('role_track_label')} title lacks clear coding/backend/platform software ownership."
+
+    if track in LOW_PRIORITY_FIT_TRACKS:
+        label = role_cls.get("role_track_label") or track.replace("_", " ")
+        return min(base, 20), f"{label} is visible as a low-priority adjacent track, capped at 20."
+
+    matched_skills = pmatch.get("matched_skills") or []
+    score = float(base)
+    parts = [f"{role_cls.get('role_track_label') or role_cls.get('label')} role-track base {base}"]
+
+    if backend_hit and track in {"backend", "full_stack", "platform_infra", "data_engineering", "general_swe"}:
+        score += 10
+        parts.append(f"+10 backend/API/data-services evidence ({backend_hit.group(0)})")
+
+    language_context = False
+    if re.search(r"\b(java|python|sql)\b", text, re.I) and (
+        backend_hit or track in {"backend", "data_engineering", "platform_infra", "ml_ai"}
+    ):
+        language_context = True
+        score += 6
+        parts.append("+6 Java/Python/SQL in software/backend/data context")
+
+    if PRODUCTION_CODE_RE.search(text) and track in SOFTWARE_FIT_TRACKS:
+        score += 5
+        parts.append("+5 production code/services ownership")
+
+    if track == "platform_infra" and not backend_hit:
+        score += 4
+        parts.append("+4 platform/infrastructure software focus")
+
+    skill_bonus = min(len(matched_skills) * 2, 8) if track in SOFTWARE_FIT_TRACKS else 0
+    if skill_bonus:
+        score += skill_bonus
+        parts.append(f"+{skill_bonus} for {len(matched_skills)} matched profile skills")
+
+    penalties = {
+        "cloud": 15,
+        "devops": 15,
+        "embedded_software": 20,
+        "firmware": 22,
+        "sdet_qa_automation": 30,
+        "frontend": 15,
+    }
+    penalty = penalties.get(track, 0)
+    if penalty:
+        if track in {"cloud", "devops"} and (backend_hit or language_context or PRODUCTION_CODE_RE.search(text)):
+            penalty = max(5, penalty - 8)
+        score -= penalty
+        parts.append(f"-{penalty} adjacent-track penalty versus backend")
+
+    if role_cls.get("confidence", 1) < 0.5:
+        score -= 10
+        parts.append("-10 low classification confidence")
+
+    return _clamp(round(score)), "; ".join(parts) + "."
 
 
 def score_compensation(comp, profile):
@@ -126,9 +256,10 @@ def score_technical_depth(row, role_cls, tools):
     expl = f"{n} concrete technolog{'y' if n == 1 else 'ies'} named"
     if tools:
         expl += f" ({', '.join(tools[:5])})"
-    if role_cls["role"] in ("non_technical", "it"):
+    track = role_cls.get("role_track") or role_cls.get("role")
+    if track not in SOFTWARE_FIT_TRACKS:
         score = min(score, 35)
-        expl += "; capped — role itself is not engineering-track"
+        expl += "; capped — role itself is not a software-track role"
     return score, expl + "."
 
 
@@ -198,7 +329,7 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
     today = today or date.today()
 
     cat = {}
-    cat["role_relevance"] = score_role_relevance(role_cls, pmatch, profile)
+    cat["role_relevance"] = score_role_relevance(row, role_cls, pmatch, profile)
     cat["compensation"] = score_compensation(comp, profile)
     cat["legitimacy"] = score_legitimacy(red_flags, company_cls, comp, positive)
     cat["learning_value"] = score_learning(red_flags, positive)
@@ -213,11 +344,19 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
         for name, (s, e) in cat.items()
     }
     total = round(sum(c["score"] * c["weight"] for c in categories.values()))
+    fit_score = categories["role_relevance"]["score"]
+    watcher_eligible = fit_score > 0
+    fit_explanation = categories["role_relevance"]["explanation"]
+    watcher_ineligible_reason = _watcher_ineligible_reason(role_cls, profile) or (
+        fit_explanation if not watcher_eligible else None
+    )
 
     has_critical = any(f["severity"] == "critical" for f in red_flags)
     majors = sum(1 for f in red_flags if f["severity"] == "major")
     expired = days_left is not None and days_left < 0
 
+    if not watcher_eligible:
+        total = min(total, BUCKET_THRESHOLDS["maybe"] - 1)
     if has_critical:
         total = min(total, BUCKET_THRESHOLDS["maybe"] - 5)
     elif majors >= 3:
@@ -225,10 +364,12 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
         total = min(total, BUCKET_THRESHOLDS["maybe"] - 1)
 
     bucket = "high" if total >= BUCKET_THRESHOLDS["high"] else "maybe" if total >= BUCKET_THRESHOLDS["maybe"] else "low"
-    if has_critical or majors >= 3:
+    if not watcher_eligible or has_critical or majors >= 3:
         bucket = "low"
 
-    if has_critical:
+    if not watcher_eligible:
+        action = "skip"
+    elif has_critical:
         action = "skip"
     elif majors >= 3:
         action = "skip"
@@ -240,6 +381,8 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
         action = "research_more"
     elif total >= 60 and days_left is not None and 0 <= days_left <= 7 and majors == 0:
         action = "apply_now"
+    elif role_cls.get("confidence", 1) < 0.6 and total < BUCKET_THRESHOLDS["high"]:
+        action = "research_more"
     elif total >= 55:
         action = "apply_later"
     elif total >= BUCKET_THRESHOLDS["maybe"]:
@@ -247,8 +390,12 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
     else:
         action = "skip"
 
-    reasons = _top_reasons(positive, categories)
+    watcher_action = _watcher_action(fit_score, watcher_eligible, expired)
+    reasons = _top_reasons(positive, categories, fit_explanation=fit_explanation, watcher_eligible=watcher_eligible)
     concerns = _top_concerns(red_flags, categories, expired)
+    if watcher_ineligible_reason and watcher_ineligible_reason not in concerns:
+        concerns.insert(0, watcher_ineligible_reason)
+        concerns = concerns[:3]
 
     explanation = (
         f"Weighted total of eight categories: {total}/100. Strongest: "
@@ -259,6 +406,13 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
 
     return {
         "total": int(total),
+        "fit_score": int(fit_score if watcher_eligible else 0),
+        "watcher_eligible": bool(watcher_eligible),
+        "watcher_ineligible_reason": None if watcher_eligible else watcher_ineligible_reason,
+        "fit_explanation": fit_explanation,
+        "role_track": role_cls.get("role_track", "unknown"),
+        "watcher_action": watcher_action,
+        "watcher_action_label": ACTION_LABELS[watcher_action],
         "bucket": bucket,
         "action": action,
         "action_label": ACTION_LABELS[action],
@@ -275,8 +429,11 @@ def _extreme(categories, best=True):
     return f"{name.replace('_', ' ')} ({data['score']})"
 
 
-def _top_reasons(positive, categories):
-    reasons = [s["label"] for s in sorted(positive, key=lambda s: -s["strength"])]
+def _top_reasons(positive, categories, *, fit_explanation=None, watcher_eligible=True):
+    reasons = []
+    if watcher_eligible and fit_explanation:
+        reasons.append(f"Role fit: {fit_explanation}")
+    reasons.extend(s["label"] for s in sorted(positive, key=lambda s: -s["strength"]))
     for name, data in sorted(categories.items(), key=lambda kv: -kv[1]["score"]):
         if data["score"] >= 85 and len(reasons) < 6:
             reasons.append(f"Strong {name.replace('_', ' ')}: {data['explanation']}")

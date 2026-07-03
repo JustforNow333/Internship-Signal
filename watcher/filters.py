@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
+from watcher.eligibility import determine_watcher_eligibility
+
 TARGET_ROLES = frozenset({"swe"})
 MIN_SCORE: int | None = None
 
@@ -27,19 +29,20 @@ def is_match(
     target_roles: set[str] | frozenset[str] = TARGET_ROLES,
     min_score: int | None = MIN_SCORE,
 ) -> bool:
-    if not is_target_role(job, target_roles=target_roles):
+    eligibility = determine_watcher_eligibility(job, target_roles)
+    if not eligibility["watcher_eligible"] or eligibility["fit_score"] <= 0:
         return False
     if not is_internship(job):
         return False
     if not is_open(job):
         return False
-    if min_score is not None and job.get("score", {}).get("total", 0) < min_score:
+    if min_score is not None and eligibility["fit_score"] < min_score:
         return False
     return True
 
 
 def is_target_role(job: dict, *, target_roles: set[str] | frozenset[str] = TARGET_ROLES) -> bool:
-    return job.get("role_classification", {}).get("role") in target_roles
+    return determine_watcher_eligibility(job, target_roles)["watcher_eligible"]
 
 
 def is_internship(job: dict) -> bool:

@@ -1,6 +1,8 @@
+import sqlite3
 from datetime import date, datetime, timezone
 
 from watcher.config import CompanyCfg, WatcherConfig
+from watcher.notify import render_digest
 from watcher.run import collect_rows, print_heartbeat, print_report, run_once
 from watcher.seen_store import SeenStore
 from watcher.sources.base import SourceError, make_row
@@ -35,7 +37,16 @@ class FakeDigestSender:
         return self.sent
 
 
-def row(company, title, *, source="direct", url=None, deadline="", description="Build Python APIs with React."):
+def row(
+    company,
+    title,
+    *,
+    source="direct",
+    url=None,
+    deadline="",
+    description="Build Python APIs with React.",
+    requirements="Python, SQL, REST APIs, Git",
+):
     return make_row(
         source=source,
         source_adapter="fake",
@@ -43,6 +54,7 @@ def row(company, title, *, source="direct", url=None, deadline="", description="
         title=title,
         location="New York, NY",
         description=description,
+        requirements=requirements,
         source_url=url or f"https://example.com/{company}/{title}".replace(" ", "-"),
         deadline=deadline,
         internship_type="Summer",
@@ -68,8 +80,9 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
         row("GitHub", "Software Engineering Intern", source="github", description=""),
     ]
     digest_sender = FakeDigestSender(sent=True)
+    db_path = tmp_path / "seen.sqlite"
 
-    with SeenStore(tmp_path / "seen.sqlite") as store:
+    with SeenStore(db_path) as store:
         first = run_once(
             config,
             seen_store=store,
@@ -99,6 +112,10 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
     assert first.digest_sent is True
     assert first.seen_marked == 2
     assert [len(call) for call in digest_sender.calls] == [2, 0]
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("select emailed_at from seen order by job_id").fetchall()
+    assert len(rows) == 2
+    assert all(row[0] == "2026-06-09T00:00:00+00:00" for row in rows)
 
 
 def test_run_once_does_not_mark_seen_when_digest_not_sent(tmp_path):
@@ -135,8 +152,9 @@ def test_run_once_can_prime_seen_store_without_sending(tmp_path):
     config = WatcherConfig(companies=(CompanyCfg(name="DirectCo", ats="greenhouse", token="directco"),))
     direct_rows = [row("DirectCo", "Software Engineer Intern")]
     digest_sender = FakeDigestSender(sent=False)
+    db_path = tmp_path / "seen.sqlite"
 
-    with SeenStore(tmp_path / "seen.sqlite") as store:
+    with SeenStore(db_path) as store:
         first = run_once(
             config,
             seen_store=store,
@@ -144,6 +162,7 @@ def test_run_once_can_prime_seen_store_without_sending(tmp_path):
             github_source=FakeGithub([]),
             digest_sender=digest_sender,
             today=date(2026, 6, 9),
+            seen_at=datetime(2026, 6, 9, tzinfo=timezone.utc),
             mark_seen_without_send=True,
         )
         second = run_once(
@@ -161,6 +180,9 @@ def test_run_once_can_prime_seen_store_without_sending(tmp_path):
     assert first.digest_sent is False
     assert first.seen_marked == 1
     assert [len(call) for call in digest_sender.calls] == [1, 0]
+    with sqlite3.connect(db_path) as conn:
+        seen_row = conn.execute("select first_seen, emailed_at from seen").fetchone()
+    assert seen_row == ("2026-06-09T00:00:00+00:00", None)
 
 
 def test_run_once_passes_watchlist_aliases_to_alumni_join(tmp_path):
@@ -278,3 +300,104 @@ def test_print_heartbeat(capsys):
         "HEARTBEAT: ran, rows_fetched=3, jobs_scored=2, matches=2, "
         "new=1, errors=1, sent=no, seen_marked=1\n"
     )
+
+
+def test_synthetic_digest_excludes_non_swe_engineering_and_ranks_backend_java(tmp_path):
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(name="Bosch", ats="greenhouse", token="bosch"),
+            CompanyCfg(name="HackerRank", ats="greenhouse", token="hackerrank"),
+            CompanyCfg(name="Anduril Industries", ats="greenhouse", token="anduril"),
+        )
+    )
+    direct_rows = {
+        "Bosch": [
+            row(
+                "Bosch",
+                "IT Internship (BackEnd, Java)",
+                description="Build BackEnd services and REST APIs in Java.",
+                requirements="Java, SQL, Git",
+            ),
+            row(
+                "Bosch",
+                "Cloud Developer Internship",
+                description="Build cloud APIs and platform services in Python.",
+                requirements="AWS, Python, Docker",
+            ),
+            row(
+                "Bosch",
+                "DevOps Engineering Intern",
+                description="Own developer tooling and automation code for backend infrastructure APIs.",
+                requirements="Python, Docker, Linux",
+            ),
+            row(
+                "Bosch",
+                "Mechanical Design Engineer",
+                description="Design mechanical components for manufacturing.",
+                requirements="CAD, fixtures, manufacturing",
+            ),
+            row(
+                "Bosch",
+                "Factory Automation Engineering Intern",
+                description="Support PLCs and plant automation equipment.",
+                requirements="PLC, manufacturing, electrical systems",
+            ),
+        ],
+        "HackerRank": [
+            row(
+                "HackerRank",
+                "Customer Experience Engineer - Intern",
+                description="Help customers troubleshoot issues and answer support tickets.",
+                requirements="Customer support, SQL",
+            ),
+        ],
+        "Anduril Industries": [
+            row(
+                "Anduril Industries",
+                "2027 Electrical Engineer Intern",
+                description="Design and test electrical hardware.",
+                requirements="Circuits, PCB, lab equipment",
+            ),
+            row(
+                "Anduril Industries",
+                "2027 Manufacturing Engineer Intern",
+                description="Improve manufacturing processes on the factory floor.",
+                requirements="Manufacturing, process engineering",
+            ),
+            row(
+                "Anduril Industries",
+                "2027 Software Engineer Intern",
+                description="Build backend APIs and production services.",
+                requirements="Python, Java, SQL, REST APIs",
+            ),
+        ],
+    }
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource(direct_rows)},
+            github_source=FakeGithub([]),
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 6, 9),
+        )
+
+    subject, body = render_digest(result.new_matches)
+
+    assert subject == "Internship Watcher: 4 new SWE-intern matches"
+    assert "IT Internship (BackEnd, Java)" in body
+    assert "Cloud Developer Internship" in body
+    assert "DevOps Engineering Intern" in body
+    assert "2027 Software Engineer Intern" in body
+    for excluded in (
+        "Mechanical Design Engineer",
+        "Factory Automation Engineering Intern",
+        "Customer Experience Engineer - Intern",
+        "2027 Electrical Engineer Intern",
+        "2027 Manufacturing Engineer Intern",
+    ):
+        assert excluded not in body
+
+    assert body.index("IT Internship (BackEnd, Java)") < body.index("Cloud Developer Internship")
+    assert body.index("IT Internship (BackEnd, Java)") < body.index("DevOps Engineering Intern")

@@ -545,3 +545,377 @@ companies:
     alumni_match: ["ey", "ernst & young", "ernst and young"]
     source_url: "https://careers.ey.com/"
     note: "SuccessFactors portal; unsupported by current watcher adapters"
+
+  - name: "TextQL"
+    ats: bespoke
+    module: "textql"
+    alumni_match: ["textql"]
+    source_url: "https://textql.com/resources/careers"
+    note: "company-hosted careers portal"
+
+  - name: "Worklytics"
+    ats: github_only
+    alumni_match: ["worklytics"]
+    note: "no supported ATS URL or active careers portal found"
+
+  - name: "Monetate"
+    ats: bespoke
+    module: "monetate"
+    alumni_match: ["monetate"]
+    source_url: "https://monetate.com/careers/"
+    note: "company-hosted careers portal"
+
+  - name: "Bnchmrk"
+    ats: github_only
+    alumni_match: ["bnchmrk"]
+    note: "no supported ATS URL or active careers portal found"
+
+  - name: "Ardent"
+    ats: github_only
+    alumni_match: ["ardent"]
+    note: "ambiguous company name; no confident exact careers source selected"
+
+  - name: "Brooks Automation"
+    ats: workday
+    token: "brooksauto"
+    workday_shard: "wd1"
+    workday_site: "Brooks_External_Site"
+    alumni_match: ["brooks automation"]
+    source_url: "https://brooksauto.wd1.myworkdayjobs.com/Brooks_External_Site"
+
+  - name: "General Dynamics Electric Boat"
+    ats: bespoke
+    module: "general_dynamics_electric_boat"
+    aliases: ["Electric Boat", "GDEB"]
+    alumni_match: ["general dynamics electric boat", "electric boat", "gdeb"]
+    source_url: "https://careers-gdeb.icims.com/"
+    note: "iCIMS portal; unsupported by current watcher adapters"
+
+  - name: "Halo Industries"
+    ats: bespoke
+    module: "halo_industries"
+    aliases: ["Halo"]
+    alumni_match: ["halo industries", "halo"]
+    source_url: "https://halo.com/careers/"
+    note: "company-hosted careers portal"
+
+  - name: "Proterra"
+    ats: github_only
+    alumni_match: ["proterra"]
+    source_url: "https://recruiting2.ultipro.com/PRO1047PROTI/JobBoard/e33a1c2e-8d7a-4008-851e-f7bd1d7bf788/?q=&o=postedDateDesc&w=&wc=&we=&wpst="
+    note: "UKG/UltiPro portal; unsupported by current watcher adapters"
+
+  - name: "SharkNinja"
+    ats: greenhouse
+    token: "sharkninjaoperatingllc"
+    aliases: ["Shark Ninja"]
+    alumni_match: ["sharkninja", "shark ninja"]
+    source_url: "https://job-boards.greenhouse.io/sharkninjaoperatingllc"
+
+  - name: "LMR Partners"
+    ats: bespoke
+    module: "lmr_partners"
+    alumni_match: ["lmr partners"]
+    source_url: "https://www.lmrpartners.com/careers"
+    note: "company-hosted careers portal"
+
+  - name: "Taula Capital"
+    ats: github_only
+    alumni_match: ["taula capital"]
+    source_url: "https://www.taulacapital.com/"
+    note: "no supported ATS URL or active careers portal found"
+
+  - name: "Evercore"
+    ats: bespoke
+    module: "evercore"
+    alumni_match: ["evercore"]
+    source_url: "https://www.evercore.com/careers/"
+    note: "company-hosted careers portal"
+
+  - name: "Moelis & Company"
+    ats: workday
+    token: "moelis"
+    workday_shard: "wd1"
+    workday_site: "Experienced-Hires"
+    aliases: ["Moelis"]
+    alumni_match: ["moelis & company", "moelis"]
+    source_url: "https://moelis.wd1.myworkdayjobs.com/Experienced-Hires"
+
+  - name: "Blackstone"
+    ats: workday
+    token: "blackstone"
+    workday_shard: "wd1"
+    workday_site: "Blackstone_Careers"
+    alumni_match: ["blackstone"]
+    source_url: "https://blackstone.wd1.myworkdayjobs.com/Blackstone_Careers"
+
+  - name: "Apollo Global Management"
+    ats: workday
+    token: "athene"
+    workday_shard: "wd5"
+    workday_site: "Apollo_Careers"
+    aliases: ["Apollo", "Apollo Global"]
+    alumni_match: ["apollo global management", "apollo", "apollo global"]
+    source_url: "https://athene.wd5.myworkdayjobs.com/Apollo_Careers"
+
+  - name: "Brookfield"
+    ats: bespoke
+    module: "brookfield"
+    aliases: ["Brookfield Asset Management"]
+    alumni_match: ["brookfield", "brookfield asset management"]
+    source_url: "https://www.brookfield.com/careers/life-at-brookfield"
+    note: "company-hosted careers portal"
+
+  - name: "The Carlyle Group"
+    ats: bespoke
+    module: "the_carlyle_group"
+    aliases: ["Carlyle"]
+    alumni_match: ["the carlyle group", "carlyle"]
+    source_url: "https://www.carlyle.com/careers"
+    note: "company-hosted careers portal; unsupported by current watcher adapters"
+
+  - name: "TPG Capital"
+    ats: greenhouse
+    token: "tpgcareers"
+    aliases: ["TPG"]
+    alumni_match: ["tpg capital", "tpg"]
+    source_url: "https://job-boards.greenhouse.io/tpgcareers"
+
+  - name: "Sixth Street"
+    ats: bespoke
+    module: "sixth_street"
+    alumni_match: ["sixth street"]
+    source_url: "https://sixth.com/careers"
+    note: "company-hosted careers portal"
+
+  - name: "Vitol"
+    ats: smartrecruiters
+    token: "Vitol"
+    aliases: ["Vitol Group"]
+    alumni_match: ["vitol", "vitol group"]
+    source_url: "https://jobs.smartrecruiters.com/Vitol"
+
+  - name: "Analysis Group"
+    ats: bespoke
+    module: "analysis_group"
+    alumni_match: ["analysis group"]
+    source_url: "https://www.analysisgroup.com/careers/"
+    note: "iCIMS portal; unsupported by current watcher adapters"
+
+  - name: "Cornerstone Research"
+    ats: workday
+    token: "cornerstone"
+    workday_shard: "wd501"
+    workday_site: "CornerstoneResearch_Careers"
+    alumni_match: ["cornerstone research"]
+    source_url: "https://cornerstone.wd501.myworkdayjobs.com/CornerstoneResearch_Careers"
+
+  - name: "Charles River Associates"
+    ats: greenhouse
+    token: "charlesriverassociates"
+    aliases: ["CRA"]
+    alumni_match: ["charles river associates", "cra"]
+    source_url: "https://job-boards.greenhouse.io/charlesriverassociates"
+
+  - name: "FTI Delta"
+    ats: workday
+    token: "fticonsulting"
+    workday_shard: "wd108"
+    workday_site: "FTIConsultingCareers"
+    aliases: ["FTI Consulting"]
+    alumni_match: ["fti delta", "fti consulting"]
+    source_url: "https://fticonsulting.wd108.myworkdayjobs.com/FTIConsultingCareers"
+
+  - name: "Bain & Company"
+    ats: bespoke
+    module: "bain_company"
+    aliases: ["Bain"]
+    alumni_match: ["bain & company", "bain"]
+    source_url: "https://www.bain.com/careers/"
+    note: "company-hosted careers portal; unsupported by current watcher adapters"
+
+  - name: "Aon"
+    ats: bespoke
+    module: "aon"
+    alumni_match: ["aon"]
+    source_url: "https://jobs.aon.com/"
+    note: "company-hosted iCIMS portal; unsupported by current watcher adapters"
+
+  - name: "WTW"
+    ats: smartrecruiters
+    token: "WTW"
+    aliases: ["Willis Towers Watson"]
+    alumni_match: ["wtw", "willis towers watson"]
+    source_url: "https://careers.smartrecruiters.com/WTW"
+
+  - name: "Arup"
+    ats: bespoke
+    module: "arup"
+    alumni_match: ["arup"]
+    source_url: "https://jobs.arup.com/"
+    note: "Taleo/company-hosted careers portal; unsupported by current watcher adapters"
+
+  - name: "Thornton Tomasetti"
+    ats: workday
+    token: "tt"
+    workday_shard: "wd503"
+    workday_site: "ThorntonTomasetti"
+    alumni_match: ["thornton tomasetti"]
+    source_url: "https://tt.wd503.myworkdayjobs.com/ThorntonTomasetti"
+
+  - name: "Jacobs"
+    ats: bespoke
+    module: "jacobs"
+    alumni_match: ["jacobs"]
+    source_url: "https://careers.jacobs.com/en_US/careers/Home"
+    note: "company-hosted careers portal; unsupported by current watcher adapters"
+
+  - name: "Bechtel Corporation"
+    ats: bespoke
+    module: "bechtel_corporation"
+    aliases: ["Bechtel"]
+    alumni_match: ["bechtel corporation", "bechtel"]
+    source_url: "https://jobs.bechtel.com/"
+    note: "BrassRing/Phenom careers portal; unsupported by current watcher adapters"
+
+  - name: "Air Products"
+    ats: workday
+    token: "airproducts"
+    workday_shard: "wd5"
+    workday_site: "AP0001"
+    aliases: ["Air Products and Chemicals"]
+    alumni_match: ["air products", "air products and chemicals"]
+    source_url: "https://airproducts.wd5.myworkdayjobs.com/AP0001"
+
+  - name: "LevelTen Energy"
+    ats: greenhouse
+    token: "leveltenenergy"
+    alumni_match: ["levelten energy"]
+    source_url: "https://job-boards.greenhouse.io/leveltenenergy"
+
+  - name: "Convergent Energy and Power"
+    ats: workable
+    token: "convergent-careers"
+    aliases: ["Convergent Energy + Power", "Convergent"]
+    alumni_match: ["convergent energy and power", "convergent energy + power", "convergent"]
+    source_url: "https://apply.workable.com/convergent-careers/"
+
+  - name: "Orsted"
+    ats: bespoke
+    module: "orsted"
+    aliases: ["Oersted"]
+    alumni_match: ["orsted", "oersted"]
+    source_url: "https://us.orsted.com/careers/vacancies"
+    note: "company-hosted careers portal; unsupported by current watcher adapters"
+
+  - name: "Fractal Energy Storage Consultants"
+    ats: github_only
+    aliases: ["Fractal"]
+    alumni_match: ["fractal energy storage consultants", "fractal"]
+    source_url: "https://www.energystorageconsultants.com/"
+    note: "no supported ATS URL or active careers portal found"
+
+  - name: "ClimaData Corporation"
+    ats: github_only
+    aliases: ["ClimaData"]
+    alumni_match: ["climadata corporation", "climadata"]
+    source_url: "https://climadata.com/"
+    note: "no supported ATS URL or active careers portal found"
+
+  - name: "Trail Ridge Power"
+    ats: bespoke
+    module: "trail_ridge_power"
+    alumni_match: ["trail ridge power"]
+    source_url: "https://www.trailridgepower.com/"
+    note: "company-hosted careers/contact page; unsupported by current watcher adapters"
+
+  - name: "Vaisala"
+    ats: bespoke
+    module: "vaisala"
+    alumni_match: ["vaisala"]
+    source_url: "https://www.vaisala.com/en/careers/open-jobs"
+    note: "company-hosted/Salesforce Experience careers portal; unsupported by current watcher adapters"
+
+  - name: "Merck"
+    ats: workday
+    token: "msd"
+    workday_shard: "wd5"
+    workday_site: "SearchJobs"
+    aliases: ["Merck & Co", "MSD"]
+    alumni_match: ["merck", "merck & co", "msd"]
+    source_url: "https://msd.wd5.myworkdayjobs.com/SearchJobs"
+
+  - name: "Pfizer"
+    ats: workday
+    token: "pfizer"
+    workday_shard: "wd1"
+    workday_site: "PfizerCareers"
+    alumni_match: ["pfizer"]
+    source_url: "https://pfizer.wd1.myworkdayjobs.com/PfizerCareers"
+
+  - name: "Eli Lilly and Company"
+    ats: workday
+    token: "lilly"
+    workday_shard: "wd115"
+    workday_site: "LLY"
+    aliases: ["Eli Lilly", "Lilly"]
+    alumni_match: ["eli lilly and company", "eli lilly", "lilly"]
+    source_url: "https://lilly.wd115.myworkdayjobs.com/LLY"
+
+  - name: "Genentech"
+    ats: workday
+    token: "roche"
+    workday_shard: "wd3"
+    workday_site: "ROG-A2O-GENE"
+    aliases: ["Roche Genentech"]
+    alumni_match: ["genentech", "roche genentech"]
+    source_url: "https://roche.wd3.myworkdayjobs.com/ROG-A2O-GENE"
+
+  - name: "Exxon Mobil"
+    ats: bespoke
+    module: "exxon_mobil"
+    aliases: ["ExxonMobil", "Exxon"]
+    alumni_match: ["exxon mobil", "exxonmobil", "exxon"]
+    source_url: "https://jobs.exxonmobil.com/"
+    note: "SuccessFactors/company-hosted careers portal; unsupported by current watcher adapters"
+
+  - name: "Warner Bros. Discovery"
+    ats: workday
+    token: "warnerbros"
+    workday_shard: "wd5"
+    workday_site: "global"
+    aliases: ["WBD", "Warner Bros Discovery"]
+    alumni_match: ["warner bros. discovery", "wbd", "warner bros discovery"]
+    source_url: "https://warnerbros.wd5.myworkdayjobs.com/global"
+
+  - name: "AT&T"
+    ats: workday
+    token: "att"
+    workday_shard: "wd1"
+    workday_site: "ATTGeneral"
+    aliases: ["ATT", "AT and T"]
+    alumni_match: ["at&t", "att", "at and t"]
+    source_url: "https://att.wd1.myworkdayjobs.com/ATTGeneral"
+
+  - name: "SGLang"
+    ats: github_only
+    alumni_match: ["sglang"]
+    source_url: "https://github.com/sgl-project/sglang"
+    note: "open-source project; no supported company ATS URL found"
+
+  - name: "Strategic Analysis Incorporated"
+    ats: bespoke
+    module: "strategic_analysis_incorporated"
+    aliases: ["Strategic Analysis, Inc.", "Strategic Analysis"]
+    alumni_match: ["strategic analysis incorporated", "strategic analysis, inc.", "strategic analysis"]
+    source_url: "https://www.vscyberhosting.com/sainc/"
+    note: "VSCyberHosting applicant portal; unsupported by current watcher adapters"
+
+  - name: "Hospital for Special Surgery"
+    ats: workday
+    token: "hss"
+    workday_shard: "wd1"
+    workday_site: "HSS_Careers"
+    aliases: ["HSS"]
+    alumni_match: ["hospital for special surgery", "hss"]
+    source_url: "https://hss.wd1.myworkdayjobs.com/HSS_Careers"

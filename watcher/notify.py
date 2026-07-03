@@ -17,6 +17,24 @@ SMTP_TIMEOUT_SECONDS = 30
 DRY_RUN_HEADER = "[DRY RUN - not sent]"
 COMPENSATION_UNCLEAR_LABEL = "Compensation unclear or unstated"
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "y", "on"}
+ROLE_TRACK_SORT_PRIORITY = {
+    "backend": 0,
+    "full_stack": 1,
+    "general_swe": 2,
+    "platform_infra": 3,
+    "data_engineering": 4,
+    "ml_ai": 5,
+    "quant_dev": 6,
+    "frontend": 7,
+    "cloud": 8,
+    "devops": 9,
+    "embedded_software": 10,
+    "firmware": 11,
+    "sdet_qa_automation": 12,
+    "it_support": 50,
+    "quality_test": 51,
+    "solutions_engineering": 52,
+}
 
 
 class NotifyConfigError(RuntimeError):
@@ -26,10 +44,11 @@ class NotifyConfigError(RuntimeError):
 def render_digest(matches: Sequence[dict]) -> tuple[str, str]:
     """Return the digest subject and plain-text body, or empty strings for no email."""
 
-    if not matches:
+    eligible_matches = [job for job in matches if _digest_eligible(job)]
+    if not eligible_matches:
         return "", ""
 
-    sorted_matches = sorted(matches, key=_sort_key)
+    sorted_matches = sorted(eligible_matches, key=_sort_key)
     count = len(sorted_matches)
     match_word = "match" if count == 1 else "matches"
     posting_word = "posting" if count == 1 else "postings"
@@ -37,17 +56,22 @@ def render_digest(matches: Sequence[dict]) -> tuple[str, str]:
     lines = [
         subject,
         "",
-        f"{count} new watched-company SWE-intern {posting_word}, sorted by score.",
+        f"{count} new watched-company SWE-intern {posting_word}, sorted by fit score.",
         "",
     ]
 
     for index, job in enumerate(sorted_matches, start=1):
         score = job.get("score", {})
+        role_cls = job.get("role_classification") or {}
+        role_track = score.get("role_track") or role_cls.get("role_track") or "unknown"
         lines.extend(
             [
                 f"{index}. {job.get('company', '')} - {job.get('title', '')}",
                 f"   score: {score.get('total', 0)}",
-                f"   action / recommendation: {score.get('action_label') or score.get('action') or 'unknown'}",
+                f"   fit score: {score.get('fit_score', score.get('total', 0))}",
+                f"   role track: {role_track}",
+                f"   fit reason: {score.get('fit_explanation') or _top_reason(score)}",
+                f"   action / recommendation: {score.get('watcher_action_label') or score.get('action_label') or score.get('action') or 'unknown'}",
                 f"   top reason: {_top_reason(score)}",
                 f"   red flags: {_red_flags(job.get('red_flags') or [])}",
                 f"   apply URL: {job.get('source_url') or '(not listed)'}",
@@ -89,13 +113,29 @@ def send_digest(matches: Sequence[dict], *, output: TextIO | None = None) -> boo
     return True
 
 
-def _sort_key(job: dict) -> tuple[int, str, str]:
-    score = job.get("score", {}).get("total", 0)
+def _sort_key(job: dict) -> tuple[int, int, int, str, str]:
+    score = job.get("score", {})
+    fit_score = _int_score(score.get("fit_score", score.get("total", 0)))
+    total = _int_score(score.get("total", 0))
+    role_track = score.get("role_track") or (job.get("role_classification") or {}).get("role_track") or "unknown"
+    priority = ROLE_TRACK_SORT_PRIORITY.get(str(role_track), 99)
+    return (-fit_score, -total, priority, str(job.get("company") or "").lower(), str(job.get("title") or "").lower())
+
+
+def _digest_eligible(job: dict) -> bool:
+    score = job.get("score") or {}
+    if score.get("watcher_eligible") is False:
+        return False
+    if "fit_score" in score and _int_score(score.get("fit_score")) <= 0:
+        return False
+    return True
+
+
+def _int_score(value) -> int:
     try:
-        score_value = int(score)
+        return int(value)
     except (TypeError, ValueError):
-        score_value = 0
-    return (-score_value, str(job.get("company") or "").lower(), str(job.get("title") or "").lower())
+        return 0
 
 
 def _top_reason(score: dict) -> str:

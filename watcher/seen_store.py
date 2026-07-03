@@ -53,10 +53,16 @@ class SeenStore:
         )
         self._conn.commit()
 
-    def mark_many_seen(self, jobs: Iterable[dict], *, seen_at: datetime | None = None) -> None:
+    def mark_many_seen(
+        self,
+        jobs: Iterable[dict],
+        *,
+        seen_at: datetime | None = None,
+        emailed_at: datetime | None = None,
+    ) -> None:
         timestamp = seen_at or datetime.now(timezone.utc)
         for job in jobs:
-            self.mark_seen(job, seen_at=timestamp)
+            self.mark_seen(job, seen_at=timestamp, emailed_at=emailed_at)
 
     def _init_schema(self) -> None:
         self._conn.execute(
