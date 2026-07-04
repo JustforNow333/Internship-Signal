@@ -118,6 +118,9 @@ jobs:
         id: alumni
         shell: bash
         env:
+          WATCHER_COMPANY_ALUMNI_JSON_B64: ${{ secrets.WATCHER_COMPANY_ALUMNI_JSON_B64 }}
+          WATCHER_COMPANY_ALUMNI_JSON_RAW: ${{ secrets.WATCHER_COMPANY_ALUMNI_JSON }}
+          WATCHER_COMPANY_ALUMNI_JSON_PATH_SECRET: ${{ secrets.WATCHER_COMPANY_ALUMNI_JSON_PATH }}
           WATCHER_ALUMNI_CSV_B64: ${{ secrets.WATCHER_ALUMNI_CSV_B64 }}
           ALUMNI_CSV_B64: ${{ secrets.ALUMNI_CSV_B64 }}
           WATCHER_ALUMNI_CSV_TEXT: ${{ secrets.WATCHER_ALUMNI_CSV_TEXT }}
@@ -127,62 +130,98 @@ jobs:
         run: |
           set -euo pipefail
 
+          json_path="$RUNNER_TEMP/watcher-company-alumni.json"
           roster_path="$RUNNER_TEMP/watcher-alumni.csv"
           status=missing
+          source_kind=missing
 
-          if [ -n "${WATCHER_ALUMNI_CSV_B64:-}" ]; then
+          if [ -n "${WATCHER_COMPANY_ALUMNI_JSON_B64:-}" ]; then
+            printf '%s' "$WATCHER_COMPANY_ALUMNI_JSON_B64" | base64 --decode > "$json_path"
+            status=restored-company-json-b64
+            source_kind=json
+          elif [ -n "${WATCHER_COMPANY_ALUMNI_JSON_RAW:-}" ]; then
+            printf '%s' "$WATCHER_COMPANY_ALUMNI_JSON_RAW" > "$json_path"
+            status=restored-company-json
+            source_kind=json
+          elif [ -n "${WATCHER_COMPANY_ALUMNI_JSON_PATH_SECRET:-}" ]; then
+            json_path="$WATCHER_COMPANY_ALUMNI_JSON_PATH_SECRET"
+            if [ ! -f "$json_path" ]; then
+              echo "::error::ALUMNI-JSON: WATCHER_COMPANY_ALUMNI_JSON_PATH does not exist: $json_path"
+              exit 1
+            fi
+            status=company-json-path
+            source_kind=json
+          elif [ -n "${WATCHER_ALUMNI_CSV_B64:-}" ]; then
             printf '%s' "$WATCHER_ALUMNI_CSV_B64" | base64 --decode > "$roster_path"
             status=restored-watcher-b64
+            source_kind=csv
           elif [ -n "${ALUMNI_CSV_B64:-}" ]; then
             printf '%s' "$ALUMNI_CSV_B64" | base64 --decode > "$roster_path"
             status=restored-b64
+            source_kind=csv
           elif [ -n "${WATCHER_ALUMNI_CSV_TEXT:-}" ]; then
             printf '%s' "$WATCHER_ALUMNI_CSV_TEXT" > "$roster_path"
             status=restored-watcher-text
+            source_kind=csv
           elif [ -n "${WATCHER_ALUMNI_CSV_RAW:-}" ]; then
             printf '%s' "$WATCHER_ALUMNI_CSV_RAW" > "$roster_path"
             status=restored-watcher-raw
+            source_kind=csv
           elif [ -n "${ALUMNI_CSV_TEXT:-}" ]; then
             printf '%s' "$ALUMNI_CSV_TEXT" > "$roster_path"
             status=restored-text
+            source_kind=csv
           elif [ -n "${ALUMNI_CSV_RAW:-}" ]; then
             printf '%s' "$ALUMNI_CSV_RAW" > "$roster_path"
             status=restored-raw
+            source_kind=csv
           elif [ -f watcher/alumni.csv ]; then
             roster_path="$PWD/watcher/alumni.csv"
             status=local-file
+            source_kind=csv
           fi
 
           if [ "$status" = "missing" ]; then
-            echo "::warning::ALUMNI-CSV: no roster found. Alumni matching will be disabled for this run. Set secret WATCHER_ALUMNI_CSV_B64 to the base64-encoded private watcher/alumni.csv."
+            if [ "${{ steps.mode.outputs.send_email }}" = "true" ]; then
+              echo "::error::ALUMNI: live email requested but no compact JSON map or CSV roster was found. Set WATCHER_COMPANY_ALUMNI_JSON_B64 or WATCHER_ALUMNI_CSV_B64."
+              exit 1
+            fi
+            echo "::warning::ALUMNI: no compact JSON map or CSV roster found. Alumni matching will be disabled for this dry run. Set secret WATCHER_COMPANY_ALUMNI_JSON_B64 to a base64-encoded private company alumni JSON map."
             echo "status=missing" >> "$GITHUB_OUTPUT"
             echo "records=0" >> "$GITHUB_OUTPUT"
             echo "employers=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          chmod 600 "$roster_path"
-          echo "WATCHER_ALUMNI_CSV=$roster_path" >> "$GITHUB_ENV"
+          if [ "$source_kind" = "json" ]; then
+            chmod 600 "$json_path"
+            echo "WATCHER_COMPANY_ALUMNI_JSON_PATH=$json_path" >> "$GITHUB_ENV"
+          else
+            chmod 600 "$roster_path"
+            echo "WATCHER_ALUMNI_CSV=$roster_path" >> "$GITHUB_ENV"
+          fi
 
           stats="$(
-            PYTHONPATH=.:backend WATCHER_ALUMNI_CSV="$roster_path" python - <<'PY'
-          from watcher.alumni import load_default_alumni
-
-          _index, status = load_default_alumni()
-          print(f"{status.status} {status.records_loaded} {status.employers_indexed}")
-          PY
+            if [ "$source_kind" = "json" ]; then
+              PYTHONPATH=.:backend WATCHER_COMPANY_ALUMNI_JSON_PATH="$json_path" python -c 'from watcher.alumni import load_default_alumni; _index, status = load_default_alumni(); print(f"{status.status} {status.records_loaded} {status.employers_indexed}")'
+            else
+              PYTHONPATH=.:backend WATCHER_ALUMNI_CSV="$roster_path" python -c 'from watcher.alumni import load_default_alumni; _index, status = load_default_alumni(); print(f"{status.status} {status.records_loaded} {status.employers_indexed}")'
+            fi
           )"
           read -r loaded_status records employers <<< "$stats"
 
-          if [ "$loaded_status" != "loaded" ]; then
-            echo "::error::ALUMNI-CSV: restored roster is not usable (status=$loaded_status)"
+          case "$loaded_status" in
+            loaded-json-map|loaded-csv) ;;
+            *)
+            echo "::error::ALUMNI: restored $source_kind source is not usable (status=$loaded_status)"
             exit 1
-          fi
+            ;;
+          esac
 
-          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "status=$loaded_status" >> "$GITHUB_OUTPUT"
           echo "records=$records" >> "$GITHUB_OUTPUT"
           echo "employers=$employers" >> "$GITHUB_OUTPUT"
-          echo "ALUMNI-CSV: status=$status records=$records employers=$employers"
+          echo "ALUMNI: status=$loaded_status records=$records employers=$employers"
 
       - name: Run watcher
         id: run_watcher
@@ -196,9 +235,7 @@ jobs:
           args=()
           if [ "${{ steps.mode.outputs.send_email }}" = "true" ]; then
             export WATCHER_SEND_EMAIL=1
-            if [ "${{ steps.alumni.outputs.status }}" != "missing" ]; then
-              export WATCHER_REQUIRE_ALUMNI=1
-            fi
+            export WATCHER_REQUIRE_ALUMNI=1
           else
             unset WATCHER_SEND_EMAIL
             args+=(--mark-seen-without-send)

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -16,6 +19,9 @@ LOGGER = logging.getLogger(__name__)
 
 ALUMNI_CSV_PATH = Path(__file__).resolve().parent / "alumni.csv"
 ALUMNI_CSV_ENV = "WATCHER_ALUMNI_CSV"
+COMPANY_ALUMNI_JSON_B64_ENV = "WATCHER_COMPANY_ALUMNI_JSON_B64"
+COMPANY_ALUMNI_JSON_ENV = "WATCHER_COMPANY_ALUMNI_JSON"
+COMPANY_ALUMNI_JSON_PATH_ENV = "WATCHER_COMPANY_ALUMNI_JSON_PATH"
 REQUIRE_ALUMNI_ENV = "WATCHER_REQUIRE_ALUMNI"
 SEND_EMAIL_ENV = "WATCHER_SEND_EMAIL"
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "y", "on"}
@@ -104,6 +110,43 @@ def load_alumni(path: str | Path = ALUMNI_CSV_PATH) -> AlumniIndex:
     return index
 
 
+def load_company_alumni_json(path: str | Path) -> AlumniIndex:
+    """Read a compact private company->alumni JSON map."""
+
+    path = Path(path)
+    if not path.exists():
+        raise AlumniError(f"Company alumni JSON not found: {path}")
+    return load_company_alumni_json_text(path.read_text(encoding="utf-8"), source=str(path))
+
+
+def load_company_alumni_json_text(text: str, *, source: str = "company alumni JSON") -> AlumniIndex:
+    """Convert a compact JSON map into the same AlumniIndex shape as the CSV."""
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise AlumniError(f"Company alumni JSON is invalid JSON ({source}): {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise AlumniError(f"Company alumni JSON must be an object mapping company names to alumni lists ({source}).")
+
+    index: AlumniIndex = {}
+    for company_name, records in payload.items():
+        if not isinstance(records, list):
+            raise AlumniError(f"Company alumni JSON value for {company_name!r} must be a list.")
+        fallback_employer = str(company_name or "").strip()
+        key = norm_company(fallback_employer)
+        for record in records:
+            if not isinstance(record, dict):
+                raise AlumniError(f"Company alumni JSON record for {company_name!r} must be an object.")
+            alumni_record = _json_record(record, fallback_employer=fallback_employer)
+            record_key = norm_company(alumni_record["employer"]) or key
+            if not record_key:
+                continue
+            index.setdefault(record_key, []).append(alumni_record)
+    return index
+
+
 def alumni_index_stats(index: Mapping[str, Sequence[AlumniRecord]]) -> tuple[int, int]:
     """Return (record count, employer count) for a loaded alumni index."""
 
@@ -117,9 +160,20 @@ def load_default_alumni(
 ) -> tuple[AlumniIndex, AlumniLoadStatus]:
     """Load the configured alumni roster and report whether matching is active."""
 
-    roster_path = Path(path or os.getenv(ALUMNI_CSV_ENV) or ALUMNI_CSV_PATH)
     require = _env_truthy(REQUIRE_ALUMNI_ENV) if require is None else require
+    try:
+        json_source = _configured_company_json_source()
+    except Exception as exc:
+        message = f"Company alumni JSON error, alumni matching disabled: {exc}"
+        status = AlumniLoadStatus("error", f"env:{COMPANY_ALUMNI_JSON_PATH_ENV}", message=message)
+        if require:
+            raise AlumniError(message) from exc
+        LOGGER.error(message)
+        return {}, status
+    if json_source is not None:
+        return _load_default_company_json(json_source, require=require)
 
+    roster_path = Path(path or os.getenv(ALUMNI_CSV_ENV) or ALUMNI_CSV_PATH)
     if not roster_path.exists():
         message = "Alumni CSV missing, alumni matching disabled."
         status = AlumniLoadStatus("missing", str(roster_path), message=message)
@@ -151,11 +205,69 @@ def load_default_alumni(
         return index, status
 
     status = AlumniLoadStatus(
-        "loaded",
+        "loaded-csv",
         str(roster_path),
         records_loaded=records_loaded,
         employers_indexed=employers_indexed,
         message=f"Alumni CSV loaded: {records_loaded} records across {employers_indexed} employers.",
+    )
+    LOGGER.info(status.message)
+    return index, status
+
+
+def _configured_company_json_source() -> tuple[str, str] | None:
+    raw_b64 = os.getenv(COMPANY_ALUMNI_JSON_B64_ENV)
+    if raw_b64:
+        try:
+            decoded = base64.b64decode(raw_b64.strip(), validate=True).decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError) as exc:
+            raise AlumniError(f"{COMPANY_ALUMNI_JSON_B64_ENV} is not valid base64-encoded UTF-8 JSON.") from exc
+        return f"env:{COMPANY_ALUMNI_JSON_B64_ENV}", decoded
+
+    raw_json = os.getenv(COMPANY_ALUMNI_JSON_ENV)
+    if raw_json:
+        return f"env:{COMPANY_ALUMNI_JSON_ENV}", raw_json
+
+    json_path = os.getenv(COMPANY_ALUMNI_JSON_PATH_ENV)
+    if json_path:
+        path = Path(json_path)
+        if not path.exists():
+            raise AlumniError(f"Company alumni JSON not found: {path}")
+        return str(path), path.read_text(encoding="utf-8")
+
+    return None
+
+
+def _load_default_company_json(json_source: tuple[str, str], *, require: bool) -> tuple[AlumniIndex, AlumniLoadStatus]:
+    source, text = json_source
+    try:
+        index = load_company_alumni_json_text(text, source=source)
+    except Exception as exc:
+        message = f"Company alumni JSON error, alumni matching disabled: {exc}"
+        status = AlumniLoadStatus("error", source, message=message)
+        if require:
+            raise AlumniError(message) from exc
+        LOGGER.error(message)
+        return {}, status
+
+    records_loaded, employers_indexed = alumni_index_stats(index)
+    if records_loaded == 0:
+        status = AlumniLoadStatus(
+            "empty",
+            source,
+            records_loaded=0,
+            employers_indexed=0,
+            message="Company alumni JSON loaded but contained no usable employer records.",
+        )
+        LOGGER.warning(status.message)
+        return index, status
+
+    status = AlumniLoadStatus(
+        "loaded-json-map",
+        source,
+        records_loaded=records_loaded,
+        employers_indexed=employers_indexed,
+        message=f"Company alumni JSON loaded: {records_loaded} records across {employers_indexed} employers.",
     )
     LOGGER.info(status.message)
     return index, status
@@ -366,4 +478,13 @@ def _record(row: Mapping[str, str]) -> AlumniRecord:
         "occupation": str(row.get("Occupation") or "").strip(),
         "linkedin_url": str(row.get("LinkedIn URL") or "").strip(),
         "employer": str(row.get("Employer") or "").strip(),
+    }
+
+
+def _json_record(row: Mapping[str, object], *, fallback_employer: str) -> AlumniRecord:
+    return {
+        "name": str(row.get("name") or "").strip(),
+        "occupation": str(row.get("occupation") or "").strip(),
+        "linkedin_url": str(row.get("linkedin_url") or "").strip(),
+        "employer": str(row.get("employer") or fallback_employer or "").strip(),
     }

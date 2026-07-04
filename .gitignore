@@ -66,8 +66,19 @@ desktop.ini
 *.rej
 
 # Local private watcher data
+private/
+*.private.csv
+*.private.json
+*.secret.csv
+*.secret.json
 alumni.csv
 alumni.csv.b64
+company_alumni.json
+company_alumni.json.b64
+watcher/company_alumni.json
+watcher/company_alumni.json.b64
+watcher/company-alumni.json
+watcher/company-alumni.json.b64
 watcher/alumni.csv
 watcher/alumni.csv.b64
 watcher/alumni.b64

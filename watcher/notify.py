@@ -147,7 +147,7 @@ def _alumni_summary_line(summary: Mapping[str, object] | None) -> str:
     status = str(summary.get("status") or "unknown")
     records = _int_score(summary.get("records_loaded"))
     employers = _int_score(summary.get("employers_indexed"))
-    if status == "loaded":
+    if status in {"loaded", "loaded-json-map", "loaded-csv"}:
         return f"Alumni index: {records} records across {employers} employers"
     if status == "empty":
         return "Alumni index: 0 records across 0 employers"
@@ -208,7 +208,7 @@ def _alumni_line(alumni: Sequence[dict], summary: Mapping[str, object] | None = 
             return "Alumni matching disabled; roster could not be read"
         if status == "empty":
             return "Alumni roster loaded but empty"
-        if status == "loaded":
+        if status in {"loaded", "loaded-json-map", "loaded-csv"}:
             return "No matching alumni in loaded roster"
         return "No alumni matched; alumni index status unknown"
     return "; ".join(_format_alum(record) for record in alumni)

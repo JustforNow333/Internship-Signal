@@ -119,22 +119,36 @@ Current watcher run core:
 - `watcher/seen_store.py` is the SQLite seen-store. It keys on the existing
   analyzed job `id`, which comes from `backend.app.dedupe.job_id`. A job seen
   via GitHub is not new later via direct, and vice versa.
-- `watcher/alumni.py` loads the private gitignored `watcher/alumni.csv`,
-  or the path named by `WATCHER_ALUMNI_CSV`, indexes alumni by
-  `backend.app.dedupe.norm_company(Employer)`, and annotates matches with
-  `alumni` after filtering. Alumni data is additive only; it must never drop,
-  reorder, gate, or rescore a posting. Missing private alumni data must not be
-  treated as a normal empty roster in live watcher mode: the run reports
-  `alumni_csv_status=missing` and the digest says that no alumni matching was
-  performed. Set `WATCHER_REQUIRE_ALUMNI=1` when a missing or malformed private
-  roster should hard-fail the run.
-- In GitHub Actions, the private roster is restored from repository secret
-  `WATCHER_ALUMNI_CSV_B64` into a temp file and exported as
-  `WATCHER_ALUMNI_CSV`. The workflow also accepts fallback secret names
-  `ALUMNI_CSV_B64`, `WATCHER_ALUMNI_CSV_TEXT`, `WATCHER_ALUMNI_CSV`,
-  `ALUMNI_CSV_TEXT`, and `ALUMNI_CSV`. If no roster secret is available, the
-  workflow continues with explicit warning text and the digest says alumni
-  matching was disabled.
+- `watcher/alumni.py` loads a private compact company alumni JSON map first,
+  then falls back to the private full alumni CSV. Loading priority is
+  `WATCHER_COMPANY_ALUMNI_JSON_B64`, `WATCHER_COMPANY_ALUMNI_JSON`,
+  `WATCHER_COMPANY_ALUMNI_JSON_PATH`, then `WATCHER_ALUMNI_CSV` or the default
+  gitignored `watcher/alumni.csv`. The compact JSON shape is
+  `{ "bosch": [{"name": "...", "occupation": "...", "linkedin_url": "...",
+  "employer": "Bosch"}] }` and is converted into the same `AlumniIndex` shape
+  used by CSV loading. Top-level JSON keys should be `norm_company`-normalized
+  employer names, and records should contain only `name`, `occupation`,
+  `linkedin_url`, and `employer`. Alumni data is additive only; it must never
+  drop, reorder, gate, or rescore a posting.
+- `scripts/build_watcher_alumni_map.py` builds the compact private JSON map
+  from the full private CSV and `watcher/watchlist.yml`. It must write only
+  alumni attached to watched companies and must not include unrelated alumni or
+  extra private columns. Expected local command:
+  `python scripts/build_watcher_alumni_map.py --csv "C:\path\to\alumni.csv" --watchlist watcher/watchlist.yml --out private/company_alumni.json`.
+  The `private/` directory and common `*.private.*`/`*.secret.*` artifacts are
+  ignored; never commit generated private alumni maps.
+- Missing private alumni data must not be treated as a normal empty roster in
+  live watcher mode. Set `WATCHER_REQUIRE_ALUMNI=1` when a missing or malformed
+  private JSON/CSV source should hard-fail the run; live GitHub Actions sends do
+  this.
+- In GitHub Actions, the private compact JSON map is restored first from
+  repository secret `WATCHER_COMPANY_ALUMNI_JSON_B64` into a temp file and
+  exported as `WATCHER_COMPANY_ALUMNI_JSON_PATH`. The workflow then falls back
+  to full CSV secrets including `WATCHER_ALUMNI_CSV_B64`, `ALUMNI_CSV_B64`,
+  `WATCHER_ALUMNI_CSV_TEXT`, `WATCHER_ALUMNI_CSV`, `ALUMNI_CSV_TEXT`, and
+  `ALUMNI_CSV`. If live email is requested and neither compact JSON nor CSV is
+  available, the workflow fails before sending; dry runs continue with explicit
+  warning text and alumni matching disabled.
 - Alumni matching order is exact normalized employer match first, then
   hard-coded common aliases, then watchlist `aliases` and `alumni_match` values,
   with fuzzy matching only as a fallback. Keep private contact data out of the
@@ -174,8 +188,8 @@ Current watcher run core:
   `WATCHER_SEND_EMAIL`; live sends require the repo secrets `SMTP_USER`,
   `SMTP_APP_PASSWORD`, and `EMAIL_TO`.
 - The watcher prints a run heartbeat, and the workflow prints a final heartbeat
-  including run counts, source-error count, alumni CSV status
-  (`alumni_csv_status=loaded/missing/empty/error`,
+  including run counts, source-error count, alumni index status
+  (`alumni_csv_status=loaded-json-map/loaded-csv/missing/empty/error`,
   `alumni_records_loaded=<n>`, `alumni_employers_indexed=<n>`), seen-store
   load/save counts, send result, and persistence status. Source adapter
   failures are logged and surfaced as warnings; seen-store load corruption or

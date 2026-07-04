@@ -58,6 +58,46 @@ unrelated to app code.)
 
 ---
 
+## Watcher Alumni Matching
+
+The scheduled watcher can use alumni matching in GitHub Actions without
+uploading the full private alumni spreadsheet. Generate a compact JSON map that
+contains only alumni attached to companies in `watcher/watchlist.yml`; keep this
+file private and do not commit it.
+
+**Step 1. Generate the compact alumni map**
+
+```bash
+python scripts/build_watcher_alumni_map.py --csv "C:\path\to\alumni.csv" --watchlist watcher/watchlist.yml --out private/company_alumni.json
+```
+
+The script prints the number of alumni records written, the number of companies
+with alumni, the number of watchlist companies checked, and a short list of
+companies with matches.
+
+**Step 2. Base64 it in PowerShell**
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("private/company_alumni.json")) | Set-Clipboard
+```
+
+**Step 3. Create a GitHub Actions secret**
+
+Create a repository secret named `WATCHER_COMPANY_ALUMNI_JSON_B64` and paste the
+base64 value from your clipboard.
+
+**Step 4. Rerun the watcher**
+
+Confirm the workflow log says something like:
+
+```text
+ALUMNI: status=loaded-json-map records=12 employers=8
+```
+
+The email digest should say `Alumni index: X records across Y employers`, and
+jobs at companies in the map should show the matching alumni instead of
+`Alumni matching disabled; roster not loaded`.
+
 ## What it does
 
 1. **Ingest & clean** — sniffs the delimiter, normalizes messy headers
