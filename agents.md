@@ -12,6 +12,15 @@ Current foundational seam:
 - Do not reimplement scoring, classification, salary parsing, dedupe, ids, or
   signal detection in watcher code. Reuse the existing backend functions.
 
+Current backend query layer:
+
+- `backend/app/ask.py` is a deterministic query engine, not an LLM path.
+- Backend-oriented Ask queries must not treat every broad SWE role as backend
+  relevant. They should match backend-adjacent `role_track` values
+  (`backend`, `full_stack`, `platform_infra`, `data_engineering`) or the
+  existing `backend_focus` signal. Frontend-only or generic SWE roles without
+  backend evidence should not appear in backend-specific Ask results.
+
 Current watcher fetch layer:
 
 - Source adapters live under `watcher/sources/`.
@@ -121,8 +130,11 @@ Current watcher run core:
   roster should hard-fail the run.
 - In GitHub Actions, the private roster is restored from repository secret
   `WATCHER_ALUMNI_CSV_B64` into a temp file and exported as
-  `WATCHER_ALUMNI_CSV`. Live sends require a usable restored roster; the
-  workflow should fail rather than send an email with disabled alumni matching.
+  `WATCHER_ALUMNI_CSV`. The workflow also accepts fallback secret names
+  `ALUMNI_CSV_B64`, `WATCHER_ALUMNI_CSV_TEXT`, `WATCHER_ALUMNI_CSV`,
+  `ALUMNI_CSV_TEXT`, and `ALUMNI_CSV`. If no roster secret is available, the
+  workflow continues with explicit warning text and the digest says alumni
+  matching was disabled.
 - Alumni matching order is exact normalized employer match first, then
   hard-coded common aliases, then watchlist `aliases` and `alumni_match` values,
   with fuzzy matching only as a fallback. Keep private contact data out of the

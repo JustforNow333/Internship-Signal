@@ -5,6 +5,31 @@ def _by_id(jobs):
     return {j["id"]: j for j in jobs}
 
 
+def _ask_job(job_id, *, role_track, score=70, signals=None):
+    return {
+        "id": job_id,
+        "company": f"{job_id.title()} Co",
+        "title": f"{role_track.replace('_', ' ').title()} Intern",
+        "compensation": {"kind": "paid"},
+        "red_flags": [],
+        "positive_signals": [{"id": sid, "label": sid, "strength": 1} for sid in (signals or [])],
+        "role_classification": {
+            "role": "swe",
+            "role_track": role_track,
+            "label": role_track.replace("_", " ").title(),
+        },
+        "score": {
+            "total": score,
+            "action_label": "Apply later",
+            "categories": {
+                "role_relevance": {"score": score},
+                "technical_depth": {"score": score},
+            },
+            "reasons": [f"{role_track} fit"],
+        },
+    }
+
+
 def test_backend_question(sample_jobs):
     r = ask("Which postings are best for backend experience?", sample_jobs)
     assert r["results"], "should return ranked results"
@@ -17,6 +42,24 @@ def test_backend_question(sample_jobs):
     # The exploitative equity-only posting must not be a top "best" pick.
     top3 = [r["results"][i]["company"] for i in range(3)]
     assert "HustleHub" not in top3
+
+
+def test_backend_question_excludes_frontend_only_swe():
+    jobs = [
+        _ask_job("frontend", role_track="frontend", score=99),
+        _ask_job("general", role_track="general_swe", score=98),
+        _ask_job("backend", role_track="backend", score=70),
+        _ask_job("platform", role_track="platform_infra", score=65),
+        _ask_job("legacy", role_track="general_swe", score=60, signals=["backend_focus"]),
+    ]
+
+    r = ask("best backend internships", jobs)
+
+    ids = [item["id"] for item in r["results"]]
+    assert set(ids) == {"backend", "platform", "legacy"}
+    assert "frontend" not in ids
+    assert "general" not in ids
+    assert "backend-adjacent" in "; ".join(r["filters_applied"])
 
 
 def test_paid_data_science_only(sample_jobs):

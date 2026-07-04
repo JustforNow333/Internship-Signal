@@ -46,6 +46,8 @@ _PAID_RE = re.compile(r"\bpaid\b", re.I)          # \b stops this matching insid
 _UNPAID_RE = re.compile(r"\bunpaid\b|\bfree labor\b", re.I)
 _REMOTE_RE = re.compile(r"\bremote\b|work from home|\bwfh\b", re.I)
 
+BACKEND_ADJACENT_TRACKS = {"backend", "full_stack", "platform_infra", "data_engineering"}
+
 _STOPWORDS = {
     "the", "a", "an", "which", "what", "who", "show", "me", "ones", "one", "are",
     "is", "do", "does", "should", "i", "to", "for", "of", "in", "on", "only",
@@ -130,7 +132,8 @@ def _role_matches(job, plan):
         return True
     rc = job["role_classification"]["role"]
     if plan["want_backend"]:
-        return rc == "swe" or _has_signal(job, "backend_focus")
+        role_track = job["role_classification"].get("role_track")
+        return role_track in BACKEND_ADJACENT_TRACKS or _has_signal(job, "backend_focus")
     return rc == plan["role"]
 
 
@@ -147,7 +150,7 @@ def _apply_modifiers(jobs, plan, filters_applied):
         filters_applied.append("remote only")
     if plan["role"]:
         out = [j for j in out if _role_matches(j, plan)]
-        label = "backend-leaning (SWE or backend-focused)" if plan["want_backend"] else plan["role"].replace("_", " ")
+        label = "backend-adjacent software/data roles" if plan["want_backend"] else plan["role"].replace("_", " ")
         filters_applied.append(f"role: {label}")
     return out
 
