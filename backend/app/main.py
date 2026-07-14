@@ -3,6 +3,8 @@
 Run from backend/:  uvicorn app.main:app --reload --port 8000
 """
 
+from json import JSONDecodeError
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -45,14 +47,19 @@ async def ingest(request: Request):
         upload = form.get("file")
         if upload is None:
             raise HTTPException(status_code=400, detail="No file field in the upload.")
-        raw = await upload.read()
+        read_upload = getattr(upload, "read", None)
+        if not callable(read_upload):
+            raise HTTPException(status_code=400, detail="The file field must be a file upload.")
+        raw = await read_upload()
         try:
             csv_text = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
             csv_text = raw.decode("latin-1")
     else:
-        body = await request.json()
-        csv_text = (body or {}).get("csv_text", "")
+        body = await _json_object(request)
+        csv_text = body.get("csv_text", "")
+        if not isinstance(csv_text, str):
+            raise HTTPException(status_code=400, detail="csv_text must be a string.")
     if not csv_text.strip():
         raise HTTPException(status_code=400, detail="No CSV content provided.")
     return _ingest_text(csv_text)
@@ -127,9 +134,23 @@ def get_summary(dataset_id: str):
 @app.post("/api/datasets/{dataset_id}/ask")
 async def ask_dataset(dataset_id: str, request: Request):
     ds = _dataset_or_404(dataset_id)
-    body = await request.json()
-    question = (body or {}).get("question", "")
+    body = await _json_object(request)
+    question = body.get("question", "")
+    if not isinstance(question, str):
+        raise HTTPException(status_code=400, detail="question must be a string.")
     return ask(question, ds["jobs"])
+
+
+async def _json_object(request: Request) -> dict:
+    """Read a JSON request body and turn client-shape errors into HTTP 400s."""
+
+    try:
+        body = await request.json()
+    except (JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Request body must contain valid JSON.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    return body
 
 
 @app.get("/api/profile")

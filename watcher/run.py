@@ -1,8 +1,4 @@
-"""Runnable watcher core.
-
-This step intentionally stops at printing new matches. Scheduling is a later
-layer.
-"""
+"""Runnable watcher collection, analysis, digest, and seen-store core."""
 
 from __future__ import annotations
 
@@ -125,8 +121,10 @@ def collect_rows(
     direct_sources: dict[str, object] | None = None,
     github_source: object | None = None,
 ) -> tuple[list[dict], list[str]]:
-    direct_sources = direct_sources or _default_direct_sources()
-    github_source = github_source or GitHubListingsSource()
+    if direct_sources is None:
+        direct_sources = _default_direct_sources()
+    if github_source is None:
+        github_source = GitHubListingsSource()
     direct_rows: list[dict] = []
     github_rows: list[dict] = []
     errors: list[str] = []

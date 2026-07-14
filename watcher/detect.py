@@ -675,7 +675,7 @@ def _decode_text(text: str) -> str:
         decoded = decoded.replace("\\/", "/")
         decoded = decoded.replace("\\u002F", "/").replace("\\u002f", "/")
         decoded = decoded.replace("\\u003A", ":").replace("\\u003a", ":")
-        decoded = decoded.replace("\\u0026", "&").replace("\\u0026", "&")
+        decoded = decoded.replace("\\u0026", "&")
         decoded = unquote(decoded)
         decoded = html.unescape(decoded)
     return decoded

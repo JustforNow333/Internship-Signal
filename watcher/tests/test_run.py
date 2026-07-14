@@ -258,6 +258,25 @@ def test_collect_rows_skips_bespoke_and_github_only_for_direct_fetch():
     assert errors == []
 
 
+def test_collect_rows_preserves_an_explicitly_empty_source_registry(monkeypatch):
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="NoAdapterCo", ats="greenhouse", token="unused"),)
+    )
+    def fail_if_defaults_are_built():
+        raise AssertionError("default adapters should not be constructed")
+
+    monkeypatch.setattr("watcher.run._default_direct_sources", fail_if_defaults_are_built)
+
+    rows, errors = collect_rows(
+        config,
+        direct_sources={},
+        github_source=FakeGithub([]),
+    )
+
+    assert rows == []
+    assert errors == ["NoAdapterCo: no source registered for ats 'greenhouse'"]
+
+
 def test_print_report_for_matches_and_empty(capsys):
     result = type("Result", (), {
         "errors": [],

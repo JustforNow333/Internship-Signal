@@ -55,6 +55,9 @@ pnpm-debug.log*
 Thumbs.db
 desktop.ini
 *Zone.Identifier
+# WSL can create this literal file when Windows-style `2>NUL` redirection is
+# used from a POSIX shell.
+/NUL
 
 # Editors
 .idea/

@@ -96,11 +96,16 @@ def load_known_companies() -> dict:
     Names are matched case-insensitively against the normalized company name.
     """
     data = _load_json(KNOWN_COMPANIES_PATH, _DEFAULT_KNOWN)
+    if not isinstance(data, dict):
+        data = _DEFAULT_KNOWN
     out = {}
     for key in ("tech", "non_tech", "reputable"):
+        values = data.get(key, _DEFAULT_KNOWN.get(key, []))
+        if not isinstance(values, (list, tuple, set)):
+            values = _DEFAULT_KNOWN.get(key, [])
         out[key] = {
             normalized
-            for value in data.get(key, _DEFAULT_KNOWN.get(key, []))
+            for value in values
             if (normalized := norm_company(str(value)))
         }
     return out

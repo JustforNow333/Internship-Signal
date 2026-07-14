@@ -71,6 +71,20 @@ def test_ask_endpoint(dataset_id):
     assert body["results"] and body["interpretation"]
 
 
+@pytest.mark.parametrize(
+    ("content", "headers"),
+    [
+        ("{", {"content-type": "application/json"}),
+        ('["not", "an", "object"]', {"content-type": "application/json"}),
+        ('{"question": 123}', {"content-type": "application/json"}),
+    ],
+)
+def test_ask_rejects_malformed_or_wrong_shape_json(dataset_id, content, headers):
+    res = client.post(f"/api/datasets/{dataset_id}/ask", content=content, headers=headers)
+
+    assert res.status_code == 400
+
+
 def test_ingest_json_paste():
     csv_text = SAMPLE.read_text(encoding="utf-8")
     res = client.post("/api/ingest", json={"csv_text": csv_text})
@@ -85,6 +99,26 @@ def test_ingest_multipart_upload():
     )
     assert res.status_code == 200
     assert res.json()["summary"]["total"] >= 25
+
+
+@pytest.mark.parametrize(
+    ("content", "headers"),
+    [
+        ("{", {"content-type": "application/json"}),
+        ('["not", "an", "object"]', {"content-type": "application/json"}),
+        ('{"csv_text": 123}', {"content-type": "application/json"}),
+    ],
+)
+def test_ingest_rejects_malformed_or_wrong_shape_json(content, headers):
+    res = client.post("/api/ingest", content=content, headers=headers)
+
+    assert res.status_code == 400
+
+
+def test_ingest_rejects_non_file_multipart_field():
+    res = client.post("/api/ingest", files={"file": (None, "not a file")})
+
+    assert res.status_code == 400
 
 
 def test_ingest_rejects_empty_and_junk():

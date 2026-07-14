@@ -273,7 +273,6 @@ SOFTWARE_CONTEXT_RE = re.compile(
     r"\bembedded software\b|\bfirmware\b",
     re.I,
 )
-GENERIC_TECH_RE = re.compile(r"\bpython\b|\bjava\b|\bsql\b|\blinux\b|\bc\+\+\b|\bcloud\b|\baws\b|\bgcp\b|\bazure\b", re.I)
 MANUFACTURING_CONTEXT_RE = re.compile(r"manufactur|factory|plant|plc|mechanical|electrical|hardware|industrial|process", re.I)
 
 
@@ -314,8 +313,6 @@ def has_strong_software_context(title: str, description: str = "", requirements:
         return True
     if re.search(r"\b(aws|gcp|azure|cloud)\b", full, re.I) and re.search(r"code|api|service|platform|developer|software", full, re.I):
         return True
-    if GENERIC_TECH_RE.search(full):
-        return False
     return False
 
 

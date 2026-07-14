@@ -35,6 +35,17 @@ def test_known_company_overrides_use_same_normalization(tmp_path, monkeypatch):
     assert c["category"] == "tech"
 
 
+@pytest.mark.parametrize("payload", [[], {"tech": "Stripe"}, {"tech": 123}])
+def test_invalid_known_company_shapes_fall_back_safely(tmp_path, monkeypatch, payload):
+    path = tmp_path / "known_companies.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(config, "KNOWN_COMPANIES_PATH", path)
+
+    known = config.load_known_companies()
+
+    assert "stripe" in known["tech"]
+
+
 def test_name_token_ai():
     c = classify_company(_row(company="Nimbus AI", title="ML Intern"))
     assert c["category"] in ("tech", "startup")

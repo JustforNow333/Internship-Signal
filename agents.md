@@ -21,6 +21,18 @@ Current backend query layer:
   existing `backend_focus` signal. Frontend-only or generic SWE roles without
   backend evidence should not appear in backend-specific Ask results.
 
+Current backend API and override handling:
+
+- JSON API endpoints must treat malformed JSON, non-object request bodies, and
+  non-string `csv_text`/`question` fields as HTTP 400 client errors. Reuse
+  `backend/app/main.py::_json_object` so parsing failures do not escape as 500s.
+- Multipart ingestion must verify that the `file` form field is an uploaded
+  file before reading it; a plain text form field named `file` is a 400.
+- `KNOWN_COMPANIES_PATH` overrides are optional configuration. A valid override
+  is a JSON object whose `tech`, `non_tech`, and `reputable` values are arrays;
+  invalid top-level or per-list shapes fall back to the built-in values rather
+  than crashing ingestion.
+
 Current watcher fetch layer:
 
 - Source adapters live under `watcher/sources/`.
@@ -79,6 +91,10 @@ Current watcher run core:
   direct rows win the source tag without changing backend dedupe.
 - The run loop calls `backend.app.ingest.analyze_rows`; watcher code must not
   compute scores or ids itself.
+- `collect_rows(..., direct_sources=None, github_source=None)` constructs the
+  production adapters only for arguments that are actually `None`. An explicit
+  empty `direct_sources={}` is meaningful dependency injection and must remain
+  empty; do not replace it through truthiness fallback.
 - Backend role classification now includes a narrow `role_track` plus
   `software_evidence` and `non_swe_evidence`. Generic `engineer` or
   `engineering intern` text must not imply SWE without strong software context.
@@ -239,7 +255,7 @@ cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\bu
 Also run a syntax pass after broad Python edits:
 
 ```bash
-PYTHONPATH=.:backend python3 -m compileall -q backend watcher
+PYTHONPATH=.:backend python3 -m compileall -q backend watcher scripts
 ```
 
 For frontend changes:
@@ -249,6 +265,20 @@ cd frontend
 npm test
 npm run build
 ```
+
+When WSL's Linux Node runtime fails inside Vite/Vitest while reading this repo
+from `/mnt/c`, use the installed Windows Node runtime instead:
+
+```bash
+cmd.exe /C "cd /D C:\Users\burst\internship-signal\frontend && npm test -- --run && npm run build"
+```
+
+As of the July 2026 audit, `npm audit --omit=dev` is clean and the non-breaking
+`form-data` fix is locked at 4.0.6. The remaining audit findings are in the
+Vite/Vitest development toolchain and require major-version upgrades. Do not
+use `npm audit fix --force` as a drive-by fix; treat that as an explicit
+dependency-upgrade task and rerun frontend tests/build under the supported Node
+runtime.
 
 To run the watcher once from the repo root:
 
