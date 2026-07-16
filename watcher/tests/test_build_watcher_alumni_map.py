@@ -27,6 +27,7 @@ Uma,Other,Engineer,Unwatched Co,https://www.linkedin.com/in/fake-other
     watchlist_path = tmp_path / "watchlist.yml"
     watchlist_path.write_text(
         """defaults:
+  terms: ["Summer 2027"]
   target_roles: ["swe"]
 companies:
   - name: "Bosch"

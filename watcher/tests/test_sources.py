@@ -11,6 +11,7 @@ from watcher.sources import (
     GreenhouseSource,
     LeverSource,
     SourceError,
+    SourceFetchError,
     SmartRecruitersSource,
     SourceSchemaError,
     WorkableSource,
@@ -18,6 +19,7 @@ from watcher.sources import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
+TEST_GITHUB_FEED_URL = "https://fixtures.example.test/internships/listings.json"
 
 
 def load_fixture(name: str):
@@ -250,7 +252,8 @@ def test_github_listings_fixture_filters_active_company_and_terms():
     payload = load_fixture("github_listings_subset.json")
     company = CompanyCfg(name="GitHub", terms=("Summer 2026",))
 
-    rows = GitHubListingsSource().parse(payload, company)
+    source = GitHubListingsSource(TEST_GITHUB_FEED_URL)
+    rows = source.parse(payload, company)
 
     assert len(rows) == 1
     row = rows[0]
@@ -263,11 +266,13 @@ def test_github_listings_fixture_filters_active_company_and_terms():
     assert row["internship_type"] == "Summer 2026"
     assert row["extra"]["source"] == "github"
     assert row["extra"]["source_adapter"] == "github_listings"
+    assert row["extra"]["feed_url"] == TEST_GITHUB_FEED_URL
+    assert source.url == TEST_GITHUB_FEED_URL
 
 
 def test_github_listings_matches_aliases_and_filters_inactive_or_wrong_term():
     payload = load_fixture("github_listings_subset.json")
-    source = GitHubListingsSource()
+    source = GitHubListingsSource(TEST_GITHUB_FEED_URL)
 
     alias_rows = source.parse(
         payload,
@@ -289,6 +294,43 @@ def test_github_listings_matches_aliases_and_filters_inactive_or_wrong_term():
 
 def test_github_schema_change_logs_and_raises(caplog):
     with pytest.raises(SourceSchemaError, match="missing keys"):
-        GitHubListingsSource().parse([{"company_name": "GitHub"}], CompanyCfg(name="GitHub"))
+        GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(
+            [{"company_name": "GitHub"}],
+            CompanyCfg(name="GitHub"),
+        )
 
     assert "GitHub listings schema problem" in caplog.text
+
+
+def test_github_term_matching_is_case_insensitive_whitespace_tolerant_and_exact():
+    payload = load_fixture("github_listings_subset.json")
+    source = GitHubListingsSource(TEST_GITHUB_FEED_URL)
+
+    matching = source.parse(payload, CompanyCfg(name="GitHub", terms=("  summer   2026  ",)))
+    substring_only = source.parse(payload, CompanyCfg(name="GitHub", terms=("Summer",)))
+
+    assert len(matching) == 1
+    assert substring_only == []
+
+
+def test_github_empty_payload_is_not_a_silent_success():
+    with pytest.raises(SourceSchemaError, match="contained no entries"):
+        GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(
+            [],
+            CompanyCfg(name="GitHub", terms=("Summer 2027",)),
+        )
+
+
+def test_github_fetch_errors_do_not_log_or_raise_query_parameters(monkeypatch):
+    source = GitHubListingsSource(f"{TEST_GITHUB_FEED_URL}?temporary_token=secret")
+
+    def fail(url, source_name):
+        raise SourceFetchError(f"{source_name} fetch failed: {url}")
+
+    monkeypatch.setattr("watcher.sources.github_listings.fetch_json", fail)
+
+    with pytest.raises(SourceFetchError) as exc_info:
+        source.fetch_payload()
+
+    assert str(exc_info.value) == f"github_listings fetch failed: {TEST_GITHUB_FEED_URL}"
+    assert "secret" not in str(exc_info.value)

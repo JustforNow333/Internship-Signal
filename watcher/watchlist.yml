@@ -1,5 +1,6 @@
 defaults:
-  terms: ["Summer 2026"]
+  terms: ["Summer 2027"]
+  github_listing_urls: ["https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"]
   target_roles: ["swe"]
   min_score:
 

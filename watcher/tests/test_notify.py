@@ -151,6 +151,20 @@ def test_render_digest_shows_alumni_index_summary():
     assert "alumni you know there: No matching alumni in loaded roster" in body
 
 
+def test_render_digest_shows_active_terms_and_non_ok_season_warning_with_alumni_header():
+    subject, body = render_digest(
+        [match("Bosch", "IT Internship (BackEnd, Java)", 82, fit_score=90, role_track="backend")],
+        alumni_summary={"status": "loaded", "records_loaded": 124, "employers_indexed": 80},
+        active_terms=("Fall 2026", "Summer 2027"),
+        season_status="rollover_due",
+    )
+
+    assert subject == "Internship Watcher: 1 new SWE-intern match"
+    assert "Active internship terms: Fall 2026, Summer 2027" in body
+    assert "Season configuration warning: rollover_due" in body
+    assert "Alumni index: 124 records across 80 employers" in body
+
+
 def test_render_digest_does_not_claim_no_alumni_when_roster_missing():
     _subject, body = render_digest(
         [match("Bosch", "IT Internship (BackEnd, Java)", 82, fit_score=90, role_track="backend")],

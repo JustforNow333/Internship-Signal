@@ -1,9 +1,10 @@
 import sqlite3
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 from watcher.config import CompanyCfg, WatcherConfig
 from watcher.notify import render_digest
-from watcher.run import collect_rows, print_heartbeat, print_report, run_once
+from watcher.run import CollectionStats, collect_rows, print_heartbeat, print_report, run_once
 from watcher.seen_store import SeenStore
 from watcher.sources.base import SourceError, make_row
 
@@ -25,6 +26,20 @@ class FakeGithub:
 
     def fetch_many(self, companies):
         return self.rows
+
+
+class CountingGithub:
+    def __init__(self, url, rows=None, *, error=None):
+        self.feed_label = url
+        self.rows = rows or []
+        self.error = error
+        self.calls = 0
+
+    def fetch_many(self, companies):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return list(self.rows)
 
 
 class FakeDigestSender:
@@ -277,6 +292,113 @@ def test_collect_rows_preserves_an_explicitly_empty_source_registry(monkeypatch)
     assert errors == ["NoAdapterCo: no source registered for ats 'greenhouse'"]
 
 
+def test_collect_rows_fetches_and_aggregates_every_configured_github_feed_once(monkeypatch):
+    duplicate = row("GitHub", "Software Engineering Intern", source="github")
+    sources = {
+        "https://example.test/one.json": CountingGithub("https://example.test/one.json", [duplicate]),
+        "https://example.test/two.json": CountingGithub("https://example.test/two.json", [duplicate]),
+    }
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="GitHub", ats="github_only", terms=("Summer 2027",)),),
+        terms=("Summer 2027",),
+        github_listing_urls=tuple(sources),
+    )
+    monkeypatch.setattr("watcher.run.GitHubListingsSource", lambda url: sources[url])
+    stats = CollectionStats()
+
+    rows, errors = collect_rows(config, direct_sources={}, stats=stats)
+
+    assert rows == [duplicate, duplicate]
+    assert errors == []
+    assert [source.calls for source in sources.values()] == [1, 1]
+    assert stats.github_feeds_configured == 2
+    assert stats.github_feeds_succeeded == 2
+
+
+def test_one_failed_github_feed_keeps_successful_feed_rows_and_records_url(monkeypatch):
+    good_row = row("GitHub", "Software Engineering Intern", source="github")
+    sources = {
+        "https://example.test/broken.json": CountingGithub(
+            "https://example.test/broken.json",
+            error=SourceError("request failed"),
+        ),
+        "https://example.test/good.json": CountingGithub("https://example.test/good.json", [good_row]),
+    }
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="GitHub", ats="github_only", terms=("Summer 2027",)),),
+        terms=("Summer 2027",),
+        github_listing_urls=tuple(sources),
+    )
+    monkeypatch.setattr("watcher.run.GitHubListingsSource", lambda url: sources[url])
+    stats = CollectionStats()
+
+    rows, errors = collect_rows(config, direct_sources={}, stats=stats)
+
+    assert rows == [good_row]
+    assert errors == ["github listings (https://example.test/broken.json): request failed"]
+    assert stats.github_feeds_configured == 2
+    assert stats.github_feeds_succeeded == 1
+
+
+def test_all_github_feeds_failing_does_not_remove_direct_rows(monkeypatch):
+    direct_row = row("DirectCo", "Software Engineer Intern", source="direct")
+    urls = ("https://example.test/one.json", "https://example.test/two.json")
+    sources = {url: CountingGithub(url, error=SourceError("boom")) for url in urls}
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="DirectCo", ats="greenhouse", token="direct"),),
+        terms=("Summer 2027",),
+        github_listing_urls=urls,
+    )
+    monkeypatch.setattr("watcher.run.GitHubListingsSource", lambda url: sources[url])
+    stats = CollectionStats()
+
+    rows, errors = collect_rows(
+        config,
+        direct_sources={"greenhouse": FakeSource({"DirectCo": [direct_row]})},
+        stats=stats,
+    )
+
+    assert rows == [direct_row]
+    assert len(errors) == 2
+    assert all(url in error for url, error in zip(urls, errors))
+    assert stats.github_feeds_succeeded == 0
+
+
+def test_run_result_exposes_season_feed_counts_and_stale_company_warning(tmp_path, caplog):
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="Stale Override Co",
+                ats="github_only",
+                terms=("Summer 2026",),
+            ),
+        ),
+        terms=("Summer 2027",),
+        github_listing_urls=("https://example.test/listings.json",),
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2027, 7, 15),
+        )
+
+    assert result.configured_terms == ("Summer 2027",)
+    assert result.season_status == "rollover_due"
+    assert result.github_feeds_configured == 1
+    assert result.github_feeds_succeeded == 1
+    assert result.company_season_warnings == (
+        "Stale Override Co: stale company terms override (Summer 2026)",
+    )
+    assert "SEASON WARNING: rollover_due" in caplog.text
+    assert "Stale Override Co: stale company terms override" in caplog.text
+
+
 def test_print_report_for_matches_and_empty(capsys):
     result = type("Result", (), {
         "errors": [],
@@ -294,6 +416,9 @@ def test_print_report_for_matches_and_empty(capsys):
     print_report(result)
     output = capsys.readouterr().out
     assert "New matches: 1" in output
+    assert "Configured internship terms: (none)" in output
+    assert "Season status: unknown" in output
+    assert "GitHub backstop feeds: 0 configured, 0 succeeded" in output
     assert "[direct] DirectCo" in output
     assert "Strong role match" in output
 
@@ -309,6 +434,10 @@ def test_print_heartbeat(capsys):
         "matches": [{}, {}],
         "new_matches": [{}],
         "errors": ["BrokenCo: boom"],
+        "season_status": "ok",
+        "configured_terms": ("Fall 2026", "Summer 2027"),
+        "github_feeds_configured": 2,
+        "github_feeds_succeeded": 1,
         "alumni_csv_status": "loaded",
         "alumni_records_loaded": 124,
         "alumni_employers_indexed": 80,
@@ -320,9 +449,26 @@ def test_print_heartbeat(capsys):
 
     assert capsys.readouterr().out == (
         "HEARTBEAT: ran, rows_fetched=3, jobs_scored=2, matches=2, "
-        "new=1, errors=1, alumni_csv_status=loaded, alumni_records_loaded=124, "
+        "new=1, errors=1, season_status=ok, configured_terms=Fall_2026|Summer_2027, "
+        "github_feeds_configured=2, github_feeds_succeeded=1, "
+        "alumni_csv_status=loaded, alumni_records_loaded=124, "
         "alumni_employers_indexed=80, sent=no, seen_marked=1\n"
     )
+
+
+def test_workflow_preserves_season_and_feed_heartbeat_fields():
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml").read_text(
+        encoding="utf-8"
+    )
+
+    for field in (
+        "season_status",
+        "configured_terms",
+        "github_feeds_configured",
+        "github_feeds_succeeded",
+    ):
+        assert f"{field}=\\([^,]*\\)" in workflow or f"extract_count {field}" in workflow
+        assert f"steps.run_watcher.outputs.{field}" in workflow
 
 
 def test_synthetic_digest_excludes_non_swe_engineering_and_ranks_backend_java(tmp_path):

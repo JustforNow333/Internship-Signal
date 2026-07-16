@@ -41,7 +41,13 @@ class NotifyConfigError(RuntimeError):
     """Raised when live email sending is enabled but env config is incomplete."""
 
 
-def render_digest(matches: Sequence[dict], *, alumni_summary: Mapping[str, object] | None = None) -> tuple[str, str]:
+def render_digest(
+    matches: Sequence[dict],
+    *,
+    alumni_summary: Mapping[str, object] | None = None,
+    active_terms: Sequence[str] = (),
+    season_status: str = "ok",
+) -> tuple[str, str]:
     """Return the digest subject and plain-text body, or empty strings for no email."""
 
     eligible_matches = [job for job in matches if _digest_eligible(job)]
@@ -58,6 +64,10 @@ def render_digest(matches: Sequence[dict], *, alumni_summary: Mapping[str, objec
         "",
         f"{count} new watched-company SWE-intern {posting_word}, sorted by fit score.",
     ]
+    if active_terms:
+        lines.append(f"Active internship terms: {', '.join(str(term) for term in active_terms)}")
+    if season_status != "ok":
+        lines.append(f"Season configuration warning: {season_status}")
     summary_line = _alumni_summary_line(alumni_summary)
     if summary_line:
         lines.append(summary_line)
@@ -91,10 +101,17 @@ def send_digest(
     *,
     output: TextIO | None = None,
     alumni_summary: Mapping[str, object] | None = None,
+    active_terms: Sequence[str] = (),
+    season_status: str = "ok",
 ) -> bool:
     """Render and send the digest. Dry-run stdout output is the default."""
 
-    subject, body = render_digest(matches, alumni_summary=alumni_summary)
+    subject, body = render_digest(
+        matches,
+        alumni_summary=alumni_summary,
+        active_terms=active_terms,
+        season_status=season_status,
+    )
     if not subject:
         return False
 

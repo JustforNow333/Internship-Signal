@@ -4,21 +4,31 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from backend.app.dedupe import norm_company
 from watcher.config import CompanyCfg
-from watcher.sources.base import SourceSchemaError, ensure_list, fetch_json, iso_date, make_row
+from watcher.sources.base import SourceError, SourceSchemaError, ensure_list, fetch_json, iso_date, make_row
 
 LOGGER = logging.getLogger(__name__)
 
 
 class GitHubListingsSource:
     name = "github_listings"
-    url = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"
     required_keys = {"company_name", "title", "locations", "url", "date_posted", "active", "terms"}
 
+    def __init__(self, url: str):
+        self.url = str(url).strip()
+        if not self.url:
+            raise ValueError("GitHub listings source requires a URL")
+        self.feed_label = _safe_feed_url(self.url)
+
     def fetch_payload(self):
-        return fetch_json(self.url, self.name)
+        try:
+            return fetch_json(self.url, self.name)
+        except SourceError as exc:
+            message = str(exc).replace(self.url, self.feed_label)
+            raise type(exc)(message) from exc
 
     def fetch(self, company: CompanyCfg) -> list[dict]:
         return self.parse(self.fetch_payload(), company)
@@ -32,6 +42,8 @@ class GitHubListingsSource:
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
         listings = ensure_list(payload, self.name, "payload")
+        if not listings:
+            self._schema_problem("github listings payload contained no entries")
         rows = []
         for entry in listings:
             self._validate_entry(entry)
@@ -72,6 +84,7 @@ class GitHubListingsSource:
                 "category": str(entry.get("category") or ""),
                 "listing_source": str(entry.get("source") or ""),
                 "terms": entry["terms"],
+                "feed_url": self.feed_label,
             },
         )
 
@@ -86,6 +99,15 @@ def _company_matches(source_company: Any, company: CompanyCfg) -> bool:
 
 
 def _terms_match(source_terms: list, configured_terms: Any) -> bool:
-    terms = {str(term).strip().lower() for term in source_terms if str(term).strip()}
-    wanted = {str(term).strip().lower() for term in configured_terms if str(term).strip()}
+    terms = {_normalize_term(term) for term in source_terms if str(term).strip()}
+    wanted = {_normalize_term(term) for term in configured_terms if str(term).strip()}
     return not wanted or bool(terms & wanted)
+
+
+def _normalize_term(value: Any) -> str:
+    return " ".join(str(value).split()).casefold()
+
+
+def _safe_feed_url(url: str) -> str:
+    parsed = urlsplit(url)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))

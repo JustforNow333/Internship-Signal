@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
+from urllib.parse import urlsplit
 
 WATCHER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = WATCHER_DIR.parent
@@ -102,7 +103,7 @@ class CompanyCfg:
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)
     alumni_match: Sequence[str] = field(default_factory=tuple)
-    terms: Sequence[str] = field(default_factory=lambda: ("Summer 2026",))
+    terms: Sequence[str] = field(default_factory=tuple)
 
     def match_names(self) -> tuple[str, ...]:
         return (self.name, *tuple(self.aliases))
@@ -111,7 +112,8 @@ class CompanyCfg:
 @dataclass(frozen=True)
 class WatcherConfig:
     companies: tuple[CompanyCfg, ...]
-    terms: tuple[str, ...] = ("Summer 2026",)
+    terms: tuple[str, ...] = ()
+    github_listing_urls: tuple[str, ...] = ()
     target_roles: frozenset[str] = frozenset({"swe"})
     min_score: int | None = None
     seen_db_path: Path = DEFAULT_SEEN_DB_PATH
@@ -137,7 +139,10 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
     if not isinstance(companies_data, list) or not companies_data:
         raise ConfigError("watchlist must define at least one company")
 
-    terms = _string_tuple(defaults.get("terms", ("Summer 2026",)))
+    if "terms" not in defaults:
+        raise ConfigError("watchlist defaults.terms must explicitly define at least one nonblank term")
+    terms = _terms_tuple(defaults["terms"], "defaults.terms")
+    github_listing_urls = _github_listing_urls(defaults.get("github_listing_urls", ()))
     target_roles = frozenset(_string_tuple(defaults.get("target_roles", ("swe",))))
     min_score = defaults.get("min_score")
     if min_score in ("", None):
@@ -149,6 +154,7 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
     return WatcherConfig(
         companies=companies,
         terms=terms,
+        github_listing_urls=github_listing_urls,
         target_roles=target_roles,
         min_score=min_score,
         seen_db_path=DEFAULT_SEEN_DB_PATH,
@@ -176,6 +182,10 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             raise ConfigError(f"{name}: workday entries require workday_shard")
         if not workday_site:
             raise ConfigError(f"{name}: workday entries require workday_site")
+    if "terms" in entry:
+        company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
+    else:
+        company_terms = default_terms
     return CompanyCfg(
         name=name,
         ats=ats,
@@ -185,7 +195,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         module=str(entry.get("module") or "").strip(),
         aliases=_string_tuple(entry.get("aliases", ())),
         alumni_match=_string_tuple(entry.get("alumni_match", ())),
-        terms=_string_tuple(entry.get("terms", default_terms)),
+        terms=company_terms,
     )
 
 
@@ -299,7 +309,40 @@ def _string_tuple(value) -> tuple[str, ...]:
     if value in (None, ""):
         return ()
     if isinstance(value, str):
-        return (value,)
+        stripped = value.strip()
+        return (stripped,) if stripped else ()
     if isinstance(value, Sequence):
         return tuple(str(item).strip() for item in value if str(item).strip())
     return (str(value).strip(),)
+
+
+def _terms_tuple(value, label: str) -> tuple[str, ...]:
+    terms = _string_tuple(value)
+    if not terms:
+        raise ConfigError(f"{label} must define at least one nonblank term")
+    return terms
+
+
+def _github_listing_urls(value) -> tuple[str, ...]:
+    if value in (None, ""):
+        return ()
+    if isinstance(value, str):
+        values = (value,)
+    elif isinstance(value, Sequence):
+        values = tuple(value)
+    else:
+        values = (value,)
+
+    urls: list[str] = []
+    for raw_url in values:
+        if not isinstance(raw_url, str) or not raw_url.strip():
+            raise ConfigError("defaults.github_listing_urls values must be nonblank HTTP or HTTPS URLs")
+        url = raw_url.strip()
+        parsed = urlsplit(url)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            raise ConfigError("defaults.github_listing_urls contains an invalid HTTP/HTTPS URL")
+        if parsed.username or parsed.password:
+            raise ConfigError("defaults.github_listing_urls must not contain URL credentials")
+        if url not in urls:
+            urls.append(url)
+    return tuple(urls)

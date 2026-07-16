@@ -15,7 +15,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
@@ -494,11 +494,21 @@ def write_report(results: Iterable[DetectionResult], path: Path) -> None:
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
-def write_watchlist(results: Iterable[DetectionResult], path: Path) -> None:
+def write_watchlist(
+    results: Iterable[DetectionResult],
+    path: Path,
+    *,
+    terms: Sequence[str],
+    github_listing_urls: Sequence[str] = (),
+) -> None:
     results = list(results)
+    terms = tuple(str(term).strip() for term in terms if str(term).strip())
+    if not terms:
+        raise ValueError("generated watchlists require at least one explicit internship term")
     lines = [
         "defaults:",
-        '  terms: ["Summer 2026"]',
+        f"  terms: {_inline_list(terms)}",
+        f"  github_listing_urls: {_inline_list(github_listing_urls)}",
         '  target_roles: ["swe"]',
         "  min_score:",
         "",
@@ -936,12 +946,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json-out", type=Path, help="Write raw detection results as JSON")
     parser.add_argument("--report-out", type=Path, help="Write a Markdown three-way report")
     parser.add_argument("--watchlist-out", type=Path, help="Write a starter watchlist.yml")
+    parser.add_argument(
+        "--term",
+        action="append",
+        default=[],
+        help="Explicit internship term for --watchlist-out; repeat for multiple terms",
+    )
+    parser.add_argument(
+        "--github-listing-url",
+        action="append",
+        default=[],
+        help="Verified structured listings URL for --watchlist-out; repeat for multiple feeds",
+    )
     parser.add_argument("--max-pages", type=int, default=DEFAULT_MAX_PAGES)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--fetch-delay", type=float, default=DEFAULT_FETCH_DELAY_SECONDS)
     parser.add_argument("--company-delay", type=float, default=DEFAULT_COMPANY_DELAY_SECONDS)
     parser.add_argument("--no-search", action="store_true", help="Skip search engines and only try common URLs")
     args = parser.parse_args(argv)
+    if args.watchlist_out and not any(str(term).strip() for term in args.term):
+        parser.error("--watchlist-out requires at least one explicit --term")
 
     companies = list(args.companies)
     if args.company_file:
@@ -975,7 +999,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.report_out:
         write_report(results, args.report_out)
     if args.watchlist_out:
-        write_watchlist(results, args.watchlist_out)
+        write_watchlist(
+            results,
+            args.watchlist_out,
+            terms=args.term,
+            github_listing_urls=args.github_listing_url,
+        )
 
     print_text_report(results)
     return 0

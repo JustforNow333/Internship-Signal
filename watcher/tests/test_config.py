@@ -1,10 +1,15 @@
 import os
 from collections import Counter
 
+import pytest
+
 from backend.app.dedupe import norm_company
 from watcher.config import (
+    CompanyCfg,
+    ConfigError,
     DEFAULT_WATCHLIST_PATH,
     SUPPORTED_ATS,
+    WatcherConfig,
     _parse_env_assignment,
     _parse_watchlist_yaml,
     load_dotenv,
@@ -119,7 +124,10 @@ def test_default_watchlist_loads_and_preserves_core_invariants():
     names = [company.name for company in config.companies]
     normalized_names = [norm_company(name) for name in names]
 
-    assert config.terms == ("Summer 2026",)
+    assert config.terms == ("Summer 2027",)
+    assert config.github_listing_urls == (
+        "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json",
+    )
     assert config.target_roles == frozenset({"swe"})
     assert config.min_score is None
     assert _duplicates(names) == []
@@ -132,7 +140,7 @@ def test_default_watchlist_loads_and_preserves_core_invariants():
         entry = entries_by_name[company.name]
         assert company.name == company.name.strip()
         assert company.ats in SUPPORTED_ATS
-        assert company.terms == ("Summer 2026",)
+        assert company.terms == ("Summer 2027",)
 
         if company.ats == "workday":
             assert company.token
@@ -156,7 +164,7 @@ def test_default_watchlist_contains_recent_priority_companies():
     missing = sorted(RECENT_PRIORITY_COMPANIES - set(companies_by_name))
     assert missing == []
     for name in RECENT_PRIORITY_COMPANIES:
-        assert companies_by_name[name].terms == ("Summer 2026",)
+        assert companies_by_name[name].terms == ("Summer 2027",)
 
 
 def test_recent_direct_watchlist_entries_keep_verified_adapter_metadata():
@@ -171,3 +179,101 @@ def test_recent_direct_watchlist_entries_keep_verified_adapter_metadata():
         assert company.token == token
         assert company.workday_shard == workday_shard
         assert company.workday_site == workday_site
+
+
+def _write_watchlist(tmp_path, defaults: str, companies: str | None = None):
+    path = tmp_path / "watchlist.yml"
+    path.write_text(
+        "defaults:\n"
+        f"{defaults}"
+        "companies:\n"
+        + (companies or '  - name: "Example"\n    ats: github_only\n'),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_load_watchlist_parses_explicit_terms_multiple_feeds_and_inheritance(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Fall 2026", "Summer 2027"]\n'
+        '  github_listing_urls: ["https://example.com/one.json", "http://example.org/two.json"]\n',
+    )
+
+    config = load_watchlist(path)
+
+    assert config.terms == ("Fall 2026", "Summer 2027")
+    assert config.github_listing_urls == (
+        "https://example.com/one.json",
+        "http://example.org/two.json",
+    )
+    assert config.companies[0].terms == config.terms
+
+
+def test_company_specific_terms_override_defaults(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        '  - name: "Example"\n    ats: github_only\n    terms: ["Fall 2027"]\n',
+    )
+
+    config = load_watchlist(path)
+
+    assert config.companies[0].terms == ("Fall 2027",)
+
+
+@pytest.mark.parametrize("defaults", ["", "  target_roles: [\"swe\"]\n"])
+def test_missing_defaults_terms_is_rejected(tmp_path, defaults):
+    path = _write_watchlist(tmp_path, defaults)
+
+    with pytest.raises(ConfigError, match=r"defaults\.terms.*explicitly"):
+        load_watchlist(path)
+
+
+@pytest.mark.parametrize("value", ["[]", '["  "]', ""])
+def test_empty_defaults_terms_is_rejected(tmp_path, value):
+    path = _write_watchlist(tmp_path, f"  terms: {value}\n")
+
+    with pytest.raises(ConfigError, match=r"defaults\.terms.*nonblank"):
+        load_watchlist(path)
+
+
+@pytest.mark.parametrize(
+    "url_value",
+    [
+        '["ftp://example.com/listings.json"]',
+        '["not-a-url"]',
+        '[""]',
+        '["https://user:secret@example.com/listings.json"]',
+        "[123]",
+    ],
+)
+def test_invalid_github_listing_urls_are_rejected(tmp_path, url_value):
+    path = _write_watchlist(
+        tmp_path,
+        f'  terms: ["Summer 2027"]\n  github_listing_urls: {url_value}\n',
+    )
+
+    with pytest.raises(ConfigError, match="github_listing_urls"):
+        load_watchlist(path)
+
+
+@pytest.mark.parametrize("value", ["[]", '["  "]', ""])
+def test_explicitly_empty_company_terms_are_rejected(tmp_path, value):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        f'  - name: "Example"\n    ats: github_only\n    terms: {value}\n',
+    )
+
+    with pytest.raises(ConfigError, match=r"Example\.terms.*nonblank"):
+        load_watchlist(path)
+
+
+def test_dataclass_defaults_do_not_insert_a_season_or_feed():
+    company = CompanyCfg(name="Manual")
+    config = WatcherConfig(companies=(company,))
+
+    assert tuple(company.terms) == ()
+    assert config.terms == ()
+    assert config.github_listing_urls == ()

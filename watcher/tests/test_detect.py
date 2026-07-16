@@ -113,6 +113,8 @@ def test_watchlist_writer_keeps_unresolved_as_github_only(tmp_path):
             DetectionResult(company="Unknown Co", status=UNRESOLVED, reason="manual check needed"),
         ],
         path,
+        terms=("Summer 2027",),
+        github_listing_urls=("https://example.test/listings.json",),
     )
 
     output = path.read_text(encoding="utf-8")
@@ -121,6 +123,8 @@ def test_watchlist_writer_keeps_unresolved_as_github_only(tmp_path):
     assert 'token: "andurilindustries"' in output
     assert "ats: bespoke" in output
     assert "ats: github_only" in output
+    assert 'terms: ["Summer 2027"]' in output
+    assert 'github_listing_urls: ["https://example.test/listings.json"]' in output
 
 
 def test_report_writer_includes_workday_shard(tmp_path):
