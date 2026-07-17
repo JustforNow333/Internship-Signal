@@ -6,7 +6,17 @@ from watcher.config import CompanyCfg, WatcherConfig
 from watcher.notify import render_digest
 from watcher.run import CollectionStats, collect_rows, print_heartbeat, print_report, run_once
 from watcher.seen_store import SeenStore
-from watcher.sources.base import SourceError, make_row
+from watcher.source_health import (
+    ERROR_MISSING_ADAPTER,
+    ERROR_SCHEMA,
+    ERROR_UNEXPECTED,
+    SOURCE_KIND_DIRECT,
+    SOURCE_KIND_GITHUB_FEED,
+    STATUS_HEALTHY,
+    STATUS_UNSUPPORTED,
+    SourceHealthStore,
+)
+from watcher.sources.base import SourceError, SourceSchemaError, make_row
 
 
 class FakeSource:
@@ -273,6 +283,70 @@ def test_collect_rows_skips_bespoke_and_github_only_for_direct_fetch():
     assert errors == []
 
 
+def test_collect_rows_records_exactly_one_direct_outcome_per_company_and_one_per_feed():
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(name="HealthyCo", ats="greenhouse", token="healthy"),
+            CompanyCfg(name="BespokeCo", ats="bespoke"),
+            CompanyCfg(name="GitHubOnlyCo", ats="github_only"),
+        ),
+        github_listing_urls=("https://example.test/listings.json",),
+    )
+    stats = CollectionStats()
+    observed = datetime(2026, 7, 16, 14, 30, tzinfo=timezone.utc)
+
+    collect_rows(
+        config,
+        direct_sources={"greenhouse": FakeSource({"HealthyCo": [row("HealthyCo", "Intern")]})},
+        github_source=CountingGithub("https://example.test/listings.json"),
+        stats=stats,
+        run_id="fixed-run",
+        observed_at=observed,
+    )
+
+    direct_attempts = [item for item in stats.source_attempts if item.source_kind == SOURCE_KIND_DIRECT]
+    github_attempts = [item for item in stats.source_attempts if item.source_kind == SOURCE_KIND_GITHUB_FEED]
+    assert [item.company for item in direct_attempts] == ["HealthyCo", "BespokeCo", "GitHubOnlyCo"]
+    assert len(github_attempts) == 1
+    assert {item.run_id for item in stats.source_attempts} == {"fixed-run"}
+    assert {item.observed_at for item in stats.source_attempts} == {observed}
+    assert direct_attempts[0].rows_returned == 1
+    assert direct_attempts[1].unsupported_reason == "bespoke"
+    assert direct_attempts[2].unsupported_reason == "github_only"
+
+
+def test_collect_rows_classifies_missing_schema_and_unexpected_failures():
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(name="MissingCo", ats="lever", token="missing"),
+            CompanyCfg(name="SchemaCo", ats="greenhouse", token="schema"),
+            CompanyCfg(name="UnexpectedCo", ats="ashby", token="unexpected"),
+        )
+    )
+    stats = CollectionStats()
+
+    collect_rows(
+        config,
+        direct_sources={
+            "greenhouse": FakeSource(error=SourceSchemaError("bad payload")),
+            "ashby": FakeSource(error=ValueError("query_secret=hidden")),
+        },
+        github_source=FakeGithub([]),
+        stats=stats,
+        run_id="fixed-run",
+        observed_at=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
+
+    errors = {item.company: item.error_kind for item in stats.source_attempts if item.company}
+    assert errors == {
+        "MissingCo": ERROR_MISSING_ADAPTER,
+        "SchemaCo": ERROR_SCHEMA,
+        "UnexpectedCo": ERROR_UNEXPECTED,
+    }
+    unexpected = next(item for item in stats.source_attempts if item.company == "UnexpectedCo")
+    assert "hidden" not in unexpected.error_message
+
+
 def test_collect_rows_preserves_an_explicitly_empty_source_registry(monkeypatch):
     config = WatcherConfig(
         companies=(CompanyCfg(name="NoAdapterCo", ats="greenhouse", token="unused"),)
@@ -338,6 +412,24 @@ def test_one_failed_github_feed_keeps_successful_feed_rows_and_records_url(monke
     assert errors == ["github listings (https://example.test/broken.json): request failed"]
     assert stats.github_feeds_configured == 2
     assert stats.github_feeds_succeeded == 1
+    github_attempts = [item for item in stats.source_attempts if item.source_kind == SOURCE_KIND_GITHUB_FEED]
+    assert len(github_attempts) == 2
+    assert [item.succeeded for item in github_attempts] == [False, True]
+
+
+def test_collect_rows_accepts_multiple_injected_github_sources():
+    urls = ("https://example.test/one.json", "https://example.test/two.json")
+    sources = [CountingGithub(url) for url in urls]
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="GitHub", ats="github_only"),),
+        github_listing_urls=urls,
+    )
+    stats = CollectionStats()
+
+    collect_rows(config, direct_sources={}, github_source=sources, stats=stats, run_id="fixed-run")
+
+    assert [source.calls for source in sources] == [1, 1]
+    assert len([item for item in stats.source_attempts if item.source_kind == SOURCE_KIND_GITHUB_FEED]) == 2
 
 
 def test_all_github_feeds_failing_does_not_remove_direct_rows(monkeypatch):
@@ -399,6 +491,82 @@ def test_run_result_exposes_season_feed_counts_and_stale_company_warning(tmp_pat
     assert "Stale Override Co: stale company terms override" in caplog.text
 
 
+def test_run_once_persists_health_without_matches_email_or_seen_marking(tmp_path):
+    db_path = tmp_path / "seen.sqlite"
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(name="EmptyCo", ats="greenhouse", token="empty"),
+            CompanyCfg(name="BackstopCo", ats="github_only"),
+        ),
+        github_listing_urls=("https://example.test/listings.json",),
+    )
+    digest_sender = FakeDigestSender(sent=False)
+    observed = datetime(2026, 7, 16, 14, 30, tzinfo=timezone.utc)
+
+    with SeenStore(db_path) as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"EmptyCo": []})},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=digest_sender,
+            today=date(2026, 7, 16),
+            run_id="fixed-run",
+            health_observed_at=observed,
+        )
+
+    assert result.run_id == "fixed-run"
+    assert result.health_summary.direct_empty == 1
+    assert result.health_summary.direct_unsupported == 1
+    assert result.health_summary.github_feeds_healthy == 1
+    assert result.health_summary.backstop_only_companies == 1
+    assert result.matches == []
+    assert result.seen_marked == 0
+    assert digest_sender.calls == [[]]
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("select count(*) from seen").fetchone()[0] == 0
+        assert conn.execute(
+            "select count(*) from source_health_attempts where run_id = ?", ("fixed-run",)
+        ).fetchone()[0] == 3
+
+
+def test_run_once_reuses_injected_health_store_and_detects_recovery(tmp_path):
+    db_path = tmp_path / "seen.sqlite"
+    config = WatcherConfig(companies=(CompanyCfg(name="DirectCo", ats="greenhouse", token="direct"),))
+    observed = datetime(2026, 7, 16, tzinfo=timezone.utc)
+
+    with SeenStore(db_path) as seen_store, SourceHealthStore(db_path) as health_store:
+        failed = run_once(
+            config,
+            seen_store=seen_store,
+            health_store=health_store,
+            direct_sources={"greenhouse": FakeSource(error=SourceError("boom"))},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            run_id="run-failed",
+            health_observed_at=observed,
+        )
+        recovered = run_once(
+            config,
+            seen_store=seen_store,
+            health_store=health_store,
+            direct_sources={"greenhouse": FakeSource({"DirectCo": [row("DirectCo", "Intern")]})},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            run_id="run-recovered",
+            health_observed_at=observed.replace(hour=1),
+        )
+
+    assert failed.health_summary.direct_degraded == 1
+    assert recovered.health_summary.direct_healthy == 1
+    assert recovered.health_summary.health_recoveries == 1
+    assert recovered.health_transitions[0].recovery is True
+    assert recovered.source_health_states[recovered.source_attempts[0].health_key].status == STATUS_HEALTHY
+
+
 def test_print_report_for_matches_and_empty(capsys):
     result = type("Result", (), {
         "errors": [],
@@ -451,6 +619,10 @@ def test_print_heartbeat(capsys):
         "HEARTBEAT: ran, rows_fetched=3, jobs_scored=2, matches=2, "
         "new=1, errors=1, season_status=ok, configured_terms=Fall_2026|Summer_2027, "
         "github_feeds_configured=2, github_feeds_succeeded=1, "
+        "companies_configured=0, direct_healthy=0, direct_empty=0, direct_degraded=0, "
+        "direct_failing=0, direct_unsupported=0, github_feeds_healthy=0, "
+        "backstop_only_companies=0, uncovered_companies=0, health_transitions=0, "
+        "health_recoveries=0, "
         "alumni_csv_status=loaded, alumni_records_loaded=124, "
         "alumni_employers_indexed=80, sent=no, seen_marked=1\n"
     )
@@ -469,6 +641,41 @@ def test_workflow_preserves_season_and_feed_heartbeat_fields():
     ):
         assert f"{field}=\\([^,]*\\)" in workflow or f"extract_count {field}" in workflow
         assert f"steps.run_watcher.outputs.{field}" in workflow
+
+
+def test_workflow_preserves_health_fields_validates_db_and_renders_summary():
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml").read_text(
+        encoding="utf-8"
+    )
+
+    health_fields = (
+        "companies_configured",
+        "direct_healthy",
+        "direct_empty",
+        "direct_degraded",
+        "direct_failing",
+        "direct_unsupported",
+        "github_feeds_healthy",
+        "backstop_only_companies",
+        "uncovered_companies",
+        "health_transitions",
+        "health_recoveries",
+    )
+    for field in health_fields:
+        assert f"extract_count {field}" in workflow
+        assert f"steps.run_watcher.outputs.{field}" in workflow
+    assert "WATCHER_HEALTH_REPORT_PATH" in workflow
+    assert "$GITHUB_STEP_SUMMARY" in workflow
+    assert "python -m watcher.source_health workflow-report" in workflow
+    assert "source_health_attempts" in workflow
+    assert "source_health_current" in workflow
+    assert "select count(*) from seen" in workflow
+    assert "where run_id = ?" in workflow
+    assert "::error::SEEN-STORE" in workflow
+    assert "git worktree add -B \"$DATA_BRANCH\"" in workflow
+    assert "checkout --orphan \"$DATA_BRANCH\"" in workflow
+    assert "push origin \"HEAD:$DATA_BRANCH\"" in workflow
+    assert "git branch -D watcher-data" not in workflow
 
 
 def test_synthetic_digest_excludes_non_swe_engineering_and_ranks_backend_java(tmp_path):
