@@ -26,7 +26,7 @@ jobs:
       DATA_BRANCH: watcher-data
       DATA_DB_FILE: seen.sqlite
       SEEN_DB_PATH: ${{ github.workspace }}/.watcher-state/seen.sqlite
-      HEALTH_REPORT_PATH: ${{ runner.temp }}/watcher-source-health.json
+      HEALTH_REPORT_PATH: ${{ github.workspace }}/.watcher-state/watcher-source-health.json
       ACTIONS_WATCHER_SEND_EMAIL: ${{ vars.WATCHER_SEND_EMAIL }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
