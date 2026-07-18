@@ -35,6 +35,22 @@ class SeenStore:
 
     def mark_seen(self, job: dict, *, seen_at: datetime | None = None, emailed_at: datetime | None = None) -> None:
         seen_at = seen_at or datetime.now(timezone.utc)
+        with self._conn:
+            self._insert_seen(job, seen_at=seen_at, emailed_at=emailed_at)
+
+    def mark_many_seen(
+        self,
+        jobs: Iterable[dict],
+        *,
+        seen_at: datetime | None = None,
+        emailed_at: datetime | None = None,
+    ) -> None:
+        timestamp = seen_at or datetime.now(timezone.utc)
+        with self._conn:
+            for job in jobs:
+                self._insert_seen(job, seen_at=timestamp, emailed_at=emailed_at)
+
+    def _insert_seen(self, job: dict, *, seen_at: datetime, emailed_at: datetime | None) -> None:
         extra = job.get("extra", {})
         self._conn.execute(
             """
@@ -51,18 +67,6 @@ class SeenStore:
                 _iso(emailed_at) if emailed_at else None,
             ),
         )
-        self._conn.commit()
-
-    def mark_many_seen(
-        self,
-        jobs: Iterable[dict],
-        *,
-        seen_at: datetime | None = None,
-        emailed_at: datetime | None = None,
-    ) -> None:
-        timestamp = seen_at or datetime.now(timezone.utc)
-        for job in jobs:
-            self.mark_seen(job, seen_at=timestamp, emailed_at=emailed_at)
 
     def _init_schema(self) -> None:
         self._conn.execute(

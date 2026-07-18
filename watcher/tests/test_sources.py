@@ -348,6 +348,134 @@ def test_workday_invalid_total_still_raises():
         WorkdaySource().parse({"jobPostings": [], "total": "zero"}, workday_company())
 
 
+@pytest.mark.parametrize(
+    ("source", "company", "payload"),
+    [
+        (
+            GreenhouseSource(),
+            CompanyCfg(name="Acme", ats="greenhouse", token="acme"),
+            {"jobs": [{"title": "Intern", "absolute_url": "https://example.test/1"}, {"title": "broken"}]},
+        ),
+        (
+            LeverSource(),
+            CompanyCfg(name="Acme", ats="lever", token="acme"),
+            [{"text": "Intern", "applyUrl": "https://example.test/1"}, {"text": "broken"}],
+        ),
+        (
+            AshbySource(),
+            CompanyCfg(name="Acme", ats="ashby", token="acme"),
+            {"jobs": [{"title": "Intern", "applyUrl": "https://example.test/1"}, {"title": "broken"}]},
+        ),
+        (
+            SmartRecruitersSource(),
+            CompanyCfg(name="Acme", ats="smartrecruiters", token="acme"),
+            {
+                "content": [
+                    {"name": "Intern", "id": "1", "postingUrl": "https://example.test/1"},
+                    {"name": "broken"},
+                ],
+                "totalFound": 2,
+            },
+        ),
+        (
+            WorkableSource(),
+            CompanyCfg(name="Acme", ats="workable", token="acme"),
+            {
+                "results": [
+                    {"title": "Intern", "shortcode": "ONE", "url": "https://example.test/1"},
+                    {"title": "broken"},
+                ],
+                "total": 2,
+            },
+        ),
+    ],
+)
+def test_direct_adapters_retain_valid_rows_when_one_record_is_malformed(source, company, payload, caplog):
+    with caplog.at_level(logging.WARNING, logger="watcher.sources.base"):
+        rows = source.parse(payload, company)
+
+    assert [row["title"] for row in rows] == ["Intern"]
+    assert "Skipped 1 malformed" in caplog.text
+    assert "Acme" in caplog.text
+    assert "broken" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("source", "company", "payload"),
+    [
+        (GreenhouseSource(), CompanyCfg(name="Acme", ats="greenhouse", token="acme"), {"jobs": [{"title": "broken"}]}),
+        (LeverSource(), CompanyCfg(name="Acme", ats="lever", token="acme"), [{"text": "broken"}]),
+        (AshbySource(), CompanyCfg(name="Acme", ats="ashby", token="acme"), {"jobs": [{"title": "broken"}]}),
+        (
+            SmartRecruitersSource(),
+            CompanyCfg(name="Acme", ats="smartrecruiters", token="acme"),
+            {"content": [{"name": "broken"}], "totalFound": 1},
+        ),
+        (
+            WorkableSource(),
+            CompanyCfg(name="Acme", ats="workable", token="acme"),
+            {"results": [{"title": "broken"}], "total": 1},
+        ),
+    ],
+)
+def test_direct_adapters_still_fail_nonempty_all_malformed_payloads(source, company, payload):
+    with pytest.raises(SourceSchemaError, match="none were valid"):
+        source.parse(payload, company)
+
+
+def test_ashby_all_unlisted_jobs_are_a_successful_empty_result():
+    payload = {
+        "jobs": [
+            {"title": "Private", "applyUrl": "https://example.test/private", "isListed": False}
+        ]
+    }
+
+    assert AshbySource().parse(payload, CompanyCfg(name="Acme", ats="ashby", token="acme")) == []
+
+
+def test_smartrecruiters_repeated_page_fails_instead_of_looping(monkeypatch):
+    offsets = []
+    payload = {
+        "content": [{"name": "Intern", "id": "1", "postingUrl": "https://example.test/1"}],
+        "totalFound": 3,
+    }
+
+    def fake_fetch_json(url, source_name):
+        offsets.append(int(url.rsplit("offset=", 1)[1]))
+        return payload
+
+    monkeypatch.setattr("watcher.sources.smartrecruiters.fetch_json", fake_fetch_json)
+    with pytest.raises(SourceSchemaError, match="repeated pagination page"):
+        SmartRecruitersSource().fetch(
+            CompanyCfg(name="Acme", ats="smartrecruiters", token="acme")
+        )
+
+    assert offsets == [0, 1]
+
+
+def test_workday_repeated_page_fails_and_diagnostics_do_not_leak(monkeypatch):
+    source = WorkdaySource()
+    source.parse(
+        {"jobPostings": [workday_posting(), {"title": "broken"}], "total": 2},
+        workday_company(),
+    )
+    assert source.last_diagnostics.malformed_postings_skipped == 1
+    offsets = []
+    payload = {"jobPostings": [workday_posting()], "total": 3}
+
+    def fake_post_json(url, data, source_name):
+        offsets.append(data["offset"])
+        return payload
+
+    monkeypatch.setattr("watcher.sources.workday.post_json", fake_post_json)
+    with pytest.raises(SourceSchemaError, match="repeated pagination page"):
+        source.fetch(workday_company())
+
+    assert offsets == [0, 1]
+    assert source.last_diagnostics.malformed_postings_skipped == 0
+    assert source.last_diagnostics.raw_postings_seen == 0
+
+
 def test_ashby_fixture_to_canonical_rows():
     payload = load_fixture("ashby_chainalysis_careers.json")
     company = CompanyCfg(name="Chainalysis", ats="ashby", token="chainalysis-careers")

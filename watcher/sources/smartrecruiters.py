@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import SourceSchemaError, ensure_list, fetch_json, iso_date, make_row, require_token
+from watcher.sources.base import SourceSchemaError, ensure_list, fetch_json, iso_date, make_row, page_fingerprint, parse_records, require_token
 
 
 class SmartRecruitersSource:
@@ -22,20 +22,34 @@ class SmartRecruitersSource:
         postings: list[dict] = []
         offset = 0
         total = None
+        seen_pages: set[str] = set()
         while True:
             payload = fetch_json(self.endpoint(token, limit=self.page_size, offset=offset), self.name)
             page_postings, total_found = self._page(payload)
+            if page_postings:
+                fingerprint = page_fingerprint(page_postings)
+                if fingerprint in seen_pages:
+                    raise SourceSchemaError("smartrecruiters returned a repeated pagination page")
+                seen_pages.add(fingerprint)
             postings.extend(page_postings)
             offset += len(page_postings)
             total = total_found if total_found is not None else total
             if not page_postings or (total is not None and offset >= total):
                 break
-        return [self._parse_posting(posting, company, token) for posting in postings]
+        return self._parse_postings(postings, company, token)
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
         token = require_token(company, self.name)
         postings, _ = self._page(payload)
-        return [self._parse_posting(posting, company, token) for posting in postings]
+        return self._parse_postings(postings, company, token)
+
+    def _parse_postings(self, postings: list, company: CompanyCfg, token: str) -> list[dict]:
+        return parse_records(
+            postings,
+            lambda posting: self._parse_posting(posting, company, token),
+            source_name=self.name,
+            company_name=company.name,
+        )
 
     def _page(self, payload: Any) -> tuple[list, int | None]:
         if not isinstance(payload, dict):

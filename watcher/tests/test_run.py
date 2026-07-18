@@ -17,6 +17,7 @@ from watcher.source_health import (
     STATUS_HEALTHY,
     STATUS_UNSUPPORTED,
     SourceHealthStore,
+    render_final_heartbeat,
 )
 from watcher.sources.base import SourceError, SourceSchemaError, make_row
 from watcher.sources.workday import WorkdaySource
@@ -750,7 +751,9 @@ def test_workflow_forwards_exact_application_heartbeat_and_keeps_existing_output
     )
 
     assert "grep '^HEARTBEAT:' \"$RUNNER_TEMP/watcher-run.log\" | tail -n 1" in workflow
-    assert "printf 'application_heartbeat=%s\\n' \"$application_heartbeat\"" in workflow
+    assert 'echo "application_heartbeat<<WATCHER_HEARTBEAT_EOF"' in workflow
+    assert "printf '%s\\n' \"$heartbeat\"" in workflow
+    assert "[[ \"$heartbeat\" == *$'\\n'* || \"$heartbeat\" == *$'\\r'* ]]" in workflow
     assert "APPLICATION_HEARTBEAT: ${{ steps.run_watcher.outputs.application_heartbeat }}" in workflow
     assert "python -m watcher.source_health final-heartbeat" in workflow
     assert 'echo "HEARTBEAT: ran, rows_fetched=' not in workflow
@@ -759,6 +762,33 @@ def test_workflow_forwards_exact_application_heartbeat_and_keeps_existing_output
     assert "Watcher completed with $ERRORS source error(s)" in workflow
     assert "eval " not in workflow
     assert 'source "$' not in workflow
+
+    application = (
+        "HEARTBEAT: ran, rows_fetched=10, jobs_scored=9, matches=2, new=1, errors=0, "
+        "season_status=ok, configured_terms=Summer_2027, github_feeds_configured=1, "
+        "github_feeds_succeeded=1, companies_configured=3, direct_healthy=2, "
+        "direct_empty=0, direct_degraded=0, direct_failing=0, direct_unsupported=1, "
+        "github_feeds_healthy=1, backstop_only_companies=1, uncovered_companies=0, "
+        "health_transitions=0, health_recoveries=0, alumni_csv_status=loaded-json-map, "
+        "alumni_records_loaded=2, alumni_employers_indexed=2, sent=no, seen_marked=0, "
+        "future_metric=123"
+    )
+    final = render_final_heartbeat(
+        application,
+        seen_loaded=7,
+        seen_saved=8,
+        load_status="loaded",
+        save_status="pushed",
+    )
+    assert final.startswith(application)
+    assert "future_metric=123" in final
+    assert "season_status=ok" in final
+    assert "github_feeds_succeeded=1" in final
+    assert "direct_healthy=2" in final
+    assert "alumni_csv_status=loaded-json-map" in final
+    assert "sent=no, seen_marked=0" in final
+    assert final.endswith("seen_loaded=7, seen_saved=8, seen_store=loaded/pushed")
+    assert "\n" not in final and "\r" not in final
 
     for field in (
         "rows_fetched",
@@ -770,6 +800,17 @@ def test_workflow_forwards_exact_application_heartbeat_and_keeps_existing_output
         "seen_marked",
     ):
         assert f'echo "{field}=' in workflow
+
+
+def test_workflow_false_mode_explicitly_disables_email_and_keeps_priming():
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "export WATCHER_SEND_EMAIL=0" in workflow
+    assert "export WATCHER_SUPPRESS_DRY_RUN_DIGEST=1" in workflow
+    assert "unset WATCHER_SEND_EMAIL" not in workflow
+    assert "args+=(--mark-seen-without-send)" in workflow
 
 
 def test_workflow_yaml_parses_successfully():

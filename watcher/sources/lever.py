@@ -12,6 +12,7 @@ from watcher.sources.base import (
     html_to_text,
     iso_date,
     make_row,
+    parse_records,
     require_token,
 )
 
@@ -29,7 +30,12 @@ class LeverSource:
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
         postings = ensure_list(payload, self.name, "payload")
-        return [self._parse_posting(posting, company) for posting in postings]
+        return parse_records(
+            postings,
+            lambda posting: self._parse_posting(posting, company),
+            source_name=self.name,
+            company_name=company.name,
+        )
 
     def _parse_posting(self, posting: Any, company: CompanyCfg) -> dict:
         if not isinstance(posting, dict):
@@ -138,4 +144,3 @@ def _salary_range(value: Any) -> str:
     if minimum is not None and maximum is not None:
         return f"{money(minimum)} - {money(maximum)}{suffix}"
     return f"{money(minimum if minimum is not None else maximum)}{suffix}"
-

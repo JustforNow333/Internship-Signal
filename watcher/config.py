@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Sequence
 from urllib.parse import urlsplit
 
+from backend.app.dedupe import norm_company
+
 WATCHER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = WATCHER_DIR.parent
 DEFAULT_DOTENV_PATH = REPO_ROOT / ".env"
@@ -151,6 +153,7 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
         raise ConfigError("defaults.min_score must be an integer when set")
 
     companies = tuple(_build_company(entry, terms) for entry in companies_data)
+    _validate_unique_company_names(companies)
     return WatcherConfig(
         companies=companies,
         terms=terms,
@@ -197,6 +200,22 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         alumni_match=_string_tuple(entry.get("alumni_match", ())),
         terms=company_terms,
     )
+
+
+def _validate_unique_company_names(companies: Sequence[CompanyCfg]) -> None:
+    owners: dict[str, tuple[int, str]] = {}
+    for index, company in enumerate(companies):
+        labels = (company.name, *company.aliases, *company.alumni_match)
+        for label in labels:
+            key = norm_company(str(label or ""))
+            if not key:
+                continue
+            owner = owners.get(key)
+            if owner is not None and owner[0] != index:
+                raise ConfigError(
+                    f"watchlist company/alias {label!r} is ambiguous between {owner[1]!r} and {company.name!r}"
+                )
+            owners[key] = (index, company.name)
 
 
 def _parse_watchlist_yaml(text: str) -> dict:
@@ -334,6 +353,7 @@ def _github_listing_urls(value) -> tuple[str, ...]:
         values = (value,)
 
     urls: list[str] = []
+    identities: dict[tuple[str, str, int | None, str], str] = {}
     for raw_url in values:
         if not isinstance(raw_url, str) or not raw_url.strip():
             raise ConfigError("defaults.github_listing_urls values must be nonblank HTTP or HTTPS URLs")
@@ -343,6 +363,22 @@ def _github_listing_urls(value) -> tuple[str, ...]:
             raise ConfigError("defaults.github_listing_urls contains an invalid HTTP/HTTPS URL")
         if parsed.username or parsed.password:
             raise ConfigError("defaults.github_listing_urls must not contain URL credentials")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ConfigError("defaults.github_listing_urls contains an invalid HTTP/HTTPS URL") from exc
+        identity = (
+            parsed.scheme.lower(),
+            str(parsed.hostname).lower(),
+            port,
+            parsed.path or "/",
+        )
+        previous = identities.get(identity)
+        if previous is not None and previous != url:
+            raise ConfigError(
+                "defaults.github_listing_urls contains duplicate feed identities that differ only by query or fragment"
+            )
+        identities[identity] = url
         if url not in urls:
             urls.append(url)
     return tuple(urls)

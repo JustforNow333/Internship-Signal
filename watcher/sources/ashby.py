@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import SourceSchemaError, ensure_list, fetch_json, html_to_text, iso_date, make_row, require_token
+from watcher.sources.base import SourceSchemaError, ensure_list, fetch_json, html_to_text, iso_date, make_row, parse_records, require_token
 
 
 class AshbySource:
@@ -23,7 +23,13 @@ class AshbySource:
         if not isinstance(payload, dict):
             raise SourceSchemaError("ashby expected a JSON object")
         jobs = ensure_list(payload.get("jobs"), self.name, "jobs")
-        return [self._parse_job(job, company) for job in jobs if _is_public(job)]
+        return parse_records(
+            jobs,
+            lambda job: self._parse_job(job, company),
+            source_name=self.name,
+            company_name=company.name,
+            include=_should_parse,
+        )
 
     def _parse_job(self, job: Any, company: CompanyCfg) -> dict:
         if not isinstance(job, dict):
@@ -54,8 +60,8 @@ class AshbySource:
         )
 
 
-def _is_public(job: Any) -> bool:
-    return isinstance(job, dict) and job.get("isListed", True) is not False
+def _should_parse(job: Any) -> bool:
+    return not isinstance(job, dict) or job.get("isListed", True) is not False
 
 
 def _location(job: dict) -> str:

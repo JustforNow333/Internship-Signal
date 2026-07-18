@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import SourceSchemaError, ensure_list, html_to_text, iso_date, make_row, post_json, require_token
+from watcher.sources.base import SourceSchemaError, ensure_list, html_to_text, iso_date, make_row, parse_records, post_json, require_token
 
 
 class WorkableSource:
@@ -26,7 +26,12 @@ class WorkableSource:
         if total is not None and not isinstance(total, int):
             raise SourceSchemaError("workable expected total to be an integer")
         jobs = ensure_list(payload.get("results"), self.name, "results")
-        return [self._parse_job(job, company) for job in jobs]
+        return parse_records(
+            jobs,
+            lambda job: self._parse_job(job, company),
+            source_name=self.name,
+            company_name=company.name,
+        )
 
     def _parse_job(self, job: Any, company: CompanyCfg) -> dict:
         if not isinstance(job, dict):

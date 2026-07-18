@@ -222,6 +222,42 @@ def test_company_specific_terms_override_defaults(tmp_path):
     assert config.companies[0].terms == ("Fall 2027",)
 
 
+@pytest.mark.parametrize("second_name", ["Acme", "ACME, Inc."])
+def test_duplicate_normalized_company_names_are_rejected(tmp_path, second_name):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        '  - name: "Acme"\n    ats: greenhouse\n    token: one\n'
+        f'  - name: "{second_name}"\n    ats: greenhouse\n    token: two\n',
+    )
+
+    with pytest.raises(ConfigError, match="ambiguous"):
+        load_watchlist(path)
+
+
+def test_alias_shared_by_two_companies_is_rejected(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        '  - name: "First Co"\n    ats: greenhouse\n    token: first\n    aliases: ["Shared"]\n'
+        '  - name: "Second Co"\n    ats: greenhouse\n    token: second\n    alumni_match: ["shared"]\n',
+    )
+
+    with pytest.raises(ConfigError, match="ambiguous"):
+        load_watchlist(path)
+
+
+def test_feed_urls_differing_only_by_query_are_rejected(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n'
+        '  github_listing_urls: ["https://example.test/listings.json?region=us", "https://example.test/listings.json?region=eu"]\n',
+    )
+
+    with pytest.raises(ConfigError, match="duplicate feed identities"):
+        load_watchlist(path)
+
+
 @pytest.mark.parametrize("defaults", ["", "  target_roles: [\"swe\"]\n"])
 def test_missing_defaults_terms_is_rejected(tmp_path, defaults):
     path = _write_watchlist(tmp_path, defaults)
@@ -245,6 +281,7 @@ def test_empty_defaults_terms_is_rejected(tmp_path, value):
         '["not-a-url"]',
         '[""]',
         '["https://user:secret@example.com/listings.json"]',
+        '["https://example.com:invalid/listings.json"]',
         "[123]",
     ],
 )

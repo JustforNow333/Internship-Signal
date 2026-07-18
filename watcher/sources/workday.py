@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import SourceError, SourceSchemaError, ensure_list, html_to_text, make_row, post_json, require_token
+from watcher.sources.base import SourceError, SourceSchemaError, ensure_list, html_to_text, make_row, page_fingerprint, post_json, require_token
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ class WorkdaySource:
         return f"https://{token}.{shard}.myworkdayjobs.com/{site}{external_path}"
 
     def fetch(self, company: CompanyCfg) -> list[dict]:
+        self.last_diagnostics = WorkdayParseDiagnostics()
         token = require_token(company, self.name)
         shard = _required(company.workday_shard, "workday_shard", company)
         site = _required(company.workday_site, "workday_site", company)
@@ -46,6 +47,7 @@ class WorkdaySource:
         skip_reasons: Counter[str] = Counter()
         offset = 0
         total = None
+        seen_pages: set[str] = set()
         while True:
             payload = post_json(
                 self.endpoint(token, shard, site),
@@ -53,6 +55,11 @@ class WorkdaySource:
                 self.name,
             )
             postings, total_found = self._page(payload)
+            if postings:
+                fingerprint = page_fingerprint(postings)
+                if fingerprint in seen_pages:
+                    raise SourceSchemaError("workday returned a repeated pagination page")
+                seen_pages.add(fingerprint)
             raw_postings_seen += len(postings)
             page_rows, page_reasons = self._parse_postings(postings, company, token, shard, site)
             rows.extend(page_rows)
@@ -64,6 +71,7 @@ class WorkdaySource:
         return self._finalize(rows, raw_postings_seen, skip_reasons, company)
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
+        self.last_diagnostics = WorkdayParseDiagnostics()
         token = require_token(company, self.name)
         shard = _required(company.workday_shard, "workday_shard", company)
         site = _required(company.workday_site, "workday_site", company)

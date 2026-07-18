@@ -1,4 +1,11 @@
-from watcher.notify import SMTP_TIMEOUT_SECONDS, render_digest, send_digest
+import io
+import logging
+import os
+
+import pytest
+
+from watcher.config import load_dotenv
+from watcher.notify import DRY_RUN_HEADER, SMTP_TIMEOUT_SECONDS, render_digest, send_digest
 
 
 def match(
@@ -176,7 +183,7 @@ def test_render_digest_does_not_claim_no_alumni_when_roster_missing():
     assert "No alumni on file" not in body
 
 
-def test_send_digest_uses_timeout_for_live_smtp(monkeypatch):
+def test_send_digest_uses_timeout_for_live_smtp_without_logging_recipient(monkeypatch, caplog):
     calls = {}
 
     class FakeSMTP:
@@ -202,8 +209,56 @@ def test_send_digest_uses_timeout_for_live_smtp(monkeypatch):
     monkeypatch.setenv("SMTP_APP_PASSWORD", "app-password")
     monkeypatch.setenv("EMAIL_TO", "to@example.com")
     monkeypatch.setattr("watcher.notify.smtplib.SMTP_SSL", FakeSMTP)
+    caplog.set_level(logging.INFO, logger="watcher.notify")
 
     assert send_digest([match("DirectCo", "Software Engineer Intern", 80)]) is True
     assert calls["timeout"] == SMTP_TIMEOUT_SECONDS
     assert calls["login"] == ("from@example.com", "app-password")
     assert calls["to"] == "to@example.com"
+    assert "to@example.com" not in caplog.text
+
+
+@pytest.mark.parametrize("false_value", ["0", "false", "no", "off"])
+def test_explicit_false_send_mode_overrides_truthy_dotenv(tmp_path, monkeypatch, false_value):
+    env_path = tmp_path / ".env"
+    env_path.write_text("WATCHER_SEND_EMAIL=1\n", encoding="utf-8")
+    monkeypatch.setenv("WATCHER_SEND_EMAIL", false_value)
+
+    class ForbiddenSMTP:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("SMTP must not be opened in explicit false mode")
+
+    monkeypatch.setattr("watcher.notify.smtplib.SMTP_SSL", ForbiddenSMTP)
+    load_dotenv(env_path)
+    output = io.StringIO()
+
+    assert send_digest([match("DirectCo", "Software Engineer Intern", 80)], output=output) is False
+    assert os.environ["WATCHER_SEND_EMAIL"] == false_value
+    assert DRY_RUN_HEADER in output.getvalue()
+
+
+def test_actions_priming_can_suppress_private_alumni_from_dry_run_output(monkeypatch, caplog):
+    private_name = "Private Alumni Person"
+    private_link = "https://linkedin.example/private-person"
+    private_match = match(
+        "DirectCo",
+        "Software Engineer Intern",
+        80,
+        alumni=[
+            {
+                "name": private_name,
+                "occupation": "Engineer",
+                "linkedin_url": private_link,
+            }
+        ],
+    )
+    monkeypatch.setenv("WATCHER_SEND_EMAIL", "0")
+    monkeypatch.setenv("WATCHER_SUPPRESS_DRY_RUN_DIGEST", "1")
+    caplog.set_level(logging.INFO, logger="watcher.notify")
+    output = io.StringIO()
+
+    assert send_digest([private_match], output=output) is False
+    assert output.getvalue() == ""
+    assert private_name not in caplog.text
+    assert private_link not in caplog.text
+    assert "Dry-run digest output suppressed" in caplog.text

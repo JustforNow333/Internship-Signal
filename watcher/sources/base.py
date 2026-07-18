@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from html import unescape
 from json import JSONDecodeError
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -16,6 +18,7 @@ from watcher.config import CompanyCfg
 
 USER_AGENT = "internship-signal-watcher/0.1"
 DEFAULT_TIMEOUT_SECONDS = 20
+LOGGER = logging.getLogger(__name__)
 
 
 class SourceError(Exception):
@@ -151,3 +154,44 @@ def ensure_list(value: Any, source_name: str, field: str) -> list:
     if not isinstance(value, list):
         raise SourceSchemaError(f"{source_name} expected {field} to be a list")
     return value
+
+
+def parse_records(
+    records: list,
+    parse_record: Callable[[Any], dict],
+    *,
+    source_name: str,
+    company_name: str,
+    include: Callable[[Any], bool] | None = None,
+) -> list[dict]:
+    """Retain valid direct-source records while rejecting all-malformed payloads."""
+
+    candidates = [record for record in records if include is None or include(record)]
+    rows: list[dict] = []
+    skipped = 0
+    for record in candidates:
+        try:
+            rows.append(parse_record(record))
+        except SourceSchemaError:
+            skipped += 1
+    if skipped:
+        safe_company = re.sub(r"[\x00-\x1f\x7f]+", " ", str(company_name or "unknown")).strip()[:120]
+        LOGGER.warning(
+            "Skipped %d malformed %s record(s) for %s; %d valid record(s) retained.",
+            skipped,
+            source_name,
+            safe_company or "unknown",
+            len(rows),
+        )
+    if candidates and not rows:
+        raise SourceSchemaError(
+            f"{source_name} received {len(candidates)} posting record(s) but none were valid"
+        )
+    return rows
+
+
+def page_fingerprint(records: list) -> str:
+    """Return a bounded digest used to detect broken repeated pagination pages."""
+
+    encoded = json.dumps(records, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

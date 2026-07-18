@@ -12,6 +12,7 @@ from watcher.sources.base import (
     html_to_text,
     iso_date,
     make_row,
+    parse_records,
     require_token,
 )
 
@@ -31,7 +32,12 @@ class GreenhouseSource:
         if not isinstance(payload, dict):
             raise SourceSchemaError("greenhouse expected a JSON object")
         jobs = ensure_list(payload.get("jobs"), self.name, "jobs")
-        return [self._parse_job(job, company) for job in jobs]
+        return parse_records(
+            jobs,
+            lambda job: self._parse_job(job, company),
+            source_name=self.name,
+            company_name=company.name,
+        )
 
     def _parse_job(self, job: Any, company: CompanyCfg) -> dict:
         if not isinstance(job, dict):
@@ -73,4 +79,3 @@ def _metadata_value(metadata: Any, name: str) -> str:
         if str(item.get("name") or "").strip().lower() == name.lower():
             return str(item.get("value") or "").strip()
     return ""
-

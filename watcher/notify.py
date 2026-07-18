@@ -15,6 +15,7 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
 SMTP_TIMEOUT_SECONDS = 30
 DRY_RUN_HEADER = "[DRY RUN - not sent]"
+SUPPRESS_DRY_RUN_ENV = "WATCHER_SUPPRESS_DRY_RUN_DIGEST"
 COMPENSATION_UNCLEAR_LABEL = "Compensation unclear or unstated"
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "y", "on"}
 ROLE_TRACK_SORT_PRIORITY = {
@@ -116,6 +117,9 @@ def send_digest(
         return False
 
     if not _send_enabled():
+        if _env_truthy(SUPPRESS_DRY_RUN_ENV):
+            LOGGER.info("Dry-run digest output suppressed.")
+            return False
         output = output or sys.stdout
         print(DRY_RUN_HEADER, file=output)
         print(f"Subject: {subject}", file=output)
@@ -130,7 +134,7 @@ def send_digest(
     message["To"] = env["EMAIL_TO"]
     message.set_content(body)
 
-    LOGGER.info("Sending email digest to %s via %s:%s...", env["EMAIL_TO"], SMTP_HOST, SMTP_PORT)
+    LOGGER.info("Sending email digest via %s:%s...", SMTP_HOST, SMTP_PORT)
     with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS) as smtp:
         smtp.login(env["SMTP_USER"], env["SMTP_APP_PASSWORD"])
         smtp.send_message(message)
@@ -239,7 +243,11 @@ def _format_alum(record: dict) -> str:
 
 
 def _send_enabled() -> bool:
-    return str(os.getenv("WATCHER_SEND_EMAIL") or "").strip().lower() in TRUTHY_ENV_VALUES
+    return _env_truthy("WATCHER_SEND_EMAIL")
+
+
+def _env_truthy(name: str) -> bool:
+    return str(os.getenv(name) or "").strip().lower() in TRUTHY_ENV_VALUES
 
 
 def _email_env() -> dict[str, str]:
