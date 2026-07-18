@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,27 @@ from watcher.sources import (
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TEST_GITHUB_FEED_URL = "https://fixtures.example.test/internships/listings.json"
+
+
+def workday_company(name="Merck"):
+    return CompanyCfg(
+        name=name,
+        ats="workday",
+        token="merck",
+        workday_shard="wd5",
+        workday_site="Search_Jobs",
+    )
+
+
+def workday_posting(title="Software Engineer Intern", external_path="/job/Test/Software-Engineer_R1"):
+    return {
+        "title": title,
+        "externalPath": external_path,
+        "locationsText": "Rahway, NJ",
+        "postedOn": "Posted Today",
+        "jobDescription": "Build software.",
+        "bulletFields": ["R1"],
+    }
 
 
 def load_fixture(name: str):
@@ -166,6 +188,164 @@ def test_workday_missing_shard_fails_loudly():
 
     with pytest.raises(SourceError, match="workday_shard"):
         WorkdaySource().parse(payload, company)
+
+
+def test_workday_malformed_posting_followed_by_valid_posting_is_skipped():
+    source = WorkdaySource()
+    rows = source.parse(
+        {"jobPostings": [{"title": ""}, workday_posting()], "total": 2},
+        workday_company(),
+    )
+
+    assert [item["title"] for item in rows] == ["Software Engineer Intern"]
+    assert source.last_diagnostics.raw_postings_seen == 2
+    assert source.last_diagnostics.valid_rows_retained == 1
+    assert source.last_diagnostics.malformed_postings_skipped == 1
+
+
+def test_workday_valid_posting_followed_by_malformed_posting_is_retained():
+    source = WorkdaySource()
+    rows = source.parse(
+        {"jobPostings": [workday_posting(), {"externalPath": "/job/Test/Missing-Title_R2"}], "total": 2},
+        workday_company(),
+    )
+
+    assert [item["title"] for item in rows] == ["Software Engineer Intern"]
+    assert source.last_diagnostics.skip_reasons == (("missing_title", 1),)
+
+
+@pytest.mark.parametrize(
+    ("posting", "reason"),
+    [
+        ({"externalPath": "/job/Test/Missing-Title_R2"}, "missing_title"),
+        ({"title": "Missing URL Intern"}, "missing_external_path"),
+        ({"title": "", "externalPath": ""}, "missing_title_and_external_path"),
+        ("not-an-object", "posting_not_object"),
+    ],
+)
+def test_workday_malformed_record_reason_categories(posting, reason):
+    source = WorkdaySource()
+    rows = source.parse(
+        {"jobPostings": [workday_posting(), posting], "total": 2},
+        workday_company(),
+    )
+
+    assert len(rows) == 1
+    assert source.last_diagnostics.skip_reasons == ((reason, 1),)
+
+
+def test_workday_mixed_parse_logs_one_bounded_aggregate_warning_without_payload(caplog):
+    source = WorkdaySource()
+    payload = {
+        "jobPostings": [
+            workday_posting(),
+            {"title": "", "externalPath": "/job/private?token=DO_NOT_LOG", "secret_marker": "DO_NOT_LOG"},
+            {"title": "No URL", "secret_marker": "DO_NOT_LOG"},
+        ],
+        "total": 3,
+    }
+
+    with caplog.at_level(logging.WARNING, logger="watcher.sources.workday"):
+        rows = source.parse(payload, workday_company())
+
+    warnings = [record.getMessage() for record in caplog.records if "Skipped" in record.getMessage()]
+    assert len(rows) == 1
+    assert len(warnings) == 1
+    assert "Merck" in warnings[0]
+    assert "2 malformed" in warnings[0]
+    assert "1 valid posting retained" in warnings[0]
+    assert "missing_title=1" in warnings[0]
+    assert "missing_external_path=1" in warnings[0]
+    assert "DO_NOT_LOG" not in warnings[0]
+    assert len(warnings[0]) < 500
+
+
+def test_workday_other_record_schema_error_is_skipped_with_stable_reason(monkeypatch):
+    source = WorkdaySource()
+    original = source._parse_posting
+
+    def parse_posting(posting, company, token, shard, site):
+        if posting["title"] == "Record Schema Problem":
+            raise SourceSchemaError("record-only schema problem")
+        return original(posting, company, token, shard, site)
+
+    monkeypatch.setattr(source, "_parse_posting", parse_posting)
+    rows = source.parse(
+        {
+            "jobPostings": [
+                workday_posting(),
+                workday_posting("Record Schema Problem", "/job/Test/Problem_R2"),
+            ],
+            "total": 2,
+        },
+        workday_company(),
+    )
+
+    assert len(rows) == 1
+    assert source.last_diagnostics.skip_reasons == (("posting_schema_error", 1),)
+
+
+def test_workday_fetch_skips_malformed_records_across_pages_and_uses_raw_offsets(monkeypatch):
+    payloads = [
+        {
+            "jobPostings": [workday_posting("First Intern", "/job/Test/First_R1"), {"title": "Bad"}],
+            "total": 4,
+        },
+        {
+            "jobPostings": [{"externalPath": "/job/Test/Bad_R2"}, workday_posting("Later Intern", "/job/Test/Later_R3")],
+            "total": 4,
+        },
+    ]
+    offsets = []
+
+    def fake_post_json(url, data, source_name):
+        offsets.append(data["offset"])
+        return payloads.pop(0)
+
+    monkeypatch.setattr("watcher.sources.workday.post_json", fake_post_json)
+    source = WorkdaySource()
+    rows = source.fetch(workday_company())
+
+    assert offsets == [0, 2]
+    assert [item["title"] for item in rows] == ["First Intern", "Later Intern"]
+    assert source.last_diagnostics.raw_postings_seen == 4
+    assert source.last_diagnostics.valid_rows_retained == 2
+    assert source.last_diagnostics.malformed_postings_skipped == 2
+
+
+def test_workday_parse_nonempty_all_malformed_raises_schema_error():
+    with pytest.raises(SourceSchemaError, match="none were valid"):
+        WorkdaySource().parse(
+            {"jobPostings": [{"title": ""}, "bad"], "total": 2},
+            workday_company(),
+        )
+
+
+def test_workday_complete_paginated_fetch_with_no_valid_rows_raises(monkeypatch):
+    payloads = [
+        {"jobPostings": [{"title": "Bad"}], "total": 2},
+        {"jobPostings": [{"externalPath": "/job/Test/Bad_R2"}], "total": 2},
+    ]
+
+    def fake_post_json(url, data, source_name):
+        return payloads.pop(0)
+
+    monkeypatch.setattr("watcher.sources.workday.post_json", fake_post_json)
+    with pytest.raises(SourceSchemaError, match="2 posting record.*none were valid"):
+        WorkdaySource().fetch(workday_company())
+
+
+def test_workday_genuinely_empty_board_is_successful():
+    source = WorkdaySource()
+
+    assert source.parse({"jobPostings": [], "total": 0}, workday_company()) == []
+    assert source.last_diagnostics.raw_postings_seen == 0
+    assert source.last_diagnostics.malformed_postings_skipped == 0
+
+
+def test_workday_invalid_total_still_raises():
+    with pytest.raises(SourceSchemaError, match="total to be an integer"):
+        WorkdaySource().parse({"jobPostings": [], "total": "zero"}, workday_company())
 
 
 def test_ashby_fixture_to_canonical_rows():

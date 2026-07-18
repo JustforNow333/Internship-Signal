@@ -830,19 +830,69 @@ def parse_utc(value: str | None) -> datetime | None:
     return utc_datetime(datetime.fromisoformat(value.replace("Z", "+00:00")))
 
 
+def render_final_heartbeat(
+    application_heartbeat: str,
+    *,
+    seen_loaded: object = "unknown",
+    seen_saved: object = "unknown",
+    load_status: object = "unknown",
+    save_status: object = "unknown",
+) -> str:
+    """Append workflow persistence fields to an exact application heartbeat."""
+
+    if not application_heartbeat or not application_heartbeat.startswith("HEARTBEAT: "):
+        raise ValueError("application heartbeat is missing or invalid")
+    if "\n" in application_heartbeat or "\r" in application_heartbeat:
+        raise ValueError("application heartbeat must be exactly one line")
+    values = (
+        _heartbeat_workflow_value(seen_loaded),
+        _heartbeat_workflow_value(seen_saved),
+        _heartbeat_workflow_value(load_status),
+        _heartbeat_workflow_value(save_status),
+    )
+    return (
+        f"{application_heartbeat}, seen_loaded={values[0]}, seen_saved={values[1]}, "
+        f"seen_store={values[2]}/{values[3]}"
+    )
+
+
+def _heartbeat_workflow_value(value: object) -> str:
+    text = str(value or "unknown").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", text):
+        return "unknown"
+    return text[:80]
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render source-health GitHub Actions output.")
-    parser.add_argument("command", choices=("workflow-report",))
-    parser.add_argument("report_path")
+    parser.add_argument("command", choices=("workflow-report", "final-heartbeat"))
+    parser.add_argument("report_path", nargs="?")
     args = parser.parse_args(argv)
-    render_github_actions_report(
-        args.report_path,
-        summary_path=os.getenv("GITHUB_STEP_SUMMARY"),
-        seen_loaded=os.getenv("SEEN_LOADED", "unknown"),
-        seen_saved=os.getenv("SEEN_SAVED", "unknown"),
-        load_status=os.getenv("LOAD_STATUS", "unknown"),
-        save_status=os.getenv("SAVE_STATUS", "unknown"),
-    )
+    if args.command == "workflow-report":
+        if not args.report_path:
+            parser.error("workflow-report requires report_path")
+        render_github_actions_report(
+            args.report_path,
+            summary_path=os.getenv("GITHUB_STEP_SUMMARY"),
+            seen_loaded=os.getenv("SEEN_LOADED", "unknown"),
+            seen_saved=os.getenv("SEEN_SAVED", "unknown"),
+            load_status=os.getenv("LOAD_STATUS", "unknown"),
+            save_status=os.getenv("SAVE_STATUS", "unknown"),
+        )
+    else:
+        try:
+            print(
+                render_final_heartbeat(
+                    os.getenv("APPLICATION_HEARTBEAT", ""),
+                    seen_loaded=os.getenv("SEEN_LOADED", "unknown"),
+                    seen_saved=os.getenv("SEEN_SAVED", "unknown"),
+                    load_status=os.getenv("LOAD_STATUS", "unknown"),
+                    save_status=os.getenv("SAVE_STATUS", "unknown"),
+                )
+            )
+        except ValueError as exc:
+            print(f"::error::WATCHER HEARTBEAT: {exc}", file=sys.stderr)
+            return 1
     return 0
 
 

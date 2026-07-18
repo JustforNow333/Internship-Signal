@@ -2,6 +2,8 @@ import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import yaml
+
 from watcher.config import CompanyCfg, WatcherConfig
 from watcher.notify import render_digest
 from watcher.run import CollectionStats, collect_rows, print_heartbeat, print_report, run_once
@@ -17,6 +19,7 @@ from watcher.source_health import (
     SourceHealthStore,
 )
 from watcher.sources.base import SourceError, SourceSchemaError, make_row
+from watcher.sources.workday import WorkdaySource
 
 
 class FakeSource:
@@ -567,6 +570,69 @@ def test_run_once_reuses_injected_health_store_and_detects_recovery(tmp_path):
     assert recovered.source_health_states[recovered.source_attempts[0].health_key].status == STATUS_HEALTHY
 
 
+def test_partial_workday_fetch_is_successful_and_recovers_prior_degraded_state(tmp_path, monkeypatch):
+    db_path = tmp_path / "seen.sqlite"
+    company = CompanyCfg(
+        name="Merck",
+        ats="workday",
+        token="merck",
+        workday_shard="wd5",
+        workday_site="Search_Jobs",
+    )
+    config = WatcherConfig(companies=(company,))
+    observed = datetime(2026, 7, 16, tzinfo=timezone.utc)
+    payload = {
+        "jobPostings": [
+            {"title": "Malformed Workday Posting", "externalPath": ""},
+            {
+                "title": "Software Engineer Intern",
+                "externalPath": "/job/Rahway-NJ/Software-Engineer-Intern_R123",
+                "locationsText": "Rahway, NJ",
+                "jobDescription": "Build Python backend APIs and SQL services.",
+                "bulletFields": ["R123"],
+            },
+        ],
+        "total": 2,
+    }
+    monkeypatch.setattr("watcher.sources.workday.post_json", lambda url, data, source_name: payload)
+
+    with SeenStore(db_path) as seen_store, SourceHealthStore(db_path) as health_store:
+        failed = run_once(
+            config,
+            seen_store=seen_store,
+            health_store=health_store,
+            direct_sources={"workday": FakeSource(error=SourceSchemaError("malformed posting"))},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            run_id="merck-failed",
+            health_observed_at=observed,
+        )
+        recovered = run_once(
+            config,
+            seen_store=seen_store,
+            health_store=health_store,
+            direct_sources={"workday": WorkdaySource()},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            run_id="merck-recovered",
+            health_observed_at=observed.replace(hour=1),
+        )
+
+    direct_attempt = next(
+        item for item in recovered.source_attempts if item.source_kind == SOURCE_KIND_DIRECT
+    )
+    assert failed.health_summary.direct_degraded == 1
+    assert recovered.errors == []
+    assert direct_attempt.succeeded is True
+    assert direct_attempt.rows_returned == 1
+    assert recovered.health_summary.direct_healthy == 1
+    assert recovered.health_summary.health_recoveries == 1
+    assert recovered.health_transitions[0].company == "Merck"
+    assert recovered.health_transitions[0].recovery is True
+
+
 def test_print_report_for_matches_and_empty(capsys):
     result = type("Result", (), {
         "errors": [],
@@ -640,7 +706,7 @@ def test_workflow_preserves_season_and_feed_heartbeat_fields():
         "github_feeds_succeeded",
     ):
         assert f"{field}=\\([^,]*\\)" in workflow or f"extract_count {field}" in workflow
-        assert f"steps.run_watcher.outputs.{field}" in workflow
+        assert f'echo "{field}=' in workflow
 
 
 def test_workflow_preserves_health_fields_validates_db_and_renders_summary():
@@ -663,7 +729,7 @@ def test_workflow_preserves_health_fields_validates_db_and_renders_summary():
     )
     for field in health_fields:
         assert f"extract_count {field}" in workflow
-        assert f"steps.run_watcher.outputs.{field}" in workflow
+        assert f'echo "{field}=' in workflow
     assert "WATCHER_HEALTH_REPORT_PATH" in workflow
     assert "$GITHUB_STEP_SUMMARY" in workflow
     assert "python -m watcher.source_health workflow-report" in workflow
@@ -676,6 +742,43 @@ def test_workflow_preserves_health_fields_validates_db_and_renders_summary():
     assert "checkout --orphan \"$DATA_BRANCH\"" in workflow
     assert "push origin \"HEAD:$DATA_BRANCH\"" in workflow
     assert "git branch -D watcher-data" not in workflow
+
+
+def test_workflow_forwards_exact_application_heartbeat_and_keeps_existing_outputs():
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "grep '^HEARTBEAT:' \"$RUNNER_TEMP/watcher-run.log\" | tail -n 1" in workflow
+    assert "printf 'application_heartbeat=%s\\n' \"$application_heartbeat\"" in workflow
+    assert "APPLICATION_HEARTBEAT: ${{ steps.run_watcher.outputs.application_heartbeat }}" in workflow
+    assert "python -m watcher.source_health final-heartbeat" in workflow
+    assert 'echo "HEARTBEAT: ran, rows_fetched=' not in workflow
+    assert "application heartbeat unavailable; no final success heartbeat was fabricated" in workflow
+    assert "watcher.run did not emit an application heartbeat" in workflow
+    assert "Watcher completed with $ERRORS source error(s)" in workflow
+    assert "eval " not in workflow
+    assert 'source "$' not in workflow
+
+    for field in (
+        "rows_fetched",
+        "season_status",
+        "github_feeds_configured",
+        "direct_healthy",
+        "alumni_csv_status",
+        "sent",
+        "seen_marked",
+    ):
+        assert f'echo "{field}=' in workflow
+
+
+def test_workflow_yaml_parses_successfully():
+    workflow_path = Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml"
+    document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+
+    assert isinstance(document, dict)
+    assert "jobs" in document
+    assert "watcher" in document["jobs"]
 
 
 def test_synthetic_digest_excludes_non_swe_engineering_and_ranks_backend_java(tmp_path):

@@ -30,6 +30,7 @@ from watcher.source_health import (
     calculate_next_state,
     direct_health_key,
     github_feed_health_key,
+    render_final_heartbeat,
     render_github_actions_report,
     sanitize_error,
     sanitize_feed_label,
@@ -403,3 +404,57 @@ def test_sanitizers_are_deterministic():
     assert github_feed_health_key("https://example.test/a?x=1") == github_feed_health_key(
         "https://example.test/a?x=2"
     )
+
+
+def test_final_heartbeat_forwards_every_application_field_and_appends_persistence():
+    application = (
+        "HEARTBEAT: ran, rows_fetched=16295, jobs_scored=15121, matches=68, new=0, errors=1, "
+        "season_status=ok, configured_terms=Summer_2027, github_feeds_configured=1, "
+        "github_feeds_succeeded=1, companies_configured=129, direct_healthy=57, direct_empty=1, "
+        "direct_degraded=1, direct_failing=0, direct_unsupported=70, github_feeds_healthy=1, "
+        "backstop_only_companies=70, uncovered_companies=0, health_transitions=0, "
+        "health_recoveries=0, alumni_csv_status=loaded-json-map, alumni_records_loaded=150, "
+        "alumni_employers_indexed=128, sent=no, seen_marked=0, future_metric=123"
+    )
+
+    final = render_final_heartbeat(
+        application,
+        seen_loaded=70,
+        seen_saved=70,
+        load_status="loaded",
+        save_status="pushed",
+    )
+
+    assert final.startswith(application)
+    assert "future_metric=123" in final
+    assert "season_status=ok" in final
+    assert "github_feeds_succeeded=1" in final
+    assert "direct_degraded=1" in final
+    assert "alumni_records_loaded=150" in final
+    assert "sent=no, seen_marked=0" in final
+    assert final.endswith("seen_loaded=70, seen_saved=70, seen_store=loaded/pushed")
+    assert "\n" not in final
+    assert "\r" not in final
+
+
+def test_final_heartbeat_represents_unknown_save_state_honestly():
+    final = render_final_heartbeat(
+        "HEARTBEAT: ran, errors=0",
+        seen_loaded="unknown",
+        seen_saved="unknown",
+        load_status="new",
+        save_status="skipped-or-failed",
+    )
+
+    assert final.endswith(
+        "seen_loaded=unknown, seen_saved=unknown, seen_store=new/skipped-or-failed"
+    )
+
+
+@pytest.mark.parametrize(
+    "application",
+    ("", "ran, errors=0", "HEARTBEAT: ran, errors=0\nHEARTBEAT: injected"),
+)
+def test_final_heartbeat_rejects_missing_or_multiline_application_value(application):
+    with pytest.raises(ValueError):
+        render_final_heartbeat(application)
