@@ -31,6 +31,17 @@ def test_sample_ingest_shape():
         assert key in job
 
 
+def test_missing_sample_does_not_expose_server_path(monkeypatch, tmp_path):
+    missing = tmp_path / "private" / "sample.csv"
+    monkeypatch.setattr("app.config.SAMPLE_CSV_PATH", missing)
+
+    response = client.get("/api/sample")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Sample CSV not found."}
+    assert str(missing) not in response.text
+
+
 def test_jobs_filtering(dataset_id):
     high = client.get(f"/api/datasets/{dataset_id}/jobs", params={"bucket": "high"}).json()
     assert high["count"] > 0
@@ -119,6 +130,23 @@ def test_ingest_rejects_non_file_multipart_field():
     res = client.post("/api/ingest", files={"file": (None, "not a file")})
 
     assert res.status_code == 400
+
+
+def test_ingest_rejects_oversized_multipart(monkeypatch):
+    monkeypatch.setattr("app.main.MAX_CSV_BYTES", 64)
+    res = client.post(
+        "/api/ingest",
+        files={"file": ("large.csv", b"Company,Title\n" + b"x" * 128, "text/csv")},
+    )
+
+    assert res.status_code == 413
+
+
+def test_ingest_rejects_oversized_json_body(monkeypatch):
+    monkeypatch.setattr("app.main.MAX_CSV_BYTES", 64)
+    res = client.post("/api/ingest", json={"csv_text": "Company,Title\n" + "x" * 128})
+
+    assert res.status_code == 413
 
 
 def test_ingest_rejects_empty_and_junk():

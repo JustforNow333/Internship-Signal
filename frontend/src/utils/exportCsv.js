@@ -3,11 +3,12 @@
 import { fmtPay } from "./format.js";
 
 const esc = (v) => {
-  const s = String(v ?? "");
+  let s = String(v ?? "");
+  if (typeof v === "string" && /^\s*[=+\-@]/.test(s)) s = `'${s}`;
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-function jobsToCsv(jobs) {
+export function jobsToCsv(jobs) {
   const head = [
     "company", "title", "location", "remote_status", "score", "bucket",
     "action", "pay", "usd_hourly_mid", "deadline", "days_left", "role",

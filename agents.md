@@ -42,6 +42,14 @@ Current watcher fetch layer:
   `watchlist.yml` loader. The loader intentionally supports the simple
   top-level `defaults` + `companies` YAML shape used by this repo; there is no
   PyYAML dependency.
+- Loaded production watchlists must explicitly define at least one nonblank
+  `defaults.terms` value. Runtime dataclass construction has no implicit
+  recruiting season. Company terms inherit from defaults when omitted, and an
+  explicitly empty company override is invalid.
+- Structured GitHub backstop URLs come from the inline
+  `defaults.github_listing_urls` list. Values must be nonblank HTTP/HTTPS URLs;
+  multiple feeds are supported and no recruiting-year feed URL belongs in
+  Python source.
 - The config schema accepts the §3 ATS values
   (`greenhouse`, `lever`, `ashby`, `smartrecruiters`, `workable`, `workday`,
   `bespoke`, `github_only`) plus generated metadata fields like
@@ -52,6 +60,13 @@ Current watcher fetch layer:
   Workday, and SimplifyJobs GitHub listings.
 - Adapters return canonical-shaped rows plus `extra.source` (`direct` or
   `github`) and `extra.source_adapter`.
+- Direct adapters isolate posting-level schema damage: a mixed payload retains
+  valid records and emits one bounded aggregate warning, while a nonempty
+  payload with zero valid records remains a source schema failure. Paginated
+  adapters reject repeated pages instead of looping indefinitely.
+- GitHub listing rows also retain safe feed provenance in `extra.feed_url`.
+  Each configured feed is fetched once. A failed feed is identified in source
+  errors without suppressing successful feeds or direct ATS rows.
 - Adapter tests parse saved fixtures only; tests must never hit the network.
 - For future adapter work, verify the live endpoint first, save representative
   real responses under `watcher/tests/fixtures/`, and parse fixtures in tests.
@@ -61,6 +76,11 @@ Current watcher fetch layer:
   uses `limit: 20`. Some Workday URLs from the generated watchlist currently
   return Workday maintenance/refresh HTML instead of JSON; the adapter treats
   that as a fetch failure rather than a silent empty result.
+- Workday skips isolated non-object postings and postings missing a usable
+  title or `externalPath`, retaining valid postings from the same/later pages
+  and logging one bounded aggregate warning with reason counts. Pagination uses
+  raw posting count. Page-level schema errors and nonempty all-malformed fetches
+  still fail; a valid zero-posting board remains a successful empty fetch.
 - Workable uses the current public careers API
   `POST https://apply.workable.com/api/v3/accounts/{token}/jobs`. ICEYE's
   live board currently reports zero openings.
@@ -92,9 +112,17 @@ Current watcher run core:
 - The run loop calls `backend.app.ingest.analyze_rows`; watcher code must not
   compute scores or ids itself.
 - `collect_rows(..., direct_sources=None, github_source=None)` constructs the
-  production adapters only for arguments that are actually `None`. An explicit
-  empty `direct_sources={}` is meaningful dependency injection and must remain
-  empty; do not replace it through truthiness fallback.
+  production adapters only for arguments that are actually `None`. When the
+  GitHub source is not injected it builds one source per configured listings
+  URL. An explicit empty `direct_sources={}` and an explicitly injected
+  `github_source` are meaningful dependency injection; do not replace either
+  through truthiness fallback.
+- `watcher/season.py` owns deterministic season validation. `stale` means all
+  recognized term years are in the past; `rollover_due` means July or later
+  with only current-year terms; `ok` covers a future-year term or a current-year
+  term before July; `unknown` means no four-digit year was found. Non-`ok`
+  statuses warn but never stop direct ATS collection. Stale company-specific
+  overrides must be named in warnings.
 - Backend role classification now includes a narrow `role_track` plus
   `software_evidence` and `non_swe_evidence`. Generic `engineer` or
   `engineering intern` text must not imply SWE without strong software context.
@@ -171,7 +199,8 @@ Current watcher run core:
   repo; use a local file, GitHub Actions secret/data branch, or another private
   loading path.
 - `watcher/notify.py` renders one plain-text email digest for genuinely new
-  matches. `render_digest(matches, alumni_summary=...)` is pure and
+  matches. `render_digest(matches, alumni_summary=..., active_terms=...,
+  season_status=...)` is pure and
   offline-tested. The digest header should include alumni index status such as
   `Alumni index: 124 records across 80 employers` or `Alumni index missing, no
   alumni matching was performed`. `send_digest` dry-runs to stdout unless
@@ -197,19 +226,64 @@ Current watcher run core:
   dispatch. It restores `seen.sqlite` from the orphan `watcher-data` branch into
   the path named by `WATCHER_SEEN_DB`, runs `python -m watcher.run`, then commits
   and pushes the DB back to `watcher-data`.
-- Workflow dispatch input `send_email=false` is the priming path: it unsets
-  `WATCHER_SEND_EMAIL`, prints a dry-run digest, marks the new matches seen with
+- Workflow dispatch input `send_email=false` is the priming path: it exports
+  `WATCHER_SEND_EMAIL=0`, suppresses the digest body so private alumni details
+  do not enter Actions logs, marks the new matches seen with
   `--mark-seen-without-send`, and persists that DB so the first later send does
   not email the whole backlog. Scheduled runs read the repo Actions variable
   `WATCHER_SEND_EMAIL`; live sends require the repo secrets `SMTP_USER`,
   `SMTP_APP_PASSWORD`, and `EMAIL_TO`.
-- The watcher prints a run heartbeat, and the workflow prints a final heartbeat
-  including run counts, source-error count, alumni index status
+- The watcher prints a run heartbeat. The workflow captures its exact last
+  one-line `HEARTBEAT:` output, forwards every current/future application field,
+  and appends only `seen_loaded`, `seen_saved`, and `seen_store`. A missing
+  application heartbeat is an explicit error. The heartbeat includes run
+  counts, source-error count, alumni index status
   (`alumni_csv_status=loaded-json-map/loaded-csv/missing/empty/error`,
   `alumni_records_loaded=<n>`, `alumni_employers_indexed=<n>`), seen-store
   load/save counts, send result, and persistence status. Source adapter
   failures are logged and surfaced as warnings; seen-store load corruption or
   push failure is a hard workflow failure.
+- Both heartbeats preserve `season_status`, heartbeat-safe `configured_terms`,
+  `github_feeds_configured`, and `github_feeds_succeeded`. Multiple terms use
+  `|` separators and underscores for spaces; heartbeat values must not add raw
+  commas.
+
+Current watcher source-health layer:
+
+- `watcher/source_health.py` owns source-attempt/state dataclasses, pure status
+  and transition rules, effective coverage, stable health keys, sanitization,
+  SQLite health persistence, summaries, JSON output, and Actions rendering. It
+  must never make network requests.
+- Every run uses one run ID/UTC observation time and records exactly one direct
+  outcome per configured company plus one outcome per configured GitHub feed.
+  Direct collection remains before GitHub collection.
+- Direct status thresholds are: nonzero success `healthy`; zero success
+  `empty`; repeated zero successes become `degraded` only after a prior nonzero
+  success; one/two consecutive failures `degraded`; three or more `failing`;
+  `bespoke`/`github_only` `unsupported` without failure increments. GitHub valid
+  payloads are `healthy` even with zero matching rows and use only the
+  one/two-degraded, three-failing failure thresholds.
+- Initialization is not an actionable transition. Unchanged states do not
+  re-alert. `degraded`/`failing` to `healthy`, or to a responding direct
+  `empty`, is a recovery.
+- Company coverage is operational, not opening availability. Successful zero
+  direct results are `direct_empty_but_responding`; a successful configured
+  GitHub feed is an available backstop even without a company posting;
+  `uncovered_for_run` requires a failed/unsupported direct source and no
+  successful configured feed.
+- `source_health_attempts` and `source_health_current` live in the existing
+  `seen.sqlite`. Schema creation must not alter `seen`; attempt insertion and
+  current-state upsert are one transaction. Deleting `watcher-data` resets both
+  seen and health histories and must not produce false recovery transitions.
+- Health error messages and feed labels are bounded/sanitized. Raw query
+  strings and credentials must not enter keys, heartbeats, annotations, or
+  stored errors.
+- Health appears in logs, the normal report, application/final heartbeats, the
+  sanitized `WATCHER_HEALTH_REPORT_PATH` JSON, Actions summary, transition
+  warnings, and uncovered annotations. These states remain nonfatal and do not
+  change email or seen-marking behavior. No health-warning email exists yet.
+- Source-health tests are offline with fake adapters, fixed times/run IDs, and
+  temporary SQLite files.
 
 Scope guardrails:
 

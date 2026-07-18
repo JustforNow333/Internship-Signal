@@ -58,6 +58,164 @@ unrelated to app code.)
 
 ---
 
+## Watcher season configuration and rollover
+
+The watcher recruiting cycle and structured GitHub backstops are explicit in
+`watcher/watchlist.yml`:
+
+```yaml
+defaults:
+  terms: ["Summer 2027"]
+  github_listing_urls: ["https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"]
+```
+
+`defaults.terms` is required and cannot be blank. Companies inherit it unless
+they provide a nonempty `terms` override. Structured term matching is exact
+after case and whitespace normalization; direct ATS postings are not rejected
+merely because they lack structured season metadata. The URL list accepts
+multiple HTTP/HTTPS feeds, and a failure in one feed does not suppress other
+feeds or direct ATS results.
+
+The current URL was live-verified on July 15, 2026. Its repository name is
+historical, but its payload includes the exact `Summer 2027` term. It remains a
+configuration value and must be rechecked during future rollovers.
+
+The run reports a deterministic season status from four-digit years in the
+default terms:
+
+- `ok`: a future-year term exists, or it is before July and a current-year term
+  exists.
+- `rollover_due`: it is July or later and the newest configured year is the
+  current year.
+- `stale`: every recognized configured year is in the past.
+- `unknown`: no four-digit year can be extracted.
+
+Non-`ok` statuses warn but do not stop collection. The report, digest, and
+heartbeat expose the active terms, season status, and configured/successful
+GitHub feed counts.
+
+To roll from Summer 2027 to Summer 2028 without editing Python:
+
+1. Find the active repository on the official SimplifyJobs GitHub organization;
+   do not infer a repository name from the year.
+2. GET the candidate raw `listings.json` URL and confirm HTTP 200, a top-level
+   list, and every entry's required keys: `company_name`, `title`, `locations`,
+   `url`, `date_posted`, `active`, and `terms`. Confirm `locations` and `terms`
+   remain lists and inspect the exact term strings.
+3. Change `defaults.terms` to `["Summer 2028"]`. Keep the existing URL if the
+   verified payload contains that exact term; otherwise replace it with the
+   verified official URL. During overlap, list both verified URLs inline.
+4. Run the offline backend/watcher tests, then run a separate dry live probe:
+
+```bash
+WATCHER_SEND_EMAIL=0 PYTHONPATH=.:backend python3 -m watcher.run --seen-db /tmp/internship_signal_season_probe.sqlite
+```
+
+Do not add `--mark-seen-without-send` to the probe. Tests never access the
+network: adapter tests use saved UTF-8 fixtures and run-loop tests use mocks.
+Use an explicit false value rather than unsetting `WATCHER_SEND_EMAIL`, because
+the repository dotenv loader may otherwise restore a local `.env` send setting.
+Live endpoint verification is deliberately separate from fixture-based tests.
+If no official next-cycle structured feed exists, leave the URL list empty (or
+retain only a verified feed containing the desired exact term) and rely on
+direct ATS coverage until an official replacement is available.
+
+The Workday adapter skips isolated malformed posting records while retaining
+valid records from the same and later pages. It logs one bounded aggregate
+warning with stable reason counts and never logs raw postings. Structurally
+invalid pages still fail, as does any nonempty fetch that produces zero valid
+canonical rows; a genuinely empty Workday board remains a successful empty
+source.
+
+---
+
+## Watcher source health
+
+Every watcher execution assigns a unique run ID and records exactly one direct
+source outcome for every configured company plus one outcome for every
+configured GitHub listings feed. This is operational health, not opening
+availability: a direct source that successfully returns zero jobs is responding
+correctly, and a GitHub feed that validates but has zero watchlist-matching rows
+is healthy.
+
+Direct sources use these deterministic states:
+
+- `healthy`: the latest fetch succeeded with one or more rows.
+- `empty`: the latest fetch succeeded with zero rows and has not met the
+  repeated-empty threshold.
+- `degraded`: the latest fetch failed once or twice, or a previously productive
+  source has returned zero rows in at least two consecutive successful runs.
+- `failing`: the latest fetch failed at least three consecutive times.
+- `unsupported`: the company is intentionally `bespoke` or `github_only`; no
+  direct request was attempted and failure counters do not advance.
+- `unknown`: no usable attempt state exists.
+
+GitHub feeds are `healthy` after any valid payload, including zero matching
+rows; one or two consecutive failures are `degraded`, and three or more are
+`failing`. Status changes are reported once as transitions. A transition from
+`degraded`/`failing` to `healthy`, or to `empty` after the endpoint responds
+again, is a recovery. Initial states are not treated as transitions or false
+recoveries.
+
+Per-company effective coverage is reported separately:
+
+- `direct_covered`: direct succeeded with one or more rows.
+- `direct_empty_but_responding`: direct succeeded with zero rows.
+- `backstop_only`: an intentionally unsupported direct source has at least one
+  successfully responding configured GitHub feed.
+- `direct_degraded_backstop_available` or
+  `direct_failing_backstop_available`: direct failed this run, but a GitHub feed
+  responded; persistent direct health chooses degraded versus failing.
+- `uncovered_for_run`: direct failed or is unsupported and every configured
+  GitHub feed failed. Merely finding no active posting never makes a company
+  uncovered.
+
+Health history lives in the existing watcher `seen.sqlite` file, so the current
+`watcher-data` branch persistence automatically carries both seen-job and
+source-health history. Opening an older database safely adds
+`source_health_attempts` and `source_health_current` with `CREATE TABLE IF NOT
+EXISTS`; it does not delete, rename, or rewrite `seen`. Deleting `watcher-data`
+resets both histories. The next run initializes successes as `healthy`/`empty`,
+first failures as `degraded`, and unsupported sources as `unsupported`, without
+emitting recovery alerts.
+
+The final Actions heartbeat forwards the exact last one-line application
+heartbeat and appends only `seen_loaded`, `seen_saved`, and `seen_store`, so
+current and future application fields are preserved automatically. The
+application heartbeat includes comma-safe integer fields:
+`companies_configured`, `direct_healthy`,
+`direct_empty`, `direct_degraded`, `direct_failing`, `direct_unsupported`,
+`github_feeds_healthy`, `backstop_only_companies`, `uncovered_companies`,
+`health_transitions`, and `health_recoveries`. GitHub Actions also writes the run
+ID, run counts, health aggregates, seen-store status, and actionable details to
+the job summary. It emits transition-only warnings for newly degraded/failing
+sources and recoveries, plus an error annotation for each currently uncovered
+company; these annotations do not fail the watcher run.
+
+Set `WATCHER_HEALTH_REPORT_PATH` or pass `--health-report` to write the sanitized
+JSON report used by the workflow. No source-health warning email exists yet,
+and health changes do not change digest sending or seen marking. A future task
+could add a separate health-email policy without coupling it to internship
+matches.
+
+Inspect a local database with SQLite:
+
+```sql
+select company, adapter, status, consecutive_failures, last_rows_returned
+from source_health_current
+order by status, company;
+
+select observed_at, company, adapter, succeeded, rows_returned, error_kind
+from source_health_attempts
+order by attempt_id desc
+limit 100;
+```
+
+All health tests are offline: source adapters are faked, timestamps/run IDs are
+fixed, and SQLite files are temporary.
+
+---
+
 ## Watcher Alumni Matching
 
 The scheduled watcher can use alumni matching in GitHub Actions without

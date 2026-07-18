@@ -26,6 +26,7 @@ jobs:
       DATA_BRANCH: watcher-data
       DATA_DB_FILE: seen.sqlite
       SEEN_DB_PATH: ${{ github.workspace }}/.watcher-state/seen.sqlite
+      HEALTH_REPORT_PATH: ${{ runner.temp }}/watcher-source-health.json
       ACTIONS_WATCHER_SEND_EMAIL: ${{ vars.WATCHER_SEND_EMAIL }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
@@ -229,6 +230,7 @@ jobs:
         env:
           PYTHONPATH: .:backend
           WATCHER_SEEN_DB: ${{ env.SEEN_DB_PATH }}
+          WATCHER_HEALTH_REPORT_PATH: ${{ env.HEALTH_REPORT_PATH }}
         run: |
           set -u -o pipefail
 
@@ -237,7 +239,8 @@ jobs:
             export WATCHER_SEND_EMAIL=1
             export WATCHER_REQUIRE_ALUMNI=1
           else
-            unset WATCHER_SEND_EMAIL
+            export WATCHER_SEND_EMAIL=0
+            export WATCHER_SUPPRESS_DRY_RUN_DIGEST=1
             args+=(--mark-seen-without-send)
           fi
 
@@ -247,17 +250,49 @@ jobs:
           set -e
 
           heartbeat="$(grep '^HEARTBEAT:' "$RUNNER_TEMP/watcher-run.log" | tail -n 1 || true)"
+          if [ -z "$heartbeat" ]; then
+            echo "::error::WATCHER HEARTBEAT: watcher.run did not emit an application heartbeat"
+            if [ "$status" -eq 0 ]; then
+              status=1
+            fi
+          elif [[ "$heartbeat" == *$'\n'* || "$heartbeat" == *$'\r'* ]]; then
+            echo "::error::WATCHER HEARTBEAT: application heartbeat must be exactly one line"
+            heartbeat=""
+            if [ "$status" -eq 0 ]; then
+              status=1
+            fi
+          fi
+          {
+            echo "application_heartbeat<<WATCHER_HEARTBEAT_EOF"
+            printf '%s\n' "$heartbeat"
+            echo "WATCHER_HEARTBEAT_EOF"
+          } >> "$GITHUB_OUTPUT"
           extract_count() {
             printf '%s\n' "$heartbeat" | sed -n "s/.*$1=\([0-9][0-9]*\).*/\1/p"
           }
 
           sent="$(printf '%s\n' "$heartbeat" | sed -n 's/.*sent=\(yes\|no\).*/\1/p')"
+          season_status="$(printf '%s\n' "$heartbeat" | sed -n 's/.*season_status=\([^,]*\).*/\1/p')"
+          configured_terms="$(printf '%s\n' "$heartbeat" | sed -n 's/.*configured_terms=\([^,]*\).*/\1/p')"
           alumni_csv_status="$(printf '%s\n' "$heartbeat" | sed -n 's/.*alumni_csv_status=\([^,]*\).*/\1/p')"
           rows="$(extract_count rows_fetched)"
           jobs="$(extract_count jobs_scored)"
           matches="$(extract_count matches)"
           new="$(extract_count new)"
           errors="$(extract_count errors)"
+          github_feeds_configured="$(extract_count github_feeds_configured)"
+          github_feeds_succeeded="$(extract_count github_feeds_succeeded)"
+          companies_configured="$(extract_count companies_configured)"
+          direct_healthy="$(extract_count direct_healthy)"
+          direct_empty="$(extract_count direct_empty)"
+          direct_degraded="$(extract_count direct_degraded)"
+          direct_failing="$(extract_count direct_failing)"
+          direct_unsupported="$(extract_count direct_unsupported)"
+          github_feeds_healthy="$(extract_count github_feeds_healthy)"
+          backstop_only_companies="$(extract_count backstop_only_companies)"
+          uncovered_companies="$(extract_count uncovered_companies)"
+          health_transitions="$(extract_count health_transitions)"
+          health_recoveries="$(extract_count health_recoveries)"
           alumni_records="$(extract_count alumni_records_loaded)"
           alumni_employers="$(extract_count alumni_employers_indexed)"
           marked="$(extract_count seen_marked)"
@@ -268,11 +303,36 @@ jobs:
           echo "matches=${matches:-unknown}" >> "$GITHUB_OUTPUT"
           echo "new=${new:-unknown}" >> "$GITHUB_OUTPUT"
           echo "errors=${errors:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "season_status=${season_status:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "configured_terms=${configured_terms:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "github_feeds_configured=${github_feeds_configured:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "github_feeds_succeeded=${github_feeds_succeeded:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "companies_configured=${companies_configured:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "direct_healthy=${direct_healthy:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "direct_empty=${direct_empty:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "direct_degraded=${direct_degraded:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "direct_failing=${direct_failing:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "direct_unsupported=${direct_unsupported:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "github_feeds_healthy=${github_feeds_healthy:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "backstop_only_companies=${backstop_only_companies:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "uncovered_companies=${uncovered_companies:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "health_transitions=${health_transitions:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "health_recoveries=${health_recoveries:-unknown}" >> "$GITHUB_OUTPUT"
           echo "alumni_csv_status=${alumni_csv_status:-unknown}" >> "$GITHUB_OUTPUT"
           echo "alumni_records_loaded=${alumni_records:-unknown}" >> "$GITHUB_OUTPUT"
           echo "alumni_employers_indexed=${alumni_employers:-unknown}" >> "$GITHUB_OUTPUT"
           echo "sent=${sent:-unknown}" >> "$GITHUB_OUTPUT"
           echo "seen_marked=${marked:-unknown}" >> "$GITHUB_OUTPUT"
+
+          if [ -f "$HEALTH_REPORT_PATH" ]; then
+            run_id="$(python -c 'import json, os; print(json.load(open(os.environ["HEALTH_REPORT_PATH"], encoding="utf-8"))["run_id"])')"
+            health_attempts="$(python -c 'import json, os; print(len(json.load(open(os.environ["HEALTH_REPORT_PATH"], encoding="utf-8"))["attempts"]))')"
+            echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+            echo "health_attempts=$health_attempts" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_id=unknown" >> "$GITHUB_OUTPUT"
+            echo "health_attempts=0" >> "$GITHUB_OUTPUT"
+          fi
 
           if [ "$status" -ne 0 ]; then
             exit "$status"
@@ -282,6 +342,9 @@ jobs:
         id: save_seen
         if: steps.run_watcher.outputs.status == '0'
         shell: bash
+        env:
+          CURRENT_RUN_ID: ${{ steps.run_watcher.outputs.run_id }}
+          SEEN_LOADED: ${{ steps.load_seen.outputs.loaded }}
         run: |
           set -euo pipefail
 
@@ -290,10 +353,13 @@ jobs:
             exit 1
           fi
 
-          saved="$(
-            python -c 'import os, sqlite3; con = sqlite3.connect(os.environ["SEEN_DB_PATH"]); print(con.execute("select count(*) from seen").fetchone()[0]); con.close()'
+          validation="$(
+            python -c 'import os, sqlite3; con = sqlite3.connect(os.environ["SEEN_DB_PATH"]); tables = {row[0] for row in con.execute("select name from sqlite_master where type = ?", ("table",))}; required = {"seen", "source_health_attempts", "source_health_current"}; missing = required - tables; assert not missing, f"missing SQLite tables: {sorted(missing)}"; seen = con.execute("select count(*) from seen").fetchone()[0]; loaded = int(os.environ.get("SEEN_LOADED") or 0); assert seen >= loaded, f"seen row count decreased: loaded={loaded} saved={seen}"; run_id = os.environ["CURRENT_RUN_ID"]; attempts = con.execute("select count(*) from source_health_attempts where run_id = ?", (run_id,)).fetchone()[0]; assert attempts > 0, "no health attempts for run {}".format(run_id); assert con.execute("pragma quick_check").fetchone()[0] == "ok", "SQLite quick_check failed"; print(f"{seen} {attempts}"); con.close()'
           )"
+          read -r saved health_attempts <<< "$validation"
           echo "saved=$saved" >> "$GITHUB_OUTPUT"
+          echo "health_attempts=$health_attempts" >> "$GITHUB_OUTPUT"
+          echo "SOURCE-HEALTH: validated tables and $health_attempts attempt rows for run $CURRENT_RUN_ID"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -342,28 +408,39 @@ jobs:
           echo "::error::SEEN-STORE: failed to push watcher-data after retries"
           exit 1
 
-      - name: Final heartbeat
-        if: always()
+      - name: Source-health summary and annotations
+        if: always() && steps.run_watcher.outputs.run_id != '' && steps.run_watcher.outputs.run_id != 'unknown'
         shell: bash
         env:
-          ROWS_FETCHED: ${{ steps.run_watcher.outputs.rows_fetched }}
-          JOBS_SCORED: ${{ steps.run_watcher.outputs.jobs_scored }}
-          MATCHES: ${{ steps.run_watcher.outputs.matches }}
-          NEW_MATCHES: ${{ steps.run_watcher.outputs.new }}
-          ERRORS: ${{ steps.run_watcher.outputs.errors }}
-          ALUMNI_CSV_STATUS: ${{ steps.run_watcher.outputs.alumni_csv_status }}
-          ALUMNI_RECORDS_LOADED: ${{ steps.run_watcher.outputs.alumni_records_loaded }}
-          ALUMNI_EMPLOYERS_INDEXED: ${{ steps.run_watcher.outputs.alumni_employers_indexed }}
-          DIGEST_SENT: ${{ steps.run_watcher.outputs.sent }}
+          PYTHONPATH: .:backend
           SEEN_LOADED: ${{ steps.load_seen.outputs.loaded }}
           LOAD_STATUS: ${{ steps.load_seen.outputs.load_status }}
           SEEN_SAVED: ${{ steps.save_seen.outputs.saved }}
           SAVE_STATUS: ${{ steps.save_seen.outputs.save_status }}
         run: |
-          set -euo pipefail
+          test -n "$GITHUB_STEP_SUMMARY"
+          python -m watcher.source_health workflow-report "$HEALTH_REPORT_PATH"
 
-          save_status="${SAVE_STATUS:-skipped-or-failed}"
-          echo "HEARTBEAT: ran, rows_fetched=${ROWS_FETCHED:-unknown}, jobs_scored=${JOBS_SCORED:-unknown}, matches=${MATCHES:-unknown}, new=${NEW_MATCHES:-unknown}, errors=${ERRORS:-unknown}, alumni_csv_status=${ALUMNI_CSV_STATUS:-unknown}, alumni_records_loaded=${ALUMNI_RECORDS_LOADED:-unknown}, alumni_employers_indexed=${ALUMNI_EMPLOYERS_INDEXED:-unknown}, seen_loaded=${SEEN_LOADED:-unknown}, seen_saved=${SEEN_SAVED:-unknown}, sent=${DIGEST_SENT:-unknown}, seen_store=${LOAD_STATUS:-unknown}/$save_status"
+      - name: Final heartbeat
+        if: always()
+        shell: bash
+        env:
+          APPLICATION_HEARTBEAT: ${{ steps.run_watcher.outputs.application_heartbeat }}
+          ERRORS: ${{ steps.run_watcher.outputs.errors }}
+          SEEN_LOADED: ${{ steps.load_seen.outputs.loaded }}
+          LOAD_STATUS: ${{ steps.load_seen.outputs.load_status }}
+          SEEN_SAVED: ${{ steps.save_seen.outputs.saved }}
+          SAVE_STATUS: ${{ steps.save_seen.outputs.save_status }}
+        run: |
+          set -u -o pipefail
+
+          heartbeat_status=0
+          if [ -z "${APPLICATION_HEARTBEAT:-}" ]; then
+            echo "::error::WATCHER HEARTBEAT: application heartbeat unavailable; no final success heartbeat was fabricated"
+            heartbeat_status=1
+          else
+            PYTHONPATH=.:backend python -m watcher.source_health final-heartbeat || heartbeat_status=$?
+          fi
 
           case "${ERRORS:-unknown}" in
             ''|unknown) ;;
@@ -373,3 +450,5 @@ jobs:
               fi
               ;;
           esac
+
+          exit "$heartbeat_status"

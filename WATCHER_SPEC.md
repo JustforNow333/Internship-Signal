@@ -94,6 +94,7 @@ internship-signal/
     ├── __init__.py
     ├── run.py                   entry point: python -m watcher.run
     ├── config.py                load + validate watchlist.yml, env settings
+    ├── season.py                pure configured-term staleness checks
     ├── watchlist.yml            per-company config (see §3)
     ├── alumni.csv               the fraternity list (see §6)
     ├── sources/
@@ -131,7 +132,8 @@ The per-company labor is this table, not code. One entry per company.
 
 ```yaml
 defaults:
-  terms: ["Summer 2026"]          # internship terms we care about
+  terms: ["Summer 2027"]          # required; recruiting cycles are explicit
+  github_listing_urls: ["https://raw.githubusercontent.com/OWNER/REPO/BRANCH/path/listings.json"]
   remote_ok: true
 
 companies:
@@ -163,6 +165,14 @@ companies:
 `ats` ∈ {greenhouse, lever, ashby, smartrecruiters, workable, workday, bespoke,
 github_only}. `config.py` validates every entry at startup and fails loudly on
 an unknown `ats` or a `bespoke` entry whose module is missing.
+
+`defaults.terms` must be present and contain at least one nonblank term. A
+company inherits those terms unless it declares its own nonempty `terms` list;
+an explicitly empty company override is an error. Terms are not inferred from
+the calendar because choosing the recruiting cycle is a user decision.
+`defaults.github_listing_urls` is an inline list of validated HTTP/HTTPS URLs.
+It may contain more than one structured feed for regional coverage or overlap
+periods. No recruiting-year URL is embedded in Python.
 
 **Agent task — ATS auto-detection helper.** Provide
 `python -m watcher.detect "Company Name"` that fetches the company's careers
@@ -196,6 +206,11 @@ A helper `make_row(**fields)` returns a dict pre-filled with empty
 Each reusable adapter hits the platform's standard JSON endpoint. Known shapes
 (agent: verify current endpoints at build time, they drift):
 
+Posting-level schema failures are isolated: mixed payloads retain valid rows
+and log one bounded aggregate warning, while a nonempty payload with zero valid
+canonical rows fails the source. Paginated adapters reject repeated pages
+rather than looping. Page/feed-level schema validation remains strict.
+
 - **Greenhouse:** `https://boards-api.greenhouse.io/v1/boards/<token>/jobs?content=true`
 - **Lever:** `https://api.lever.co/v0/postings/<token>?mode=json`
 - **Ashby:** public posting API per board token
@@ -212,6 +227,13 @@ tenant's CXS search endpoint with a JSON body (pagination via `offset`/`limit`).
 Expect more per-company config (`token` + `workday_site`) and more breakage.
 Many enterprise/finance names on the list live here.
 
+Posting-level schema damage is isolated: non-object records and records with a
+blank title or `externalPath` are skipped, raw page length advances pagination,
+and one bounded aggregate warning reports company, retained/skipped totals, and
+stable reason counts without raw payloads. Page-level shape errors remain fatal.
+A nonempty complete fetch with zero valid canonical rows also remains a schema
+failure, while a valid zero-posting board succeeds with an empty result.
+
 ### Bespoke (`sources/bespoke/*.py`)
 
 Google, Amazon, Bloomberg, etc. run custom sites. One module each, highest
@@ -223,8 +245,12 @@ the decision in the module.
 
 ### Tier-2 backstop (`sources/github_listings.py`)
 
-Single GET of the raw listings file:
-`https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json`
+One GET per configured `defaults.github_listing_urls` entry. As of July 15,
+2026, the active official SimplifyJobs structured feed is
+`https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json`.
+Despite the historical repository name, live verification found structured
+`Summer 2027` rows in that payload. This URL is current configuration, not an
+architectural constant; verify it again during each rollover.
 
 Each entry maps to a canonical row:
 
@@ -239,9 +265,30 @@ Each entry maps to a canonical row:
 
 Filter to entries whose `company_name` matches a watchlist company (via
 `norm_company` + aliases) and whose `terms` intersect the configured terms.
-Tag every row `source="github"`. Treat the schema defensively: if the file
-fails to parse or required keys vanish, log a loud warning and continue with
-Tier-1 results — never crash the run.
+Matching is exact after case folding and whitespace normalization. Tag every
+row `source="github"`, retain `source_adapter="github_listings"`, and add feed
+provenance. Treat the schema defensively: if a file fails to parse or required
+keys vanish, log a loud warning identifying that feed and continue with Tier-1
+and any other successful feeds. Never turn a failed fetch or invalid payload
+into an empty successful result.
+
+### Season status (`season.py`)
+
+Season checking is pure and never makes a network request. It extracts
+four-digit years from configured default terms and reports:
+
+- `stale` when every recognized term year is before the current year.
+- `rollover_due` in July or later when the newest recognized term year is the
+  current year and no future-year term is configured.
+- `ok` when any future-year term exists, or before July when a current-year
+  term exists.
+- `unknown` when no four-digit year can be extracted.
+
+All statuses continue the run. Non-`ok` statuses are prominent warnings, and
+stale company-specific overrides are identified by company name. The report,
+email header, run result, application heartbeat, and workflow final heartbeat
+surface the active terms and status. Heartbeat terms use underscores for spaces
+and `|` between terms so comma-delimited parsing remains safe.
 
 ---
 
@@ -385,6 +432,10 @@ line) so silence is distinguishable from "nothing new."
 - `test_alumni.py`: exact, alias, and fuzzy (typo) matches; and a non-match.
 - `test_run.py`: end-to-end with all sources mocked and SMTP faked — asserts
   only new SWE-intern matches are emailed and the seen-store is updated.
+- `test_season.py`: deterministic status rules with injected dates and stale
+  company-override warnings.
+- Tests never access live sources. Source parsing uses saved fixtures and
+  mocked fetches; live rollover verification is a separate manual operation.
 - **Regression:** the existing `backend/tests` (86) still pass after the
   `analyze_rows` refactor. State real run output; never claim a pass without
   running it.
@@ -423,3 +474,104 @@ breadth, added one tested adapter at a time.
   do not hammer it. Prefer official JSON endpoints over HTML scraping wherever
   both exist.
 - No secrets in the repo. No silent failures.
+
+---
+
+## 14. Persistent source health
+
+`watcher/source_health.py` owns source attempts, deterministic state updates,
+transitions/recoveries, effective company coverage, sanitization, SQLite health
+persistence, JSON output, and GitHub Actions summary rendering. It performs no
+network requests. `run.py` remains responsible for calling sources and creates
+one run ID and UTC observation timestamp shared by all attempts in an
+execution.
+
+Stable direct keys combine normalized company, `direct`, and configured ATS,
+so changing an adapter starts a separate history. GitHub feed keys use a SHA-256
+digest of a query-free, credential-free URL label; raw query strings never
+appear in keys, heartbeats, or annotations.
+
+Direct state rules, in order:
+
+1. `unsupported` for `bespoke`/`github_only`; no request and no failure-counter
+   increment.
+2. `failing` after at least three consecutive failed direct attempts.
+3. `degraded` after one or two failed attempts, or after at least two
+   consecutive successful zero-row runs when that source has previously
+   returned a nonzero result.
+4. `empty` for any other successful zero-row direct result, including sources
+   that have never returned a row.
+5. `healthy` for a successful nonzero result.
+6. `unknown` only before usable state exists.
+
+GitHub feeds are `healthy` after a valid payload even with zero watchlist rows,
+`degraded` after one or two consecutive failures, and `failing` after three.
+Fetch, schema, missing-adapter, generic source, and unexpected failures use
+stable typed error kinds. Stored error text and feed labels are bounded and
+sanitized.
+
+Status changes after initialization are transitions. Recoveries are
+`degraded`/`failing` to `healthy`, or to `empty` when a failed direct endpoint
+successfully responds with zero rows. Unchanged failing states do not create
+another transition. Attempt history is never reset after recovery.
+
+Effective per-company coverage is distinct from posting availability:
+
+- direct success with rows: `direct_covered`;
+- direct success with zero rows: `direct_empty_but_responding`;
+- unsupported direct plus any successful configured feed: `backstop_only`;
+- failed direct plus any successful feed:
+  `direct_degraded_backstop_available` or
+  `direct_failing_backstop_available` from persistent status;
+- failed/unsupported direct plus no successful configured feed:
+  `uncovered_for_run`.
+
+The existing `seen.sqlite` owns two additional tables. `source_health_attempts`
+is append-only and has `attempt_id`, `run_id`, `health_key`, `observed_at`,
+`source_kind`, `company`, `adapter`, `feed_label`, `unsupported_reason`,
+`attempted`, `succeeded`, `rows_returned`, `error_kind`, and `error_message`.
+`source_health_current` has one row per key with identity/label columns plus
+`status`, `previous_status`, `total_attempts`, `total_successes`,
+`consecutive_failures`, `consecutive_zero_successes`, `last_attempt_at`,
+`last_success_at`, `last_nonzero_at`, `last_rows_returned`, `last_error_kind`,
+and `last_error_message`. Attempt insertion and current-state upsert share one
+transaction. Legacy databases upgrade via `CREATE TABLE IF NOT EXISTS`; the
+`seen` table and its rows are untouched.
+
+Deleting `watcher-data` intentionally resets seen and health history. The next
+run initializes nonzero successes to `healthy`, zero successes to `empty`,
+failures to `degraded`, and unsupported entries to `unsupported`; initialization
+does not emit transition/recovery alerts.
+
+Reports and logs show aggregates, transitions, degraded/failing detail, and all
+uncovered companies without listing every healthy/unsupported company. The
+application heartbeat preserves existing fields and adds integer-only
+`companies_configured`, `direct_healthy`, `direct_empty`, `direct_degraded`,
+`direct_failing`, `direct_unsupported`, `github_feeds_healthy`,
+`backstop_only_companies`, `uncovered_companies`, `health_transitions`, and
+`health_recoveries`. Actions captures the exact last application heartbeat and
+forwards it unchanged before appending only `seen_loaded`, `seen_saved`, and
+`seen_store`; no second field list can become stale. A missing application
+heartbeat is an explicit workflow error rather than a fabricated success.
+
+`WATCHER_HEALTH_REPORT_PATH` or `--health-report` writes sanitized JSON for the
+Actions job summary. Actions warns on newly degraded/failing transitions and
+recoveries, emits nonfatal error annotations for uncovered companies, validates
+both health tables and current-run attempts, and persists the same SQLite file.
+There is no source-health email; zero internship matches still send no email.
+All automated health tests use fake sources and temporary SQLite files and must
+remain offline. Adapter recoveries use existing persisted health state; never
+reset `watcher-data` or manually edit a source row to force a recovery.
+
+Operational queries:
+
+```sql
+select company, adapter, status, consecutive_failures, last_rows_returned
+from source_health_current
+order by status, company;
+
+select observed_at, company, adapter, succeeded, rows_returned, error_kind
+from source_health_attempts
+order by attempt_id desc
+limit 100;
+```

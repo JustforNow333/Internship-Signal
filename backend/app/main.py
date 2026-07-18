@@ -3,6 +3,7 @@
 Run from backend/:  uvicorn app.main:app --reload --port 8000
 """
 
+import json
 from json import JSONDecodeError
 
 from fastapi import FastAPI, HTTPException, Request
@@ -14,6 +15,7 @@ from .ingest import process_csv
 from .profile import load_profile
 
 app = FastAPI(title="Internship Signal API", version="1.0.0")
+MAX_CSV_BYTES = 10 * 1024 * 1024
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,16 +52,20 @@ async def ingest(request: Request):
         read_upload = getattr(upload, "read", None)
         if not callable(read_upload):
             raise HTTPException(status_code=400, detail="The file field must be a file upload.")
-        raw = await read_upload()
+        raw = await read_upload(MAX_CSV_BYTES + 1)
+        if len(raw) > MAX_CSV_BYTES:
+            raise HTTPException(status_code=413, detail="CSV content exceeds the 10 MiB limit.")
         try:
             csv_text = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
             csv_text = raw.decode("latin-1")
     else:
-        body = await _json_object(request)
+        body = await _json_object(request, max_bytes=MAX_CSV_BYTES + 1024)
         csv_text = body.get("csv_text", "")
         if not isinstance(csv_text, str):
             raise HTTPException(status_code=400, detail="csv_text must be a string.")
+        if len(csv_text.encode("utf-8")) > MAX_CSV_BYTES:
+            raise HTTPException(status_code=413, detail="CSV content exceeds the 10 MiB limit.")
     if not csv_text.strip():
         raise HTTPException(status_code=400, detail="No CSV content provided.")
     return _ingest_text(csv_text)
@@ -70,7 +76,7 @@ def ingest_sample():
     """Loads the bundled demo CSV so the app is useful with zero setup."""
     path = config.SAMPLE_CSV_PATH
     if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Sample CSV not found at {path}")
+        raise HTTPException(status_code=404, detail="Sample CSV not found.")
     return _ingest_text(path.read_text(encoding="utf-8"))
 
 
@@ -141,11 +147,19 @@ async def ask_dataset(dataset_id: str, request: Request):
     return ask(question, ds["jobs"])
 
 
-async def _json_object(request: Request) -> dict:
+async def _json_object(request: Request, *, max_bytes: int | None = None) -> dict:
     """Read a JSON request body and turn client-shape errors into HTTP 400s."""
 
     try:
-        body = await request.json()
+        if max_bytes is None:
+            body = await request.json()
+        else:
+            raw = bytearray()
+            async for chunk in request.stream():
+                raw.extend(chunk)
+                if len(raw) > max_bytes:
+                    raise HTTPException(status_code=413, detail="Request body is too large.")
+            body = json.loads(raw.decode("utf-8"))
     except (JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Request body must contain valid JSON.") from exc
     if not isinstance(body, dict):
