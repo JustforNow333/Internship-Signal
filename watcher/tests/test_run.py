@@ -2,11 +2,20 @@ import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import pytest
 import yaml
 
 from watcher.config import CompanyCfg, WatcherConfig
 from watcher.notify import render_digest
-from watcher.run import CollectionStats, collect_rows, print_heartbeat, print_report, run_once
+from watcher.run import (
+    CollectionStats,
+    WorkdayTransportSummary,
+    collect_rows,
+    print_heartbeat,
+    print_report,
+    run_once,
+    summarize_workday_transport,
+)
 from watcher.seen_store import SeenStore
 from watcher.source_health import (
     ERROR_MISSING_ADAPTER,
@@ -19,7 +28,7 @@ from watcher.source_health import (
     SourceHealthStore,
     render_final_heartbeat,
 )
-from watcher.sources.base import SourceError, SourceSchemaError, make_row
+from watcher.sources.base import SourceError, SourceFetchError, SourceSchemaError, make_row
 from watcher.sources.workday import WorkdaySource
 
 
@@ -634,6 +643,113 @@ def test_partial_workday_fetch_is_successful_and_recovers_prior_degraded_state(t
     assert recovered.health_transitions[0].recovery is True
 
 
+def test_twenty_four_identical_workday_transport_failures_are_shared_incident():
+    stats = CollectionStats(
+        workday_attempted=59,
+        workday_succeeded=35,
+        workday_failed=24,
+        workday_retry_attempts=48,
+    )
+    stats.workday_failure_codes["html_challenge"] = 24
+
+    summary = summarize_workday_transport(stats)
+
+    assert summary == WorkdayTransportSummary(
+        attempted_tenants=59,
+        successful_tenants=35,
+        failed_tenants=24,
+        retry_attempts=48,
+        dominant_error="html_challenge",
+        dominant_error_count=24,
+        likely_shared_incident=True,
+    )
+
+
+def test_non_workday_collection_does_not_invoke_workday_pacing(monkeypatch):
+    def unexpected_pacing(self):
+        pytest.fail("Workday pacing was used for a non-Workday adapter")
+
+    monkeypatch.setattr(
+        "watcher.sources.workday.WorkdayPacer.wait_for_tenant",
+        unexpected_pacing,
+    )
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="Greenhouse Co", ats="greenhouse", token="board"),)
+    )
+
+    rows, errors = collect_rows(
+        config,
+        direct_sources={
+            "greenhouse": FakeSource(
+                {"Greenhouse Co": [row("Greenhouse Co", "Software Engineer Intern")]}
+            )
+        },
+        github_source=FakeGithub([]),
+    )
+
+    assert len(rows) == 1
+    assert errors == []
+
+
+def test_isolated_or_mixed_workday_failures_do_not_create_false_incident():
+    isolated = CollectionStats(workday_attempted=2, workday_failed=2)
+    isolated.workday_failure_codes["html_challenge"] = 2
+    assert summarize_workday_transport(isolated).likely_shared_incident is False
+
+    mixed = CollectionStats(workday_attempted=10, workday_failed=10)
+    mixed.workday_failure_codes.update(
+        {"html_challenge": 5, "rate_limited": 3, "timeout": 2}
+    )
+    assert summarize_workday_transport(mixed).likely_shared_incident is False
+
+
+def test_workday_shared_incident_rule_is_deterministic_at_sixty_percent():
+    stats = CollectionStats(workday_attempted=10, workday_failed=10)
+    stats.workday_failure_codes.update({"html_challenge": 6, "timeout": 4})
+
+    first = summarize_workday_transport(stats)
+    second = summarize_workday_transport(stats)
+
+    assert first == second
+    assert first.likely_shared_incident is True
+
+
+def test_collect_rows_persists_each_workday_attempt_and_stable_transport_subtype():
+    companies = tuple(
+        CompanyCfg(
+            name=f"Workday Co {index}",
+            ats="workday",
+            token=f"tenant{index}",
+            workday_shard="wd5",
+            workday_site="Site",
+        )
+        for index in range(5)
+    )
+    error = SourceFetchError(
+        "challenge response",
+        error_code="html_challenge",
+        retryable=True,
+        attempt_count=3,
+    )
+    stats = CollectionStats()
+
+    collect_rows(
+        WatcherConfig(companies=companies),
+        direct_sources={"workday": FakeSource(error=error)},
+        github_source=FakeGithub([]),
+        stats=stats,
+        run_id="workday-incident",
+    )
+
+    direct_attempts = [
+        item for item in stats.source_attempts if item.source_kind == SOURCE_KIND_DIRECT
+    ]
+    assert len(direct_attempts) == 5
+    assert all(item.error_kind == "fetch_failure/html_challenge" for item in direct_attempts)
+    assert all(item.succeeded is False for item in direct_attempts)
+    assert summarize_workday_transport(stats).likely_shared_incident is True
+
+
 def test_print_report_for_matches_and_empty(capsys):
     result = type("Result", (), {
         "errors": [],
@@ -678,6 +794,12 @@ def test_print_heartbeat(capsys):
         "alumni_employers_indexed": 80,
         "digest_sent": False,
         "seen_marked": 1,
+        "workday_transport": WorkdayTransportSummary(
+            attempted_tenants=3,
+            successful_tenants=2,
+            failed_tenants=1,
+            retry_attempts=2,
+        ),
     })()
 
     print_heartbeat(result)
@@ -690,6 +812,8 @@ def test_print_heartbeat(capsys):
         "direct_failing=0, direct_unsupported=0, github_feeds_healthy=0, "
         "backstop_only_companies=0, uncovered_companies=0, health_transitions=0, "
         "health_recoveries=0, "
+        "workday_attempted=3, workday_succeeded=2, workday_failed=1, "
+        "workday_retry_attempts=2, workday_shared_incident=0, "
         "alumni_csv_status=loaded, alumni_records_loaded=124, "
         "alumni_employers_indexed=80, sent=no, seen_marked=1\n"
     )
@@ -743,6 +867,22 @@ def test_workflow_preserves_health_fields_validates_db_and_renders_summary():
     assert "checkout --orphan \"$DATA_BRANCH\"" in workflow
     assert "push origin \"HEAD:$DATA_BRANCH\"" in workflow
     assert "git branch -D watcher-data" not in workflow
+
+
+def test_workflow_workday_probe_is_isolated_from_email_seen_and_data_branch():
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "workday_transport_probe" in workflow
+    assert "python scripts/probe_workday_transport.py" in workflow
+    assert 'WATCHER_SEND_EMAIL: "0"' in workflow
+    assert "WATCHER_WORKDAY_MIN_INTERVAL_SECONDS" in workflow
+    probe_job = workflow.split("  workday-transport-probe:", 1)[1].split("  watcher:", 1)[0]
+    assert "--mark-seen-without-send" not in probe_job
+    assert "watcher-data" not in probe_job
+    assert "WATCHER_SEEN_DB" not in probe_job
+    assert "SMTP_" not in probe_job
 
 
 def test_workflow_forwards_exact_application_heartbeat_and_keeps_existing_outputs():

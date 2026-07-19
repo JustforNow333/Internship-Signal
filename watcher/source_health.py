@@ -587,7 +587,7 @@ def normalize_attempt(attempt: SourceAttempt) -> SourceAttempt:
         adapter=safe_token(attempt.adapter) or "unknown",
         feed_label=sanitize_feed_label(attempt.feed_label) if attempt.feed_label else None,
         unsupported_reason=safe_token(attempt.unsupported_reason) if attempt.unsupported_reason else None,
-        error_kind=safe_token(attempt.error_kind) if attempt.error_kind else None,
+        error_kind=safe_error_kind(attempt.error_kind) if attempt.error_kind else None,
         error_message=sanitize_error(attempt.error_message) if attempt.error_message else None,
     )
 
@@ -631,6 +631,17 @@ def render_github_actions_report(
     save_status: str = "unknown",
 ) -> None:
     data = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    run = data.get("run", {})
+    workday = run.get("workday_transport", {}) if isinstance(run, Mapping) else {}
+    if isinstance(workday, Mapping) and workday.get("likely_shared_incident"):
+        print(
+            "::warning::WORKDAY TRANSPORT INCIDENT: "
+            f"attempted={int(workday.get('attempted_tenants', 0) or 0)}, "
+            f"failed={int(workday.get('failed_tenants', 0) or 0)}, "
+            f"dominant_error={safe_error_kind(workday.get('dominant_error', 'unknown')) or 'unknown'}, "
+            f"dominant_error_count={int(workday.get('dominant_error_count', 0) or 0)}",
+            file=output,
+        )
     for transition in data.get("transitions", []):
         label = _json_source_label(transition)
         if transition.get("recovery"):
@@ -655,7 +666,6 @@ def render_github_actions_report(
     if not summary_path:
         return
     summary = data.get("summary", {})
-    run = data.get("run", {})
     states = data.get("states", [])
     transitions = data.get("transitions", [])
     coverage = data.get("coverage", [])
@@ -687,6 +697,19 @@ def render_github_actions_report(
         ("Health recoveries", "health_recoveries"),
     ):
         lines.append(f"| {label} | {int(summary.get(key, 0) or 0)} |")
+    workday = run.get("workday_transport", {})
+    if isinstance(workday, Mapping):
+        lines.extend(
+            [
+                "",
+                "### Workday transport",
+                "",
+                f"- Attempted/succeeded/failed tenants: {int(workday.get('attempted_tenants', 0) or 0)} / {int(workday.get('successful_tenants', 0) or 0)} / {int(workday.get('failed_tenants', 0) or 0)}",
+                f"- Retry attempts: {int(workday.get('retry_attempts', 0) or 0)}",
+                f"- Dominant error: `{safe_error_kind(workday.get('dominant_error', 'none')) or 'none'}` ({int(workday.get('dominant_error_count', 0) or 0)})",
+                f"- Likely shared incident: `{'yes' if workday.get('likely_shared_incident') else 'no'}`",
+            ]
+        )
     details = _workflow_detail_rows(states, transitions, coverage)
     lines.extend(["", "### Actionable source details", "", "| Category | Company/feed | Adapter | Detail |", "|---|---|---|---|"])
     lines.extend(details or ["| none | — | — | No degraded, failing, recovered, or uncovered sources |"])
@@ -700,7 +723,10 @@ def _workflow_detail_rows(states: list[dict], transitions: list[dict], coverage:
         if state.get("status") not in {STATUS_DEGRADED, STATUS_FAILING}:
             continue
         label = _json_source_label(state)
+        error_kind = safe_error_kind(state.get("last_error_kind"))
         detail = state.get("last_error_message") or f"rows={state.get('last_rows_returned')}"
+        if error_kind:
+            detail = f"{error_kind}: {detail}"
         rows.append(_markdown_row(state.get("status"), label, state.get("adapter"), detail))
     for transition in transitions:
         if transition.get("recovery"):
@@ -733,7 +759,7 @@ def _state_dict(state: SourceHealthState) -> dict:
     for key in ("last_attempt_at", "last_success_at", "last_nonzero_at"):
         data[key] = iso_utc(data[key]) if data[key] else None
     data["feed_label"] = sanitize_feed_label(data["feed_label"]) if data["feed_label"] else None
-    data["last_error_kind"] = safe_token(data["last_error_kind"]) if data["last_error_kind"] else None
+    data["last_error_kind"] = safe_error_kind(data["last_error_kind"]) if data["last_error_kind"] else None
     data["last_error_message"] = sanitize_error(data["last_error_message"]) if data["last_error_message"] else None
     data["company"] = sanitize_plain(data["company"]) if data["company"] else None
     return data
@@ -804,6 +830,13 @@ def _status_count(states: Iterable[SourceHealthState], status: str) -> int:
 
 def safe_token(value: object) -> str:
     return re.sub(r"[^a-z0-9_.-]+", "_", str(value or "").strip().casefold()).strip("_")
+
+
+def safe_error_kind(value: object) -> str:
+    """Normalize broad/subtype error kinds while preserving one slash."""
+
+    parts = [safe_token(part) for part in str(value or "").split("/", 1)]
+    return "/".join(part for part in parts if part)[:96]
 
 
 def safe_run_id(value: object) -> str:

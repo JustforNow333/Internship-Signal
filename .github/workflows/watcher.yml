@@ -10,6 +10,11 @@ name: watcher
         required: true
         default: false
         type: boolean
+      workday_transport_probe:
+        description: "Run only the isolated five-tenant Workday transport probe."
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -19,7 +24,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  workday-transport-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.workday_transport_probe == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Probe five Workday tenants safely
+        env:
+          PYTHONPATH: .:backend
+          WATCHER_SEND_EMAIL: "0"
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/workday-transport-probe.json"
+          python scripts/probe_workday_transport.py --json-out "$report"
+          {
+            echo "## Workday transport probe"
+            echo
+            echo '```json'
+            sed -n '1,240p' "$report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   watcher:
+    if: github.event_name != 'workflow_dispatch' || inputs.workday_transport_probe != true
     runs-on: ubuntu-latest
     env:
       PYTHON_VERSION: "3.11"

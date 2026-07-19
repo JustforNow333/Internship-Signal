@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -77,6 +78,8 @@ load_dotenv()
 
 DEFAULT_WATCHLIST_PATH = WATCHER_DIR / "watchlist.yml"
 DEFAULT_SEEN_DB_PATH = Path(os.getenv("WATCHER_SEEN_DB", WATCHER_DIR / "seen.sqlite"))
+DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS = 0.5
+MAX_WORKDAY_MIN_INTERVAL_SECONDS = 10.0
 SUPPORTED_ATS = {
     "greenhouse",
     "lever",
@@ -91,6 +94,25 @@ SUPPORTED_ATS = {
 
 class ConfigError(ValueError):
     """Raised when watcher config is missing or invalid."""
+
+
+def workday_min_interval_seconds(value: str | float | int | None = None) -> float:
+    """Return the validated delay between starting Workday tenant fetches."""
+
+    raw = os.getenv("WATCHER_WORKDAY_MIN_INTERVAL_SECONDS") if value is None else value
+    if raw in (None, ""):
+        return DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS
+    try:
+        interval = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(
+            "WATCHER_WORKDAY_MIN_INTERVAL_SECONDS must be a numeric value between 0 and 10"
+        ) from exc
+    if not math.isfinite(interval) or not 0 <= interval <= MAX_WORKDAY_MIN_INTERVAL_SECONDS:
+        raise ConfigError(
+            "WATCHER_WORKDAY_MIN_INTERVAL_SECONDS must be between 0 and 10 seconds"
+        )
+    return interval
 
 
 @dataclass(frozen=True)

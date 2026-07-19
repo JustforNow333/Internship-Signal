@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -92,6 +93,7 @@ class RunResult:
     health_transitions: tuple[HealthTransition, ...]
     company_coverage: tuple[CompanyCoverage, ...]
     health_summary: HealthSummary
+    workday_transport: "WorkdayTransportSummary"
     alumni_status_message: str = ""
 
 
@@ -100,6 +102,41 @@ class CollectionStats:
     github_feeds_configured: int = 0
     github_feeds_succeeded: int = 0
     source_attempts: list[SourceAttempt] = field(default_factory=list)
+    workday_attempted: int = 0
+    workday_succeeded: int = 0
+    workday_failed: int = 0
+    workday_retry_attempts: int = 0
+    workday_failure_codes: Counter[str] = field(default_factory=Counter)
+
+
+@dataclass(frozen=True)
+class WorkdayTransportSummary:
+    attempted_tenants: int = 0
+    successful_tenants: int = 0
+    failed_tenants: int = 0
+    retry_attempts: int = 0
+    dominant_error: str = "none"
+    dominant_error_count: int = 0
+    likely_shared_incident: bool = False
+
+
+WORKDAY_TRANSPORT_ERROR_CODES = frozenset(
+    {
+        "compressed_decode_failure",
+        "connection_reset",
+        "dns_failure",
+        "empty_response",
+        "html_challenge",
+        "html_response",
+        "json_decode_failure",
+        "network_failure",
+        "rate_limited",
+        "redirected_to_html",
+        "timeout",
+        "transient_http_error",
+        "unsupported_content_type",
+    }
+)
 
 
 def run_once(
@@ -138,6 +175,8 @@ def run_once(
         run_id=active_run_id,
         observed_at=observed_at,
     )
+    workday_transport = summarize_workday_transport(collection_stats)
+    _log_workday_transport(workday_transport)
     owned_health_store = health_store is None
     active_health_store = health_store or SourceHealthStore(seen_store.path)
     try:
@@ -234,6 +273,7 @@ def run_once(
         health_transitions=health_transitions,
         company_coverage=company_coverage,
         health_summary=health_summary,
+        workday_transport=workday_transport,
         alumni_status_message=alumni_status.message,
     )
 
@@ -299,6 +339,9 @@ def collect_rows(
                 )
             )
             continue
+        is_workday = company.ats == "workday"
+        if is_workday:
+            stats.workday_attempted += 1
         try:
             LOGGER.info("Fetching %s via %s...", company.name, company.ats)
             rows = source.fetch(company)
@@ -315,22 +358,39 @@ def collect_rows(
                     rows_returned=len(rows),
                 )
             )
+            if is_workday:
+                stats.workday_succeeded += 1
+                stats.workday_retry_attempts += _workday_retry_count(source)
         except SourceSchemaError as exc:
+            if is_workday:
+                _record_workday_failure(stats, source, "schema_failure")
             _record_error(errors, f"{company.name}: {exc}")
             stats.source_attempts.append(
                 _failed_direct_attempt(company, active_run_id, active_observed_at, ERROR_SCHEMA, exc)
             )
         except SourceFetchError as exc:
+            if is_workday:
+                _record_workday_failure(stats, source, exc.error_code, error=exc)
             _record_error(errors, f"{company.name}: {exc}")
             stats.source_attempts.append(
-                _failed_direct_attempt(company, active_run_id, active_observed_at, ERROR_FETCH, exc)
+                _failed_direct_attempt(
+                    company,
+                    active_run_id,
+                    active_observed_at,
+                    _fetch_error_kind(exc),
+                    exc,
+                )
             )
         except SourceError as exc:
+            if is_workday:
+                _record_workday_failure(stats, source, "source_failure")
             _record_error(errors, f"{company.name}: {exc}")
             stats.source_attempts.append(
                 _failed_direct_attempt(company, active_run_id, active_observed_at, ERROR_SOURCE, exc)
             )
         except Exception as exc:  # defensive run-loop boundary
+            if is_workday:
+                _record_workday_failure(stats, source, "unexpected_exception")
             _record_error(errors, f"{company.name}: unexpected {type(exc).__name__}: {exc}")
             stats.source_attempts.append(
                 _failed_direct_attempt(company, active_run_id, active_observed_at, ERROR_UNEXPECTED, exc)
@@ -451,6 +511,7 @@ def print_report(result: RunResult, *, output: TextIO | None = None) -> None:
         f"{getattr(result, 'github_feeds_succeeded', 0)} succeeded",
         file=output,
     )
+    _print_workday_transport(getattr(result, "workday_transport", WorkdayTransportSummary()), output)
     _print_source_health(result, output=output)
     if result.errors:
         print(f"Source errors: {len(result.errors)}", file=output)
@@ -512,6 +573,11 @@ def print_heartbeat(result: RunResult, *, output: TextIO | None = None) -> None:
         f"uncovered_companies={_health_value(health, 'uncovered_companies')}, "
         f"health_transitions={_health_value(health, 'health_transitions')}, "
         f"health_recoveries={_health_value(health, 'health_recoveries')}, "
+        f"workday_attempted={getattr(getattr(result, 'workday_transport', None), 'attempted_tenants', 0)}, "
+        f"workday_succeeded={getattr(getattr(result, 'workday_transport', None), 'successful_tenants', 0)}, "
+        f"workday_failed={getattr(getattr(result, 'workday_transport', None), 'failed_tenants', 0)}, "
+        f"workday_retry_attempts={getattr(getattr(result, 'workday_transport', None), 'retry_attempts', 0)}, "
+        f"workday_shared_incident={int(bool(getattr(getattr(result, 'workday_transport', None), 'likely_shared_incident', False)))}, "
         f"alumni_csv_status={getattr(result, 'alumni_csv_status', 'unknown')}, "
         f"alumni_records_loaded={getattr(result, 'alumni_records_loaded', 0)}, "
         f"alumni_employers_indexed={getattr(result, 'alumni_employers_indexed', 0)}, "
@@ -619,6 +685,86 @@ def _failed_attempt(
         error_kind=error_kind,
         error_message=sanitize_error(f"{type(error).__name__}: {error}"),
         feed_label=feed_label,
+    )
+
+
+def _fetch_error_kind(error: SourceFetchError) -> str:
+    code = re.sub(r"[^a-z0-9_.-]+", "_", str(error.error_code or "").casefold()).strip("_")
+    return ERROR_FETCH if not code or code == ERROR_FETCH else f"{ERROR_FETCH}/{code}"
+
+
+def _workday_retry_count(source: object, error: SourceFetchError | None = None) -> int:
+    diagnostics = getattr(source, "last_diagnostics", None)
+    from_source = int(getattr(diagnostics, "retry_attempts", 0) or 0)
+    from_error = max(0, int(getattr(error, "attempt_count", 1) or 1) - 1) if error else 0
+    return max(from_source, from_error)
+
+
+def _record_workday_failure(
+    stats: CollectionStats,
+    source: object,
+    code: str,
+    *,
+    error: SourceFetchError | None = None,
+) -> None:
+    stable_code = re.sub(r"[^a-z0-9_.-]+", "_", str(code or "unknown").casefold()).strip("_")
+    stats.workday_failed += 1
+    stats.workday_retry_attempts += _workday_retry_count(source, error)
+    stats.workday_failure_codes[stable_code or "unknown"] += 1
+
+
+def summarize_workday_transport(stats: CollectionStats) -> WorkdayTransportSummary:
+    dominant_error = "none"
+    dominant_count = 0
+    if stats.workday_failure_codes:
+        dominant_error, dominant_count = sorted(
+            stats.workday_failure_codes.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[0]
+    shared = (
+        stats.workday_failed >= 5
+        and dominant_error in WORKDAY_TRANSPORT_ERROR_CODES
+        and dominant_count * 100 >= stats.workday_failed * 60
+    )
+    return WorkdayTransportSummary(
+        attempted_tenants=stats.workday_attempted,
+        successful_tenants=stats.workday_succeeded,
+        failed_tenants=stats.workday_failed,
+        retry_attempts=stats.workday_retry_attempts,
+        dominant_error=dominant_error,
+        dominant_error_count=dominant_count,
+        likely_shared_incident=shared,
+    )
+
+
+def _log_workday_transport(summary: WorkdayTransportSummary) -> None:
+    LOGGER.warning(
+        "WORKDAY TRANSPORT SUMMARY: attempted_tenants=%d successful_tenants=%d "
+        "failed_tenants=%d retry_attempts=%d dominant_error=%s dominant_error_count=%d "
+        "likely_shared_incident=%s",
+        summary.attempted_tenants,
+        summary.successful_tenants,
+        summary.failed_tenants,
+        summary.retry_attempts,
+        summary.dominant_error,
+        summary.dominant_error_count,
+        "yes" if summary.likely_shared_incident else "no",
+    )
+
+
+def _print_workday_transport(summary: WorkdayTransportSummary, output: TextIO) -> None:
+    print("Workday transport:", file=output)
+    print(f"  Attempted tenants: {summary.attempted_tenants}", file=output)
+    print(f"  Successful tenants: {summary.successful_tenants}", file=output)
+    print(f"  Failed tenants: {summary.failed_tenants}", file=output)
+    print(f"  Retry attempts: {summary.retry_attempts}", file=output)
+    print(
+        f"  Dominant error: {summary.dominant_error} ({summary.dominant_error_count})",
+        file=output,
+    )
+    print(
+        f"  Likely shared incident: {'yes' if summary.likely_shared_incident else 'no'}",
+        file=output,
     )
 
 
@@ -770,6 +916,15 @@ def _write_result_health_report(result: RunResult, path: str | Path) -> None:
             "github_feeds_succeeded": result.github_feeds_succeeded,
             "digest_sent": result.digest_sent,
             "seen_marked": result.seen_marked,
+            "workday_transport": {
+                "attempted_tenants": result.workday_transport.attempted_tenants,
+                "successful_tenants": result.workday_transport.successful_tenants,
+                "failed_tenants": result.workday_transport.failed_tenants,
+                "retry_attempts": result.workday_transport.retry_attempts,
+                "dominant_error": result.workday_transport.dominant_error,
+                "dominant_error_count": result.workday_transport.dominant_error_count,
+                "likely_shared_incident": result.workday_transport.likely_shared_incident,
+            },
         },
     )
 

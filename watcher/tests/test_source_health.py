@@ -146,6 +146,32 @@ def test_long_errors_and_sensitive_urls_are_bounded_and_sanitized(tmp_path):
     assert "user:pass" not in stored
 
 
+def test_transport_subtype_is_persisted_without_raw_html_or_metadata(tmp_path):
+    raw_marker = "<html><input value=PRIVATE_CHALLENGE_TOKEN></html>"
+    with SourceHealthStore(tmp_path / "seen.sqlite") as store:
+        states, _ = store.record_attempts(
+            [
+                attempt(
+                    succeeded=False,
+                    rows=None,
+                    error_kind="fetch_failure/html_challenge",
+                    error_message="SourceFetchError: workday non-JSON code=html_challenge",
+                )
+            ]
+        )
+        state = next(iter(states.values()))
+        stored = store._conn.execute(
+            "select error_kind, error_message from source_health_attempts"
+        ).fetchone()
+
+    assert stored[0] == "fetch_failure/html_challenge"
+    assert state.last_error_kind == "fetch_failure/html_challenge"
+    assert state.status == STATUS_DEGRADED
+    assert state.consecutive_failures == 1
+    assert raw_marker not in stored[1]
+    assert "PRIVATE_CHALLENGE_TOKEN" not in stored[1]
+
+
 def test_feed_keys_and_labels_do_not_expose_query_strings():
     raw = "https://user:secret@example.test/listings.json?temporary_token=private#fragment"
     label = sanitize_feed_label(raw)
@@ -382,21 +408,39 @@ def test_json_report_is_sanitized_and_github_annotations_use_transitions(tmp_pat
         transitions=(transition,),
         coverage=coverage,
         summary=summary,
-        run_metadata={"configured_terms": "Summer_2027", "season_status": "ok"},
+        run_metadata={
+            "configured_terms": "Summer_2027",
+            "season_status": "ok",
+            "workday_transport": {
+                "attempted_tenants": 59,
+                "successful_tenants": 35,
+                "failed_tenants": 24,
+                "retry_attempts": 48,
+                "dominant_error": "html_challenge",
+                "dominant_error_count": 24,
+                "likely_shared_incident": True,
+            },
+        },
     )
     raw = report.read_text(encoding="utf-8")
     data = json.loads(raw)
     assert data["run_id"] == "fixed-run"
     assert data["summary"]["direct_degraded"] == 1
+    assert data["run"]["workday_transport"]["dominant_error"] == "html_challenge"
+    assert data["run"]["workday_transport"]["failed_tenants"] == 24
     assert "secret" not in raw
 
     output = io.StringIO()
     summary_path = tmp_path / "summary.md"
     render_github_actions_report(report, summary_path=summary_path, output=output)
     annotations = output.getvalue()
+    assert "::warning::WORKDAY TRANSPORT INCIDENT:" in annotations
+    assert "failed=24" in annotations
+    assert "dominant_error=html_challenge" in annotations
     assert "::warning::SOURCE HEALTH: Example Co: healthy -> degraded" in annotations
     assert "::error::SOURCE COVERAGE: Example Co was uncovered" in annotations
     assert "Internship watcher run" in summary_path.read_text(encoding="utf-8")
+    assert "Likely shared incident: `yes`" in summary_path.read_text(encoding="utf-8")
 
 
 def test_sanitizers_are_deterministic():
