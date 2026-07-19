@@ -127,6 +127,49 @@ invalid pages still fail, as does any nonempty fetch that produces zero valid
 canonical rows; a genuinely empty Workday board remains a successful empty
 source.
 
+Workday transport failures are diagnosed without retaining response bodies.
+Safe diagnostics include HTTP status, query-free final URL, content metadata,
+body byte count and SHA-256 digest, a generic body classification, attempt
+number, and retryability. Raw HTML, cookies, sensitive headers, and challenge
+values are neither logged nor stored. HTML and empty responses remain fetch
+failures—not empty job boards.
+
+The adapter makes at most three attempts for transient failures: HTTP 429,
+500/502/503/504, timeouts, temporary DNS/connection failures, empty responses,
+and potentially transient HTML/non-JSON responses. HTTP 400/401/404 and plain
+403 responses fail immediately, as do valid-JSON schema errors. Retry delays
+are bounded (about 1–2 seconds, then 3–5 seconds); `Retry-After` is honored for
+429 responses with a 10-second cap. Starting a different Workday tenant is
+paced by `WATCHER_WORKDAY_MIN_INTERVAL_SECONDS`, which defaults to `0.5`, must
+be from `0` through `10`, and may be set to `0` to disable pacing locally.
+Pagination within one tenant does not incur that tenant-level delay.
+
+When at least five Workday tenants fail and one stable transient transport
+classification accounts for at least 60% of those failures, the run reports a
+likely shared incident. This adds aggregate logs, JSON/report detail, an Actions
+warning, and integer heartbeat fields (`workday_attempted`,
+`workday_succeeded`, `workday_failed`, `workday_retry_attempts`, and
+`workday_shared_incident`). Every company still records its own failed health
+attempt; no counter is reset or source declared healthy. A later success creates
+the normal one-time recovery transition.
+
+Run the isolated five-tenant comparison probe without a seen database, alumni
+data, or email:
+
+```powershell
+$env:WATCHER_SEND_EMAIL = "0"
+$env:PYTHONPATH = ".;backend"
+backend\venv\Scripts\python.exe scripts\probe_workday_transport.py
+```
+
+The `workday_transport_probe=true` manual workflow-dispatch input runs the same
+safe probe on a GitHub-hosted runner without restoring or saving
+`watcher-data`. It prints only company/shard, attempt count, status, content
+metadata, body size/hash prefix, JSON decode state, and jobs-field presence. If
+GitHub-hosted runners remain blocked, keep the GitHub backstop active and
+investigate legitimate Workday access with the provider; this project does not
+harvest cookies, rotate proxies, automate browsers, or bypass challenges.
+
 ---
 
 ## Watcher source health

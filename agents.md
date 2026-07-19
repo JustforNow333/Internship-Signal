@@ -81,6 +81,17 @@ Current watcher fetch layer:
   and logging one bounded aggregate warning with reason counts. Pagination uses
   raw posting count. Page-level schema errors and nonempty all-malformed fetches
   still fail; a valid zero-posting board remains a successful empty fetch.
+- Workday transport classifies non-JSON responses from safe metadata only:
+  status, query-free final URL, content type/encoding, bounded body length,
+  generic body kind, and a SHA-256 digest. Raw bodies, cookies, sensitive
+  headers, and challenge payloads must never be logged or persisted. The
+  adapter retries only transient network/429/selected 5xx/empty/HTML failures,
+  with three total attempts and bounded injectable backoff. Deterministic
+  schema failures are not retried, and HTML is never treated as an empty board.
+- Starting different Workday tenant fetches is paced by an instance-local
+  pacer. `WATCHER_WORKDAY_MIN_INTERVAL_SECONDS` defaults to `0.5`, accepts
+  values from `0` through `10`, and `0` disables pacing for controlled local
+  diagnostics. Pagination pages for one tenant do not receive tenant pacing.
 - Workable uses the current public careers API
   `POST https://apply.workable.com/api/v3/accounts/{token}/jobs`. ICEYE's
   live board currently reports zero openings.
@@ -247,6 +258,18 @@ Current watcher run core:
   `github_feeds_configured`, and `github_feeds_succeeded`. Multiple terms use
   `|` separators and underscores for spaces; heartbeat values must not add raw
   commas.
+- Workday heartbeat fields are integer-only: `workday_attempted`,
+  `workday_succeeded`, `workday_failed`, `workday_retry_attempts`, and
+  `workday_shared_incident`. A likely shared incident requires at least five
+  failed Workday tenants and one supported transient transport classification
+  accounting for at least 60% of the Workday failures. It adds an aggregate log,
+  report, Actions warning, and JSON summary without suppressing per-company
+  health attempts or resetting counters.
+- Manual dispatch input `workday_transport_probe=true` runs only the isolated
+  five-tenant safe probe. It sets `WATCHER_SEND_EMAIL=0`, uses no seen database,
+  alumni data, or SMTP secret, never writes `watcher-data`, and emits only safe
+  transport metadata. Do not add cookies, challenge tokens, browser automation,
+  proxy rotation, or other anti-bot evasion.
 
 Current watcher source-health layer:
 

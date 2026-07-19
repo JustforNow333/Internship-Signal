@@ -111,6 +111,12 @@ workday-live-probe*.json
 workday-live-probe*.log
 watcher/workday-live-probe*.json
 watcher/workday-live-probe*.log
+# Safe Workday transport probe output is operational scratch data. The probe
+# script and offline test fixtures remain trackable.
+workday-transport-probe*.json
+workday-transport-probe*.log
+watcher/workday-transport-probe*.json
+watcher/workday-transport-probe*.log
 # Keep canonical agents.md/AGENTS.md files trackable; ignore local copies.
 agents.local.md
 agents.*.md

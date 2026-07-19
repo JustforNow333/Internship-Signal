@@ -234,6 +234,49 @@ stable reason counts without raw payloads. Page-level shape errors remain fatal.
 A nonempty complete fetch with zero valid canonical rows also remains a schema
 failure, while a valid zero-posting board succeeds with an empty result.
 
+#### Workday transport reliability
+
+The shared Workday request path captures only safe response metadata: status,
+query-free final URL, content type/encoding, bounded body size, generic body
+kind, SHA-256 digest, attempt number, and retryability. Body previews are off by
+default; any enabled preview is bounded/redacted. Raw HTML, cookies, sensitive
+headers, tokens, and challenge values are never logged, persisted, placed in
+health JSON, heartbeats, or email. Responses larger than 16 MiB fail safely.
+Gzip/deflate, UTF-8 BOM, safe declared charsets, redirects, empty bodies, and
+decode failures are classified explicitly. HTML is a fetch failure, never an
+empty board.
+
+Workday alone retries transient failures with three total attempts: HTTP 429,
+500/502/503/504, timeout, temporary DNS/connection failures, empty responses,
+and potentially transient HTML/non-JSON responses. Plain HTTP 400/401/404 and
+plain 403 responses are permanent; a 403 is retryable only when its safely
+inspected body is unambiguously a temporary HTML challenge. Valid-JSON schema
+and deterministic posting failures are not retried. Backoff is injectable and
+bounded to approximately 1–2 seconds after attempt one and 3–5 seconds after
+attempt two; a numeric `Retry-After` is capped at 10 seconds.
+
+An instance-local pacer delays the start of different Workday tenant fetches,
+not pagination pages within one tenant. `WATCHER_WORKDAY_MIN_INTERVAL_SECONDS`
+defaults to `0.5`, permits finite values from `0` through `10`, and `0` disables
+pacing. Invalid values fail configuration clearly. No module-level timing state
+or concurrency is introduced.
+
+The run labels a likely shared Workday incident when at least five tenants fail
+and one supported transient transport classification represents at least 60%
+of the Workday failures. It reports attempted/succeeded/failed tenants, retry
+attempts, the dominant stable error, and the incident flag in logs, the human
+report, sanitized health JSON, Actions summary/annotation, and integer-only
+heartbeat fields. Per-company attempts and persistent failure counters remain
+unchanged; later successes recover naturally. No browser automation, challenge
+bypass, copied cookies, proxy rotation, or other anti-bot evasion is allowed.
+
+`scripts/probe_workday_transport.py` safely probes at most five configured
+tenants and reports only company, shard, attempts, status, content metadata,
+body length/hash prefix, JSON decode status, and jobs-field presence. The manual
+Actions `workday_transport_probe` mode runs it without SMTP, alumni data, a seen
+database, or `watcher-data` restore/save. Local probes must explicitly set
+`WATCHER_SEND_EMAIL=0` and must not use `--mark-seen-without-send`.
+
 ### Bespoke (`sources/bespoke/*.py`)
 
 Google, Amazon, Bloomberg, etc. run custom sites. One module each, highest

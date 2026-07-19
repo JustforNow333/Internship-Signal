@@ -47,6 +47,7 @@ jobs:
         env:
           PYTHONPATH: .:backend
           WATCHER_SEND_EMAIL: "0"
+          WATCHER_WORKDAY_MIN_INTERVAL_SECONDS: ${{ vars.WATCHER_WORKDAY_MIN_INTERVAL_SECONDS }}
         run: |
           set -euo pipefail
           report="$RUNNER_TEMP/workday-transport-probe.json"
@@ -69,6 +70,7 @@ jobs:
       SEEN_DB_PATH: ${{ github.workspace }}/.watcher-state/seen.sqlite
       HEALTH_REPORT_PATH: ${{ github.workspace }}/.watcher-state/watcher-source-health.json
       ACTIONS_WATCHER_SEND_EMAIL: ${{ vars.WATCHER_SEND_EMAIL }}
+      WATCHER_WORKDAY_MIN_INTERVAL_SECONDS: ${{ vars.WATCHER_WORKDAY_MIN_INTERVAL_SECONDS }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
       EMAIL_TO: ${{ secrets.EMAIL_TO }}

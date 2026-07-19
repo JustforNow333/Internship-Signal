@@ -30,6 +30,9 @@ This file tracks completed watcher steps and the next handoff target.
 - The Actions final heartbeat now forwards the complete application heartbeat
   before appending seen-store persistence, and Workday isolates malformed
   posting records without hiding structurally broken/all-malformed feeds.
+- Workday transport now has safe non-JSON diagnostics, bounded transient
+  retries, configurable cross-tenant pacing, shared-incident reporting, and an
+  isolated five-tenant local/Actions comparison probe.
 
 ## Done
 
@@ -204,6 +207,26 @@ This file tracks completed watcher steps and the next handoff target.
    - Backend CSV ingestion has a 10 MiB limit and missing sample responses no
      longer expose server paths. CSV export neutralizes spreadsheet formulas in
      untrusted text fields. Live SMTP logs no longer include the recipient.
+10. Shared Workday transport reliability:
+   - Non-JSON failures now carry stable structured classifications and safe
+     metadata (status, query-free URL, content type/encoding, bounded size,
+     generic body kind, SHA-256 digest, and attempt count). Raw bodies, cookies,
+     sensitive headers, and challenge values are never logged or persisted.
+   - Workday retries only transient network, 429, selected 5xx, empty, and
+     transient HTML/non-JSON failures, with three total attempts and bounded
+     injectable backoff. Deterministic schema failures still fail immediately.
+   - An instance-local pacer defaults to 0.5 seconds between starting different
+     tenants and is configurable with `WATCHER_WORKDAY_MIN_INTERVAL_SECONDS`;
+     pagination pages are not tenant-paced.
+   - A shared incident is reported when at least five Workday tenants fail and
+     one supported transient classification accounts for at least 60% of those
+     failures. Per-company attempts and health counters remain unchanged.
+   - A safe local five-tenant probe on July 19, 2026 returned valid JSON on the
+     first attempt for Cornerstone Research, Merck, Capital One, Salesforce,
+     and Eli Lilly and Company across `wd501`, `wd5`, `wd12`, and `wd115`.
+     This disproves 24 simultaneous tenant configuration errors locally but
+     cannot distinguish a time-limited incident from GitHub-runner-specific
+     blocking until the isolated manual Actions probe is deployed and run.
 
 ## Next
 
