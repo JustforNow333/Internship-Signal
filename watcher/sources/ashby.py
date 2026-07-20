@@ -72,7 +72,12 @@ def _location(job: dict) -> str:
     secondary = job.get("secondaryLocations")
     if isinstance(secondary, list):
         for location in secondary:
-            name = str(location if isinstance(location, str) else location.get("location", "")).strip()
+            if isinstance(location, str):
+                name = location.strip()
+            elif isinstance(location, dict):
+                name = str(location.get("location") or "").strip()
+            else:
+                raise SourceSchemaError("ashby secondary location must be a string or object")
             if name:
                 locations.append(name)
     return ", ".join(dict.fromkeys(locations))

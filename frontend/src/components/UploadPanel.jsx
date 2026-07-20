@@ -7,7 +7,7 @@ export default function UploadPanel({ onIngestFile, onIngestText, onLoadSample, 
   const fileRef = useRef(null);
 
   const pick = (files) => {
-    if (files && files[0]) onIngestFile(files[0]);
+    if (!busy && files && files[0]) onIngestFile(files[0]);
   };
 
   return (

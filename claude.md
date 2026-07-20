@@ -27,3 +27,22 @@ Workday transport constraints most likely to be missed during incident work.
 - Keep automated tests offline. Use injected request functions, clocks,
   sleepers, and jitter, then run the full backend/watcher suite, compile check,
   workflow YAML validation, and `git diff --check`.
+
+For scoring benchmark work, preserve the same backend/watcher seams:
+
+- Export with `collect_rows()` followed by `analyze_rows()` and construct the
+  candidate pool with only `is_internship()` and `is_open()`. Never use
+  `filter_matches()` for benchmark candidates or alter scoring to make the
+  benchmark look better.
+- Keep human labels blind from model outputs. Only the independently sampled
+  `random` cohort supports headline population eligibility metrics; top and
+  difficult cohorts are diagnostic enrichment.
+- Rescore the canonical frozen JSONL with the manifest's exact `as_of_date` and
+  fail on missing, duplicate, or changed job IDs. `fit_score` is a ranking
+  score, not a probability.
+- Keep generated real-posting data and private preference labels under
+  gitignored `evaluation/private/`. Never load alumni, send email, open or mark
+  a seen-store, touch `watcher-data`, add benchmark work to Actions, or upload
+  benchmark artifacts.
+- Use `evaluation/README.md` for the exact commands and label rubric. All
+  automated benchmark tests use injected rows and remain offline.

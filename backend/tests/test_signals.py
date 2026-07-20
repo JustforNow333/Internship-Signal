@@ -1,4 +1,5 @@
 from tests.conftest import analyze_row
+from app.signals import count_tech_tools
 
 
 def _ids(items):
@@ -76,3 +77,11 @@ def test_no_learning_flag_only_for_nontechnical_roles():
                            "description": "Inventory counts and gift wrapping."})
     assert "no_learning_mention" not in _ids(tech["red"])
     assert "no_learning_mention" in _ids(nontech["red"])
+
+
+def test_tech_tool_detection_does_not_match_inside_unrelated_words():
+    tools = count_tech_tools(
+        "JavaScript for digital marketing analytics with trust and reactive workflows"
+    )
+
+    assert tools == ["javascript"]

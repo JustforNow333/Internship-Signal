@@ -32,6 +32,11 @@ def _read_csv(csv_text: str):
         dialect = csv.excel  # default comma
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
     headers = reader.fieldnames or []
+    seen_headers = set()
+    for header in headers:
+        if header in seen_headers:
+            raise ValueError(f"Duplicate CSV header: {header or '(blank)'}")
+        seen_headers.add(header)
     rows = [r for r in reader if any(_cell_has_text(v) for v in r.values())]
     return headers, rows
 

@@ -141,6 +141,28 @@ def test_lever_unexpected_shape_raises():
         LeverSource().parse({"postings": []}, CompanyCfg(name="Institute of Foundation Models", token="ifm-us"))
 
 
+def test_ashby_malformed_secondary_location_does_not_abort_valid_records():
+    company = CompanyCfg(name="Example", ats="ashby", token="example")
+    payload = {
+        "jobs": [
+            {
+                "title": "Malformed location intern",
+                "applyUrl": "https://jobs.example.test/malformed",
+                "secondaryLocations": [42],
+            },
+            {
+                "title": "Software Engineer Intern",
+                "applyUrl": "https://jobs.example.test/valid",
+                "location": "New York, NY",
+            },
+        ]
+    }
+
+    rows = AshbySource().parse(payload, company)
+
+    assert [row["title"] for row in rows] == ["Software Engineer Intern"]
+
+
 def test_workday_fixture_to_canonical_rows():
     payload = load_fixture("workday_capitalone_intern.json")
     company = CompanyCfg(
@@ -610,6 +632,34 @@ def test_github_schema_change_logs_and_raises(caplog):
     assert "GitHub listings schema problem" in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("active", "false", "active must be a boolean"),
+        ("company_name", "", "company_name must be a nonblank string"),
+        ("title", None, "title must be a nonblank string"),
+        ("url", "  ", "url must be a nonblank string"),
+    ],
+)
+def test_github_required_value_types_are_validated(field, value, message):
+    entry = {
+        "company_name": "GitHub",
+        "title": "Software Engineering Intern",
+        "locations": ["Remote"],
+        "url": "https://example.test/jobs/1",
+        "date_posted": "2026-07-19",
+        "active": True,
+        "terms": ["Summer 2027"],
+    }
+    entry[field] = value
+
+    with pytest.raises(SourceSchemaError, match=message):
+        GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(
+            [entry],
+            CompanyCfg(name="GitHub", terms=("Summer 2027",)),
+        )
+
+
 def test_github_term_matching_is_case_insensitive_whitespace_tolerant_and_exact():
     payload = load_fixture("github_listings_subset.json")
     source = GitHubListingsSource(TEST_GITHUB_FEED_URL)
@@ -630,7 +680,11 @@ def test_github_empty_payload_is_not_a_silent_success():
 
 
 def test_github_fetch_errors_do_not_log_or_raise_query_parameters(monkeypatch):
-    source = GitHubListingsSource(f"{TEST_GITHUB_FEED_URL}?temporary_token=secret")
+    private_url = TEST_GITHUB_FEED_URL.replace(
+        "https://",
+        "https://feed-user:feed-password@",
+    ) + "?temporary_token=secret"
+    source = GitHubListingsSource(private_url)
 
     def fail(url, source_name):
         raise SourceFetchError(f"{source_name} fetch failed: {url}")
@@ -642,3 +696,5 @@ def test_github_fetch_errors_do_not_log_or_raise_query_parameters(monkeypatch):
 
     assert str(exc_info.value) == f"github_listings fetch failed: {TEST_GITHUB_FEED_URL}"
     assert "secret" not in str(exc_info.value)
+    assert "feed-user" not in str(exc_info.value)
+    assert "feed-password" not in str(exc_info.value)

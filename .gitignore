@@ -87,6 +87,17 @@ watcher/alumni.b64
 make_alumni_b64.py
 watcher/make_alumni_b64.py
 
+# Real-posting scoring benchmarks contain posting text and private preference
+# labels. Keep the documentation/tests trackable while all generated sets stay
+# local and out of workflow artifacts.
+evaluation/private/
+evaluation/scoring_*_labels.csv
+evaluation/scoring_*_rows.jsonl
+evaluation/scoring_*_predictions.json
+evaluation/scoring_*_manifest.json
+evaluation/scoring_*_report.md
+evaluation/scoring_*_metrics.json
+
 # Local watcher scratch artifacts
 check_alumni_coverage.py
 watcher/add_company_batch.txt
@@ -124,6 +135,15 @@ agents (*).md
 AGENTS.local.md
 AGENTS.*.md
 AGENTS (*).md
+# Keep the canonical root claude.md trackable; ignore local instruction copies
+# and Claude Code's machine-specific settings.
+claude.local.md
+claude.*.md
+claude (*).md
+CLAUDE.local.md
+CLAUDE.*.md
+CLAUDE (*).md
+.claude/settings.local.json
 # Keep the canonical root WATCHER_PROGRESS.md tracked; ignore local copies.
 WATCHER_PROGRESS.local.md
 WATCHER_PROGRESS.*.md

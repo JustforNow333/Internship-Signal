@@ -29,6 +29,7 @@ UNPAID_PAT = re.compile(
     r"\b(unpaid|no (pay|compensation|salary|stipend)|volunteer|for (college )?credit|credit[- ]only|academic credit)\b",
     re.I,
 )
+NEGATED_UNPAID_PAT = re.compile(r"\b(?:not|isn't|is not)\s+(?:an?\s+)?unpaid\b", re.I)
 EQUITY_ONLY_PAT = re.compile(r"\bequity([\s-]*(only|based|compensation))?\b", re.I)
 EQUITY_ONLY_STRICT = re.compile(r"equity[\s-]*only|only equity|equity in lieu|paid in equity|equity[\s-]*based", re.I)
 COMMISSION_PAT = re.compile(r"commission[\s-]*(only|based)|100% commission", re.I)
@@ -89,6 +90,8 @@ def _extract_amounts(s: str):
     amounts = []
     for m in _AMOUNT_RE.finditer(cleaned):
         tail = cleaned[m.end(): m.end() + 12].lower()
+        if re.match(r"\s*%", tail):
+            continue  # an equity/bonus percentage, not a cash amount
         if re.match(r"\s*(hours?|hrs?)\b", tail) and "$" not in cleaned[max(0, m.start() - 2): m.start()]:
             continue  # an hours-per-week figure, not money
         value = float(m.group(1).replace(",", ""))
@@ -118,7 +121,8 @@ def parse_compensation(raw) -> dict:
         result["notes"].append("No compensation listed.")
         return result
 
-    if UNPAID_PAT.search(raw):
+    unpaid_text = NEGATED_UNPAID_PAT.sub("", raw)
+    if UNPAID_PAT.search(unpaid_text):
         result["kind"] = "unpaid"
         result["usd_hourly_min"] = result["usd_hourly_max"] = 0.0
         result["confidence"] = 0.95
@@ -135,7 +139,7 @@ def parse_compensation(raw) -> dict:
     amounts = _extract_amounts(raw)
 
     if not amounts:
-        if EQUITY_ONLY_STRICT.search(raw) or EQUITY_ONLY_PAT.search(raw):
+        if EQUITY_ONLY_STRICT.search(raw):
             result["kind"] = "equity_only"
             result["confidence"] = 0.9
             result["notes"].append("Equity only: no cash compensation stated.")
@@ -149,6 +153,11 @@ def parse_compensation(raw) -> dict:
             result["kind"] = "stipend_unspecified"
             result["confidence"] = 0.5
             result["notes"].append("A stipend is mentioned but no amount is given.")
+            return result
+        if EQUITY_ONLY_PAT.search(raw):
+            result["kind"] = "equity_only"
+            result["confidence"] = 0.9
+            result["notes"].append("Equity only: no cash compensation stated.")
             return result
         result["notes"].append(f'Could not parse "{raw}".')
         return result

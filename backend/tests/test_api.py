@@ -161,6 +161,21 @@ def test_ingest_tolerates_extra_cells_in_csv_rows():
     assert result["jobs"][0]["company"] == "Acme"
 
 
+def test_ingest_rejects_duplicate_header_names_instead_of_silently_losing_data():
+    response = client.post(
+        "/api/ingest",
+        json={
+            "csv_text": (
+                "Company,Company,Title\n"
+                "Correct Employer,Overwriting Employer,Software Engineer Intern\n"
+            )
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Duplicate CSV header: Company"}
+
+
 def test_profile_endpoint():
     body = client.get("/api/profile").json()
     assert "flask" in body["skills"]

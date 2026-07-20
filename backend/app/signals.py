@@ -85,8 +85,10 @@ def count_tech_tools(text: str):
             if " go " in lower or re.search(r"\bgolang\b", lower):
                 found.append("go")
             continue
-        if term in lower:
-            found.append(term.strip())
+        normalized = term.strip()
+        right_boundary = r"(?![a-z0-9])" if normalized[-1].isalnum() else ""
+        if re.search(rf"(?<![a-z0-9]){re.escape(normalized)}{right_boundary}", lower):
+            found.append(normalized)
     return sorted(set(found))
 
 

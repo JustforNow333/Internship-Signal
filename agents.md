@@ -308,6 +308,36 @@ Current watcher source-health layer:
 - Source-health tests are offline with fake adapters, fixed times/run IDs, and
   temporary SQLite files.
 
+Current scoring benchmark layer:
+
+- `scripts/build_scoring_benchmark.py` is a benchmark-only exporter. It calls
+  `watcher.run.collect_rows()`, then `backend.app.ingest.analyze_rows()`, and
+  defines candidates only with `watcher.filters.is_internship()` plus
+  `watcher.filters.is_open()`. It must not call `filter_matches()` because
+  currently ineligible jobs belong in the evaluation population.
+- Sampling is deterministic for fixed canonical input, frozen as-of date,
+  integer seed, group sizes, and code version. The independently selected
+  `random`, `top`, and `difficult` cohorts retain overlap in `sample_groups`
+  while emitting each stable job ID once. Only `random` supports headline
+  population precision/recall.
+- Benchmark sets separate a blind labels CSV from baseline predictions, plus
+  canonical frozen JSONL rows and a hashed manifest. CSV fields are
+  formula-injection-safe. Frozen rows and provenance use explicit whitelists;
+  alumni/private fields are never exported.
+- `scripts/evaluate_scoring_benchmark.py` is network-free. It rescores frozen
+  rows through `analyze_rows()` using the manifest's exact date, requires an
+  exact stable-ID join, validates labels, and compares baseline/current/human
+  eligibility and ranking. Partial evaluation is explicit and reports
+  coverage; uncertain labels are excluded from binary/ranking metrics.
+- Generated real-posting benchmarks belong under gitignored
+  `evaluation/private/`. The benchmark never sends email, opens a seen-store,
+  marks jobs seen, loads alumni, touches `watcher-data`, or runs in the hourly
+  workflow. See `evaluation/README.md` for commands and the labeling rubric.
+- Scoring benchmark tests are fully offline with injected collected rows. A
+  benchmark task must not change weights, thresholds, classifiers, regexes,
+  filters, profile data, scoring behavior, or treat `fit_score` as a
+  probability.
+
 Scope guardrails:
 
 - Do not add scheduling, GitHub Actions, or extra adapters unless the task

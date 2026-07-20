@@ -54,7 +54,7 @@ def map_headers(headers):
     for header in headers:
         n = norm_header(header)
         canon = exact.get(n)
-        if canon is None and n:
+        if canon is None and n and not re.search(r"\b(?:id|identifier)\b", n):
             # Substring pass: pick the longest alias contained in the header,
             # so "company name (cleaned)" -> company, "apply by date" -> deadline.
             candidates = [

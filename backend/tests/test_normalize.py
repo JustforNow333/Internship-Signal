@@ -28,6 +28,14 @@ def test_substring_alias_pass():
     assert mapping["apply by date"] == "deadline"
 
 
+def test_identifier_headers_do_not_map_to_generic_job_or_source_fields():
+    mapping, report = map_headers(["Job ID", "Source ID"])
+
+    assert mapping["Job ID"] is None
+    assert mapping["Source ID"] is None
+    assert {"Job ID", "Source ID"} <= set(report["unmapped"])
+
+
 def test_duplicate_headers_collide_first_wins():
     mapping, report = map_headers(["Pay", "Salary"])
     assert mapping["Pay"] == "compensation"

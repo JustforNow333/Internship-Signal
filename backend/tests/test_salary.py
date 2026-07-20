@@ -82,3 +82,40 @@ def test_hours_per_week_is_not_pay():
     # "40 hrs/week" must not be read as $40/hr.
     c = parse_compensation("$20/hr, 40 hrs/week")
     assert c["usd_hourly_min"] == 20.0 and c["usd_hourly_max"] == 20.0
+
+
+def test_percentage_only_compensation_is_not_parsed_as_cash():
+    equity = parse_compensation("0.5% equity")
+    bonus = parse_compensation("10% performance bonus")
+
+    assert equity["kind"] == "equity_only"
+    assert equity["usd_hourly_min"] is None
+    assert bonus["kind"] != "paid"
+    assert bonus["usd_hourly_min"] is None
+
+
+def test_competitive_salary_plus_equity_is_not_labeled_equity_only():
+    compensation = parse_compensation("Competitive salary plus equity")
+
+    assert compensation["kind"] == "unknown_vague"
+
+
+def test_negated_unpaid_phrase_does_not_override_explicit_cash_pay():
+    compensation = parse_compensation("This is not an unpaid internship; $20/hour")
+
+    assert compensation["kind"] == "paid"
+    assert compensation["usd_hourly_min"] == 20.0
+
+
+def test_negated_unpaid_phrase_does_not_mask_a_separate_unpaid_statement():
+    compensation = parse_compensation(
+        "This is not an unpaid trial, but the internship offers no compensation"
+    )
+
+    assert compensation["kind"] == "unpaid"
+
+
+def test_unspecified_stipend_plus_equity_is_not_labeled_equity_only():
+    compensation = parse_compensation("Stipend provided plus equity")
+
+    assert compensation["kind"] == "stipend_unspecified"

@@ -33,6 +33,9 @@ This file tracks completed watcher steps and the next handoff target.
 - Workday transport now has safe non-JSON diagnostics, bounded transient
   retries, configurable cross-tenant pacing, shared-incident reporting, and an
   isolated five-tenant local/Actions comparison probe.
+- A deterministic real-posting scoring benchmark exporter/evaluator now
+  supports blind human labeling and frozen baseline/current comparisons without
+  changing scoring or watcher state.
 
 ## Done
 
@@ -227,9 +230,30 @@ This file tracks completed watcher steps and the next handoff target.
      This disproves 24 simultaneous tenant configuration errors locally but
      cannot distinguish a time-limited incident from GitHub-runner-specific
      blocking until the isolated manual Actions probe is deployed and run.
+11. Real-posting scoring benchmark:
+   - `scripts/build_scoring_benchmark.py` collects through the normal watcher
+     adapters, analyzes through the existing backend seam, keeps all open
+     internships regardless of watcher eligibility, and deterministically
+     samples random, top-ranked, and difficult cohorts.
+   - Exports are a blind formula-safe labels CSV, canonical frozen rows JSONL,
+     baseline predictions keyed by stable job ID, and a manifest containing
+     Git/source/count metadata plus deterministic hashes.
+   - `scripts/evaluate_scoring_benchmark.py` is offline, validates complete or
+     explicitly partial labels, rescores at the frozen date, requires exact ID
+     joins, and reports random-cohort eligibility metrics, ranking metrics,
+     score bands, error diagnostics, disagreements, and baseline/current
+     changes in Markdown and JSON.
+   - Generated real-posting benchmark sets live only in gitignored
+     `evaluation/private/`. No alumni data, email, seen-store, `watcher-data`,
+     workflow artifact, or hourly integration is involved.
+   - `evaluation/README.md` documents commands, the label rubric, sampling
+     interpretation, privacy, and later scoring-version comparison.
 
 ## Next
 
+- Export the first private real-posting benchmark, label the CSV without
+  opening baseline predictions, and evaluate it before any separate scoring
+  calibration task.
 - Run the first manual GitHub Actions priming dispatch with `send_email=false`.
 - After confirming the data branch exists and the heartbeat looks right, set the
   repo Actions variable `WATCHER_SEND_EMAIL=true` to enable scheduled sends.

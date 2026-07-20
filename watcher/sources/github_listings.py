@@ -66,6 +66,13 @@ class GitHubListingsSource:
             self._schema_problem("github listing locations must be a list")
         if not isinstance(entry["terms"], list):
             self._schema_problem("github listing terms must be a list")
+        if not isinstance(entry["active"], bool):
+            self._schema_problem("github listing active must be a boolean")
+        for field in ("company_name", "title", "url"):
+            if not isinstance(entry[field], str) or not entry[field].strip():
+                self._schema_problem(
+                    f"github listing {field} must be a nonblank string"
+                )
 
     def _parse_entry(self, entry: dict) -> dict:
         locations = ", ".join(str(location).strip() for location in entry["locations"] if str(location).strip())
