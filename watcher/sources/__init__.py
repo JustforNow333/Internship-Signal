@@ -3,6 +3,7 @@
 from .base import Source, SourceError, SourceFetchError, SourceSchemaError, make_row
 from .ashby import AshbySource
 from .github_listings import GitHubListingsSource
+from .github_markdown_table import GitHubMarkdownTableSource
 from .greenhouse import GreenhouseSource
 from .lever import LeverSource
 from .smartrecruiters import SmartRecruitersSource
@@ -12,6 +13,7 @@ from .workday import WorkdaySource
 __all__ = [
     "AshbySource",
     "GitHubListingsSource",
+    "GitHubMarkdownTableSource",
     "GreenhouseSource",
     "LeverSource",
     "SmartRecruitersSource",

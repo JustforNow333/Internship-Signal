@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from app.dedupe import canonical_key, dedupe, job_id, norm_company, norm_url
 
 
@@ -24,6 +26,18 @@ def test_norm_url_sorts_query_params():
     a = norm_url("https://example.com/job?department=eng&id=123")
     b = norm_url("https://example.com/job?id=123&department=eng")
     assert a == b
+
+
+def test_norm_url_canonicalizes_greenhouse_host_and_redundant_job_id():
+    direct = (
+        "https://boards.greenhouse.io/andurilindustries/jobs/5148079007"
+        "?gh_jid=5148079007&gh_src=board"
+    )
+    backstop = (
+        "https://job-boards.greenhouse.io/andurilindustries/jobs/5148079007/"
+    )
+
+    assert norm_url(direct) == norm_url(backstop)
 
 
 def test_exact_duplicate_removed_and_reported():
@@ -89,3 +103,134 @@ def test_job_id_is_stable_across_formatting():
     assert canonical_key(a) == canonical_key(b)
     assert job_id(a) == job_id(b)
     assert len(job_id(a)) == 10
+
+
+def test_source_priority_merge_preserves_canonical_fields_and_all_provenance():
+    url = "https://example.com/jobs/shared"
+    direct = _row(
+        1,
+        company="Direct Canonical",
+        title="Software Engineer Intern",
+        location="New York, NY",
+        source_url=url,
+        extra={"source": "direct", "source_adapter": "greenhouse"},
+    )
+    simplify = _row(
+        2,
+        company="Simplify Name",
+        title="SWE Intern",
+        location="Remote",
+        source_url=f"{url}?utm_source=simplify",
+        description="Structured description",
+        extra={
+            "source": "github",
+            "source_adapter": "github_listings",
+            "source_name": "simplify",
+            "source_format": "simplify_json",
+            "source_priority": 10,
+            "active": True,
+        },
+    )
+    markdown = _row(
+        3,
+        company="Markdown Name",
+        title="Engineering Intern",
+        location="Boston, MA",
+        source_url=f"{url}?ref=readme",
+        internship_type="Summer 2027",
+        extra={
+            "source": "github",
+            "source_adapter": "github_markdown_table",
+            "source_name": "sndsh404_summer_2027",
+            "source_format": "github_markdown_table",
+            "source_priority": 20,
+            "source_added_date": "2026-07-20",
+            "active": False,
+            "closed": True,
+            "no_sponsorship": True,
+        },
+    )
+
+    kept, report = dedupe([markdown, simplify, direct])
+
+    assert len(kept) == 1
+    assert len(report) == 2
+    merged = kept[0]
+    assert merged["company"] == "Direct Canonical"
+    assert merged["title"] == "Software Engineer Intern"
+    assert merged["location"] == "New York, NY"
+    assert merged["description"] == "Structured description"
+    assert merged["internship_type"] == "Summer 2027"
+    assert merged["extra"]["primary_source"] == "direct_ats"
+    assert merged["extra"]["sources"] == [
+        "direct_ats",
+        "simplify",
+        "sndsh404_summer_2027",
+    ]
+    assert merged["extra"]["active"] is True
+    assert merged["extra"]["closed"] is False
+    assert merged["extra"]["no_sponsorship"] is True
+    assert merged["extra"]["source_added_date"] == "2026-07-20"
+    assert (
+        merged["extra"]["source_details"]["sndsh404_summer_2027"]["closed"]
+        is True
+    )
+
+
+def test_source_priority_result_is_independent_of_feed_row_order():
+    url = "https://example.com/jobs/shared"
+    simplify = _row(
+        1,
+        company="Structured Canonical",
+        title="Software Engineer Intern",
+        source_url=url,
+        extra={
+            "source": "github",
+            "source_adapter": "github_listings",
+            "source_name": "simplify",
+            "source_format": "simplify_json",
+            "source_priority": 10,
+            "active": True,
+        },
+    )
+    markdown = _row(
+        2,
+        company="Markdown Copy",
+        title="SWE Intern",
+        source_url=url,
+        extra={
+            "source": "github",
+            "source_adapter": "github_markdown_table",
+            "source_name": "sndsh404_summer_2027",
+            "source_format": "github_markdown_table",
+            "source_priority": 20,
+            "active": False,
+        },
+    )
+
+    forward, _ = dedupe(deepcopy([simplify, markdown]))
+    reverse, _ = dedupe(deepcopy([markdown, simplify]))
+
+    assert forward == reverse
+    assert forward[0]["company"] == "Structured Canonical"
+    assert forward[0]["extra"]["primary_source"] == "simplify"
+
+
+def test_csv_extra_source_column_does_not_become_watcher_provenance():
+    # A CSV header literally named "source" collides with the source_url alias
+    # and lands in `extra`. That is user data, not adapter provenance: it must
+    # not reorder rows or grow synthetic primary_source/sources/source_details.
+    rows = [
+        _row(1, company="Zeta", title="SWE Intern", source_url="https://z.test/1",
+             extra={"source": "LinkedIn"}),
+        _row(2, company="Alpha", title="Data Intern", source_url="https://a.test/2",
+             extra={"source": "Indeed"}),
+    ]
+
+    kept, report = dedupe(deepcopy(rows))
+
+    assert report == []
+    assert [row["company"] for row in kept] == ["Zeta", "Alpha"]
+    assert [row["_row_number"] for row in kept] == [1, 2]
+    assert kept[0]["extra"] == {"source": "LinkedIn"}
+    assert kept[1]["extra"] == {"source": "Indeed"}

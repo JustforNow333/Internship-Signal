@@ -125,9 +125,14 @@ def test_default_watchlist_loads_and_preserves_core_invariants():
     normalized_names = [norm_company(name) for name in names]
 
     assert config.terms == ("Summer 2027",)
-    assert config.github_listing_urls == (
-        "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json",
-    )
+    assert config.github_listing_urls == ()
+    assert [
+        (source.name, source.format, source.default_term)
+        for source in config.github_listing_sources
+    ] == [
+        ("simplify", "simplify_json", ""),
+        ("sndsh404_summer_2027", "github_markdown_table", "Summer 2027"),
+    ]
     assert config.target_roles == frozenset({"swe"})
     assert config.min_score is None
     assert _duplicates(names) == []
@@ -208,6 +213,85 @@ def test_load_watchlist_parses_explicit_terms_multiple_feeds_and_inheritance(tmp
         "http://example.org/two.json",
     )
     assert config.companies[0].terms == config.terms
+    assert [source.format for source in config.effective_github_listing_sources()] == [
+        "simplify_json",
+        "simplify_json",
+    ]
+
+
+def test_load_watchlist_parses_typed_github_sources_in_fixed_priority_order(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n'
+        "  github_listing_sources:\n"
+        "    - name: markdown\n"
+        "      format: github_markdown_table\n"
+        "      url: https://example.test/README.md\n"
+        '      default_term: "Summer 2027"\n'
+        "    - name: simplify\n"
+        "      format: simplify_json\n"
+        "      url: https://example.test/listings.json\n",
+    )
+
+    config = load_watchlist(path)
+
+    assert [source.name for source in config.github_listing_sources] == ["markdown", "simplify"]
+    assert [source.name for source in config.effective_github_listing_sources()] == [
+        "simplify",
+        "markdown",
+    ]
+
+
+def test_legacy_github_listing_urls_remain_backward_compatible(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n'
+        '  github_listing_urls: ["https://example.test/listings.json"]\n',
+    )
+
+    config = load_watchlist(path)
+    sources = config.effective_github_listing_sources()
+
+    assert config.github_listing_sources == ()
+    assert config.github_listing_urls == ("https://example.test/listings.json",)
+    assert len(sources) == 1
+    assert sources[0].format == "simplify_json"
+    assert sources[0].url == config.github_listing_urls[0]
+
+
+@pytest.mark.parametrize(
+    ("source_lines", "message"),
+    [
+        (
+            "    - name: markdown\n"
+            "      format: github_markdown_table\n"
+            "      url: https://example.test/README.md\n",
+            "default_term",
+        ),
+        (
+            "    - name: unknown\n"
+            "      format: csv\n"
+            "      url: https://example.test/jobs.csv\n",
+            "format",
+        ),
+        (
+            "    - name: bad name\n"
+            "      format: simplify_json\n"
+            "      url: https://example.test/listings.json\n",
+            "name",
+        ),
+    ],
+)
+def test_invalid_typed_github_sources_are_rejected(tmp_path, source_lines, message):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n'
+        "  github_listing_sources:\n"
+        + source_lines,
+    )
+
+    with pytest.raises(ConfigError, match=message):
+        load_watchlist(path)
 
 
 def test_company_specific_terms_override_defaults(tmp_path):
@@ -313,4 +397,5 @@ def test_dataclass_defaults_do_not_insert_a_season_or_feed():
 
     assert tuple(company.terms) == ()
     assert config.terms == ()
+    assert config.github_listing_sources == ()
     assert config.github_listing_urls == ()

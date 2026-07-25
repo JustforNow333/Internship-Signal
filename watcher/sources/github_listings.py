@@ -15,12 +15,15 @@ LOGGER = logging.getLogger(__name__)
 
 class GitHubListingsSource:
     name = "github_listings"
+    format = "simplify_json"
+    priority = 10
     required_keys = {"company_name", "title", "locations", "url", "date_posted", "active", "terms"}
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, *, source_name: str = "simplify"):
         self.url = str(url).strip()
         if not self.url:
             raise ValueError("GitHub listings source requires a URL")
+        self.source_name = str(source_name).strip() or "simplify"
         self.feed_label = _safe_feed_url(self.url)
 
     def fetch_payload(self):
@@ -49,7 +52,7 @@ class GitHubListingsSource:
             self._validate_entry(entry)
             if not entry["active"]:
                 continue
-            if not _company_matches(entry["company_name"], company):
+            if not company_matches(entry["company_name"], company):
                 continue
             if not _terms_match(entry["terms"], company.terms):
                 continue
@@ -92,6 +95,10 @@ class GitHubListingsSource:
                 "listing_source": str(entry.get("source") or ""),
                 "terms": entry["terms"],
                 "feed_url": self.feed_label,
+                "source_name": self.source_name,
+                "source_format": self.format,
+                "source_priority": self.priority,
+                "active": True,
             },
         )
 
@@ -100,7 +107,7 @@ class GitHubListingsSource:
         raise SourceSchemaError(message)
 
 
-def _company_matches(source_company: Any, company: CompanyCfg) -> bool:
+def company_matches(source_company: Any, company: CompanyCfg) -> bool:
     source_norm = norm_company(str(source_company or ""))
     return any(source_norm == norm_company(name) for name in company.match_names())
 

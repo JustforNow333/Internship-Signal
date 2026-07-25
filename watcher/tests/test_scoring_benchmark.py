@@ -186,6 +186,13 @@ def test_export_writes_blind_safe_rescorable_files_and_correct_hashes(tmp_path, 
     predictions = json.loads(paths["predictions"].read_text(encoding="utf-8"))
     frozen = [json.loads(line) for line in paths["rows"].read_text(encoding="utf-8").splitlines()]
     assert len(calls) == 1
+    assert headers[-4:] == [
+        "human_eligible",
+        "human_role_track",
+        "human_exclusion_reason",
+        "human_notes",
+    ]
+    assert not {"human_priority", "human_action", "error_category", "label_notes"} & set(headers)
     assert all(not row[field] for row in label_rows for field in exporter.HUMAN_LABEL_COLUMNS)
     assert not {
         "fit_score", "watcher_eligible", "watcher_action", "role_track",
@@ -294,23 +301,20 @@ def _evaluation_files(tmp_path: Path) -> dict[str, Path]:
     jobs = analyze_rows(raw_rows, today=AS_OF)
     jobs_by_index = {int(job["source_url"].rsplit("/", 1)[-1]): job for job in jobs}
     groups = {
-        str(jobs_by_index[index]["id"]): (["random"] if index <= 4 else ["top"])
+        str(jobs_by_index[index]["id"]): (
+            ["random"] if index <= 4 else ["random", "top"]
+        )
         for index in range(1, 6)
     }
     labels = []
-    human = {
-        1: ("yes", "4", "apply_now"),
-        2: ("no", "0", "skip"),
-        3: ("yes", "3", "apply_later"),
-        4: ("no", "0", "skip"),
-        5: ("uncertain", "", ""),
-    }
+    human = {1: "yes", 2: "no", 3: "yes", 4: "no", 5: "uncertain"}
     ordered_jobs = [jobs_by_index[index] for index in range(1, 6)]
     for index, job in enumerate(ordered_jobs, start=1):
         row = exporter.labels_row(job, groups[str(job["id"])])
-        row["human_eligible"], row["human_priority"], row["human_action"] = human[index]
+        row["human_eligible"] = human[index]
         row["human_role_track"] = "backend" if index in {1, 4} else ""
-        row["error_category"] = "role" if index in {3, 4} else ""
+        row["human_exclusion_reason"] = "wrong role" if index in {2, 4} else ""
+        row["human_notes"] = "reviewed" if index == 3 else ""
         labels.append(row)
 
     paths = {
@@ -369,7 +373,18 @@ def test_evaluator_confusion_metrics_use_only_random_and_exclude_uncertain(tmp_p
         "f1": 0.5,
     }
     assert metrics["coverage"]["uncertain_rows"] == 1
+    assert metrics["coverage"]["yes_rows"] == 2
+    assert metrics["coverage"]["no_rows"] == 2
+    assert metrics["coverage"]["unlabeled_rows"] == 0
     assert metrics["coverage"]["evaluated_rows"] == 4
+    _headers, label_rows = read_csv(paths["labels"])
+    uncertain_id = next(
+        row["job_id"]
+        for row in label_rows
+        if row["human_eligible"] == "uncertain"
+    )
+    assert uncertain_id not in metrics["ranking"]["current"]["at_20"]["job_ids"]
+    assert sum(band["labeled_count"] for band in metrics["score_bands"]) == 4
     assert metrics["baseline_vs_current"] == {
         "eligibility_decisions_changed": 0,
         "fit_scores_changed": 0,
@@ -382,7 +397,7 @@ def test_evaluator_confusion_metrics_use_only_random_and_exclude_uncertain(tmp_p
 def test_partial_labels_fail_by_default_and_work_when_allowed(tmp_path):
     paths = _evaluation_files(tmp_path)
     headers, rows = read_csv(paths["labels"])
-    rows[0]["human_priority"] = ""
+    rows[0]["human_eligible"] = ""
     paths["labels"].write_bytes(render_csv_bytes(headers, rows))
 
     with pytest.raises(BenchmarkError, match="incomplete labels"):
@@ -391,10 +406,13 @@ def test_partial_labels_fail_by_default_and_work_when_allowed(tmp_path):
     metrics = evaluate_paths(paths, allow_partial=True)
     assert metrics["coverage"]["evaluated_rows"] == 3
     assert metrics["coverage"]["incomplete_rows"] == 1
+    assert metrics["coverage"]["unlabeled_rows"] == 1
+    assert metrics["coverage"]["uncertain_rows"] == 1
+    assert metrics["coverage"]["labeled_coverage"] == pytest.approx(4 / 5)
     assert metrics["coverage"]["coverage"] == pytest.approx(3 / 5)
 
 
-def test_ranking_metrics_use_available_cutoff_and_priority_rubric():
+def test_ranking_metrics_use_available_cutoff_and_binary_labels():
     ids = [f"id-{index}" for index in range(7)]
     predictions = {
         job_id: {
@@ -411,8 +429,6 @@ def test_ranking_metrics_use_available_cutoff_and_priority_rubric():
             job_id,
             ("random",),
             "yes" if index < 4 else "no",
-            4 if index < 4 else 0,
-            "apply_now" if index < 4 else "skip",
             "",
             "",
             "",
@@ -425,7 +441,7 @@ def test_ranking_metrics_use_available_cutoff_and_priority_rubric():
     assert metrics["at_10"]["label"] == "Precision@7"
     assert metrics["at_10"]["precision"] == pytest.approx(4 / 7)
     assert metrics["at_20"]["used_k"] == 7
-    assert metrics["at_10"]["average_human_priority"] == pytest.approx(16 / 7)
+    assert "average_human_priority" not in metrics["at_10"]
 
 
 def test_score_bands_and_zero_denominators_are_safe():
@@ -434,7 +450,7 @@ def test_score_bands_and_zero_denominators_are_safe():
         "zero": {"watcher_eligible": False, "fit_score": 0},
     }
     labels = {
-        "high": evaluator.HumanLabel("high", ("random",), "no", 0, "skip", "", "", ""),
+        "high": evaluator.HumanLabel("high", ("random",), "no", "", "", ""),
     }
 
     bands = evaluator.score_band_diagnostics(predictions, labels, ["high", "zero"])
@@ -486,22 +502,51 @@ def test_duplicate_and_unknown_label_ids_fail_clearly(tmp_path):
     with pytest.raises(BenchmarkError, match="not in frozen benchmark"):
         evaluate_paths(paths)
 
-
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("human_eligible", "maybe", "invalid human_eligible"),
-        ("human_priority", "5", "invalid human_priority"),
-        ("human_action", "email_now", "invalid human_action"),
-    ],
-)
-def test_invalid_label_values_fail_clearly(tmp_path, field, value, message):
     paths = _evaluation_files(tmp_path)
     headers, rows = read_csv(paths["labels"])
-    rows[0][field] = value
+    preserved_ids = [row["job_id"] for row in rows]
+    rows[0]["sample_groups"] = "top"
+    paths["labels"].write_bytes(render_csv_bytes(headers, rows))
+    with pytest.raises(BenchmarkError, match="sample_groups do not match"):
+        evaluate_paths(paths)
+    assert [row["job_id"] for row in rows] == preserved_ids
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("YES", "yes"),
+        (" no ", "no"),
+        ("UnCeRtAiN", "uncertain"),
+    ],
+)
+def test_accepted_human_eligible_values_are_normalized(tmp_path, value, expected):
+    paths = _evaluation_files(tmp_path)
+    headers, rows = read_csv(paths["labels"])
+    rows[0]["human_eligible"] = value
     paths["labels"].write_bytes(render_csv_bytes(headers, rows))
 
-    with pytest.raises(BenchmarkError, match=message):
+    baseline = evaluator.load_predictions(paths["baseline"])
+    labels, _coverage = evaluator.load_labels(
+        paths["labels"],
+        benchmark_ids=set(baseline),
+        expected_groups={
+            job_id: prediction["sample_groups"]
+            for job_id, prediction in baseline.items()
+        },
+        allow_partial=False,
+    )
+
+    assert labels[rows[0]["job_id"]].human_eligible == expected
+
+
+def test_invalid_human_eligible_value_fails_clearly(tmp_path):
+    paths = _evaluation_files(tmp_path)
+    headers, rows = read_csv(paths["labels"])
+    rows[0]["human_eligible"] = "maybe"
+    paths["labels"].write_bytes(render_csv_bytes(headers, rows))
+
+    with pytest.raises(BenchmarkError, match="invalid human_eligible"):
         evaluate_paths(paths)
 
 

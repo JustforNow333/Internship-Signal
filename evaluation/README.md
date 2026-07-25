@@ -104,26 +104,17 @@ attempt to guess or imitate the current watcher.
 - `yes`: this posting belongs in the user's internship watcher.
 - `no`: this posting should be excluded.
 - `uncertain`: evidence is insufficient for a confident eligibility label;
-  excluded from binary and ranking metrics.
+  counted separately and excluded from binary and ranking metrics.
 
-`human_priority` (required for `yes`; optional for `no`, where blank is treated
-as zero for aggregate ranking diagnostics):
+Every row requires one of those three values unless evaluation is explicitly
+run with `--allow-partial-labels`. The remaining editable columns are optional
+free text:
 
-- `4`: excellent fit, clearly apply.
-- `3`: good fit, worth applying.
-- `2`: borderline, investigate.
-- `1`: technically relevant but weak.
-- `0`: irrelevant.
+- `human_role_track`: the role category a human would assign.
+- `human_exclusion_reason`: why a `no` posting should be excluded.
+- `human_notes`: any other labeling context.
 
-`human_action` is required for `yes` and `no`:
-
-- `apply_now`
-- `apply_later`
-- `research_more`
-- `skip`
-
-`human_role_track`, `error_category`, and `label_notes` are optional free-text
-diagnostics. Do not edit `job_id` or `sample_groups`.
+Do not edit `job_id`, `sample_groups`, or any job-information column.
 
 ## 3. Evaluate offline
 
@@ -159,31 +150,32 @@ then joins by stable job ID. The frozen date matters because deadlines and
 expiry decisions are date-sensitive. Missing, duplicate, or changed IDs fail
 instead of silently changing the evaluated dataset.
 
-By default every row must have a complete label, except that `uncertain` needs
-no action or priority. During labeling, `--allow-partial-labels` permits an
-interim report over complete, non-uncertain rows and reports exact coverage.
+By default every benchmark row must be present and `human_eligible` must be
+`yes`, `no`, or `uncertain`. During labeling, `--allow-partial-labels` permits
+blank labels or missing CSV rows and reports exact coverage. Optional free-text
+fields never determine whether a row is complete.
 
 ## Metrics
 
 Headline binary eligibility metrics—TP, FP, FN, TN, precision, recall,
-specificity, accuracy, and F1—use only fully labeled `random` cohort rows.
+specificity, accuracy, and F1—treat `yes` as eligible and `no` as ineligible,
+using only those labels in the `random` cohort. `uncertain` and unlabeled rows
+are excluded from every binary calculation.
 The top-ranked and difficult cohorts are intentionally enriched and must not be
 used for headline population precision or recall.
 
-Across all fully labeled, non-uncertain selected rows, the report includes:
+The report gives total `yes`, `no`, `uncertain`, and unlabeled counts. Across
+all `yes`/`no` selected rows, it also includes:
 
-- Precision@10 and Precision@20, where a good result is human eligible with
-  priority at least 3.
-- Average human priority in the same top-k cutoffs.
-- The same ranking metrics for baseline and current predictions.
-- Current fit-score-band eligibility rates, priorities, false positives, and
-  false negatives.
-- False positives/negatives by predicted role track, human error-category
+- Eligibility Precision@10 and Precision@20 for baseline and current rankings.
+- Current fit-score-band eligibility rates, false positives, and false
+  negatives.
+- False positives/negatives by predicted role track, human exclusion-reason
   counts, and predicted-versus-human role confusion.
 - Deterministically ranked largest disagreements. Eligibility mismatches sort
   first; remaining disagreements use the absolute gap between fit score and
-  priority mapped to 0/25/50/75/100. Fit score remains a ranking score, not a
-  probability.
+  the binary human target (`yes=100`, `no=0`). Fit score remains a ranking
+  score, not a probability.
 - Baseline/current changes to eligibility, fit score, role track, action, and
   degree eligibility.
 

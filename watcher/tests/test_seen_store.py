@@ -26,11 +26,19 @@ def test_seen_store_first_sighting_is_new_then_seen(tmp_path):
         assert store.has_seen("abc123")
 
 
-def test_seen_store_github_then_direct_is_not_new(tmp_path):
+def test_seen_store_github_then_direct_is_not_new_by_normalized_url(tmp_path):
     with SeenStore(tmp_path / "seen.sqlite") as store:
-        store.mark_seen(job(source="github"), seen_at=datetime(2026, 6, 9, tzinfo=timezone.utc))
+        github = job(job_id="github-wording", source="github")
+        github["source_url"] = (
+            "https://job-boards.greenhouse.io/example/jobs/12345"
+        )
+        direct = job(job_id="direct-wording", source="direct")
+        direct["source_url"] = (
+            "https://boards.greenhouse.io/example/jobs/12345?gh_jid=12345"
+        )
+        store.mark_seen(github, seen_at=datetime(2026, 6, 9, tzinfo=timezone.utc))
 
-        assert store.unseen([job(source="direct")]) == []
+        assert store.unseen([direct]) == []
 
 
 def test_mark_many_seen_rolls_back_the_entire_batch_on_failure(tmp_path):

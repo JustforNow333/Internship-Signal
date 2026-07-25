@@ -57,11 +57,13 @@ For each company in watchlist.yml:
     │     └─ success → canonical rows tagged source="direct"
     │     └─ fail/blocked → log, continue (do NOT abort the run)
     │
-    └─ Tier 2 (always, as backstop): GitHub listings.json
-          └─ canonical rows tagged source="github"
+    └─ Tier 2 (always, as backstops): typed GitHub feeds
+          ├─ Simplify structured listings.json
+          └─ configured Markdown internship tables
+              └─ canonical rows tagged source="github"
         │
         ▼
-Merge both sources → analyze_rows() → scored jobs (existing engine)
+Merge all sources → analyze_rows() → scored jobs (existing engine)
         │
         ▼
 Filter: role == "swe" AND looks like an internship AND active/open
@@ -106,7 +108,8 @@ internship-signal/
     │   ├── workable.py
     │   ├── workday.py           per-tenant; fussier (see §4)
     │   ├── bespoke/             one file per custom site (google.py, amazon.py…)
-    │   └── github_listings.py   Tier-2 backstop
+    │   ├── github_listings.py   Simplify JSON backstop
+    │   └── github_markdown_table.py  header-driven Markdown backstop
     ├── filters.py               SWE + internship + open detection
     ├── seen_store.py            SQLite "already emailed" memory
     ├── alumni.py                load + match alumni to companies
@@ -133,7 +136,14 @@ The per-company labor is this table, not code. One entry per company.
 ```yaml
 defaults:
   terms: ["Summer 2027"]          # required; recruiting cycles are explicit
-  github_listing_urls: ["https://raw.githubusercontent.com/OWNER/REPO/BRANCH/path/listings.json"]
+  github_listing_sources:
+    - name: simplify
+      format: simplify_json
+      url: https://raw.githubusercontent.com/OWNER/REPO/BRANCH/path/listings.json
+    - name: community_markdown
+      format: github_markdown_table
+      url: https://raw.githubusercontent.com/OWNER/REPO/BRANCH/README.md
+      default_term: Summer 2027
   remote_ok: true
 
 companies:
@@ -170,9 +180,12 @@ an unknown `ats` or a `bespoke` entry whose module is missing.
 company inherits those terms unless it declares its own nonempty `terms` list;
 an explicitly empty company override is an error. Terms are not inferred from
 the calendar because choosing the recruiting cycle is a user decision.
-`defaults.github_listing_urls` is an inline list of validated HTTP/HTTPS URLs.
-It may contain more than one structured feed for regional coverage or overlap
-periods. No recruiting-year URL is embedded in Python.
+`defaults.github_listing_sources` is a list of named, typed, validated HTTP(S)
+feeds. Supported formats are `simplify_json` and `github_markdown_table`; the
+latter requires a nonblank `default_term`. Adding another compatible feed is a
+configuration-only change. Legacy `defaults.github_listing_urls` remains
+supported as Simplify JSON. URLs are credential-free and unique after removing
+query/fragment. No recruiting-year URL is embedded in Python.
 
 **Agent task — ATS auto-detection helper.** Provide
 `python -m watcher.detect "Company Name"` that fetches the company's careers
@@ -286,9 +299,11 @@ or other anti-bot challenges, do **not** escalate to headless-browser evasion;
 mark the company `github_only` in a comment and let Tier 2 cover it. Document
 the decision in the module.
 
-### Tier-2 backstop (`sources/github_listings.py`)
+### Tier-2 backstops
 
-One GET per configured `defaults.github_listing_urls` entry. As of July 15,
+#### Simplify JSON (`sources/github_listings.py`)
+
+One GET per configured `simplify_json` entry. As of July 15,
 2026, the active official SimplifyJobs structured feed is
 `https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json`.
 Despite the historical repository name, live verification found structured
@@ -315,6 +330,21 @@ keys vanish, log a loud warning identifying that feed and continue with Tier-1
 and any other successful feeds. Never turn a failed fetch or invalid payload
 into an empty successful result.
 
+#### Markdown tables (`sources/github_markdown_table.py`)
+
+Find the internship table by normalized
+`Company | Role | Location | Apply | Added` headers and a valid Markdown
+separator row, never by fixed line number. Parse escaped Markdown safely and
+extract the real HTTP(S) application target from Markdown links. Retain valid
+rows from mixed malformed tables and emit one bounded aggregate warning without
+README content; missing/invalid tables and nonempty all-malformed tables fail.
+
+Record `🔒` as closed/inactive, `🛂` as no sponsorship, and `🇺🇸` as US
+citizenship required, then remove those markers from company/title/location.
+Assign the configured `default_term` and apply normal company/term matching.
+Store `Added` only as `extra.source_added_date`; never copy it to
+`date_posted` or use it for employer-posting freshness.
+
 ### Season status (`season.py`)
 
 Season checking is pure and never makes a network request. It extracts
@@ -337,16 +367,16 @@ and `|` between terms so comma-delimited parsing remains safe.
 
 ## 5. Merge, dedup, and source priority
 
-1. Collect rows from all sources into one list. Tag each with its `source`
-   (`"direct"` or `"github"`) in the row's `extra` dict so it survives into the
-   job object.
-2. Run them through `analyze_rows()` — the existing engine already merges
-   duplicates by `job_id` (stable `sha1(company|title|location)`) and by
-   normalized URL. **Enhancement:** when two rows merge, keep
-   `source="direct"` if either was direct (direct wins). The agent should add a
-   tiny merge-time rule for the `source` tag, since the stock merge only fills
-   empty fields.
-3. After scoring, each job has a stable `id` and a winning `source`.
+1. Collect rows from every source. Fixed precedence is direct ATS, Simplify
+   JSON, then Markdown, independent of configured feed order.
+2. Run them through `analyze_rows()`. Normalized application URL is the
+   strongest duplicate key; normalized company/title/location is the fallback.
+   Preserve the highest-priority canonical fields, fill missing fields from
+   lower-priority rows when safe, and never let lower-priority closed state
+   override an active higher-priority result.
+3. Preserve `extra.source` compatibility and record `primary_source`, ordered
+   `sources`, and per-source details. Emit one analyzed job and one
+   notification.
 
 A job seen via `direct` is a first-wave hit; a job seen only via `github` is
 tagged so the email can say "(via GitHub — may be a few days old)".

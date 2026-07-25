@@ -36,6 +36,9 @@ This file tracks completed watcher steps and the next handoff target.
 - A deterministic real-posting scoring benchmark exporter/evaluator now
   supports blind human labeling and frozen baseline/current comparisons without
   changing scoring or watcher state.
+- Typed GitHub backstops now include the independent `sndsh404` Summer 2027
+  Markdown table after Simplify, with fixed source priority, merged provenance,
+  and normalized-URL seen suppression.
 
 ## Done
 
@@ -246,6 +249,35 @@ This file tracks completed watcher steps and the next handoff target.
    - Generated real-posting benchmark sets live only in gitignored
      `evaluation/private/`. No alumni data, email, seen-store, `watcher-data`,
      workflow artifact, or hourly integration is involved.
+12. Typed GitHub backstops and `sndsh404` Markdown source:
+   - `defaults.github_listing_sources` supports named `simplify_json` and
+     `github_markdown_table` entries; legacy `github_listing_urls` remains
+     compatible. Production config now contains Simplify plus
+     `sndsh404_summer_2027`, sorted by fixed format priority rather than YAML
+     order.
+   - The Markdown adapter finds the five-column table by headers, parses escaped
+     text and Markdown apply links, isolates malformed rows with one bounded
+     warning, rejects missing/invalid/all-malformed tables, applies exact
+     watchlist/term filters, and retains source-only `Added` dates.
+   - Closed, sponsorship, and citizenship markers are stored then removed from
+     display fields. Lower-priority closure cannot override active direct or
+     Simplify data.
+   - Canonical dedupe uses direct ATS, Simplify, then Markdown precedence,
+     records `primary_source`, ordered `sources`, and per-source details, and
+     recognizes official Greenhouse host/`gh_jid` URL aliases. Seen suppression
+     now also uses normalized stored URLs across runs.
+   - Offline backend/watcher validation: `464 passed, 1 warning`; frontend:
+     `23 passed`, production build succeeded. Compileall and diff checks passed.
+   - Isolated live probe used email off, empty injected alumni JSON, a fresh
+     `/tmp` SQLite database/report, and no priming flag. The final-code run
+     fetched 17,540 rows, scored 16,283 jobs, found 65 new dry-run matches, had
+     0 errors, recorded
+     129 company plus 2 independent feed-health attempts, and left `seen` at
+     zero. Simplify returned 4 watchlist rows and `sndsh404` returned 9; both
+     were healthy. No normal workspace seen database appeared.
+   - A narrow live Anduril verification found one posting in all three sources
+     and produced one active canonical row with direct fields and provenance
+     `direct_ats,simplify,sndsh404_summer_2027`.
    - `evaluation/README.md` documents commands, the label rubric, sampling
      interpretation, privacy, and later scoring-version comparison.
 

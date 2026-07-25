@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from backend.app.dedupe import norm_url
+
 
 class SeenStore:
     def __init__(self, path: str | Path):
@@ -31,7 +33,18 @@ class SeenStore:
         return row is not None
 
     def unseen(self, jobs: Iterable[dict]) -> list[dict]:
-        return [job for job in jobs if not self.has_seen(job["id"])]
+        seen_rows = self._conn.execute("select job_id, url from seen").fetchall()
+        seen_ids = {row["job_id"] for row in seen_rows}
+        seen_urls = {norm_url(row["url"]) for row in seen_rows if norm_url(row["url"])}
+        return [
+            job
+            for job in jobs
+            if job["id"] not in seen_ids
+            and (
+                not norm_url(job.get("source_url", ""))
+                or norm_url(job.get("source_url", "")) not in seen_urls
+            )
+        ]
 
     def mark_seen(self, job: dict, *, seen_at: datetime | None = None, emailed_at: datetime | None = None) -> None:
         seen_at = seen_at or datetime.now(timezone.utc)

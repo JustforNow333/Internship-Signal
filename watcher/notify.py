@@ -217,7 +217,15 @@ def _source_tag(job: dict) -> str:
         label = "github backstop"
     else:
         label = source
-    return f"{label} ({adapter})" if adapter else label
+    rendered = f"{label} ({adapter})" if adapter else label
+    sources = [
+        str(value).strip()
+        for value in (extra.get("sources") or ())
+        if str(value).strip()
+    ]
+    if len(sources) > 1:
+        rendered += f"; found by {', '.join(sources)}"
+    return rendered
 
 
 def _alumni_line(alumni: Sequence[dict], summary: Mapping[str, object] | None = None) -> str:

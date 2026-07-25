@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from watcher.config import CompanyCfg, WatcherConfig
+from watcher.config import CompanyCfg, GitHubListingSourceCfg, WatcherConfig
 from watcher.notify import render_digest
 from watcher.run import (
     CollectionStats,
@@ -97,6 +97,36 @@ def row(
         deadline=deadline,
         internship_type="Summer",
     )
+
+
+def github_row(
+    company,
+    title,
+    *,
+    source_name,
+    source_format,
+    priority,
+    url,
+    active=True,
+    description="",
+):
+    result = row(
+        company,
+        title,
+        source="github",
+        url=url,
+        description=description,
+    )
+    result["extra"].update(
+        {
+            "source_name": source_name,
+            "source_format": source_format,
+            "source_priority": priority,
+            "active": active,
+            "closed": not active,
+        }
+    )
+    return result
 
 
 def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
@@ -390,7 +420,10 @@ def test_collect_rows_fetches_and_aggregates_every_configured_github_feed_once(m
         terms=("Summer 2027",),
         github_listing_urls=tuple(sources),
     )
-    monkeypatch.setattr("watcher.run.GitHubListingsSource", lambda url: sources[url])
+    monkeypatch.setattr(
+        "watcher.run.GitHubListingsSource",
+        lambda url, **_kwargs: sources[url],
+    )
     stats = CollectionStats()
 
     rows, errors = collect_rows(config, direct_sources={}, stats=stats)
@@ -416,7 +449,10 @@ def test_one_failed_github_feed_keeps_successful_feed_rows_and_records_url(monke
         terms=("Summer 2027",),
         github_listing_urls=tuple(sources),
     )
-    monkeypatch.setattr("watcher.run.GitHubListingsSource", lambda url: sources[url])
+    monkeypatch.setattr(
+        "watcher.run.GitHubListingsSource",
+        lambda url, **_kwargs: sources[url],
+    )
     stats = CollectionStats()
 
     rows, errors = collect_rows(config, direct_sources={}, stats=stats)
@@ -454,7 +490,10 @@ def test_all_github_feeds_failing_does_not_remove_direct_rows(monkeypatch):
         terms=("Summer 2027",),
         github_listing_urls=urls,
     )
-    monkeypatch.setattr("watcher.run.GitHubListingsSource", lambda url: sources[url])
+    monkeypatch.setattr(
+        "watcher.run.GitHubListingsSource",
+        lambda url, **_kwargs: sources[url],
+    )
     stats = CollectionStats()
 
     rows, errors = collect_rows(
@@ -467,6 +506,270 @@ def test_all_github_feeds_failing_does_not_remove_direct_rows(monkeypatch):
     assert len(errors) == 2
     assert all(url in error for url, error in zip(urls, errors))
     assert stats.github_feeds_succeeded == 0
+
+
+def test_run_merges_direct_simplify_and_markdown_by_fixed_priority(tmp_path):
+    shared_url = "https://example.test/jobs/shared"
+    simplify_config = GitHubListingSourceCfg(
+        name="simplify",
+        format="simplify_json",
+        url="https://example.test/simplify.json",
+    )
+    markdown_config = GitHubListingSourceCfg(
+        name="sndsh404_summer_2027",
+        format="github_markdown_table",
+        url="https://example.test/README.md",
+        default_term="Summer 2027",
+    )
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="DirectCo",
+                ats="greenhouse",
+                token="direct",
+                terms=("Summer 2027",),
+            ),
+        ),
+        terms=("Summer 2027",),
+        github_listing_sources=(markdown_config, simplify_config),
+    )
+    direct = row(
+        "DirectCo",
+        "Software Engineer Intern",
+        source="direct",
+        url=shared_url,
+        description="",
+    )
+    simplify = github_row(
+        "Simplify Company Name",
+        "SWE Intern",
+        source_name="simplify",
+        source_format="simplify_json",
+        priority=10,
+        url=f"{shared_url}?utm_source=simplify",
+        active=True,
+        description="Structured feed description",
+    )
+    markdown = github_row(
+        "Markdown Company Name",
+        "Engineering Intern",
+        source_name="sndsh404_summer_2027",
+        source_format="github_markdown_table",
+        priority=20,
+        url=f"{shared_url}?ref=readme",
+        active=False,
+    )
+    markdown["extra"]["source_added_date"] = "2026-07-20"
+    sources = [
+        CountingGithub(markdown_config.url, [markdown]),
+        CountingGithub(simplify_config.url, [simplify]),
+    ]
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"DirectCo": [direct]})},
+            github_source=sources,
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 7, 24),
+        )
+
+    assert result.rows_fetched == 3
+    assert result.jobs_scored == 1
+    assert len(result.matches) == 1
+    merged = result.matches[0]
+    assert merged["company"] == "DirectCo"
+    assert merged["title"] == "Software Engineer Intern"
+    assert merged["description"] == "Structured feed description"
+    assert merged["extra"]["primary_source"] == "direct_ats"
+    assert merged["extra"]["sources"] == [
+        "direct_ats",
+        "simplify",
+        "sndsh404_summer_2027",
+    ]
+    assert merged["extra"]["active"] is True
+    assert merged["extra"]["closed"] is False
+    assert (
+        merged["extra"]["source_details"]["sndsh404_summer_2027"]["active"]
+        is False
+    )
+
+
+def test_typed_source_order_does_not_change_deterministic_results(tmp_path):
+    simplify_config = GitHubListingSourceCfg(
+        name="simplify",
+        format="simplify_json",
+        url="https://example.test/simplify.json",
+    )
+    markdown_config = GitHubListingSourceCfg(
+        name="sndsh404_summer_2027",
+        format="github_markdown_table",
+        url="https://example.test/README.md",
+        default_term="Summer 2027",
+    )
+    shared_url = "https://example.test/jobs/shared"
+    simplify = github_row(
+        "GitHub",
+        "Software Engineering Intern",
+        source_name="simplify",
+        source_format="simplify_json",
+        priority=10,
+        url=shared_url,
+        active=True,
+    )
+    markdown = github_row(
+        "Different Markdown Name",
+        "SWE Intern",
+        source_name="sndsh404_summer_2027",
+        source_format="github_markdown_table",
+        priority=20,
+        url=shared_url,
+        active=True,
+    )
+
+    outputs = []
+    for index, configured in enumerate(
+        (
+            (simplify_config, markdown_config),
+            (markdown_config, simplify_config),
+        )
+    ):
+        config = WatcherConfig(
+            companies=(CompanyCfg(name="GitHub", ats="github_only", terms=("Summer 2027",)),),
+            terms=("Summer 2027",),
+            github_listing_sources=configured,
+        )
+        injected = [
+            CountingGithub(markdown_config.url, [markdown]),
+            CountingGithub(simplify_config.url, [simplify]),
+        ]
+        with SeenStore(tmp_path / f"seen-{index}.sqlite") as store:
+            result = run_once(
+                config,
+                seen_store=store,
+                direct_sources={},
+                github_source=injected,
+                alumni_index={},
+                digest_sender=FakeDigestSender(sent=False),
+                today=date(2026, 7, 24),
+            )
+        outputs.append(
+            [
+                {
+                    "id": job["id"],
+                    "company": job["company"],
+                    "title": job["title"],
+                    "extra": job["extra"],
+                }
+                for job in result.matches
+            ]
+        )
+
+    assert outputs[0] == outputs[1]
+    assert outputs[0][0]["company"] == "GitHub"
+    assert outputs[0][0]["extra"]["primary_source"] == "simplify"
+
+
+def test_markdown_failure_is_independent_in_health_and_keeps_other_results(tmp_path):
+    simplify_config = GitHubListingSourceCfg(
+        name="simplify",
+        format="simplify_json",
+        url="https://example.test/simplify.json",
+    )
+    markdown_config = GitHubListingSourceCfg(
+        name="sndsh404_summer_2027",
+        format="github_markdown_table",
+        url="https://example.test/README.md",
+        default_term="Summer 2027",
+    )
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="DirectCo",
+                ats="greenhouse",
+                token="direct",
+                terms=("Summer 2027",),
+            ),
+        ),
+        terms=("Summer 2027",),
+        github_listing_sources=(markdown_config, simplify_config),
+    )
+    direct = row("DirectCo", "Software Engineer Intern", source="direct")
+    sources = [
+        CountingGithub(markdown_config.url, error=SourceSchemaError("missing expected table")),
+        CountingGithub(simplify_config.url, rows=[]),
+    ]
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"DirectCo": [direct]})},
+            github_source=sources,
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 7, 24),
+            run_id="typed-health-run",
+        )
+
+    github_attempts = [
+        attempt
+        for attempt in result.source_attempts
+        if attempt.source_kind == SOURCE_KIND_GITHUB_FEED
+    ]
+    assert len(result.matches) == 1
+    assert result.github_feeds_configured == 2
+    assert result.github_feeds_succeeded == 1
+    assert result.health_summary.github_feeds_healthy == 1
+    assert result.health_summary.github_feeds_degraded == 1
+    assert [(attempt.adapter, attempt.succeeded) for attempt in github_attempts] == [
+        ("simplify_json", True),
+        ("github_markdown_table", False),
+    ]
+    assert "simplify" in github_attempts[0].feed_label
+    assert "sndsh404_summer_2027" in github_attempts[1].feed_label
+    assert len(result.errors) == 1
+
+
+def test_closed_markdown_only_row_is_scored_but_not_notified(tmp_path):
+    markdown_config = GitHubListingSourceCfg(
+        name="sndsh404_summer_2027",
+        format="github_markdown_table",
+        url="https://example.test/README.md",
+        default_term="Summer 2027",
+    )
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="GitHub", ats="github_only", terms=("Summer 2027",)),),
+        terms=("Summer 2027",),
+        github_listing_sources=(markdown_config,),
+    )
+    closed = github_row(
+        "GitHub",
+        "Software Engineering Intern",
+        source_name="sndsh404_summer_2027",
+        source_format="github_markdown_table",
+        priority=20,
+        url="https://example.test/jobs/closed",
+        active=False,
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={},
+            github_source=CountingGithub(markdown_config.url, [closed]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 7, 24),
+        )
+
+    assert result.jobs_scored == 1
+    assert result.matches == []
+    assert result.new_matches == []
+    assert result.health_summary.github_feeds_healthy == 1
 
 
 def test_run_result_exposes_season_feed_counts_and_stale_company_warning(tmp_path, caplog):

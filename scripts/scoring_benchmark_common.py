@@ -10,15 +10,13 @@ import tempfile
 from pathlib import Path
 from typing import Mapping
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 GROUP_ORDER = ("random", "top", "difficult")
 HUMAN_LABEL_COLUMNS = (
     "human_eligible",
-    "human_priority",
-    "human_action",
     "human_role_track",
-    "error_category",
-    "label_notes",
+    "human_exclusion_reason",
+    "human_notes",
 )
 
 

@@ -31,9 +31,6 @@ from scripts.scoring_benchmark_common import (  # noqa: E402
 )
 
 ALLOWED_ELIGIBILITY = frozenset({"yes", "no", "uncertain"})
-ALLOWED_PRIORITIES = frozenset({"0", "1", "2", "3", "4"})
-ALLOWED_ACTIONS = frozenset({"apply_now", "apply_later", "research_more", "skip"})
-PRIORITY_SCALE = {0: 0, 1: 25, 2: 50, 3: 75, 4: 100}
 REQUIRED_PREDICTION_FIELDS = frozenset(
     {
         "job_id",
@@ -59,17 +56,13 @@ class HumanLabel:
     job_id: str
     sample_groups: tuple[str, ...]
     human_eligible: str
-    human_priority: int | None
-    human_action: str
     human_role_track: str
-    error_category: str
-    label_notes: str
+    human_exclusion_reason: str
+    human_notes: str
 
     @property
     def evaluated(self) -> bool:
-        if self.human_eligible not in {"yes", "no"} or not self.human_action:
-            return False
-        return self.human_eligible != "yes" or self.human_priority is not None
+        return self.human_eligible in {"yes", "no"}
 
 
 def read_json(path: str | Path) -> object:
@@ -195,14 +188,8 @@ def load_labels(
                 raise BenchmarkError(f"label job_id is not in frozen benchmark: {job_id}")
 
             eligible = str(row.get("human_eligible") or "").strip().casefold()
-            priority_text = str(row.get("human_priority") or "").strip()
-            action = str(row.get("human_action") or "").strip().casefold()
             if eligible and eligible not in ALLOWED_ELIGIBILITY:
                 raise BenchmarkError(f"{job_id}: invalid human_eligible {eligible!r}")
-            if priority_text and priority_text not in ALLOWED_PRIORITIES:
-                raise BenchmarkError(f"{job_id}: invalid human_priority {priority_text!r}")
-            if action and action not in ALLOWED_ACTIONS:
-                raise BenchmarkError(f"{job_id}: invalid human_action {action!r}")
 
             groups = tuple(ordered_groups(row.get("sample_groups", "")))
             expected = tuple(ordered_groups(expected_groups.get(job_id, ())))
@@ -212,11 +199,11 @@ def load_labels(
                 job_id=job_id,
                 sample_groups=groups,
                 human_eligible=eligible,
-                human_priority=int(priority_text) if priority_text else None,
-                human_action=action,
                 human_role_track=str(row.get("human_role_track") or "").strip(),
-                error_category=str(row.get("error_category") or "").strip(),
-                label_notes=str(row.get("label_notes") or "").strip(),
+                human_exclusion_reason=str(
+                    row.get("human_exclusion_reason") or ""
+                ).strip(),
+                human_notes=str(row.get("human_notes") or "").strip(),
             )
             labels[job_id] = label
             reasons = _incomplete_reasons(label)
@@ -229,14 +216,23 @@ def load_labels(
         preview = "; ".join(incomplete[:10])
         suffix = f"; plus {len(incomplete) - 10} more" if len(incomplete) > 10 else ""
         raise BenchmarkError(f"incomplete labels: {preview}{suffix}")
-    evaluated = sum(label.evaluated for label in labels.values())
+    yes = sum(label.human_eligible == "yes" for label in labels.values())
+    no = sum(label.human_eligible == "no" for label in labels.values())
     uncertain = sum(label.human_eligible == "uncertain" for label in labels.values())
+    labeled = yes + no + uncertain
+    evaluated = yes + no
+    unlabeled = len(benchmark_ids) - labeled
     return labels, {
         "benchmark_rows": len(benchmark_ids),
         "label_rows_present": len(labels),
+        "labeled_rows": labeled,
         "evaluated_rows": evaluated,
+        "yes_rows": yes,
+        "no_rows": no,
         "uncertain_rows": uncertain,
-        "incomplete_rows": len(incomplete),
+        "unlabeled_rows": unlabeled,
+        "incomplete_rows": unlabeled,
+        "labeled_coverage": labeled / len(benchmark_ids) if benchmark_ids else None,
         "coverage": evaluated / len(benchmark_ids) if benchmark_ids else None,
     }
 
@@ -245,13 +241,6 @@ def _incomplete_reasons(label: HumanLabel) -> list[str]:
     reasons: list[str] = []
     if not label.human_eligible:
         reasons.append("human_eligible blank")
-        return reasons
-    if label.human_eligible == "uncertain":
-        return reasons
-    if label.human_eligible == "yes" and label.human_priority is None:
-        reasons.append("priority required for yes")
-    if not label.human_action:
-        reasons.append("human_action blank")
     return reasons
 
 
@@ -261,7 +250,12 @@ def eligibility_metrics(
     job_ids: Sequence[str],
 ) -> dict[str, object]:
     tp = fp = fn = tn = 0
-    for job_id in job_ids:
+    evaluated_ids = [
+        job_id
+        for job_id in job_ids
+        if job_id in labels and labels[job_id].evaluated
+    ]
+    for job_id in evaluated_ids:
         label = labels[job_id]
         predicted = bool(predictions[job_id].get("watcher_eligible"))
         actual = label.human_eligible == "yes"
@@ -274,7 +268,7 @@ def eligibility_metrics(
         else:
             tn += 1
     return {
-        "evaluated_count": len(job_ids),
+        "evaluated_count": len(evaluated_ids),
         "true_positives": tp,
         "false_positives": fp,
         "false_negatives": fn,
@@ -298,32 +292,26 @@ def ranking_metrics(
     job_ids: Sequence[str],
 ) -> dict[str, object]:
     ranked = sorted(
-        job_ids,
+        (
+            job_id
+            for job_id in job_ids
+            if job_id in labels and labels[job_id].evaluated
+        ),
         key=lambda job_id: ranking_key(predictions[job_id], contexts[job_id]),
     )
     output: dict[str, object] = {"evaluated_count": len(ranked)}
     for requested in (10, 20):
         used = min(requested, len(ranked))
         top = ranked[:used]
-        good = sum(
-            labels[job_id].human_eligible == "yes"
-            and (labels[job_id].human_priority or 0) >= 3
-            for job_id in top
-        )
-        priorities = [_priority_for_metrics(labels[job_id]) for job_id in top]
+        good = sum(labels[job_id].human_eligible == "yes" for job_id in top)
         output[f"at_{requested}"] = {
             "requested_k": requested,
             "used_k": used,
             "label": f"Precision@{used}",
             "precision": _ratio(good, used),
-            "average_human_priority": _ratio(sum(priorities), len(priorities)),
             "job_ids": top,
         }
     return output
-
-
-def _priority_for_metrics(label: HumanLabel) -> int:
-    return label.human_priority if label.human_priority is not None else 0
 
 
 def score_band_diagnostics(
@@ -350,7 +338,6 @@ def score_band_diagnostics(
         ]
         labeled = [job_id for job_id in ids if job_id in labels and labels[job_id].evaluated]
         eligible_count = sum(labels[job_id].human_eligible == "yes" for job_id in labeled)
-        priorities = [_priority_for_metrics(labels[job_id]) for job_id in labeled]
         false_positives = sum(
             bool(predictions[job_id].get("watcher_eligible"))
             and labels[job_id].human_eligible == "no"
@@ -367,7 +354,6 @@ def score_band_diagnostics(
                 "row_count": len(ids),
                 "labeled_count": len(labeled),
                 "human_eligible_rate": _ratio(eligible_count, len(labeled)),
-                "average_human_priority": _ratio(sum(priorities), len(priorities)),
                 "false_positives": false_positives,
                 "false_negatives": false_negatives,
             }
@@ -431,15 +417,15 @@ def error_diagnostics(
 ) -> dict[str, object]:
     false_positive_tracks: Counter[str] = Counter()
     false_negative_tracks: Counter[str] = Counter()
-    error_categories: Counter[str] = Counter()
+    exclusion_reasons: Counter[str] = Counter()
     role_confusion: Counter[str] = Counter()
     disagreements: list[dict[str, object]] = []
     for job_id in label_ids:
         prediction = predictions[job_id]
         label = labels[job_id]
         track = str(prediction.get("role_track") or "unknown")
-        if label.error_category:
-            error_categories[label.error_category] += 1
+        if label.human_exclusion_reason:
+            exclusion_reasons[label.human_exclusion_reason] += 1
         if label.human_role_track:
             role_confusion[f"{track} -> {label.human_role_track}"] += 1
         if not label.evaluated:
@@ -451,7 +437,7 @@ def error_diagnostics(
         if not predicted_positive and actual_positive:
             false_negative_tracks[track] += 1
 
-        priority_score = PRIORITY_SCALE[_priority_for_metrics(label)]
+        human_target_score = 100 if actual_positive else 0
         fit_score = _int_value(prediction.get("fit_score"))
         context = contexts[job_id]
         disagreements.append(
@@ -466,20 +452,18 @@ def error_diagnostics(
                 "current_watcher_eligible": predicted_positive,
                 "current_fit_score": fit_score,
                 "human_eligible": label.human_eligible,
-                "human_priority": label.human_priority,
-                "human_action": label.human_action,
                 "predicted_role_track": track,
                 "human_role_track": label.human_role_track,
-                "error_category": label.error_category,
-                "label_notes": label.label_notes,
+                "human_exclusion_reason": label.human_exclusion_reason,
+                "human_notes": label.human_notes,
                 "eligibility_mismatch": predicted_positive != actual_positive,
-                "preference_gap": abs(fit_score - priority_score),
+                "eligibility_fit_gap": abs(fit_score - human_target_score),
             }
         )
     disagreements.sort(
         key=lambda item: (
             -int(bool(item["eligibility_mismatch"])),
-            -int(item["preference_gap"]),
+            -int(item["eligibility_fit_gap"]),
             str(item["company"]).casefold(),
             str(item["title"]).casefold(),
             str(item["job_id"]),
@@ -488,7 +472,7 @@ def error_diagnostics(
     return {
         "false_positives_by_predicted_role_track": dict(sorted(false_positive_tracks.items())),
         "false_negatives_by_predicted_role_track": dict(sorted(false_negative_tracks.items())),
-        "error_categories": dict(sorted(error_categories.items())),
+        "human_exclusion_reasons": dict(sorted(exclusion_reasons.items())),
         "predicted_human_role_confusion": dict(sorted(role_confusion.items())),
         "largest_disagreements": disagreements[:25],
     }
@@ -550,7 +534,7 @@ def evaluate_benchmark(
     ranking_current = ranking_metrics(current, contexts, labels, evaluated_ids)
     ranking_baseline = ranking_metrics(baseline, contexts, labels, evaluated_ids)
     metrics: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "as_of_date": as_of.isoformat(),
         "coverage": coverage,
         "headline_random_sample": {
@@ -610,10 +594,13 @@ def render_report(metrics: Mapping[str, object]) -> str:
         "",
         f"- Benchmark rows: {coverage['benchmark_rows']}",
         f"- Label rows present: {coverage['label_rows_present']}",
-        f"- Fully evaluated rows: {coverage['evaluated_rows']}",
+        f"- Yes rows: {coverage['yes_rows']}",
+        f"- No rows: {coverage['no_rows']}",
         f"- Uncertain rows: {coverage['uncertain_rows']}",
-        f"- Incomplete rows: {coverage['incomplete_rows']}",
-        f"- Evaluation coverage: {_percent(coverage['coverage'])}",
+        f"- Unlabeled rows: {coverage['unlabeled_rows']}",
+        f"- Binary-evaluated rows: {coverage['evaluated_rows']}",
+        f"- Label coverage: {_percent(coverage['labeled_coverage'])}",
+        f"- Binary evaluation coverage: {_percent(coverage['coverage'])}",
         "",
         "## Headline eligibility metrics (random cohort only)",
         "",
@@ -631,33 +618,32 @@ def render_report(metrics: Mapping[str, object]) -> str:
     lines.extend(
         [
             "",
-            "## Ranking metrics (all fully labeled, non-uncertain rows)",
+            "## Ranking metrics (all yes/no rows)",
             "",
-            "| Version | Cutoff | Precision | Average human priority |",
-            "|---|---|---:|---:|",
+            "| Version | Cutoff | Eligible precision |",
+            "|---|---|---:|",
         ]
     )
     for name in ("baseline", "current"):
         for requested in (10, 20):
             value = ranking[name][f"at_{requested}"]
             lines.append(
-                f"| {name.title()} | {value['label']} | {_percent(value['precision'])} | "
-                f"{_number(value['average_human_priority'])} |"
+                f"| {name.title()} | {value['label']} | {_percent(value['precision'])} |"
             )
     lines.extend(
         [
             "",
             "## Current score-band diagnostics",
             "",
-            "| Band | Rows | Labeled | Human eligible | Avg priority | FP | FN |",
-            "|---|---:|---:|---:|---:|---:|---:|",
+            "| Band | Rows | Binary labeled | Human eligible | FP | FN |",
+            "|---|---:|---:|---:|---:|---:|",
         ]
     )
     for band in metrics["score_bands"]:
         lines.append(
             f"| {band['band']} | {band['row_count']} | {band['labeled_count']} | "
-            f"{_percent(band['human_eligible_rate'])} | {_number(band['average_human_priority'])} | "
-            f"{band['false_positives']} | {band['false_negatives']} |"
+            f"{_percent(band['human_eligible_rate'])} | {band['false_positives']} | "
+            f"{band['false_negatives']} |"
         )
     lines.extend(["", "## Baseline versus current", ""])
     for key in sorted(changes):
@@ -667,7 +653,7 @@ def render_report(metrics: Mapping[str, object]) -> str:
     for title, key in (
         ("False positives by predicted role track", "false_positives_by_predicted_role_track"),
         ("False negatives by predicted role track", "false_negatives_by_predicted_role_track"),
-        ("Human error categories", "error_categories"),
+        ("Human exclusion reasons", "human_exclusion_reasons"),
         ("Predicted → human role confusion", "predicted_human_role_confusion"),
     ):
         lines.append(f"### {title}")
@@ -684,9 +670,9 @@ def render_report(metrics: Mapping[str, object]) -> str:
             "## Largest disagreements",
             "",
             "Eligibility mismatches sort first, followed by the absolute gap between fit score and "
-            "human priority mapped as 0/25/50/75/100. Ties use company, title, then job ID.",
+            "the binary human target (yes=100, no=0). Ties use company, title, then job ID.",
             "",
-            "| Job | Groups | Baseline | Current | Human | Tracks | Category / notes |",
+            "| Job | Groups | Baseline | Current | Human | Tracks | Exclusion reason / notes |",
             "|---|---|---|---|---|---|---|",
         ]
     )
@@ -695,9 +681,12 @@ def render_report(metrics: Mapping[str, object]) -> str:
         groups = ", ".join(item["sample_groups"])
         baseline_text = f"eligible={item['baseline_watcher_eligible']}, fit={item['baseline_fit_score']}"
         current_text = f"eligible={item['current_watcher_eligible']}, fit={item['current_fit_score']}"
-        human = f"{item['human_eligible']}, priority={item['human_priority']}, {item['human_action']}"
+        human = str(item["human_eligible"])
         tracks = f"{item['predicted_role_track']} → {item['human_role_track'] or '(blank)'}"
-        notes = f"{item['error_category'] or '(none)'}; {item['label_notes'] or '(none)'}"
+        notes = (
+            f"{item['human_exclusion_reason'] or '(none)'}; "
+            f"{item['human_notes'] or '(none)'}"
+        )
         lines.append(
             f"| {job} | {_md(groups)} | {_md(baseline_text)} | {_md(current_text)} | "
             f"{_md(human)} | {_md(tracks)} | {_md(notes)} |"
@@ -707,10 +696,6 @@ def render_report(metrics: Mapping[str, object]) -> str:
 
 def _percent(value: object) -> str:
     return "n/a" if value is None else f"{float(value):.1%}"
-
-
-def _number(value: object) -> str:
-    return "n/a" if value is None else f"{float(value):.2f}"
 
 
 def _md(value: object) -> str:

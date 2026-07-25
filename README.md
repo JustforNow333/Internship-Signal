@@ -58,27 +58,67 @@ unrelated to app code.)
 
 ---
 
-## Watcher season configuration and rollover
+## Watcher GitHub backstops, season configuration, and rollover
 
-The watcher recruiting cycle and structured GitHub backstops are explicit in
+The recruiting cycle and typed GitHub backstops are explicit in
 `watcher/watchlist.yml`:
 
 ```yaml
 defaults:
   terms: ["Summer 2027"]
-  github_listing_urls: ["https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"]
+  github_listing_sources:
+    - name: simplify
+      format: simplify_json
+      url: "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"
+    - name: sndsh404_summer_2027
+      format: github_markdown_table
+      url: "https://raw.githubusercontent.com/sndsh404/summer-2027-internships/main/README.md"
+      default_term: "Summer 2027"
 ```
 
 `defaults.terms` is required and cannot be blank. Companies inherit it unless
-they provide a nonempty `terms` override. Structured term matching is exact
-after case and whitespace normalization; direct ATS postings are not rejected
-merely because they lack structured season metadata. The URL list accepts
-multiple HTTP/HTTPS feeds, and a failure in one feed does not suppress other
-feeds or direct ATS results.
+they provide a nonempty `terms` override. `simplify_json` applies the exact
+structured term values supplied by Simplify. `github_markdown_table` assigns
+its required `default_term`, then applies the same company term filter; adding
+another feed in either supported format requires only another configuration
+entry. The legacy `github_listing_urls` list remains supported and is
+interpreted as one or more `simplify_json` sources.
 
-The current URL was live-verified on July 15, 2026. Its repository name is
-historical, but its payload includes the exact `Summer 2027` term. It remains a
-configuration value and must be rechecked during future rollovers.
+Every configured feed is fetched and health-tracked independently. A valid
+payload/table is healthy even if it yields zero watchlist matches. Transport,
+schema, missing-table, and all-malformed-table failures affect only that source;
+other GitHub sources, direct ATS results, digest generation, and seen-state
+handling continue.
+
+Rows are merged before scoring and notification with fixed precedence,
+independent of source configuration order:
+
+1. direct company ATS;
+2. Simplify structured JSON;
+3. configured GitHub Markdown tables.
+
+Normalized application URL is the strongest duplicate key; tracking parameters
+and harmless URL formatting differences are removed. The existing normalized
+company/title/location key is the fallback. The winner keeps its canonical
+fields, missing fields may be filled from lower-priority rows, and provenance
+records `primary_source`, every discovering source in `sources`, plus per-source
+details. A lower-priority closed marker never closes an active direct or
+Simplify result. Seen suppression also checks the same normalized URL, so a
+later higher-priority sighting is not re-notified merely because its canonical
+wording produces a different content ID.
+
+The Markdown parser finds the table by its
+`Company | Role | Location | Apply | Added` headers, extracts Markdown apply
+links, and records `🔒` (closed), `🛂` (no sponsorship), and `🇺🇸` (US
+citizenship required) before removing the markers from normalized display text.
+Closed Markdown-only rows are scored but excluded from notifications. `Added`
+is stored as `extra.source_added_date`; it is deliberately never copied to
+`date_posted` or used as an employer posting date for freshness scoring.
+
+The Simplify URL was live-verified on July 15, 2026. Its repository name is
+historical, but its payload includes the exact `Summer 2027` term. The
+`sndsh404` README table was live-verified on July 24, 2026. Both remain
+configuration values and must be rechecked during future rollovers.
 
 The run reports a deterministic season status from four-digit years in the
 default terms:
@@ -102,23 +142,31 @@ To roll from Summer 2027 to Summer 2028 without editing Python:
    list, and every entry's required keys: `company_name`, `title`, `locations`,
    `url`, `date_posted`, `active`, and `terms`. Confirm `locations` and `terms`
    remain lists and inspect the exact term strings.
-3. Change `defaults.terms` to `["Summer 2028"]`. Keep the existing URL if the
-   verified payload contains that exact term; otherwise replace it with the
-   verified official URL. During overlap, list both verified URLs inline.
-4. Run the offline backend/watcher tests, then run a separate dry live probe:
+3. Verify each configured Markdown URL still returns UTF-8 Markdown with the
+   expected five-column internship table. Update its URL and `name` if the
+   repository changes, and set `default_term` to the new exact term.
+4. Change `defaults.terms` to `["Summer 2028"]`. Keep only feeds verified to
+   contain the intended cycle; overlapping feeds may coexist as separate typed
+   entries.
+5. Run the offline backend/watcher tests, then run a separate isolated probe:
 
 ```bash
-WATCHER_SEND_EMAIL=0 PYTHONPATH=.:backend python3 -m watcher.run --seen-db /tmp/internship_signal_season_probe.sqlite
+probe_db="$(mktemp --suffix=.sqlite)"
+probe_report="$(mktemp --suffix=.json)"
+WATCHER_SEND_EMAIL=0 PYTHONPATH=.:backend python3 -m watcher.run \
+  --seen-db "$probe_db" \
+  --health-report "$probe_report"
 ```
 
 Do not add `--mark-seen-without-send` to the probe. Tests never access the
 network: adapter tests use saved UTF-8 fixtures and run-loop tests use mocks.
 Use an explicit false value rather than unsetting `WATCHER_SEND_EMAIL`, because
 the repository dotenv loader may otherwise restore a local `.env` send setting.
-Live endpoint verification is deliberately separate from fixture-based tests.
-If no official next-cycle structured feed exists, leave the URL list empty (or
-retain only a verified feed containing the desired exact term) and rely on
-direct ATS coverage until an official replacement is available.
+Confirm the report contains one independent successful attempt for every
+configured feed, `sent=no`, `seen_marked=0`, and zero rows in the temporary
+database's `seen` table. Live endpoint verification is deliberately separate
+from fixture-based tests. If no verified next-cycle feed exists for a format,
+remove only that typed entry and rely on the remaining sources.
 
 The Workday adapter skips isolated malformed posting records while retaining
 valid records from the same and later pages. It logs one bounded aggregate

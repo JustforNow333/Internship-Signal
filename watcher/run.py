@@ -15,7 +15,12 @@ from typing import Callable, TextIO
 
 from backend.app.ingest import analyze_rows
 from watcher.alumni import AlumniIndex, attach_alumni, load_default_alumni, status_for_injected_index
-from watcher.config import DEFAULT_WATCHLIST_PATH, WatcherConfig, load_watchlist
+from watcher.config import (
+    DEFAULT_WATCHLIST_PATH,
+    GitHubListingSourceCfg,
+    WatcherConfig,
+    load_watchlist,
+)
 from watcher.filters import filter_matches
 from watcher.notify import send_digest
 from watcher.season import (
@@ -56,6 +61,7 @@ from watcher.source_health import (
 from watcher.sources import (
     AshbySource,
     GitHubListingsSource,
+    GitHubMarkdownTableSource,
     GreenhouseSource,
     LeverSource,
     SmartRecruitersSource,
@@ -293,13 +299,23 @@ def collect_rows(
         stats = CollectionStats()
     if direct_sources is None:
         direct_sources = _default_direct_sources()
-    configured_count = len(config.github_listing_urls)
+    configured_sources = config.effective_github_listing_sources()
+    configured_count = len(configured_sources)
     if github_source is None:
-        github_sources = [GitHubListingsSource(url) for url in config.github_listing_urls]
+        github_sources = [
+            (source_config, _build_github_source(source_config))
+            for source_config in configured_sources
+        ]
     elif isinstance(github_source, (list, tuple)):
-        github_sources = list(github_source)
+        github_sources = [
+            (_config_for_injected_source(source, configured_sources), source)
+            for source in github_source
+        ]
     else:
-        github_sources = [github_source]
+        github_sources = [
+            (_config_for_injected_source(github_source, configured_sources), github_source)
+        ]
+    github_sources.sort(key=lambda item: _github_runtime_source_sort_key(*item))
     stats.github_feeds_configured = configured_count
     direct_rows: list[dict] = []
     github_rows: list[dict] = []
@@ -396,13 +412,20 @@ def collect_rows(
                 _failed_direct_attempt(company, active_run_id, active_observed_at, ERROR_UNEXPECTED, exc)
             )
 
-    for index, source in enumerate(github_sources):
-        configured_url = config.github_listing_urls[index] if index < len(config.github_listing_urls) else ""
-        label = sanitize_feed_label(configured_url or _github_source_label(source))
-        health_key = github_feed_health_key(configured_url or label)
+    for source_config, source in github_sources:
+        configured_url = source_config.url if source_config else _github_source_url(source)
+        source_name = source_config.name if source_config else _github_source_name(source)
+        adapter = source_config.format if source_config else _github_source_adapter(source)
+        safe_url = sanitize_feed_label(configured_url or _github_source_label(source))
+        label = (
+            safe_url
+            if source_config and source_config.name.startswith("legacy_simplify_")
+            else sanitize_feed_label(f"{source_name} [{safe_url}]")
+        )
+        health_key = github_feed_health_key(configured_url or safe_url)
         before = len(github_rows)
         try:
-            LOGGER.info("Fetching GitHub listings backstop feed %s...", label)
+            LOGGER.info("Fetching GitHub listings backstop source %s...", label)
             if hasattr(source, "fetch_many"):
                 github_rows.extend(source.fetch_many(config.companies))
             else:
@@ -421,7 +444,7 @@ def collect_rows(
                     observed_at=active_observed_at,
                     source_kind=SOURCE_KIND_GITHUB_FEED,
                     company=None,
-                    adapter="github_listings",
+                    adapter=adapter,
                     rows_returned=len(github_rows) - before,
                     feed_label=label,
                 )
@@ -435,7 +458,7 @@ def collect_rows(
                     observed_at=active_observed_at,
                     source_kind=SOURCE_KIND_GITHUB_FEED,
                     company=None,
-                    adapter="github_listings",
+                    adapter=adapter,
                     error_kind=ERROR_SCHEMA,
                     error=exc,
                     feed_label=label,
@@ -450,7 +473,7 @@ def collect_rows(
                     observed_at=active_observed_at,
                     source_kind=SOURCE_KIND_GITHUB_FEED,
                     company=None,
-                    adapter="github_listings",
+                    adapter=adapter,
                     error_kind=ERROR_FETCH,
                     error=exc,
                     feed_label=label,
@@ -465,7 +488,7 @@ def collect_rows(
                     observed_at=active_observed_at,
                     source_kind=SOURCE_KIND_GITHUB_FEED,
                     company=None,
-                    adapter="github_listings",
+                    adapter=adapter,
                     error_kind=ERROR_SOURCE,
                     error=exc,
                     feed_label=label,
@@ -483,7 +506,7 @@ def collect_rows(
                     observed_at=active_observed_at,
                     source_kind=SOURCE_KIND_GITHUB_FEED,
                     company=None,
-                    adapter="github_listings",
+                    adapter=adapter,
                     error_kind=ERROR_UNEXPECTED,
                     error=exc,
                     feed_label=label,
@@ -627,6 +650,42 @@ def _default_direct_sources() -> dict[str, object]:
         "workable": WorkableSource(),
         "workday": WorkdaySource(),
     }
+
+
+def _build_github_source(config: GitHubListingSourceCfg) -> object:
+    if config.format == "simplify_json":
+        return GitHubListingsSource(config.url, source_name=config.name)
+    if config.format == "github_markdown_table":
+        return GitHubMarkdownTableSource(
+            config.url,
+            source_name=config.name,
+            default_term=config.default_term,
+        )
+    raise ValueError(f"Unsupported GitHub listing source format: {config.format}")
+
+
+def _config_for_injected_source(
+    source: object,
+    configured_sources: tuple[GitHubListingSourceCfg, ...],
+) -> GitHubListingSourceCfg | None:
+    source_url = sanitize_feed_label(_github_source_url(source))
+    for configured in configured_sources:
+        if sanitize_feed_label(configured.url) == source_url:
+            return configured
+    return None
+
+
+def _github_runtime_source_sort_key(
+    config: GitHubListingSourceCfg | None,
+    source: object,
+) -> tuple[int, str, str]:
+    if config is not None:
+        return config.priority, config.name.casefold(), config.url
+    try:
+        priority = int(getattr(source, "priority", 50))
+    except (TypeError, ValueError):
+        priority = 50
+    return priority, _github_source_name(source).casefold(), _github_source_url(source)
 
 
 def _record_error(errors: list[str], message: str) -> None:
@@ -971,6 +1030,26 @@ def _github_source_label(source: object) -> str:
         getattr(source, "feed_label", "")
         or getattr(source, "name", "")
         or "injected"
+    )
+
+
+def _github_source_url(source: object) -> str:
+    return str(getattr(source, "url", "") or getattr(source, "feed_label", "") or "")
+
+
+def _github_source_name(source: object) -> str:
+    return str(
+        getattr(source, "source_name", "")
+        or getattr(source, "name", "")
+        or "injected"
+    )
+
+
+def _github_source_adapter(source: object) -> str:
+    return str(
+        getattr(source, "format", "")
+        or getattr(source, "name", "")
+        or "github_listings"
     )
 
 

@@ -152,11 +152,20 @@ def sanitize_feed_label(value: object) -> str:
     raw = str(value or "").strip()
     if not raw:
         return "injected"
-    parsed = urlsplit(raw)
-    if parsed.scheme.lower() in {"http", "https"} and parsed.hostname:
+    # A malformed authority (bad IPv6 bracket, out-of-range port) must never
+    # raise out of a sanitizer: sanitize_error() runs over arbitrary failure
+    # text, so one bad URL would otherwise abort the whole run.
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        parsed = None
+    if parsed is not None and parsed.scheme.lower() in {"http", "https"} and parsed.hostname:
         host = parsed.hostname
-        if parsed.port:
-            host = f"{host}:{parsed.port}"
+        try:
+            if parsed.port:
+                host = f"{host}:{parsed.port}"
+        except ValueError:
+            pass
         raw = urlunsplit((parsed.scheme.lower(), host, parsed.path or "/", "", ""))
     else:
         raw = re.sub(r"[?#].*$", "", raw)

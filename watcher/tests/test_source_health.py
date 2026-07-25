@@ -182,6 +182,26 @@ def test_feed_keys_and_labels_do_not_expose_query_strings():
     assert "?" not in key
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    (
+        ("https://example.test:99999/listings.json", "https://example.test/listings.json"),
+        ("https://example.test:port/listings.json", "https://example.test/listings.json"),
+        ("https://user:secret@example.test:99999/x?t=1", "https://example.test/x"),
+        ("https://[::1]:70000/listings.json", "https://::1/listings.json"),
+        ("http://[unterminated/listings.json?t=1", "http://[unterminated/listings.json"),
+    ),
+)
+def test_feed_labels_sanitize_malformed_authorities_without_raising(raw, expected):
+    assert sanitize_feed_label(raw) == expected
+    assert "secret" not in sanitize_feed_label(raw)
+
+
+def test_sanitize_error_survives_a_malformed_url_in_failure_text():
+    message = sanitize_error("workday POST failed: https://tenant.test:99999/wday/cxs/jobs?q=1")
+    assert message == "workday POST failed: https://tenant.test/wday/cxs/jobs"
+
+
 def test_transaction_failure_rolls_back_attempt_and_current_state(tmp_path):
     duplicate = attempt(run_id="same-run")
     with SourceHealthStore(tmp_path / "seen.sqlite") as store:

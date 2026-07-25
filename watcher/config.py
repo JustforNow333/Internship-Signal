@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import math
 import os
 import re
@@ -90,6 +91,10 @@ SUPPORTED_ATS = {
     "bespoke",
     "github_only",
 }
+SUPPORTED_GITHUB_LISTING_FORMATS = {
+    "simplify_json",
+    "github_markdown_table",
+}
 
 
 class ConfigError(ValueError):
@@ -134,13 +139,38 @@ class CompanyCfg:
 
 
 @dataclass(frozen=True)
+class GitHubListingSourceCfg:
+    """One typed GitHub backstop feed from watchlist configuration."""
+
+    name: str
+    format: str
+    url: str
+    default_term: str = ""
+
+    @property
+    def priority(self) -> int:
+        return {
+            "simplify_json": 10,
+            "github_markdown_table": 20,
+        }[self.format]
+
+
+@dataclass(frozen=True)
 class WatcherConfig:
     companies: tuple[CompanyCfg, ...]
     terms: tuple[str, ...] = ()
+    github_listing_sources: tuple[GitHubListingSourceCfg, ...] = ()
     github_listing_urls: tuple[str, ...] = ()
     target_roles: frozenset[str] = frozenset({"swe"})
     min_score: int | None = None
     seen_db_path: Path = DEFAULT_SEEN_DB_PATH
+
+    def effective_github_listing_sources(self) -> tuple[GitHubListingSourceCfg, ...]:
+        """Return typed sources plus deterministic adapters for legacy URLs."""
+
+        sources = list(self.github_listing_sources)
+        sources.extend(_legacy_github_source(url) for url in self.github_listing_urls)
+        return tuple(sorted(sources, key=_github_source_sort_key))
 
 
 def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
@@ -166,7 +196,11 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
     if "terms" not in defaults:
         raise ConfigError("watchlist defaults.terms must explicitly define at least one nonblank term")
     terms = _terms_tuple(defaults["terms"], "defaults.terms")
+    github_listing_sources = _github_listing_sources(defaults.get("github_listing_sources", ()))
     github_listing_urls = _github_listing_urls(defaults.get("github_listing_urls", ()))
+    _validate_github_source_uniqueness(
+        (*github_listing_sources, *(_legacy_github_source(url) for url in github_listing_urls))
+    )
     target_roles = frozenset(_string_tuple(defaults.get("target_roles", ("swe",))))
     min_score = defaults.get("min_score")
     if min_score in ("", None):
@@ -179,6 +213,7 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
     return WatcherConfig(
         companies=companies,
         terms=terms,
+        github_listing_sources=github_listing_sources,
         github_listing_urls=github_listing_urls,
         target_roles=target_roles,
         min_score=min_score,
@@ -245,6 +280,8 @@ def _parse_watchlist_yaml(text: str) -> dict:
     defaults: dict[str, object] | None = None
     companies: list[dict[str, object]] | None = None
     current_company: dict[str, object] | None = None
+    current_default_list: list[dict[str, object]] | None = None
+    current_default_item: dict[str, object] | None = None
     section = ""
 
     for raw_line in text.splitlines():
@@ -256,19 +293,44 @@ def _parse_watchlist_yaml(text: str) -> dict:
             data["defaults"] = defaults
             section = "defaults"
             current_company = None
+            current_default_list = None
+            current_default_item = None
             continue
         if line == "companies:":
             companies = []
             data["companies"] = companies
             section = "companies"
             current_company = None
+            current_default_list = None
+            current_default_item = None
             continue
 
         if section == "defaults":
-            if defaults is None or not line.startswith("  "):
+            if defaults is None:
+                raise ConfigError(f"Invalid defaults line: {raw_line}")
+            if line.startswith("      ") and current_default_item is not None:
+                key, value = _split_key_value(line.strip())
+                current_default_item[key] = _parse_value(value)
+                continue
+            if line.startswith("    - ") and current_default_list is not None:
+                current_default_item = {}
+                current_default_list.append(current_default_item)
+                rest = line.strip()[2:].strip()
+                if rest:
+                    key, value = _split_key_value(rest)
+                    current_default_item[key] = _parse_value(value)
+                continue
+            if not line.startswith("  ") or line.startswith("    "):
                 raise ConfigError(f"Invalid defaults line: {raw_line}")
             key, value = _split_key_value(line.strip())
-            defaults[key] = _parse_value(value)
+            if key == "github_listing_sources" and value == "":
+                current_default_list = []
+                current_default_item = None
+                defaults[key] = current_default_list
+            else:
+                current_default_list = None
+                current_default_item = None
+                defaults[key] = _parse_value(value)
             continue
 
         if section == "companies":
@@ -377,24 +439,7 @@ def _github_listing_urls(value) -> tuple[str, ...]:
     urls: list[str] = []
     identities: dict[tuple[str, str, int | None, str], str] = {}
     for raw_url in values:
-        if not isinstance(raw_url, str) or not raw_url.strip():
-            raise ConfigError("defaults.github_listing_urls values must be nonblank HTTP or HTTPS URLs")
-        url = raw_url.strip()
-        parsed = urlsplit(url)
-        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
-            raise ConfigError("defaults.github_listing_urls contains an invalid HTTP/HTTPS URL")
-        if parsed.username or parsed.password:
-            raise ConfigError("defaults.github_listing_urls must not contain URL credentials")
-        try:
-            port = parsed.port
-        except ValueError as exc:
-            raise ConfigError("defaults.github_listing_urls contains an invalid HTTP/HTTPS URL") from exc
-        identity = (
-            parsed.scheme.lower(),
-            str(parsed.hostname).lower(),
-            port,
-            parsed.path or "/",
-        )
+        url, identity = _validated_feed_url(raw_url, "defaults.github_listing_urls")
         previous = identities.get(identity)
         if previous is not None and previous != url:
             raise ConfigError(
@@ -404,3 +449,99 @@ def _github_listing_urls(value) -> tuple[str, ...]:
         if url not in urls:
             urls.append(url)
     return tuple(urls)
+
+
+def _github_listing_sources(value) -> tuple[GitHubListingSourceCfg, ...]:
+    if value in (None, ""):
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise ConfigError("defaults.github_listing_sources must be a list of mappings")
+
+    sources = []
+    for index, entry in enumerate(value, start=1):
+        label = f"defaults.github_listing_sources[{index}]"
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{label} must be a mapping")
+        name = str(entry.get("name") or "").strip()
+        source_format = str(entry.get("format") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
+            raise ConfigError(
+                f"{label}.name must use only letters, digits, periods, underscores, or hyphens"
+            )
+        if source_format not in SUPPORTED_GITHUB_LISTING_FORMATS:
+            raise ConfigError(
+                f"{label}.format must be one of: "
+                + ", ".join(sorted(SUPPORTED_GITHUB_LISTING_FORMATS))
+            )
+        url, _identity = _validated_feed_url(entry.get("url"), f"{label}.url")
+        default_term = str(entry.get("default_term") or "").strip()
+        if source_format == "github_markdown_table" and not default_term:
+            raise ConfigError(f"{label}.default_term is required for github_markdown_table")
+        sources.append(
+            GitHubListingSourceCfg(
+                name=name,
+                format=source_format,
+                url=url,
+                default_term=default_term,
+            )
+        )
+    return tuple(sources)
+
+
+def _validated_feed_url(
+    raw_url: object,
+    label: str,
+) -> tuple[str, tuple[str, str, int | None, str]]:
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        raise ConfigError(f"{label} values must be nonblank HTTP or HTTPS URLs")
+    url = raw_url.strip()
+    parsed = urlsplit(url)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise ConfigError(f"{label} contains an invalid HTTP/HTTPS URL")
+    if parsed.username or parsed.password:
+        raise ConfigError(f"{label} must not contain URL credentials")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ConfigError(f"{label} contains an invalid HTTP/HTTPS URL") from exc
+    return url, (
+        parsed.scheme.lower(),
+        str(parsed.hostname).lower(),
+        port,
+        parsed.path or "/",
+    )
+
+
+def _validate_github_source_uniqueness(
+    sources: Sequence[GitHubListingSourceCfg],
+) -> None:
+    names: set[str] = set()
+    identities: dict[tuple[str, str, int | None, str], str] = {}
+    for source in sources:
+        normalized_name = source.name.casefold()
+        if normalized_name in names:
+            raise ConfigError(
+                f"defaults.github_listing_sources contains duplicate source name: {source.name}"
+            )
+        names.add(normalized_name)
+        _url, identity = _validated_feed_url(source.url, "defaults.github_listing_sources.url")
+        previous = identities.get(identity)
+        if previous is not None:
+            raise ConfigError(
+                "GitHub listing sources contain duplicate feed identities after removing query or fragment"
+            )
+        identities[identity] = source.url
+
+
+def _legacy_github_source(url: str) -> GitHubListingSourceCfg:
+    safe_url = str(url).strip()
+    digest = hashlib.sha256(safe_url.encode("utf-8")).hexdigest()[:10]
+    return GitHubListingSourceCfg(
+        name=f"legacy_simplify_{digest}",
+        format="simplify_json",
+        url=safe_url,
+    )
+
+
+def _github_source_sort_key(source: GitHubListingSourceCfg) -> tuple[int, str, str]:
+    return source.priority, source.name.casefold(), source.url

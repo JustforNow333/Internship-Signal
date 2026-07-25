@@ -1,6 +1,13 @@
 defaults:
   terms: ["Summer 2027"]
-  github_listing_urls: ["https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"]
+  github_listing_sources:
+    - name: simplify
+      format: simplify_json
+      url: "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"
+    - name: sndsh404_summer_2027
+      format: github_markdown_table
+      url: "https://raw.githubusercontent.com/sndsh404/summer-2027-internships/main/README.md"
+      default_term: "Summer 2027"
   target_roles: ["swe"]
   min_score:
 

@@ -9,6 +9,7 @@ from watcher.config import CompanyCfg
 from watcher.sources import (
     AshbySource,
     GitHubListingsSource,
+    GitHubMarkdownTableSource,
     GreenhouseSource,
     LeverSource,
     SourceError,
@@ -46,6 +47,10 @@ def workday_posting(title="Software Engineer Intern", external_path="/job/Test/S
 
 def load_fixture(name: str):
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def load_text_fixture(name: str) -> str:
+    return (FIXTURES / name).read_text(encoding="utf-8")
 
 
 def assert_canonical_row(row: dict) -> None:
@@ -598,6 +603,108 @@ def test_github_listings_fixture_filters_active_company_and_terms():
     assert row["extra"]["source_adapter"] == "github_listings"
     assert row["extra"]["feed_url"] == TEST_GITHUB_FEED_URL
     assert source.url == TEST_GITHUB_FEED_URL
+
+
+def test_github_markdown_fixture_parses_links_markers_dates_and_skips_bad_rows(caplog):
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="sndsh404_summer_2027",
+        default_term="Summer 2027",
+    )
+    companies = (
+        CompanyCfg(name="Google", terms=("Summer 2027",)),
+        CompanyCfg(name="Capital One", terms=("Summer 2027",)),
+        CompanyCfg(name="GitHub", terms=("Summer 2027",)),
+    )
+
+    rows = source.parse(load_text_fixture("github_markdown_table_subset.md"), companies)
+
+    assert [row["company"] for row in rows] == ["Google", "Capital One", "GitHub"]
+    assert all(set(row) == set(CANONICAL_COLUMNS) | {"extra"} for row in rows)
+    google, capital_one, github = rows
+    assert google["title"] == "Software Engineer Intern | Backend"
+    assert google["location"] == "New York, NY"
+    assert google["source_url"] == (
+        "https://careers.example.test/jobs/eng-1?utm_source=github"
+    )
+    assert google["date_posted"] == ""
+    assert google["internship_type"] == "Summer 2027"
+    assert google["extra"]["source_added_date"] == "2026-07-20"
+    assert google["extra"]["no_sponsorship"] is True
+    assert google["extra"]["us_citizenship_required"] is True
+    assert google["extra"]["closed"] is False
+    assert capital_one["extra"]["active"] is False
+    assert capital_one["extra"]["closed"] is True
+    assert github["location"] == ""
+    assert github["extra"]["source_added_date"] == ""
+    assert "skipped 2 malformed row(s)" in caplog.text
+    assert "invalid_added_date=1" in caplog.text
+    assert "invalid_apply_url=1" in caplog.text
+    assert "Another Broken Co" not in caplog.text
+
+
+def test_github_markdown_watchlist_and_default_term_filtering():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="sndsh404_summer_2027",
+        default_term="Summer 2027",
+    )
+    payload = load_text_fixture("github_markdown_table_subset.md")
+
+    no_company_match = source.parse(
+        payload,
+        (CompanyCfg(name="Not Listed", terms=("Summer 2027",)),),
+    )
+    wrong_term = source.parse(
+        payload,
+        (CompanyCfg(name="Google", terms=("Fall 2027",)),),
+    )
+
+    assert no_company_match == []
+    assert wrong_term == []
+
+
+def test_github_markdown_missing_expected_table_fails():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="markdown",
+        default_term="Summer 2027",
+    )
+
+    with pytest.raises(SourceSchemaError, match="missing the expected"):
+        source.parse("# README\n\n| Name | Link |\n| --- | --- |\n", ())
+
+
+def test_github_markdown_structurally_invalid_table_fails():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="markdown",
+        default_term="Summer 2027",
+    )
+    payload = (
+        "| Company | Role | Location | Apply | Added |\n"
+        "| --- | --- | broken | --- | --- |\n"
+        "| Acme | Software Intern | Remote | [apply](https://example.test/1) | 2026-07-20 |\n"
+    )
+
+    with pytest.raises(SourceSchemaError, match="invalid separator"):
+        source.parse(payload, ())
+
+
+def test_github_markdown_nonempty_all_malformed_table_fails():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="markdown",
+        default_term="Summer 2027",
+    )
+    payload = (
+        "| Company | Role | Location | Apply | Added |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| Acme | Software Intern | Remote | missing | 2026-07-20 |\n"
+    )
+
+    with pytest.raises(SourceSchemaError, match="all malformed"):
+        source.parse(payload, (CompanyCfg(name="Acme", terms=("Summer 2027",)),))
 
 
 def test_github_listings_matches_aliases_and_filters_inactive_or_wrong_term():

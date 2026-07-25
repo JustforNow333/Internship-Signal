@@ -3,21 +3,26 @@
 *.py[cod]
 *$py.class
 .pytest_cache/
+.hypothesis/
 .mypy_cache/
+.dmypy.json
 .ruff_cache/
 .pyre/
+.pytype/
 .tox/
 .nox/
 .ipynb_checkpoints/
 .coverage
 .coverage.*
 coverage.xml
+junit*.xml
 htmlcov/
 *.egg-info/
 .eggs/
 build/
 pip-wheel-metadata/
 __pypackages__/
+*.prof
 *.log
 *.tmp
 tmp/
@@ -36,6 +41,10 @@ ENV/
 node_modules/
 dist/
 .vite/
+.vitest/
+.eslintcache
+.parcel-cache/
+.turbo/
 coverage/
 playwright-report/
 test-results/
@@ -52,8 +61,11 @@ pnpm-debug.log*
 !.env.example
 .envrc
 .DS_Store
+.AppleDouble
+._*
 Thumbs.db
 desktop.ini
+ehthumbs.db
 *Zone.Identifier
 # WSL can create this literal file when Windows-style `2>NUL` redirection is
 # used from a POSIX shell.
@@ -62,6 +74,8 @@ desktop.ini
 # Editors
 .idea/
 .vscode/
+.fleet/
+.history/
 *.swp
 *.swo
 *.bak
@@ -72,6 +86,12 @@ desktop.ini
 private/
 *.private.*
 *.secret.*
+*.secrets.*
+*.credentials.*
+*.pem
+*.key
+*.p12
+*.pfx
 alumni.csv
 alumni.csv.b64
 company_alumni.json
@@ -87,9 +107,9 @@ watcher/alumni.b64
 make_alumni_b64.py
 watcher/make_alumni_b64.py
 
-# Real-posting scoring benchmarks contain posting text and private preference
-# labels. Keep the documentation/tests trackable while all generated sets stay
-# local and out of workflow artifacts.
+# Real-posting scoring benchmarks contain posting text and private human labels.
+# Keep frozen inputs, active/backup label CSVs, and generated reports local while
+# documentation and tests remain trackable.
 evaluation/private/
 evaluation/scoring_*_labels.csv
 evaluation/scoring_*_rows.jsonl
@@ -99,6 +119,9 @@ evaluation/scoring_*_report.md
 evaluation/scoring_*_metrics.json
 
 # Local watcher scratch artifacts
+# Throwaway probe/debug scripts run from the repository root.
+_probe*.py
+_scratch*.py
 check_alumni_coverage.py
 watcher/add_company_batch.txt
 watcher/additions_detect.json
@@ -117,6 +140,11 @@ watcher/source-health*.json
 # control even when a local run writes them in the repository root.
 watcher-reliability-probe*.json
 watcher/reliability-probe*.json
+# Isolated GitHub backstop probe summaries and logs are operational scratch.
+github-backstop-probe*.json
+github-backstop-probe*.log
+watcher/github-backstop-probe*.json
+watcher/github-backstop-probe*.log
 # Local direct-adapter probe captures must not become fixtures accidentally.
 workday-live-probe*.json
 workday-live-probe*.log
@@ -128,15 +156,13 @@ workday-transport-probe*.json
 workday-transport-probe*.log
 watcher/workday-transport-probe*.json
 watcher/workday-transport-probe*.log
-# Keep canonical agents.md/AGENTS.md files trackable; ignore local copies.
+# Prompt-maintained repository guidance; ignore local/case-variant copies.
 agents.local.md
 agents.*.md
 agents (*).md
 AGENTS.local.md
 AGENTS.*.md
 AGENTS (*).md
-# Keep the canonical root claude.md trackable; ignore local instruction copies
-# and Claude Code's machine-specific settings.
 claude.local.md
 claude.*.md
 claude (*).md
@@ -144,9 +170,13 @@ CLAUDE.local.md
 CLAUDE.*.md
 CLAUDE (*).md
 .claude/settings.local.json
+!/.gitignore
+!/agents.md
+!/claude.md
 # Keep the canonical root WATCHER_PROGRESS.md tracked; ignore local copies.
 WATCHER_PROGRESS.local.md
 WATCHER_PROGRESS.*.md
 WATCHER_PROGRESS (*).md
 watcher/WATCHER_PROGRESS*.md
 watcher/WATCHER_PROGRESS (*).md
+!/WATCHER_PROGRESS.md

@@ -129,6 +129,43 @@ def fetch_json(url: str, source_name: str, timeout: int = DEFAULT_TIMEOUT_SECOND
         raise SourceFetchError(f"{source_name} returned invalid JSON: {url}") from exc
 
 
+def fetch_text(
+    url: str,
+    source_name: str,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    *,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+) -> str:
+    """Fetch one explicitly UTF-8 text response with a bounded body."""
+
+    request = Request(
+        url,
+        headers={
+            "Accept": "text/plain, text/markdown;q=0.9",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read(max_response_bytes + 1)
+    except HTTPError as exc:
+        raise SourceFetchError(
+            f"{source_name} fetch failed with HTTP {exc.code}: {_safe_url(url)}"
+        ) from exc
+    except (TimeoutError, URLError, OSError) as exc:
+        raise SourceFetchError(f"{source_name} fetch failed: {_safe_url(url)}") from exc
+    if len(body) > max_response_bytes:
+        raise SourceFetchError(
+            f"{source_name} response exceeded {max_response_bytes} bytes: {_safe_url(url)}"
+        )
+    try:
+        return body.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise SourceFetchError(
+            f"{source_name} returned non-UTF-8 text: {_safe_url(url)}"
+        ) from exc
+
+
 def post_json(
     url: str,
     payload: dict,
@@ -555,7 +592,10 @@ def _json_content_type(content_type: str) -> bool:
 
 def _safe_url(value: str) -> str:
     raw = str(value or "").strip()
-    parsed = urlsplit(raw)
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return re.sub(r"[?#].*$", "", raw)
     if parsed.scheme.casefold() in {"http", "https"} and parsed.hostname:
         host = parsed.hostname
         try:

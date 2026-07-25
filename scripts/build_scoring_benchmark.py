@@ -241,6 +241,8 @@ def baseline_prediction(job: Mapping[str, object], groups: Sequence[str]) -> dic
 
 
 def labels_row(job: Mapping[str, object], groups: Sequence[str]) -> dict[str, object]:
+    """Build a blind label row with only the simplified human fields blank."""
+
     extra = job.get("extra") if isinstance(job.get("extra"), Mapping) else {}
     row = {
         "job_id": str(job.get("id") or ""),
