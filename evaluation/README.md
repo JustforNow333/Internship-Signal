@@ -240,6 +240,15 @@ U.S.-remote, multi-location U.S., and location-ambiguous rows remain.
 Production eligibility, classification, scores, actions, and ranking are not
 changed.
 
+Report-only reevaluation uses that same shared production helper. It considers
+canonical/raw/normalized location values, remote fields, adapter-preserved
+structured country metadata, unambiguous country-code prefixes, and explicit
+country evidence in strong posting-location context. Structured country data
+wins over conflicting text within one location object, a separate explicit
+U.S. location wins across a multi-location role, and city-only/state-only
+values remain ambiguous. Location explanations identify the field and bounded
+evidence used for each explicit decision.
+
 The three independent cohorts are:
 
 - `random`: 160 requested rows sampled from the complete U.S./ambiguous

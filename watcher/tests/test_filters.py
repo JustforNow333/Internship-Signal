@@ -85,9 +85,16 @@ def test_multiple_locations_with_no_us_location_are_ineligible():
     assert filter_matches([posting]) == []
 
 
-@pytest.mark.parametrize("location", ["", "8 Locations", "Boston, MA", "Santiago"])
+@pytest.mark.parametrize("location", ["", "8 Locations", "Boston, MA"])
 def test_missing_or_ambiguous_location_is_not_automatically_rejected(location):
     posting = job(location=location)
+
+    assert assess_us_location(posting).status == LOCATION_AMBIGUOUS
+    assert filter_matches([posting]) == [posting]
+
+
+def test_santiago_without_country_evidence_remains_ambiguous():
+    posting = job(location="Santiago")
 
     assert assess_us_location(posting).status == LOCATION_AMBIGUOUS
     assert filter_matches([posting]) == [posting]
@@ -98,6 +105,8 @@ def test_missing_or_ambiguous_location_is_not_automatically_rejected(location):
     [
         "Madrid, MD, Spain",
         "Schiphol, NH, Netherlands",
+        "Montpellier, France",
+        "Boxmeer, Netherlands",
     ],
 )
 def test_foreign_country_text_wins_over_state_like_abbreviations(location):
@@ -119,6 +128,93 @@ def test_structured_country_information_is_preferred_and_supports_multiple_locat
 
     assert assess_us_location(foreign).status == OUTSIDE_US
     assert assess_us_location(mixed).status == LOCATION_US
+
+
+def test_workday_alpha3_country_prefixes_are_explicit_foreign_evidence():
+    netherlands = job(location="NLD - North Brabant - Boxmeer")
+    switzerland = job(location="CHE - Lucerne - Lucerne (Rösslimatt)")
+    poland = job(location="POL - Mazowieckie Wojewodztwo - Warsaw")
+
+    assert assess_us_location(netherlands).status == OUTSIDE_US
+    assert assess_us_location(switzerland).status == OUTSIDE_US
+    assert assess_us_location(poland).status == OUTSIDE_US
+
+
+def test_nested_structured_country_metadata_is_used_consistently():
+    netherlands = job(
+        location="Utrecht",
+        extra={"posting_metadata": {"location": {"country": "Netherlands"}}},
+    )
+    switzerland = job(
+        location="Lucerne",
+        extra={"normalized_location": {"country_code": "CH"}},
+    )
+    poland = job(
+        location="Warsaw",
+        extra={"source_details": {"raw_location": {"countryCode": "PL"}}},
+    )
+
+    assert assess_us_location(netherlands).status == OUTSIDE_US
+    assert assess_us_location(switzerland).status == OUTSIDE_US
+    assert assess_us_location(poland).status == OUTSIDE_US
+
+
+def test_structured_country_overrides_misleading_text_in_the_same_location():
+    posting = job(
+        location={
+            "display_name": "Boston, MA, United States",
+            "country_code": "NL",
+        }
+    )
+
+    assert assess_us_location(posting).status == OUTSIDE_US
+
+
+def test_reliable_description_country_context_resolves_city_only_locations():
+    montpellier = job(
+        location="Montpellier",
+        description=(
+            "Work in an international environment with offices located in "
+            "Israel, Slovenia and France."
+        ),
+    )
+    santiago = job(
+        location="Santiago",
+        description=(
+            "Ability to work on-site at our office located in Ciudad Empresarial, "
+            "Huechuraba, Santiago, Chile."
+        ),
+    )
+    netherlands = job(
+        location="Utrecht",
+        description="Join our Sales Engineering team in the Netherlands.",
+    )
+
+    for posting, country in (
+        (montpellier, "France"),
+        (santiago, "Chile"),
+        (netherlands, "Netherlands"),
+    ):
+        decision = assess_us_location(posting)
+        assert decision.status == OUTSIDE_US
+        assert "description location context" in decision.explanation
+        assert country in decision.explanation
+
+
+def test_explicit_us_location_wins_over_separate_foreign_evidence():
+    posting = job(
+        location=[
+            {"city": "Amsterdam", "country": "Netherlands"},
+            {"city": "Boston", "country_code": "US"},
+        ],
+        description="Other company offices are located in France.",
+    )
+
+    decision = assess_us_location(posting)
+
+    assert decision.status == LOCATION_US
+    assert "other non-U.S. evidence does not override it" in decision.explanation
+    assert filter_matches([posting]) == [posting]
 
 
 def test_filters_drop_non_swe_roles():

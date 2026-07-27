@@ -68,6 +68,7 @@ class LeverSource:
             extra={
                 "source_id": str(posting.get("id") or ""),
                 "posting_url": str(posting.get("hostedUrl") or ""),
+                "country": str(posting.get("country") or "").strip(),
             },
         )
 

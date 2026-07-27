@@ -220,6 +220,25 @@ harvest cookies, rotate proxies, automate browsers, or bypass challenges.
 
 ---
 
+## U.S. watcher location eligibility
+
+The watcher applies one conservative location gate in
+`watcher/eligibility.py::assess_us_location()`. It reads canonical and raw
+location fields, remote-location/status fields, and structured country data
+preserved by source adapters. Structured country values take precedence over
+misleading text within the same location object; unambiguous ISO country codes
+and explicit country/region names are also recognized. Strong location phrases
+in posting text can resolve a city-only ATS location, while a city name or U.S.
+state abbreviation alone never establishes a country.
+
+Any separate explicit U.S. option keeps a multi-location role eligible, as do
+U.S.-remote roles. Explicitly foreign and foreign-remote roles receive the
+stable watcher reason `outside_us`; missing and genuinely ambiguous locations
+continue to normal role eligibility. The gate changes neither backend fit
+scores nor role tracks, actions, ranking values, or degree decisions.
+
+---
+
 ## Watcher source health
 
 Every watcher execution assigns a unique run ID and records exactly one direct

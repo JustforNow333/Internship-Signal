@@ -11,7 +11,9 @@
   `watcher/eligibility.py`; filters add internship/open/min-score checks.
 - `assess_us_location` is the sole location gate: explicit U.S. wins,
   explicit foreign country/region yields `outside_us`, and ambiguity passes.
-  Never derive country from state abbreviations or alter scores/ranking.
+  Prefer collected structured country/location metadata, keep city-only
+  evidence ambiguous, preserve diagnostics, and never derive country from
+  state abbreviations or alter scores/ranking.
 - Keep typed GitHub sources backward-compatible with `github_listing_urls`.
   Merge direct ATS, Simplify JSON, then Markdown by fixed priority; Markdown
   `Added` is source metadata and lower-priority closure cannot close direct data.

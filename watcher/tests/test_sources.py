@@ -6,6 +6,7 @@ import pytest
 
 from backend.app.normalize import CANONICAL_COLUMNS
 from watcher.config import CompanyCfg
+from watcher.eligibility import LOCATION_US, OUTSIDE_US, assess_us_location
 from watcher.sources import (
     AshbySource,
     GitHubListingsSource,
@@ -98,6 +99,8 @@ def test_greenhouse_fixture_to_canonical_rows():
     assert first["extra"]["source"] == "direct"
     assert first["extra"]["source_adapter"] == "greenhouse"
     assert first["extra"]["greenhouse_company_name"] == "Astera Labs Early Career"
+    assert first["extra"]["location"] == {"name": "Toronto, Ontario, Canada"}
+    assert assess_us_location(first).status == OUTSIDE_US
     assert "<" not in first["description"]
     assert "\u2019" in first["description"]
     assert "\u00ae" in first["description"]
@@ -138,6 +141,8 @@ def test_lever_fixture_to_canonical_rows():
     assert first["extra"]["source"] == "direct"
     assert first["extra"]["source_adapter"] == "lever"
     assert first["extra"]["posting_url"] == "https://jobs.lever.co/ifm-us/5342e333-61b9-406d-bfea-61a687a94d1f"
+    assert first["extra"]["country"] == "US"
+    assert assess_us_location(first).status == LOCATION_US
     assert "Institute of Foundation Models" in first["description"]
 
 
@@ -520,6 +525,8 @@ def test_ashby_fixture_to_canonical_rows():
     assert first["remote_status"] == "Hybrid"
     assert first["internship_type"] == "FullTime"
     assert first["extra"]["source_adapter"] == "ashby"
+    assert first["extra"]["locations"][0]["address"]["postalAddress"]["addressCountry"] == "Denmark"
+    assert assess_us_location(first).status == OUTSIDE_US
     assert "Chainalysis" in first["description"]
 
 
@@ -544,6 +551,8 @@ def test_smartrecruiters_fixture_to_canonical_rows():
     assert first["date_posted"] == "2026-06-27"
     assert first["extra"]["source_adapter"] == "smartrecruiters"
     assert first["extra"]["smartrecruiters_company"] == "Bosch Group"
+    assert first["extra"]["location"]["country"] == "cn"
+    assert assess_us_location(first).status == OUTSIDE_US
 
 
 def test_smartrecruiters_unexpected_shape_raises():
@@ -569,6 +578,8 @@ def test_workable_fixture_to_canonical_rows():
     assert first["internship_type"] == "full"
     assert first["extra"]["source_adapter"] == "workable"
     assert first["extra"]["shortcode"] == "F8427A442D"
+    assert first["extra"]["locations"][0]["countryCode"] == "US"
+    assert assess_us_location(first).status == LOCATION_US
 
 
 def test_workable_watchlist_company_with_no_openings_parses_empty_real_response():

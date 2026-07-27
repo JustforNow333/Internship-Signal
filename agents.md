@@ -80,7 +80,10 @@
 - `watcher/eligibility.py::assess_us_location` owns the conservative location
   gate. Explicit U.S. evidence wins across multiple locations; explicit
   foreign country/region evidence yields `outside_us`; ambiguous text passes.
-  Location eligibility must not change backend fit scores, actions, or roles.
+  Prefer already-collected structured country/location metadata over
+  free-form text, keep city-only evidence ambiguous, and preserve diagnostic
+  evidence. Location eligibility must not change backend fit scores, actions,
+  or roles.
 - Graduate/advanced-degree internships are excluded from digests with
   `watcher_eligible=false` and `fit_score=0`.
 - IT support, quality/test, and solutions engineering are deliberate

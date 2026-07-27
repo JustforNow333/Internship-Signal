@@ -60,6 +60,7 @@ class WorkableSource:
                 "shortcode": shortcode,
                 "department": _join(job.get("department")),
                 "workplace": str(job.get("workplace") or ""),
+                "locations": job.get("locations") or [job.get("location") or {}],
             },
         )
 

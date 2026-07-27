@@ -56,6 +56,11 @@ class AshbySource:
                 "job_url": str(job.get("jobUrl") or ""),
                 "team": str(job.get("team") or ""),
                 "department": str(job.get("department") or ""),
+                "location": {
+                    "name": str(job.get("location") or "").strip(),
+                    "country": str(job.get("country") or "").strip(),
+                },
+                "locations": job.get("secondaryLocations") or [],
             },
         )
 

@@ -52,7 +52,9 @@ _US_TERRITORY_ALIASES = frozenset(
         "united states virgin islands",
     }
 )
-_US_STRUCTURED_COUNTRY_CODES = frozenset({"AS", "GU", "MP", "PR", "UM", "US", "USA", "VI"})
+_US_STRUCTURED_COUNTRY_CODES = frozenset(
+    {"AS", "ASM", "GU", "GUM", "MP", "MNP", "PR", "PRI", "UM", "UMI", "US", "USA", "VI", "VIR"}
+)
 _FOREIGN_COUNTRY_ALIASES = frozenset(
     line.strip()
     for line in """
@@ -91,6 +93,7 @@ cameroon
 canada
 cape verde
 central african republic
+chile
 china
 colombia
 comoros
@@ -295,29 +298,78 @@ ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY
 UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW
 """.split()
 )
+_ISO_ALPHA3_CODES = frozenset(
+    """
+ABW AFG AGO AIA ALA ALB AND ARE ARG ARM ASM ATA ATF ATG AUS AUT AZE BDI BEL
+BEN BES BFA BGD BGR BHR BHS BIH BLM BLR BLZ BMU BOL BRA BRB BRN BTN BVT BWA
+CAF CAN CCK CHE CHL CHN CIV CMR COD COG COK COL COM CPV CRI CUB CUW CXR CYM
+CYP CZE DEU DJI DMA DNK DOM DZA ECU EGY ERI ESH ESP EST ETH FIN FJI FLK FRA
+FRO FSM GAB GBR GEO GGY GHA GIB GIN GLP GMB GNB GNQ GRC GRD GRL GTM GUF GUM
+GUY HKG HMD HND HRV HTI HUN IDN IMN IND IOT IRL IRN IRQ ISL ISR ITA JAM JEY
+JOR JPN KAZ KEN KGZ KHM KIR KNA KOR KWT LAO LBN LBR LBY LCA LIE LKA LSO LTU
+LUX LVA MAC MAF MAR MCO MDA MDG MDV MEX MHL MKD MLI MLT MMR MNE MNG MNP MOZ
+MRT MSR MTQ MUS MWI MYS MYT NAM NCL NER NFK NGA NIC NIU NLD NOR NPL NRU NZL
+OMN PAK PAN PCN PER PHL PLW PNG POL PRI PRK PRT PRY PSE PYF QAT REU ROU RUS
+RWA SAU SDN SEN SGP SGS SHN SJM SLB SLE SLV SMR SOM SPM SRB SSD STP SUR SVK
+SVN SWE SWZ SXM SYC SYR TCA TCD TGO THA TJK TKL TKM TLS TON TTO TUN TUR TUV
+TWN TZA UGA UKR UMI URY USA UZB VAT VCT VEN VGB VIR VNM VUT WLF WSM YEM ZAF
+ZMB ZWE
+""".split()
+)
 _COUNTRY_KEYS = frozenset(
     {
         "addresscountry",
         "country",
         "countrycode",
-        "country_code",
         "countryname",
-        "country_name",
+    }
+)
+_LOCATION_CONTAINER_KEYS = frozenset(
+    {
+        "joblocation",
+        "joblocations",
+        "location",
+        "locationdata",
+        "locations",
+        "normalizedlocation",
+        "normalizedlocations",
+        "primarylocation",
+        "rawlocation",
+        "rawlocations",
+        "remotelocation",
+        "remotelocations",
+        "remotestatus",
+        "workplacelocation",
+        "workplacelocations",
     }
 )
 _LOCATION_TEXT_KEYS = frozenset(
     {
         "address",
+        "city",
         "displayname",
-        "display_name",
         "formatted",
         "label",
         "name",
         "region",
         "regionname",
-        "region_name",
     }
 )
+_METADATA_CONTAINER_KEYS = frozenset(
+    {
+        "extra",
+        "jobmetadata",
+        "metadata",
+        "postingmetadata",
+        "sourcedetails",
+        "sourcemetadata",
+    }
+)
+_DESCRIPTION_LOCATION_CONTEXT_RE = re.compile(
+    r"\b(?:based|located|location|office|offices|on site|onsite|team in|work in)\b"
+)
+_DESCRIPTION_SPLIT_RE = re.compile(r"[\n.!?;]+")
+_US_DESCRIPTION_ALIASES = _US_COUNTRY_ALIASES - {"us"}
 
 
 @dataclass(frozen=True)
@@ -329,44 +381,57 @@ class LocationDecision:
     explanation: str
 
 
-def assess_us_location(job: Mapping[str, object]) -> LocationDecision:
-    """Classify only explicit country evidence; ambiguous locations pass.
+@dataclass(frozen=True)
+class _LocationEvidence:
+    source: str
+    text_values: tuple[str, ...] = ()
+    structured_countries: tuple[str, ...] = ()
+    allow_bare_us: bool = True
 
-    Any explicit U.S. option wins for multi-location roles. State
-    abbreviations are intentionally ignored because they collide with foreign
-    regions such as Madrid, MD and Schiphol, NH.
+
+@dataclass(frozen=True)
+class _EvidenceMatch:
+    status: str
+    source: str
+    value: str
+
+
+def assess_us_location(job: Mapping[str, object]) -> LocationDecision:
+    """Classify only reliable country evidence; ambiguous locations pass.
+
+    Structured country values take precedence over text within the same
+    location object. Any separate explicit U.S. option still wins for a
+    multi-location role. State abbreviations are intentionally ignored because
+    they collide with foreign regions such as Madrid, MD and Schiphol, NH.
     """
 
-    text_values: list[str] = []
-    structured_countries: list[str] = []
-    for key in ("location", "locations", "remote_status"):
-        _collect_location_value(job.get(key), text_values, structured_countries)
-    extra = job.get("extra")
-    if isinstance(extra, Mapping):
-        for key in ("location", "locations", "remote_location"):
-            _collect_location_value(extra.get(key), text_values, structured_countries)
+    evidence: list[_LocationEvidence] = []
+    _collect_metadata_evidence(job, "", evidence, recurse=False)
+    evidence.extend(_description_location_evidence(job.get("description")))
 
-    structured_statuses = [
-        status
-        for value in structured_countries
-        if (status := _structured_country_status(value)) is not None
+    matches = [
+        match
+        for item in evidence
+        if (match := _classify_evidence(item)) is not None
     ]
-    normalized_text = [_normalize_location_text(value) for value in text_values if value]
-    us_text = any(_contains_alias(value, _US_COUNTRY_ALIASES | _US_TERRITORY_ALIASES) for value in normalized_text)
-    foreign_text = any(_contains_foreign_location(value) for value in normalized_text)
+    us_matches = [match for match in matches if match.status == LOCATION_US]
+    foreign_matches = [match for match in matches if match.status == OUTSIDE_US]
 
-    if LOCATION_US in structured_statuses or us_text:
+    if us_matches:
+        detail = _format_evidence_match(us_matches[0])
         explanation = (
-            "At least one explicit United States location is available."
-            if OUTSIDE_US in structured_statuses or foreign_text
-            else "Explicit United States location evidence found."
+            f"At least one explicit United States location is available ({detail}); "
+            "other non-U.S. evidence does not override it."
+            if foreign_matches
+            else f"Explicit United States location evidence found ({detail})."
         )
         return LocationDecision(LOCATION_US, None, explanation)
-    if OUTSIDE_US in structured_statuses or foreign_text:
+    if foreign_matches:
+        detail = _format_evidence_match(foreign_matches[0])
         return LocationDecision(
             OUTSIDE_US,
             OUTSIDE_US,
-            "Explicit non-United States country or region evidence found.",
+            f"Explicit non-United States country or region evidence found ({detail}).",
         )
     return LocationDecision(
         LOCATION_AMBIGUOUS,
@@ -448,30 +513,218 @@ def determine_watcher_eligibility(
     }
 
 
-def _collect_location_value(
+def _collect_metadata_evidence(
     value: object,
-    text_values: list[str],
-    structured_countries: list[str],
+    path: str,
+    evidence: list[_LocationEvidence],
+    *,
+    recurse: bool,
+) -> None:
+    if not isinstance(value, Mapping):
+        return
+
+    country_values: list[str] = []
+    location_items: list[tuple[str, object]] = []
+    for key, nested in value.items():
+        token = _key_token(key)
+        nested_path = f"{path}.{key}" if path else str(key)
+        if token in _COUNTRY_KEYS and nested is not None:
+            country_values.extend(_string_values(nested))
+        elif token in _LOCATION_CONTAINER_KEYS:
+            location_items.append((nested_path, nested))
+
+    if country_values:
+        text_values = [
+            text
+            for _nested_path, nested in location_items
+            for text in _location_text_values(nested)
+        ]
+        evidence.append(
+            _LocationEvidence(
+                source=path or "job metadata",
+                text_values=tuple(text_values),
+                structured_countries=tuple(country_values),
+            )
+        )
+    else:
+        for nested_path, nested in location_items:
+            _append_location_evidence(nested, nested_path, evidence)
+
+    for key, nested in value.items():
+        token = _key_token(key)
+        if token in _COUNTRY_KEYS or token in _LOCATION_CONTAINER_KEYS:
+            continue
+        if not isinstance(nested, (Mapping, list, tuple, set, frozenset)):
+            continue
+        if recurse or token in _METADATA_CONTAINER_KEYS:
+            nested_path = f"{path}.{key}" if path else str(key)
+            _walk_metadata_value(nested, nested_path, evidence)
+
+
+def _walk_metadata_value(
+    value: object,
+    path: str,
+    evidence: list[_LocationEvidence],
+) -> None:
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for index, nested in enumerate(value):
+            _walk_metadata_value(nested, f"{path}[{index}]", evidence)
+    elif isinstance(value, Mapping):
+        _collect_metadata_evidence(value, path, evidence, recurse=True)
+
+
+def _append_location_evidence(
+    value: object,
+    source: str,
+    evidence: list[_LocationEvidence],
 ) -> None:
     if value is None:
         return
     if isinstance(value, str):
         if value.strip():
-            text_values.append(value)
+            evidence.append(_LocationEvidence(source=source, text_values=(value,)))
         return
     if isinstance(value, Mapping):
+        countries: list[str] = []
+        texts: list[str] = []
+        nested_locations: list[tuple[str, object]] = []
         for key, nested in value.items():
-            normalized_key = str(key).casefold().replace("-", "_")
-            if normalized_key in _COUNTRY_KEYS and nested is not None:
-                structured_countries.append(str(nested))
-            elif normalized_key in _LOCATION_TEXT_KEYS:
-                _collect_location_value(nested, text_values, structured_countries)
-            elif normalized_key in {"location", "locations"}:
-                _collect_location_value(nested, text_values, structured_countries)
+            token = _key_token(key)
+            nested_source = f"{source}.{key}"
+            if token in _COUNTRY_KEYS and nested is not None:
+                countries.extend(_string_values(nested))
+            elif token in _LOCATION_TEXT_KEYS:
+                texts.extend(_location_text_values(nested))
+            elif token in _LOCATION_CONTAINER_KEYS:
+                nested_locations.append((nested_source, nested))
+        if countries or texts:
+            evidence.append(
+                _LocationEvidence(
+                    source=source,
+                    text_values=tuple(texts),
+                    structured_countries=tuple(countries),
+                )
+            )
+        for nested_source, nested in nested_locations:
+            _append_location_evidence(nested, nested_source, evidence)
+        for key, nested in value.items():
+            token = _key_token(key)
+            if token in _COUNTRY_KEYS | _LOCATION_TEXT_KEYS | _LOCATION_CONTAINER_KEYS:
+                continue
+            if isinstance(nested, (Mapping, list, tuple, set, frozenset)):
+                _walk_metadata_value(nested, f"{source}.{key}", evidence)
         return
     if isinstance(value, (list, tuple, set, frozenset)):
-        for nested in value:
-            _collect_location_value(nested, text_values, structured_countries)
+        for index, nested in enumerate(value):
+            _append_location_evidence(nested, f"{source}[{index}]", evidence)
+
+
+def _location_text_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, Mapping):
+        values: list[str] = []
+        for key, nested in value.items():
+            if _key_token(key) in _LOCATION_TEXT_KEYS | _LOCATION_CONTAINER_KEYS:
+                values.extend(_location_text_values(nested))
+        return values
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [text for nested in value for text in _location_text_values(nested)]
+    return []
+
+
+def _string_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [text for nested in value for text in _string_values(nested)]
+    if value is None or isinstance(value, Mapping):
+        return []
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _description_location_evidence(value: object) -> list[_LocationEvidence]:
+    if not isinstance(value, str) or not value.strip():
+        return []
+    evidence: list[_LocationEvidence] = []
+    for segment in _DESCRIPTION_SPLIT_RE.split(value):
+        normalized = _normalize_location_text(segment)
+        if not normalized or not _DESCRIPTION_LOCATION_CONTEXT_RE.search(normalized):
+            continue
+        has_us = _contains_alias(
+            normalized,
+            _US_DESCRIPTION_ALIASES | _US_TERRITORY_ALIASES,
+        )
+        if not has_us and not _contains_foreign_location(normalized):
+            continue
+        evidence.append(
+            _LocationEvidence(
+                source="description location context",
+                text_values=(segment.strip(),),
+                allow_bare_us=False,
+            )
+        )
+    return evidence
+
+
+def _classify_evidence(evidence: _LocationEvidence) -> _EvidenceMatch | None:
+    structured_matches = [
+        _EvidenceMatch(status, evidence.source, value)
+        for value in evidence.structured_countries
+        if (status := _structured_country_status(value)) is not None
+    ]
+    us_match = next(
+        (match for match in structured_matches if match.status == LOCATION_US),
+        None,
+    )
+    if us_match is not None:
+        return us_match
+    foreign_match = next(
+        (match for match in structured_matches if match.status == OUTSIDE_US),
+        None,
+    )
+    if foreign_match is not None:
+        return foreign_match
+
+    for value in evidence.text_values:
+        status = _text_location_status(value, allow_bare_us=evidence.allow_bare_us)
+        if status == LOCATION_US:
+            return _EvidenceMatch(status, evidence.source, value)
+    for value in evidence.text_values:
+        status = _text_location_status(value, allow_bare_us=evidence.allow_bare_us)
+        if status == OUTSIDE_US:
+            return _EvidenceMatch(status, evidence.source, value)
+    return None
+
+
+def _text_location_status(value: object, *, allow_bare_us: bool) -> str | None:
+    normalized = _normalize_location_text(value)
+    us_aliases = _US_COUNTRY_ALIASES if allow_bare_us else _US_DESCRIPTION_ALIASES
+    if _contains_alias(normalized, us_aliases | _US_TERRITORY_ALIASES):
+        return LOCATION_US
+    prefix_match = re.match(r"^\s*([A-Za-z]{3})\s*(?:[-\u2013\u2014|:/])", str(value or ""))
+    if prefix_match:
+        prefix_status = _structured_country_status(prefix_match.group(1))
+        if prefix_status is not None:
+            return prefix_status
+    if _contains_foreign_location(normalized):
+        return OUTSIDE_US
+    return None
+
+
+def _format_evidence_match(match: _EvidenceMatch) -> str:
+    value = re.sub(r"\s+", " ", match.value).strip()
+    if len(value) > 140:
+        if match.source == "description location context":
+            value = "..." + value[-137:].lstrip()
+        else:
+            value = value[:137].rstrip() + "..."
+    return f'{match.source}: "{value}"'
+
+
+def _key_token(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
 
 
 def _structured_country_status(value: object) -> str | None:
@@ -481,7 +734,7 @@ def _structured_country_status(value: object) -> str | None:
         return LOCATION_US
     if compact in _US_STRUCTURED_COUNTRY_CODES:
         return LOCATION_US
-    if compact in _ISO_ALPHA2_CODES:
+    if compact in _ISO_ALPHA2_CODES or compact in _ISO_ALPHA3_CODES:
         return OUTSIDE_US
     if _contains_alias(normalized, _FOREIGN_COUNTRY_ALIASES):
         return OUTSIDE_US

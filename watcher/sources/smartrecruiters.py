@@ -86,6 +86,7 @@ class SmartRecruitersSource:
                 "ref_number": str(posting.get("refNumber") or ""),
                 "smartrecruiters_company": _company_name(posting.get("company")),
                 "function": _label(posting.get("function")),
+                "location": posting.get("location") or {},
             },
         )
 

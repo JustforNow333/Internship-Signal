@@ -108,9 +108,9 @@ make_alumni_b64.py
 watcher/make_alumni_b64.py
 
 # Real-posting scoring benchmarks contain posting text and private human labels.
-# Keep historical location-gate and all U.S. role-fit rebuild inputs,
-# active/backup labels, comparison data, and evaluator reports/metrics local
-# while docs/tests stay trackable.
+# Keep historical location-gate and all U.S. role-fit frozen inputs,
+# active/backup labels, report-only reevaluations, comparison data, and
+# evaluator metrics local while docs/tests stay trackable.
 evaluation/private/
 evaluation/scoring_*_labels.csv
 evaluation/scoring_*_rows.jsonl

@@ -66,6 +66,7 @@ class GreenhouseSource:
             extra={
                 "source_id": str(job.get("id") or ""),
                 "greenhouse_company_name": str(job.get("company_name") or ""),
+                "location": location or {},
             },
         )
 

@@ -323,11 +323,26 @@ This file tracks completed watcher steps and the next handoff target.
    - A valid freeze requires committing the construction first, a clean tracked
      tree, `git_dirty=false`, the exact committed SHA, blank human fields, and
      verified labels/IDs/rows/predictions/watchlist hashes.
+15. Structured U.S.-location evidence:
+   - The shared production helper now prefers structured country values within
+     each location, recognizes unambiguous ISO alpha-3 prefixes such as `NLD`,
+     `CHE`, and `POL`, and uses bounded country evidence only from strong
+     posting-location context when an ATS supplies a city alone.
+   - Greenhouse, Lever, Ashby, SmartRecruiters, and Workable retain their
+     already-available structured location/country metadata in canonical
+     `extra`; classification and scoring remain backend-owned and unchanged.
+   - The frozen 74-row U.S. role-fit reevaluation changed seven location
+     statuses and four eligibility decisions, all human-labeled `outside_us`.
+     False positives fell from 9 to 5; precision rose from 43.8% to 58.3% and
+     F1 from 48.3% to 56.0%. Fit scores, roles, actions, degree decisions, and
+     ranking values did not change.
+   - Offline backend/watcher validation: `499 passed, 1 warning`; compileall
+     completed successfully.
 
 ## Next
 
-- Blind-label `scoring_us_rolefit_20260726_labels.csv` with `yes`, `no`, or
-  `uncertain`, then rerun the normal evaluator without partial-label mode.
+- Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only
+  reevaluation for separately scoped production changes.
 - Run the first manual GitHub Actions priming dispatch with `send_email=false`.
 - After confirming the data branch exists and the heartbeat looks right, set the
   repo Actions variable `WATCHER_SEND_EMAIL=true` to enable scheduled sends.
@@ -348,8 +363,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the provisional U.S. role-fit export:
+Latest local validation after the structured location-evidence update:
 
 ```text
-492 passed, 1 warning in 4.55s
+499 passed, 1 warning in 3.66s
 ```
