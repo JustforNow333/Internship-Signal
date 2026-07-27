@@ -419,6 +419,11 @@ jobs at companies in the map should show the matching alumni instead of
 8. **Ask** — a natural-language box answered by a deterministic query
    interpreter (details below).
 
+Scoring benchmarks, including the clean-commit independent U.S. holdout
+workflow, are measurement-only and documented in `evaluation/README.md`.
+Holdout tooling must be committed before a later clean run collects artifacts;
+the exporter never uses email, alumni data, or production seen state.
+
 ## Company classification is layered, not name-matching
 
 Per the brief, "tech company" is decided by evidence, not vibes:

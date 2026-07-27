@@ -46,5 +46,6 @@
 - Use the validation commands in `agents.md`; always run `git diff --check`.
 - Bug audits require a reproducible failure or clear violated invariant. Add a
   regression test before fixing behavior; do not change code for style alone.
-- Holdout benchmark construction must stop when tracked files are dirty. Never
-  create provisional holdout artifacts or inspect prior labels for selection.
+- Holdout construction is two-stage: commit reusable tooling first, then
+  collect from that exact clean SHA. Exclude both prior benchmarks by stable
+  ID, normalized URL, and fallback key without reading their human labels.

@@ -111,7 +111,8 @@ watcher/make_alumni_b64.py
 # Keep historical location-gate and all U.S. role-fit frozen inputs,
 # active/backup labels, role/location report-only reevaluations, comparison
 # data, and evaluator metrics local while docs/tests stay trackable.
-# Private frozen benchmarks and holdout artifacts never enter Git.
+# Private frozen benchmarks, holdout artifacts, and their health reports never
+# enter Git.
 evaluation/private/
 evaluation/scoring_*_labels.csv
 evaluation/scoring_*_rows.jsonl

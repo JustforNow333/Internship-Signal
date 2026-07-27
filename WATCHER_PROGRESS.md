@@ -365,11 +365,28 @@ This file tracks completed watcher steps and the next handoff target.
      nonempty all-malformed payload.
    - Offline backend/watcher validation: `519 passed, 1 warning`; frontend:
      `23 passed`; production build and Python compileall completed successfully.
+18. Independent U.S. holdout tooling:
+   - `scripts/build_us_holdout_benchmark.py` adds clean expected-commit
+     enforcement before collection and freeze, private-path enforcement,
+     deterministic `random`/`likely_match`/`difficult_negative` cohorts, and
+     complete-pool behavior for undersized candidate populations.
+   - Prior labels are never opened. Validated prior rows/predictions/manifests
+     provide stable-ID, normalized-URL, and normalized fallback exclusion keys;
+     selected rows must have zero overlap under all three methods.
+   - Manifests retain sanitized source/location provenance, collection
+     failures, distributions, coverage limitations, configuration/input/output
+     hashes, and explicit email/alumni/seen-state isolation.
+   - This is the tooling stage only. Commit these tracked changes before a
+     later clean run performs live collection and freezes holdout artifacts.
+   - Offline backend/watcher validation: `533 passed, 1 warning`; compileall
+     completed successfully.
 
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only
   reevaluation for separately scoped production changes.
+- Commit the independent holdout tooling, then collect the holdout only from
+  that exact clean committed SHA.
 - Run the first manual GitHub Actions priming dispatch with `send_email=false`.
 - After confirming the data branch exists and the heartbeat looks right, set the
   repo Actions variable `WATCHER_SEND_EMAIL=true` to enable scheduled sends.
@@ -390,8 +407,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the evidence-based bug audit:
+Latest local validation after the independent holdout tooling stage:
 
 ```text
-519 passed, 1 warning in 3.90s
+533 passed, 1 warning in 4.24s
 ```

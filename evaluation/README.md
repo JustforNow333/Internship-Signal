@@ -280,3 +280,56 @@ validation. Label only the CSV using `yes`, `no`, or `uncertain`, then rerun the
 normal evaluator without `--allow-partial-labels` once every row is labeled.
 For a same-prefix rebuild, snapshot the prior exact job IDs, cohort memberships,
 and location statuses first, then explain all live-source differences.
+
+## Independent U.S. holdout benchmark
+
+Use `scripts/build_us_holdout_benchmark.py` for a blind, independent sample
+after location or role-fit work has already been evaluated on the U.S.
+role-fit benchmark. Holdout construction is deliberately two-stage:
+
+1. Add or change reusable holdout tooling and its offline tests, then commit it.
+   Do not collect in that dirty tooling worktree.
+2. From a later clean run, pass the exact committed SHA to
+   `--expected-commit`. The exporter verifies that SHA and
+   `git_dirty=false` before collection and again before writing artifacts.
+
+The exporter reads only each prior benchmark's rows, predictions, and manifest;
+it never opens prior labels. It validates the declared frozen hashes and
+excludes current candidates by stable job ID, normalized application URL, and
+normalized company/title/location fallback key. Explicitly `outside_us` rows
+are excluded rather than used as sample padding.
+
+Example after committing the tooling:
+
+```bash
+collection_date=2026-07-27
+frozen_commit="$(git rev-parse HEAD)"
+WATCHER_SEND_EMAIL=0 PYTHONPATH=.:backend python3 \
+  scripts/build_us_holdout_benchmark.py \
+  --watchlist watcher/watchlist.yml \
+  --prior-prefix evaluation/private/scoring_20260724 \
+  --prior-prefix evaluation/private/scoring_us_rolefit_20260726 \
+  --as-of "$collection_date" \
+  --seed 20260727 \
+  --expected-commit "$frozen_commit" \
+  --output-prefix evaluation/private/scoring_us_holdout_20260727
+```
+
+Defaults request 180 uniformly sampled random rows, 50 likely-match rows, and
+80 difficult-negative rows. Cohorts are independent and may overlap; the
+random cohort alone supports headline precision, recall, specificity,
+accuracy, and F1. When fewer random candidates are available, the complete
+qualifying pool is included and the manifest records the shortfall.
+
+The six output files remain under `evaluation/private/`. Labels contain posting
+context and four blank human fields but no eligibility prediction, fit score,
+action, role track, or model explanation. The initial partial-label report and
+metrics must show zero labeled rows, zero binary-evaluated rows, and 0% label
+coverage.
+
+The manifest records the construction version, exact clean commit, watchlist
+and construction-script hashes, validated prior-input hashes, sanitized
+collection failures, source/adapter and coverage distributions, all three
+leakage-exclusion counts, cohort availability/selection/overlap, artifact
+hashes, and explicit confirmation that email, alumni, and seen state were not
+used.
