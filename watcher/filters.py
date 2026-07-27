@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from watcher.eligibility import determine_watcher_eligibility
+from watcher.eligibility import DEFAULT_TARGET_ROLES, determine_watcher_eligibility
 
-TARGET_ROLES = frozenset({"swe"})
+TARGET_ROLES = DEFAULT_TARGET_ROLES
 MIN_SCORE: int | None = None
 
 INTERNSHIP_RE = re.compile(r"\b(intern|internship|co[- ]?op|summer 20\d\d)\b", re.I)

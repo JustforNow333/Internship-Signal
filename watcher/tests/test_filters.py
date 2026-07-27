@@ -1,9 +1,20 @@
+import pytest
+
+from watcher.eligibility import (
+    LOCATION_AMBIGUOUS,
+    LOCATION_US,
+    OUTSIDE_US,
+    assess_us_location,
+    determine_watcher_eligibility,
+)
 from watcher.filters import filter_matches, is_internship, is_open
 
 
 def job(**overrides):
     base = {
         "title": "Software Engineer Intern",
+        "location": "",
+        "remote_status": "",
         "description": "Build backend services with Python.",
         "internship_type": "",
         "deadline_days_left": None,
@@ -22,6 +33,92 @@ def job(**overrides):
 
 def test_filters_keep_swe_internship_open_jobs():
     assert filter_matches([job()]) == [job()]
+
+
+def test_normal_us_location_continues_through_existing_eligibility():
+    posting = job(location="Boston, MA, United States")
+
+    assert assess_us_location(posting).status == LOCATION_US
+    assert determine_watcher_eligibility(posting)["watcher_eligible"] is True
+    assert filter_matches([posting]) == [posting]
+
+
+def test_normal_international_location_is_ineligible_with_stable_reason():
+    posting = job(location="Berlin, Germany")
+
+    decision = assess_us_location(posting)
+    eligibility = determine_watcher_eligibility(posting)
+
+    assert decision.status == OUTSIDE_US
+    assert eligibility["watcher_eligible"] is False
+    assert eligibility["ineligible_reason"] == OUTSIDE_US
+    assert eligibility["location_explanation"]
+    assert filter_matches([posting]) == []
+
+
+def test_us_only_remote_role_continues():
+    posting = job(remote_status="Remote — United States only")
+
+    assert assess_us_location(posting).status == LOCATION_US
+    assert filter_matches([posting]) == [posting]
+
+
+def test_international_remote_role_is_ineligible():
+    posting = job(remote_status="Remote within Canada only")
+
+    assert assess_us_location(posting).status == OUTSIDE_US
+    assert determine_watcher_eligibility(posting)["ineligible_reason"] == OUTSIDE_US
+    assert filter_matches([posting]) == []
+
+
+def test_multiple_locations_continue_when_one_is_in_the_us():
+    posting = job(location="Toronto, Canada; Boston, MA, United States")
+
+    assert assess_us_location(posting).status == LOCATION_US
+    assert filter_matches([posting]) == [posting]
+
+
+def test_multiple_locations_with_no_us_location_are_ineligible():
+    posting = job(location="Berlin, Germany; Toronto, Canada")
+
+    assert assess_us_location(posting).status == OUTSIDE_US
+    assert filter_matches([posting]) == []
+
+
+@pytest.mark.parametrize("location", ["", "8 Locations", "Boston, MA", "Santiago"])
+def test_missing_or_ambiguous_location_is_not_automatically_rejected(location):
+    posting = job(location=location)
+
+    assert assess_us_location(posting).status == LOCATION_AMBIGUOUS
+    assert filter_matches([posting]) == [posting]
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "Madrid, MD, Spain",
+        "Schiphol, NH, Netherlands",
+    ],
+)
+def test_foreign_country_text_wins_over_state_like_abbreviations(location):
+    posting = job(location=location)
+
+    assert assess_us_location(posting).status == OUTSIDE_US
+    assert determine_watcher_eligibility(posting)["ineligible_reason"] == OUTSIDE_US
+    assert filter_matches([posting]) == []
+
+
+def test_structured_country_information_is_preferred_and_supports_multiple_locations():
+    foreign = job(location={"city": "Madrid", "region": "MD", "country_code": "ES"})
+    mixed = job(
+        location=[
+            {"city": "Madrid", "country": "Spain"},
+            {"city": "Boston", "country_code": "US"},
+        ]
+    )
+
+    assert assess_us_location(foreign).status == OUTSIDE_US
+    assert assess_us_location(mixed).status == LOCATION_US
 
 
 def test_filters_drop_non_swe_roles():

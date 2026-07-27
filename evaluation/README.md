@@ -199,3 +199,67 @@ labels; do not commit them or upload them as Actions artifacts.
 This README and synthetic offline tests are safe to commit. The exporter does
 not load private alumni data, and its explicit field whitelist prevents alumni
 names, LinkedIn URLs, or roster details from entering benchmark outputs.
+
+## U.S. role-fit benchmark
+
+The historical `scoring_20260724_*` benchmark remains immutable as the
+location-gate baseline. Use the separate U.S. role-fit exporter when measuring
+role classification:
+
+Before exporting, commit the completed benchmark-construction changes and
+confirm `git status --short` has no tracked entries. A benchmark is frozen only
+when its manifest records `git_dirty=false` and the exact commit being tested;
+ignored files under `evaluation/private/` do not make the repository dirty.
+
+```powershell
+$env:WATCHER_SEND_EMAIL = "0"
+$env:PYTHONPATH = ".;backend"
+
+backend\venv\Scripts\python.exe scripts\build_us_rolefit_benchmark.py `
+  --watchlist watcher\watchlist.yml `
+  --as-of 2026-07-26 `
+  --seed 20260726 `
+  --output-prefix evaluation\private\scoring_us_rolefit_20260726
+```
+
+POSIX equivalent:
+
+```bash
+WATCHER_SEND_EMAIL=0 PYTHONPATH=.:backend python3 \
+  scripts/build_us_rolefit_benchmark.py \
+  --watchlist watcher/watchlist.yml \
+  --as-of 2026-07-26 \
+  --seed 20260726 \
+  --output-prefix evaluation/private/scoring_us_rolefit_20260726
+```
+
+This exporter starts with the same open-internship population as the general
+benchmark, then excludes only rows for which
+`watcher.eligibility.assess_us_location()` returns `outside_us`. Explicit U.S.,
+U.S.-remote, multi-location U.S., and location-ambiguous rows remain.
+Production eligibility, classification, scores, actions, and ranking are not
+changed.
+
+The three independent cohorts are:
+
+- `random`: 160 requested rows sampled from the complete U.S./ambiguous
+  candidate pool. This remains the only headline population cohort.
+- `likely_match`: 80 requested current model-positive rows, stratified across
+  software and software-adjacent role tracks.
+- `difficult_negative`: 80 requested rows, stratified across explicit
+  engineering/nontechnical confusion patterns, graduate-only roles, and other
+  current model-negative internships.
+
+Rows may carry multiple group names but are emitted once by stable job ID. If a
+cohort lacks enough candidates, all available rows are used and the manifest's
+`target_shortfalls` records the limitation. The manifest also records
+available/requested/actual cohort counts, overlaps, expected model positives,
+source/company/role/location distributions, the frozen Git commit, and hashes.
+
+The command creates blank labels, frozen rows, baseline predictions, a
+manifest, and an initial report/metrics pair evaluated with partial labels.
+The initial report therefore shows zero label coverage; it is only a structural
+validation. Label only the CSV using `yes`, `no`, or `uncertain`, then rerun the
+normal evaluator without `--allow-partial-labels` once every row is labeled.
+For a same-prefix rebuild, snapshot the prior exact job IDs, cohort memberships,
+and location statuses first, then explain all live-source differences.

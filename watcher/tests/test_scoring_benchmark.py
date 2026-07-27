@@ -579,6 +579,23 @@ def test_rescoring_receives_frozen_as_of_date(monkeypatch):
     assert observed == [AS_OF]
 
 
+def test_rescoring_uses_production_location_eligibility_without_changing_scores():
+    row = canonical_row(1)
+    row["location"] = "Berlin, Germany"
+    scored = analyze_rows([row], today=AS_OF)[0]
+
+    _contexts, predictions = evaluator.rescore_rows([row], AS_OF)
+    prediction = predictions[scored["id"]]
+
+    assert scored["score"]["watcher_eligible"] is True
+    assert prediction["watcher_eligible"] is False
+    assert prediction["watcher_ineligible_reason"] == "outside_us"
+    assert prediction["location_status"] == "outside_us"
+    assert prediction["fit_score"] == scored["score"]["fit_score"]
+    assert prediction["watcher_action"] == scored["score"]["watcher_action"]
+    assert prediction["role_track"] == scored["score"]["role_track"]
+
+
 def test_report_rendering_is_stable_and_contains_diagnostics(tmp_path):
     paths = _evaluation_files(tmp_path)
     metrics = evaluate_paths(paths)
@@ -589,6 +606,7 @@ def test_report_rendering_is_stable_and_contains_diagnostics(tmp_path):
     assert first == second
     assert "Headline eligibility metrics (random cohort only)" in first
     assert "Largest disagreements" in first
+    assert "Current watcher ineligible reasons" in first
     assert "Marketing Intern" in first
     assert paths["report"].read_text(encoding="utf-8") == first
     assert json.loads(paths["metrics"].read_text(encoding="utf-8")) == metrics

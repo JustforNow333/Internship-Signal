@@ -9,6 +9,9 @@
   Never duplicate backend scoring, classification, signals, dedupe, or IDs.
 - Source adapters only fetch canonical rows. Eligibility belongs in
   `watcher/eligibility.py`; filters add internship/open/min-score checks.
+- `assess_us_location` is the sole location gate: explicit U.S. wins,
+  explicit foreign country/region yields `outside_us`, and ambiguity passes.
+  Never derive country from state abbreviations or alter scores/ranking.
 - Keep typed GitHub sources backward-compatible with `github_listing_urls`.
   Merge direct ATS, Simplify JSON, then Markdown by fixed priority; Markdown
   `Added` is source metadata and lower-priority closure cannot close direct data.
@@ -25,6 +28,13 @@
   run over arbitrary failure text and must never raise on a malformed URL.
 - Tests and benchmark evaluation stay offline. Benchmarking must not alter
   scoring and must not use alumni, email, seen state, or workflow persistence.
+- Frozen benchmarks retain international rows; current evaluation applies the
+  production eligibility helper without regenerating frozen inputs.
+- Never rewrite `scoring_20260724_*`. U.S. role-fit benchmarking uses the
+  separate exporter and only `us`/`ambiguous` candidates with independent
+  `random`, `likely_match`, and `difficult_negative` cohorts.
+- Rebuild U.S. role-fit artifacts only from a clean commit, validate manifest
+  hashes and `git_dirty=false`, and explain every change from the prior export.
 - Benchmark labels require `human_eligible` (`yes`, `no`, or `uncertain`);
   optional role track, exclusion reason, and notes do not affect binary metrics.
 - Use the validation commands in `agents.md`; always run `git diff --check`.

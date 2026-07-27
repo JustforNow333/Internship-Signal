@@ -39,6 +39,12 @@ This file tracks completed watcher steps and the next handoff target.
 - Typed GitHub backstops now include the independent `sndsh404` Summer 2027
   Markdown table after Simplify, with fixed source priority, merged provenance,
   and normalized-URL seen suppression.
+- Production watcher eligibility now conservatively rejects explicit non-U.S.
+  locations with `outside_us` while retaining U.S., multi-location U.S., and
+  country-ambiguous roles without changing backend scores or role decisions.
+- A separate frozen U.S. role-fit benchmark now preserves the historical
+  location-gate benchmark while measuring role relevance only on production
+  location statuses `us` and `ambiguous`.
 
 ## Done
 
@@ -280,12 +286,48 @@ This file tracks completed watcher steps and the next handoff target.
      `direct_ats,simplify,sndsh404_summer_2027`.
    - `evaluation/README.md` documents commands, the label rubric, sampling
      interpretation, privacy, and later scoring-version comparison.
+13. Production U.S.-location eligibility:
+   - `watcher/eligibility.py::assess_us_location()` is the reusable tri-state
+     helper. Explicit U.S. evidence wins across multiple locations, explicit
+     foreign country/region evidence returns `outside_us`, and missing/vague
+     locations remain eligible for normal role checks.
+   - State abbreviations are never country evidence; foreign examples such as
+     `Madrid, MD, Spain` and `Schiphol, NH, Netherlands` are rejected by their
+     explicit country text.
+   - The offline evaluator applies the production gate to current predictions
+     while retaining original fit scores, actions, role tracks, and rankings.
+     Export sampling still keeps all open internships, including international
+     rows.
+   - Frozen `scoring_20260724` reevaluation improved random-cohort false
+     positives from 9 to 0, true negatives from 90 to 99, specificity from
+     90.9% to 100%, and accuracy from 90% to 99%. Fit-score, role-track,
+     action, degree, and ranking changes were all zero.
+   - Across all 161 selected rows, six false positives remain: four labeled
+     `unrelated_role` and two city-only `outside_us` labels (`Utrecht` and
+     `Santiago`) intentionally retained as ambiguous. One U.S. ML research
+     false negative remains. All 146 international-labeled rows remain in the
+     frozen set; input hashes were unchanged and only report/metrics refreshed.
+   - Offline backend/watcher validation: `486 passed, 1 warning`; compileall
+     completed successfully.
+14. U.S. role-fit benchmark construction:
+   - `scripts/build_us_rolefit_benchmark.py` reuses normal collection,
+     `analyze_rows()`, frozen-row/prediction helpers, and the offline evaluator.
+     It excludes only `assess_us_location()==outside_us` before independently
+     selecting `random`, `likely_match`, and `difficult_negative` cohorts.
+   - The immutable historical `scoring_20260724_*` files remain separate. New
+     artifacts use prefix
+     `evaluation/private/scoring_us_rolefit_20260726`.
+   - The prior provisional dirty-tree export is retained only as comparison
+     metadata: 68 IDs, cohort counts 68 random / 16 likely-match / 56
+     difficult-negative, and location statuses 54 `us` / 14 `ambiguous`.
+   - A valid freeze requires committing the construction first, a clean tracked
+     tree, `git_dirty=false`, the exact committed SHA, blank human fields, and
+     verified labels/IDs/rows/predictions/watchlist hashes.
 
 ## Next
 
-- Export the first private real-posting benchmark, label the CSV without
-  opening baseline predictions, and evaluate it before any separate scoring
-  calibration task.
+- Blind-label `scoring_us_rolefit_20260726_labels.csv` with `yes`, `no`, or
+  `uncertain`, then rerun the normal evaluator without partial-label mode.
 - Run the first manual GitHub Actions priming dispatch with `send_email=false`.
 - After confirming the data branch exists and the heartbeat looks right, set the
   repo Actions variable `WATCHER_SEND_EMAIL=true` to enable scheduled sends.
@@ -306,8 +348,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the reliability audit:
+Latest local validation after the provisional U.S. role-fit export:
 
 ```text
-354 passed, 1 warning in 2.69s
+492 passed, 1 warning in 4.55s
 ```

@@ -77,6 +77,10 @@
 - `watcher/eligibility.py` is the only watcher-side target-role/degree wrapper;
   `watcher/filters.py` then requires eligible, positive-fit, open
   internships/co-ops and applies optional `min_score`.
+- `watcher/eligibility.py::assess_us_location` owns the conservative location
+  gate. Explicit U.S. evidence wins across multiple locations; explicit
+  foreign country/region evidence yields `outside_us`; ambiguous text passes.
+  Location eligibility must not change backend fit scores, actions, or roles.
 - Graduate/advanced-degree internships are excluded from digests with
   `watcher_eligible=false` and `fit_score=0`.
 - IT support, quality/test, and solutions engineering are deliberate
@@ -135,6 +139,16 @@
   seen-store is fatal; source failures remain warnings.
 - Benchmark export uses `collect_rows()` then `analyze_rows()`. Candidates use
   only `is_internship()` and `is_open()`, never `filter_matches()`.
+- Keep international rows in frozen benchmark exports. Current benchmark
+  predictions apply the same production watcher eligibility helper while
+  preserving scoring and ranking diagnostics.
+- Treat every existing `scoring_20260724_*` artifact as immutable. Build the
+  separate U.S. role-fit set with `build_us_rolefit_benchmark.py`; its candidate
+  pool includes only `us`/`ambiguous` location decisions and its cohorts are
+  `random`, `likely_match`, and `difficult_negative`.
+- Freeze U.S. role-fit artifacts only from a clean committed implementation;
+  require `git_dirty=false`, verify frozen-input hashes, and compare any rebuild
+  against the prior exact IDs, memberships, and location-status distribution.
 - Benchmarking is measurement only: do not change scoring behavior. Keep labels
   blind, sampling deterministic, frozen rows whitelisted, and evaluation
   offline with exact IDs/date. Only the random cohort supports headline

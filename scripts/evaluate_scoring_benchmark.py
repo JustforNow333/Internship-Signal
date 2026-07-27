@@ -418,6 +418,7 @@ def error_diagnostics(
     false_positive_tracks: Counter[str] = Counter()
     false_negative_tracks: Counter[str] = Counter()
     exclusion_reasons: Counter[str] = Counter()
+    current_ineligible_reasons: Counter[str] = Counter()
     role_confusion: Counter[str] = Counter()
     disagreements: list[dict[str, object]] = []
     for job_id in label_ids:
@@ -431,6 +432,9 @@ def error_diagnostics(
         if not label.evaluated:
             continue
         predicted_positive = bool(prediction.get("watcher_eligible"))
+        current_reason = str(prediction.get("watcher_ineligible_reason") or "")
+        if not predicted_positive:
+            current_ineligible_reasons[current_reason or "unspecified"] += 1
         actual_positive = label.human_eligible == "yes"
         if predicted_positive and not actual_positive:
             false_positive_tracks[track] += 1
@@ -451,6 +455,9 @@ def error_diagnostics(
                 "baseline_fit_score": _int_value(baseline[job_id].get("fit_score")),
                 "current_watcher_eligible": predicted_positive,
                 "current_fit_score": fit_score,
+                "current_watcher_ineligible_reason": current_reason,
+                "location_status": str(prediction.get("location_status") or ""),
+                "location_explanation": str(prediction.get("location_explanation") or ""),
                 "human_eligible": label.human_eligible,
                 "predicted_role_track": track,
                 "human_role_track": label.human_role_track,
@@ -473,6 +480,7 @@ def error_diagnostics(
         "false_positives_by_predicted_role_track": dict(sorted(false_positive_tracks.items())),
         "false_negatives_by_predicted_role_track": dict(sorted(false_negative_tracks.items())),
         "human_exclusion_reasons": dict(sorted(exclusion_reasons.items())),
+        "current_watcher_ineligible_reasons": dict(sorted(current_ineligible_reasons.items())),
         "predicted_human_role_confusion": dict(sorted(role_confusion.items())),
         "largest_disagreements": disagreements[:25],
     }
@@ -654,6 +662,7 @@ def render_report(metrics: Mapping[str, object]) -> str:
         ("False positives by predicted role track", "false_positives_by_predicted_role_track"),
         ("False negatives by predicted role track", "false_negatives_by_predicted_role_track"),
         ("Human exclusion reasons", "human_exclusion_reasons"),
+        ("Current watcher ineligible reasons", "current_watcher_ineligible_reasons"),
         ("Predicted → human role confusion", "predicted_human_role_confusion"),
     ):
         lines.append(f"### {title}")
@@ -681,6 +690,8 @@ def render_report(metrics: Mapping[str, object]) -> str:
         groups = ", ".join(item["sample_groups"])
         baseline_text = f"eligible={item['baseline_watcher_eligible']}, fit={item['baseline_fit_score']}"
         current_text = f"eligible={item['current_watcher_eligible']}, fit={item['current_fit_score']}"
+        if item["current_watcher_ineligible_reason"]:
+            current_text += f", reason={item['current_watcher_ineligible_reason']}"
         human = str(item["human_eligible"])
         tracks = f"{item['predicted_role_track']} → {item['human_role_track'] or '(blank)'}"
         notes = (

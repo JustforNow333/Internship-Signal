@@ -10,8 +10,11 @@ import tempfile
 from pathlib import Path
 from typing import Mapping
 
+from watcher.eligibility import determine_watcher_eligibility
+
 SCHEMA_VERSION = 2
 GROUP_ORDER = ("random", "top", "difficult")
+KNOWN_GROUP_ORDER = (*GROUP_ORDER, "likely_match", "difficult_negative")
 HUMAN_LABEL_COLUMNS = (
     "human_eligible",
     "human_role_track",
@@ -67,18 +70,21 @@ def prediction_from_job(
     groups: object,
 ) -> dict[str, object]:
     score = job.get("score") if isinstance(job.get("score"), Mapping) else {}
+    eligibility = determine_watcher_eligibility(dict(job))
     return {
         "job_id": str(job.get("id") or ""),
         "sample_groups": ordered_groups(groups),
-        "watcher_eligible": bool(score.get("watcher_eligible")),
+        "watcher_eligible": bool(eligibility["watcher_eligible"]),
         "fit_score": score_value(job, "fit_score"),
         "watcher_action": str(score.get("watcher_action") or ""),
         "watcher_action_label": str(score.get("watcher_action_label") or ""),
         "role_track": role_track(job),
         "degree_level": str(job.get("degree_level") or score.get("degree_level") or ""),
         "degree_eligible": bool(job.get("degree_eligible", score.get("degree_eligible"))),
-        "watcher_ineligible_reason": score.get("watcher_ineligible_reason"),
+        "watcher_ineligible_reason": eligibility["ineligible_reason"],
         "fit_explanation": str(score.get("fit_explanation") or ""),
+        "location_status": eligibility["location_status"],
+        "location_explanation": eligibility["location_explanation"],
         "total_score": score_value(job, "total"),
         "bucket": str(score.get("bucket") or ""),
         "action": str(score.get("action") or ""),
@@ -93,7 +99,9 @@ def ordered_groups(groups: object) -> list[str]:
     else:
         values = []
     unique = {value for value in values if value}
-    return [group for group in GROUP_ORDER if group in unique] + sorted(unique - set(GROUP_ORDER))
+    return [group for group in KNOWN_GROUP_ORDER if group in unique] + sorted(
+        unique - set(KNOWN_GROUP_ORDER)
+    )
 
 
 def csv_safe(value: object) -> str:
