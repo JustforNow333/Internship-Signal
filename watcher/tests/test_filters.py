@@ -292,7 +292,7 @@ def test_filters_use_watcher_eligibility_not_generic_total_score():
     assert filter_matches([bad, good]) == [good]
 
 
-def test_low_priority_it_quality_and_solutions_pass_with_low_fit_score():
+def test_low_priority_it_and_solutions_pass_but_generic_quality_is_excluded():
     matches = filter_matches([
         job(
             title="IT Support Intern",
@@ -313,9 +313,18 @@ def test_low_priority_it_quality_and_solutions_pass_with_low_fit_score():
 
     assert [match["title"] for match in matches] == [
         "IT Support Intern",
-        "Quality Engineer Intern",
         "Solutions Engineer Intern",
     ]
+
+
+def test_technical_product_track_is_watcher_eligible():
+    posting = job(
+        title="Associate Product Manager Intern",
+        role_classification={"role": "product", "role_track": "technical_product"},
+        score={"total": 60, "fit_score": 55, "watcher_eligible": True, "role_track": "technical_product"},
+    )
+
+    assert filter_matches([posting]) == [posting]
 
 
 def test_filters_drop_degree_ineligible_jobs_even_with_positive_fit_score():

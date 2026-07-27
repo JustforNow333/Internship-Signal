@@ -26,9 +26,9 @@ SWE_TARGET_TRACKS = {
     "embedded_software",
     "firmware",
     "sdet_qa_automation",
+    "technical_product",
     # Deliberate low-priority exceptions: visible, but fit-scored around 20.
     "it_support",
-    "quality_test",
     "solutions_engineering",
 }
 

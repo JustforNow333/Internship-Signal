@@ -750,6 +750,40 @@ def test_github_schema_change_logs_and_raises(caplog):
     assert "GitHub listings schema problem" in caplog.text
 
 
+def test_github_mixed_malformed_payload_retains_valid_entries_with_one_warning(caplog):
+    valid = {
+        "company_name": "GitHub",
+        "title": "Software Engineering Intern",
+        "locations": ["Remote in USA"],
+        "url": "https://example.test/jobs/valid",
+        "date_posted": "2026-07-19",
+        "active": True,
+        "terms": ["Summer 2027"],
+    }
+    malformed = {
+        "company_name": "GitHub",
+        "secret_marker": "DO_NOT_LOG",
+    }
+
+    with caplog.at_level(logging.WARNING, logger="watcher.sources.github_listings"):
+        rows = GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(
+            [valid, malformed],
+            CompanyCfg(name="GitHub", terms=("Summer 2027",)),
+        )
+
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if "GitHub listings schema problem" in record.getMessage()
+    ]
+    assert [row["source_url"] for row in rows] == ["https://example.test/jobs/valid"]
+    assert len(warnings) == 1
+    assert "1 malformed" in warnings[0]
+    assert "1 valid" in warnings[0]
+    assert "DO_NOT_LOG" not in warnings[0]
+    assert len(warnings[0]) < 300
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [

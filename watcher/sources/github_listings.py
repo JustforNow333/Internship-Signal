@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -47,9 +48,40 @@ class GitHubListingsSource:
         listings = ensure_list(payload, self.name, "payload")
         if not listings:
             self._schema_problem("github listings payload contained no entries")
-        rows = []
+
+        valid_entries = []
+        skipped = 0
+        first_problem = ""
         for entry in listings:
-            self._validate_entry(entry)
+            try:
+                self._validate_entry(entry)
+            except SourceSchemaError as exc:
+                skipped += 1
+                if not first_problem:
+                    first_problem = str(exc)
+            else:
+                valid_entries.append(entry)
+        if skipped:
+            safe_company = re.sub(
+                r"[\x00-\x1f\x7f]+",
+                " ",
+                str(company.name or "unknown"),
+            ).strip()[:120]
+            LOGGER.warning(
+                "GitHub listings schema problem: skipped %d malformed entry(s) "
+                "for %s; %d valid entry(s) retained.",
+                skipped,
+                safe_company or "unknown",
+                len(valid_entries),
+            )
+        if listings and not valid_entries:
+            raise SourceSchemaError(
+                f"{first_problem}; github listings received {len(listings)} "
+                "entry(s) but none were valid"
+            )
+
+        rows = []
+        for entry in valid_entries:
             if not entry["active"]:
                 continue
             if not company_matches(entry["company_name"], company):
@@ -61,19 +93,21 @@ class GitHubListingsSource:
 
     def _validate_entry(self, entry: Any) -> None:
         if not isinstance(entry, dict):
-            self._schema_problem("github listing entry must be an object")
+            raise SourceSchemaError("github listing entry must be an object")
         missing = sorted(self.required_keys - set(entry))
         if missing:
-            self._schema_problem(f"github listing entry missing keys: {', '.join(missing)}")
+            raise SourceSchemaError(
+                f"github listing entry missing keys: {', '.join(missing)}"
+            )
         if not isinstance(entry["locations"], list):
-            self._schema_problem("github listing locations must be a list")
+            raise SourceSchemaError("github listing locations must be a list")
         if not isinstance(entry["terms"], list):
-            self._schema_problem("github listing terms must be a list")
+            raise SourceSchemaError("github listing terms must be a list")
         if not isinstance(entry["active"], bool):
-            self._schema_problem("github listing active must be a boolean")
+            raise SourceSchemaError("github listing active must be a boolean")
         for field in ("company_name", "title", "url"):
             if not isinstance(entry[field], str) or not entry[field].strip():
-                self._schema_problem(
+                raise SourceSchemaError(
                     f"github listing {field} must be a nonblank string"
                 )
 
