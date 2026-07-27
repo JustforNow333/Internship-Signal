@@ -100,7 +100,7 @@ SMALL_FIT_BONUS_PATTERNS = [
     ("finance/data app relevance", r"\bfinance\b|\bmarket data\b|\btrading data\b|\bspreadsheet\b|\bdata apps?\b", 2),
 ]
 CPLUS_RE = re.compile(r"\bc\+\+\b|\bcpp\b", re.I)
-GO_RUST_RE = re.compile(r"\bgolang\b|\brust\b|\bgo\b", re.I)
+GO_RUST_RE = re.compile(r"(?i:\bgolang\b|\brust\b)|\b(?:Go|GO)\b")
 LOW_LEVEL_RE = re.compile(r"low[- ]level|kernel|driver|firmware|embedded|robotics?|hardware|electrical|mechanical|manufactur|cad\b", re.I)
 OPS_HEAVY_RE = re.compile(r"\bsre\b|site reliability|on[- ]call|incident|ci/cd|terraform|kubernetes|cloud operations?|infrastructure operations?", re.I)
 PRODUCT_DEV_RE = re.compile(r"product feature|user-facing feature|backend product|application|apis?|services?|platform services?", re.I)

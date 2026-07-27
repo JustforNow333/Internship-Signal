@@ -259,6 +259,16 @@ def test_anduril_style_rust_go_cpp_swe_is_eligible_but_not_perfect():
     assert "Go/Rust" in score["fit_explanation"]
 
 
+def test_lowercase_verb_go_is_not_treated_as_the_go_programming_language():
+    score = _scored(
+        "Software Engineer Intern",
+        description="Work with the team as features go from design to production.",
+        requirements="Linux and Git",
+    )["score"]
+
+    assert "Go/Rust" not in score["fit_explanation"]
+
+
 def test_backend_java_beats_generic_rust_go_cpp_swe():
     backend_java = _scored(
         "Backend Java Intern",

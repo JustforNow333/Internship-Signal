@@ -86,6 +86,11 @@
   or roles.
 - Graduate/advanced-degree internships are excluded from digests with
   `watcher_eligible=false` and `fit_score=0`.
+- Role classification prioritizes title and core duties over incidental
+  keywords. Admit technical AI-integration, digital-solutions, quant, product,
+  and umbrella-program roles only with explicit central technical evidence;
+  physical engineering, consumer research, and manufacturing quality remain
+  excluded.
 - IT support, quality/test, and solutions engineering are deliberate
   low-priority exceptions capped around 20 unless explicitly changed.
 - `watcher/season.py` warns on non-`ok` season status but never blocks direct
@@ -197,3 +202,8 @@ Always finish with:
 git diff --check
 git status --short --ignored
 ```
+
+- Bug audits require a reproducible failure or clear violated invariant. Add a
+  regression test before fixing behavior; do not change code for style alone.
+- Holdout benchmark construction must stop when tracked files are dirty. Never
+  create provisional holdout artifacts or inspect prior labels for selection.

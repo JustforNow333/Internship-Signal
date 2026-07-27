@@ -84,6 +84,24 @@ def test_hours_per_week_is_not_pay():
     assert c["usd_hourly_min"] == 20.0 and c["usd_hourly_max"] == 20.0
 
 
+@pytest.mark.parametrize(
+    ("raw", "hourly_min", "hourly_max"),
+    [
+        ("$25/hour for a 12-week internship", 25.0, 25.0),
+        ("$30-$35/hour, 10-week summer program", 30.0, 35.0),
+    ],
+)
+def test_program_duration_is_not_parsed_as_an_hourly_pay_amount(
+    raw,
+    hourly_min,
+    hourly_max,
+):
+    compensation = parse_compensation(raw)
+
+    assert compensation["usd_hourly_min"] == hourly_min
+    assert compensation["usd_hourly_max"] == hourly_max
+
+
 def test_percentage_only_compensation_is_not_parsed_as_cash():
     equity = parse_compensation("0.5% equity")
     bonus = parse_compensation("10% performance bonus")

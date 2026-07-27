@@ -175,6 +175,7 @@ ROLE_TRACK_LABELS = {
     "embedded_software": "Embedded software",
     "firmware": "Firmware",
     "sdet_qa_automation": "SDET / QA automation",
+    "technical_product": "Technical product",
     "it_support": "IT support",
     "customer_experience": "Customer experience engineering",
     "solutions_engineering": "Solutions engineering",
@@ -203,6 +204,7 @@ SOFTWARE_ROLE_TRACKS = {
     "embedded_software",
     "firmware",
     "sdet_qa_automation",
+    "technical_product",
 }
 
 LOW_PRIORITY_WATCHER_TRACKS = {"it_support", "quality_test", "solutions_engineering"}
@@ -218,6 +220,7 @@ ROLE_TRACK_TO_ROLE = {
     "embedded_software": "swe",
     "firmware": "swe",
     "sdet_qa_automation": "swe",
+    "technical_product": "product",
     "data_engineering": "data_science",
     "ml_ai": "ml_ai",
     "quant_dev": "quant",
@@ -234,11 +237,12 @@ SOFTWARE_TITLE_PATTERNS = [
     ("frontend", r"\bfront[- ]?end\b|\bui engineer\b|\bweb developer\b"),
     ("platform_infra", r"\bplatform software\b|\binfrastructure software\b|\bsite reliability\b|\bsre\b"),
     ("data_engineering", r"\bdata engineer(ing)?\b|\bdata science\b|\bdata analy(st|tics)\b|\bdata infrastructure\b|\bdata pipeline"),
-    ("ml_ai", r"machine[- ]learning (engineer|engineering|intern)|\bml\b|\bml engineer\b|\bai engineer\b|deep learning|computer vision|\bnlp\b|\bllms?\b|\bpytorch\b|\btensorflow\b"),
-    ("quant_dev", r"\bquant(itative)? (developer|engineer|trading|research)|\bquantitative trading intern\b|\btrading intern\b"),
+    ("ml_ai", r"machine[- ]learning (engineer|engineering|intern)|\bml\b|\bml engineer\b|\bai engineer\b|\ba\.?\s*i\.?\s+integration\b|\bai[- ]integration\b|deep learning|computer vision|\bnlp\b|\bllms?\b|\bpytorch\b|\btensorflow\b"),
+    ("quant_dev", r"\bquant(itative)? (developer|engineer|analyst|trading|research)|\bquantitative trading intern\b|\btrading intern\b|\bsystematic (investing|trading|research)\b|\bmarket model(l)?ing\b"),
     ("embedded_software", r"\bembedded software\b"),
     ("firmware", r"\bfirmware\b"),
     ("sdet_qa_automation", r"\bsdet\b|software qa automation|qa automation|software test automation|test automation framework"),
+    ("technical_product", r"\bassociate product manager\b|\btechnical product manage(r|ment)\b|\bapm intern(ship)?\b|\bproduct development internship program\b"),
     ("general_swe", r"\bsoftware (engineer|engineering|developer|development)\b|\bswe\b|\bdeveloper intern\b|\bfounding engineer\b"),
     ("cloud", r"\bcloud developer\b|\bcloud software\b"),
     ("devops", r"\bdevops\b|developer tooling|build engineer"),
@@ -246,16 +250,16 @@ SOFTWARE_TITLE_PATTERNS = [
 
 NON_SWE_TITLE_PATTERNS = [
     ("customer_experience", r"customer experience engineer|customer support engineer|technical support engineer"),
-    ("solutions_engineering", r"solutions? engineer|sales engineer|forward deployed engineer"),
+    ("solutions_engineering", r"solutions? engineer|sales engineer|forward deployed engineer|\bdigital solutions?\b|\bworkflow automation\b|\bintelligent systems?\b"),
     ("it_support", r"\bit (support|intern(ship)?)\b|help[- ]?desk|desktop support|sysadmin|systems administrator|network administrator"),
     ("electrical_hardware", r"electrical engineer|hardware engineer|\brf engineer|fpga engineer|pcb|circuit"),
-    ("mechanical_manufacturing", r"mechanical engineer|mechanical design engineer|manufacturing engineer|industrial engineer|process engineer|aerospace engineer"),
+    ("mechanical_manufacturing", r"naval architect|marine engineer|mechanical engineer|mechanical design engineer|manufacturing engineer|industrial engineer|industrial design engineer|physical product design|product design engineer|process engineer|aerospace engineer"),
     ("civil_structural", r"civil engineer|structural engineer"),
     ("quality_test", r"quality engineer|test engineer|validation engineer|verification engineer"),
     ("factory_automation", r"factory automation engineer|automation engineer|plc|plant automation|manufacturing automation"),
     ("product", r"product manage(r|ment)|\bpm intern\b|\bproduct intern\b|product development (co[- ]?op|intern)"),
     ("non_technical", r"commercial (co[- ]?op|intern(ship)?)"),
-    ("non_technical", r"data entry|\bmarketing\b|\bsales\b|business development|\bhr\b|human resources|recruit(ing|er)|social media|\bcontent\b|\bbrand\b|administrative|operations intern|accounting|activities intern|cold[- ]call|copywrit"),
+    ("non_technical", r"consumer insights?|consumer research|market research|survey research|data entry|\bmarketing\b|\bsales\b|business development|\bhr\b|human resources|recruit(ing|er)|social media|\bcontent\b|\bbrand\b|administrative|operations intern|accounting|activities intern|cold[- ]call|copywrit"),
 ]
 
 BACKEND_CONTEXT_RE = re.compile(
@@ -274,6 +278,17 @@ SOFTWARE_CONTEXT_RE = re.compile(
     re.I,
 )
 MANUFACTURING_CONTEXT_RE = re.compile(r"manufactur|factory|plant|plc|mechanical|electrical|hardware|industrial|process", re.I)
+UMBRELLA_PROGRAM_TITLE_RE = re.compile(
+    r"\b(?:summer )?internship program\b|\b(?:intern|summer) rotational program\b|\ball tracks\b",
+    re.I,
+)
+TECHNICAL_PROGRAM_TRACK_RE = re.compile(
+    r"\b(?:tracks?|functions?|pathways?|business areas?)\b.{0,180}"
+    r"\b(?:technology|software|engineering|data|analytics|quantitative|risk technology)\b|"
+    r"\b(?:technology|software|engineering|data|analytics|quantitative|risk technology)\b"
+    r".{0,180}\b(?:tracks?|functions?|pathways?|business areas?)\b",
+    re.I,
+)
 
 
 def _hits(patterns, text: str) -> list[tuple[str, str]]:
@@ -355,6 +370,16 @@ def classify_role(row: dict) -> dict:
             non_swe_evidence or ["data entry"],
         )
 
+    if UMBRELLA_PROGRAM_TITLE_RE.search(title) and TECHNICAL_PROGRAM_TRACK_RE.search(body):
+        match = TECHNICAL_PROGRAM_TRACK_RE.search(body)
+        return _finish_role(
+            "general_swe",
+            0.64,
+            [f'explicit technical program track: "{match.group(0).strip()}"'],
+            software_evidence or ["explicit technology/analytics/engineering program track"],
+            non_swe_evidence,
+        )
+
     if title_software_hits:
         track, hit = title_software_hits[0]
         evidence = [f'title: "{hit}"']
@@ -398,7 +423,7 @@ def classify_role(row: dict) -> dict:
                 software_evidence,
                 non_swe_evidence,
             )
-        if track in {"electrical_hardware", "mechanical_manufacturing", "factory_automation", "quality_test"}:
+        if track in {"factory_automation", "quality_test"}:
             if re.search(r"embedded software|firmware|software engineer|software developer|back[- ]?end|full[- ]?stack|platform software|infrastructure software", full, re.I):
                 rescue_track = "firmware" if re.search(r"\bfirmware\b", full, re.I) else "embedded_software" if re.search(r"embedded software", full, re.I) else "general_swe"
                 return _finish_role(

@@ -249,6 +249,14 @@ U.S. location wins across a multi-location role, and city-only/state-only
 values remain ambiguous. Location explanations identify the field and bounded
 evidence used for each explicit decision.
 
+Role-fit reevaluation likewise uses the normal backend classifier and watcher
+eligibility wrapper. Role rules require central title/duty evidence for
+AI-integration, digital-solutions, quant, technical-product, and explicit-track
+umbrella programs. Strong physical-engineering, consumer-research, and
+manufacturing-quality titles take precedence over incidental technical terms.
+The evaluator never substitutes human notes or company-specific benchmark
+exceptions for evidence present in the frozen posting.
+
 The three independent cohorts are:
 
 - `random`: 160 requested rows sampled from the complete U.S./ambiguous

@@ -183,6 +183,95 @@ def test_software_adjacent_titles_get_specific_role_tracks(title, track, role):
     assert got["software_evidence"]
 
 
+@pytest.mark.parametrize(
+    ("title", "track"),
+    [
+        ("A.I. Integration Intern", "ml_ai"),
+        ("AI-Integration Internship", "ml_ai"),
+        ("Markets Quantitative Analyst Summer Internship", "quant_dev"),
+        ("Systematic Investing Intern", "quant_dev"),
+        ("Associate Product Manager Intern (APM)", "technical_product"),
+        ("Technical Product Management Intern", "technical_product"),
+        ("Product Development Internship Program", "technical_product"),
+        ("Training Technology Digital Solutions Intern", "solutions_engineering"),
+        ("Intelligent Systems and Workflow Automation Intern", "solutions_engineering"),
+    ],
+)
+def test_scoped_technical_adjacent_titles_are_recognized(title, track):
+    got = classify_role(_row(title=title))
+
+    assert got["role_track"] == track
+
+
+def test_umbrella_program_requires_an_explicit_technical_track():
+    technical = classify_role(_row(
+        title="Summer Internship Program, All Tracks",
+        description=(
+            "Applicants select from business areas and tracks including "
+            "Technology, Analytics & Risk, Engineering, or Finance."
+        ),
+    ))
+    broad = classify_role(_row(
+        title="Summer Internship Program, All Tracks",
+        description="Applicants rotate across teams and learn about the business.",
+    ))
+
+    assert technical["role_track"] == "general_swe"
+    assert "technical program track" in technical["evidence"][0]
+    assert broad["role_track"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "requirements", "track"),
+    [
+        (
+            "Naval Architect Co-op",
+            "The company builds autonomous vehicles using AI and computer vision.",
+            "Design hull structures and manufacturing plans. Python preferred.",
+            "mechanical_manufacturing",
+        ),
+        (
+            "Product Design Engineering Co-op",
+            "Develop physical consumer products through industrial design and prototyping.",
+            "Mechanical engineering, CAD, materials, and user testing.",
+            "mechanical_manufacturing",
+        ),
+        (
+            "Consumer Insights Co-op",
+            "Analyze qualitative and quantitative surveys for product and marketing decisions.",
+            "Market research and consumer behavior.",
+            "non_technical",
+        ),
+        (
+            "Electrical Engineer Intern",
+            "Design PCBs and troubleshoot hardware/software boundaries; assist with firmware.",
+            "Electrical engineering, circuits, oscilloscopes, and Python.",
+            "electrical_hardware",
+        ),
+        (
+            "Quality Engineering Intern",
+            "Inspect manufacturing processes and supplier quality systems.",
+            "Manufacturing quality and process control.",
+            "quality_test",
+        ),
+    ],
+)
+def test_strong_unrelated_title_and_core_duties_beat_incidental_technical_terms(
+    title,
+    description,
+    requirements,
+    track,
+):
+    got = classify_role(_row(
+        title=title,
+        description=description,
+        requirements=requirements,
+    ))
+
+    assert got["role_track"] == track
+    assert got["role"] != "swe"
+
+
 def test_it_backend_java_is_rescued_by_strong_backend_evidence():
     got = classify_role(_row(
         title="IT Internship (BackEnd, Java)",

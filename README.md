@@ -175,6 +175,10 @@ invalid pages still fail, as does any nonempty fetch that produces zero valid
 canonical rows; a genuinely empty Workday board remains a successful empty
 source.
 
+The Simplify JSON backstop likewise retains valid entries from a mixed
+malformed payload and emits one bounded warning. Its deliberately nonempty feed
+still fails when every entry is malformed.
+
 Workday transport failures are diagnosed without retaining response bodies.
 Safe diagnostics include HTTP status, query-free final URL, content metadata,
 body byte count and SHA-256 digest, a generic body classification, attempt
@@ -236,6 +240,24 @@ U.S.-remote roles. Explicitly foreign and foreign-remote roles receive the
 stable watcher reason `outside_us`; missing and genuinely ambiguous locations
 continue to normal role eligibility. The gate changes neither backend fit
 scores nor role tracks, actions, ranking values, or degree decisions.
+
+---
+
+## Watcher role eligibility
+
+Role classification prioritizes explicit title and core-duty evidence over
+incidental technology words elsewhere in a posting. Applied AI integration,
+technical digital-solutions/workflow roles, quantitative analyst/trading work,
+technical product/APM programs, and umbrella programs with an explicit
+technology, analytics, engineering, data, quantitative, or risk-technology
+track can enter the software-adjacent watcher.
+
+Naval/mechanical/industrial product design, electrical hardware, consumer
+insights/market research, and generic manufacturing quality remain outside the
+watcher even when boilerplate mentions AI, Python, software, modeling,
+analytics, or testing. Firmware/embedded-software titles and explicit software
+QA automation remain eligible. Generic product and umbrella programs without
+central technical evidence remain excluded.
 
 ---
 

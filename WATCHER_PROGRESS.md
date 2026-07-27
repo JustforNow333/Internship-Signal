@@ -338,6 +338,33 @@ This file tracks completed watcher steps and the next handoff target.
      ranking values did not change.
    - Offline backend/watcher validation: `499 passed, 1 warning`; compileall
      completed successfully.
+16. Frozen U.S. role-fit classifier refinement:
+   - Title-first reusable rules recognize applied AI integration, technical
+     digital solutions/workflow automation, quantitative analyst/trading,
+     technical product/APM, and umbrella programs only with an explicit
+     relevant technical track.
+   - Strong naval/mechanical/physical-product, electrical-hardware, consumer
+     research, and manufacturing-quality evidence now defeats incidental AI,
+     software, Python, modeling, analytics, firmware, or testing mentions.
+     Explicit firmware/embedded software and software QA automation remain.
+   - On the frozen 74-row set, true positives rose from 7 to 12, false
+     positives fell from 5 to 0, false negatives fell from 6 to 1, precision
+     reached 100%, recall 92.3%, and F1 96.0%. The unsupported BlackRock
+     all-tracks row remains excluded because its frozen fields contain no
+     explicit technical track.
+   - Offline backend/watcher validation: `515 passed, 1 warning`; compileall
+     completed successfully.
+17. Evidence-based parser and source robustness fixes:
+   - The Go/Rust fit penalty no longer mistakes the ordinary lowercase verb
+     `go` for the Go programming language; explicit `Go`, `GO`, `Golang`, and
+     Rust evidence remains recognized.
+   - Compensation parsing ignores unmarked program-duration counts such as
+     `12-week internship` instead of widening an hourly pay range with them.
+   - The Simplify/GitHub JSON backstop retains schema-valid entries from a
+     mixed malformed payload, emits one bounded warning, and still fails a
+     nonempty all-malformed payload.
+   - Offline backend/watcher validation: `519 passed, 1 warning`; frontend:
+     `23 passed`; production build and Python compileall completed successfully.
 
 ## Next
 
@@ -363,8 +390,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the structured location-evidence update:
+Latest local validation after the evidence-based bug audit:
 
 ```text
-499 passed, 1 warning in 3.66s
+519 passed, 1 warning in 3.90s
 ```

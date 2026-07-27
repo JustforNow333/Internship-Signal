@@ -90,12 +90,22 @@ def _extract_amounts(s: str):
     amounts = []
     for m in _AMOUNT_RE.finditer(cleaned):
         tail = cleaned[m.end(): m.end() + 12].lower()
+        prefix = cleaned[max(0, m.start() - 8): m.start()]
+        has_currency_marker = bool(
+            re.search(r"(?:[$€£₹]|(?:usd|eur|gbp|cad|inr|rs\.?)\s*)$", prefix, re.I)
+        )
         if re.match(r"\s*%", tail):
             continue  # an equity/bonus percentage, not a cash amount
-        if re.match(r"\s*(hours?|hrs?)\b", tail) and "$" not in cleaned[max(0, m.start() - 2): m.start()]:
+        if re.match(r"\s*(hours?|hrs?)\b", tail) and not has_currency_marker:
             continue  # an hours-per-week figure, not money
         value = float(m.group(1).replace(",", ""))
         suffix = (m.group(2) or "").lower()
+        if (
+            not suffix
+            and not has_currency_marker
+            and re.match(r"\s*-?\s*(?:days?|weeks?|months?|years?)\b", tail)
+        ):
+            continue  # a program-duration count, not money
         if suffix:
             value *= _MULTIPLIERS[suffix]
         amounts.append((value, bool(suffix)))

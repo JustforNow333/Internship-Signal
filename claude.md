@@ -14,6 +14,10 @@
   Prefer collected structured country/location metadata, keep city-only
   evidence ambiguous, preserve diagnostics, and never derive country from
   state abbreviations or alter scores/ranking.
+- Role rules prioritize title/core duties over incidental keywords. Technical
+  AI integration, digital solutions, quant, product, and umbrella programs
+  require explicit central technical evidence; physical engineering, consumer
+  research, and manufacturing quality remain excluded.
 - Keep typed GitHub sources backward-compatible with `github_listing_urls`.
   Merge direct ATS, Simplify JSON, then Markdown by fixed priority; Markdown
   `Added` is source metadata and lower-priority closure cannot close direct data.
@@ -40,3 +44,7 @@
 - Benchmark labels require `human_eligible` (`yes`, `no`, or `uncertain`);
   optional role track, exclusion reason, and notes do not affect binary metrics.
 - Use the validation commands in `agents.md`; always run `git diff --check`.
+- Bug audits require a reproducible failure or clear violated invariant. Add a
+  regression test before fixing behavior; do not change code for style alone.
+- Holdout benchmark construction must stop when tracked files are dirty. Never
+  create provisional holdout artifacts or inspect prior labels for selection.
