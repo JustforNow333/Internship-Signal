@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, TextIO
 
 from backend.app.ingest import analyze_rows
+from watcher.audit_trace import enrich_duplicate_entries
 from watcher.alumni import AlumniIndex, attach_alumni, load_default_alumni, status_for_injected_index
 from watcher.config import (
     DEFAULT_WATCHLIST_PATH,
@@ -21,7 +22,15 @@ from watcher.config import (
     WatcherConfig,
     load_watchlist,
 )
+from watcher.eligibility import determine_watcher_eligibility
 from watcher.filters import filter_matches
+from watcher.health_alerts import (
+    MODE_OFF as HEALTH_EMAIL_OFF,
+    HealthAlertPolicy,
+    HealthAlertResult,
+    evaluate_and_send_health_alerts,
+    load_health_alert_policy,
+)
 from watcher.notify import email_sending_enabled, send_digest
 from watcher.season import (
     SEASON_ROLLOVER_DUE,
@@ -31,6 +40,14 @@ from watcher.season import (
     season_status,
 )
 from watcher.seen_store import SeenStore
+from watcher.source_comparison import (
+    CATEGORY_BOTH,
+    CATEGORY_DIRECT_ONLY,
+    CATEGORY_GITHUB_ONLY,
+    SourceComparisonReport,
+    SourceComparisonStore,
+    build_source_comparison,
+)
 from watcher.source_health import (
     COVERAGE_UNCOVERED,
     ERROR_FETCH,
@@ -106,6 +123,21 @@ class RunResult:
     health_summary: HealthSummary
     workday_transport: "WorkdayTransportSummary"
     alumni_status_message: str = ""
+    eligibility_exclusions: tuple[dict[str, object], ...] = ()
+    source_comparison: SourceComparisonReport | None = None
+    health_alert_result: HealthAlertResult = field(
+        default_factory=lambda: HealthAlertResult(
+            mode=HEALTH_EMAIL_OFF,
+            candidates=0,
+            sent=False,
+            suppressed_by_cooldown=0,
+            recovery_alerts=0,
+            subject="",
+            error=None,
+            daily_summary_sent=False,
+        )
+    )
+    source_comparison_persisted: bool = False
 
 
 @dataclass
@@ -169,6 +201,8 @@ def run_once(
     health_store: SourceHealthStore | None = None,
     run_id: str | None = None,
     health_observed_at: datetime | None = None,
+    health_alert_policy: HealthAlertPolicy | None = None,
+    health_alert_sender: Callable[[str, str], bool] | None = None,
 ) -> RunResult:
     if mark_seen_without_send:
         if notification_mode not in {None, RUN_MODE_PRIME}:
@@ -240,13 +274,31 @@ def run_once(
         rows,
         today=today,
         include_dedupe_report=True,
+        include_audit_diagnostics=True,
     )
+    duplicate_report = enrich_duplicate_entries(rows, duplicate_report)
     cross_source_duplicates_merged = sum(
         1
         for duplicate in duplicate_report
         if duplicate.get("cross_source") is True
     )
     LOGGER.info("Filtering %d scored job(s)...", len(jobs))
+    eligibility_exclusions = _categorical_exclusion_audit(
+        jobs,
+        target_roles=config.target_roles,
+    )
+    if eligibility_exclusions:
+        reason_counts = Counter(
+            str(item["exclusion_reason"]) for item in eligibility_exclusions
+        )
+        LOGGER.info(
+            "Categorical eligibility exclusions: total=%d reasons=%s",
+            len(eligibility_exclusions),
+            ",".join(
+                f"{reason}={count}"
+                for reason, count in sorted(reason_counts.items())
+            ),
+        )
     matches = filter_matches(jobs, target_roles=config.target_roles, min_score=config.min_score)
     if alumni_index is None:
         alumni_index, alumni_status = load_default_alumni()
@@ -324,6 +376,56 @@ def run_once(
             "Live digest was not sent; left %d posting(s) pending.",
             len(new_matches),
         )
+    source_comparison = build_source_comparison(
+        config=config,
+        jobs=jobs,
+        seen_store=seen_store,
+        run_id=active_run_id,
+        observed_at=observed_at,
+        duplicate_report=duplicate_report,
+        coverage=company_coverage,
+        source_attempts=collection_stats.source_attempts,
+        source_health_states=health_states,
+    )
+    source_comparison_persisted = False
+    try:
+        with SourceComparisonStore(seen_store.path) as comparison_store:
+            comparison_store.save(source_comparison)
+        source_comparison_persisted = True
+    except Exception as exc:  # observability must not alter notification semantics
+        LOGGER.error(
+            "Source-comparison persistence failed: %s",
+            sanitize_error(exc),
+        )
+    active_health_alert_policy = health_alert_policy or HealthAlertPolicy(
+        mode=HEALTH_EMAIL_OFF
+    )
+    try:
+        health_alert_result = evaluate_and_send_health_alerts(
+            db_path=seen_store.path,
+            policy=active_health_alert_policy,
+            run_id=active_run_id,
+            observed_at=observed_at,
+            states=health_states,
+            transitions=health_transitions,
+            coverage=company_coverage,
+            summary=health_summary,
+            comparison=source_comparison,
+            sender=health_alert_sender,
+        )
+    except Exception as exc:  # alert diagnostics must not alter match delivery
+        alert_error = sanitize_error(exc)
+        LOGGER.error("Source-health alert evaluation failed: %s", alert_error)
+        health_alert_result = HealthAlertResult(
+            mode=active_health_alert_policy.mode,
+            candidates=0,
+            sent=False,
+            suppressed_by_cooldown=0,
+            recovery_alerts=0,
+            subject="",
+            error=alert_error,
+            daily_summary_sent=False,
+        )
     return RunResult(
         rows_fetched=len(rows),
         jobs_scored=len(jobs),
@@ -354,6 +456,10 @@ def run_once(
         health_summary=health_summary,
         workday_transport=workday_transport,
         alumni_status_message=alumni_status.message,
+        eligibility_exclusions=eligibility_exclusions,
+        source_comparison=source_comparison,
+        health_alert_result=health_alert_result,
+        source_comparison_persisted=source_comparison_persisted,
     )
 
 
@@ -591,6 +697,36 @@ def collect_rows(
     return [*direct_rows, *github_rows], errors
 
 
+def _categorical_exclusion_audit(
+    jobs: list[dict],
+    *,
+    target_roles: set[str] | frozenset[str],
+) -> tuple[dict[str, object], ...]:
+    exclusions: list[dict[str, object]] = []
+    for job in jobs:
+        eligibility = determine_watcher_eligibility(job, target_roles)
+        reason = eligibility.get("eligibility_exclusion_reason")
+        if not reason:
+            continue
+        role = job.get("role_classification") or {}
+        score = job.get("score") or {}
+        exclusions.append(
+            {
+                "company": job.get("company", ""),
+                "title": job.get("title", ""),
+                "source_url": job.get("source_url", ""),
+                "role": role.get("role", "unknown"),
+                "role_track": score.get("role_track")
+                or role.get("role_track")
+                or "unknown",
+                "exclusion_reason": reason,
+                "evidence_source": eligibility.get("eligibility_evidence_source"),
+                "evidence": eligibility.get("eligibility_evidence"),
+            }
+        )
+    return tuple(exclusions)
+
+
 def print_report(result: RunResult, *, output: TextIO | None = None) -> None:
     output = output or sys.stdout
     if getattr(result, "run_id", None):
@@ -609,6 +745,33 @@ def print_report(result: RunResult, *, output: TextIO | None = None) -> None:
     )
     _print_workday_transport(getattr(result, "workday_transport", WorkdayTransportSummary()), output)
     _print_source_health(result, output=output)
+    comparison = getattr(result, "source_comparison", None)
+    if comparison is not None:
+        print("Source comparison:", file=output)
+        print(
+            f"  GitHub-only eligible: {comparison.counts.get(CATEGORY_GITHUB_ONLY, 0)}",
+            file=output,
+        )
+        print(
+            f"  Direct-only eligible: {comparison.counts.get(CATEGORY_DIRECT_ONLY, 0)}",
+            file=output,
+        )
+        print(
+            f"  Both sources merged: {comparison.counts.get(CATEGORY_BOTH, 0)}",
+            file=output,
+        )
+    alert_result = getattr(result, "health_alert_result", None)
+    if alert_result is not None:
+        print("Source-health email:", file=output)
+        print(f"  Mode: {alert_result.mode}", file=output)
+        print(f"  Alert candidates: {alert_result.candidates}", file=output)
+        print(f"  Sent: {'yes' if alert_result.sent else 'no'}", file=output)
+        print(
+            f"  Suppressed by cooldown: {alert_result.suppressed_by_cooldown}",
+            file=output,
+        )
+        if alert_result.error:
+            print(f"  Error: {alert_result.error}", file=output)
     if result.errors:
         print(f"Source errors: {len(result.errors)}", file=output)
         for error in result.errors:
@@ -631,6 +794,21 @@ def print_report(result: RunResult, *, output: TextIO | None = None) -> None:
         f"{getattr(result, 'cross_source_duplicates_merged', 0)}",
         file=output,
     )
+    eligibility_exclusions = tuple(
+        getattr(result, "eligibility_exclusions", ()) or ()
+    )
+    print(
+        f"  Categorical eligibility exclusions: {len(eligibility_exclusions)}",
+        file=output,
+    )
+    for item in eligibility_exclusions:
+        print(
+            f"  - {item.get('company', '')} - {item.get('title', '')}: "
+            f"{item.get('exclusion_reason', 'unknown')} "
+            f"[{item.get('evidence_source') or 'unknown evidence'}] "
+            f"{item.get('evidence') or ''}",
+            file=output,
+        )
     _print_suppressed_postings("Previously emailed", previously_emailed, output=output)
     _print_suppressed_postings("Explicitly primed", explicitly_primed, output=output)
 
@@ -667,6 +845,8 @@ def print_heartbeat(result: RunResult, *, output: TextIO | None = None) -> None:
     output = output or sys.stdout
     sent = "yes" if result.digest_sent else "no"
     health = getattr(result, "health_summary", None)
+    health_alert = getattr(result, "health_alert_result", None)
+    comparison = getattr(result, "source_comparison", None)
     print(
         "HEARTBEAT: ran, "
         f"rows_fetched={result.rows_fetched}, "
@@ -694,6 +874,16 @@ def print_heartbeat(result: RunResult, *, output: TextIO | None = None) -> None:
         f"uncovered_companies={_health_value(health, 'uncovered_companies')}, "
         f"health_transitions={_health_value(health, 'health_transitions')}, "
         f"health_recoveries={_health_value(health, 'health_recoveries')}, "
+        f"health_email_mode={getattr(health_alert, 'mode', HEALTH_EMAIL_OFF)}, "
+        f"health_alert_candidates={getattr(health_alert, 'candidates', 0)}, "
+        f"health_alert_sent={'yes' if getattr(health_alert, 'sent', False) else 'no'}, "
+        f"health_alert_suppressed_by_cooldown={getattr(health_alert, 'suppressed_by_cooldown', 0)}, "
+        f"health_recovery_alerts={getattr(health_alert, 'recovery_alerts', 0)}, "
+        f"health_alert_error={'yes' if getattr(health_alert, 'error', None) else 'no'}, "
+        f"source_comparison_github_only={_comparison_value(comparison, CATEGORY_GITHUB_ONLY)}, "
+        f"source_comparison_direct_only={_comparison_value(comparison, CATEGORY_DIRECT_ONLY)}, "
+        f"source_comparison_both={_comparison_value(comparison, CATEGORY_BOTH)}, "
+        f"source_comparison_persisted={'yes' if getattr(result, 'source_comparison_persisted', False) else 'no'}, "
         f"workday_attempted={getattr(getattr(result, 'workday_transport', None), 'attempted_tenants', 0)}, "
         f"workday_succeeded={getattr(getattr(result, 'workday_transport', None), 'successful_tenants', 0)}, "
         f"workday_failed={getattr(getattr(result, 'workday_transport', None), 'failed_tenants', 0)}, "
@@ -747,6 +937,7 @@ def main(argv: list[str] | None = None) -> int:
             config,
             seen_store=seen_store,
             notification_mode=notification_mode,
+            health_alert_policy=load_health_alert_policy(),
         )
     health_report_path = args.health_report or os.getenv("WATCHER_HEALTH_REPORT_PATH", "").strip()
     if health_report_path:
@@ -1127,6 +1318,27 @@ def _write_result_health_report(result: RunResult, path: str | Path) -> None:
             "github_feeds_succeeded": result.github_feeds_succeeded,
             "digest_sent": result.digest_sent,
             "seen_marked": result.seen_marked,
+            "health_email_mode": result.health_alert_result.mode,
+            "health_alert_candidates": result.health_alert_result.candidates,
+            "health_alert_sent": result.health_alert_result.sent,
+            "health_alert_suppressed_by_cooldown": (
+                result.health_alert_result.suppressed_by_cooldown
+            ),
+            "health_recovery_alerts": result.health_alert_result.recovery_alerts,
+            "health_alert_error": bool(result.health_alert_result.error),
+            "source_comparison_github_only": _comparison_value(
+                result.source_comparison,
+                CATEGORY_GITHUB_ONLY,
+            ),
+            "source_comparison_direct_only": _comparison_value(
+                result.source_comparison,
+                CATEGORY_DIRECT_ONLY,
+            ),
+            "source_comparison_both": _comparison_value(
+                result.source_comparison,
+                CATEGORY_BOTH,
+            ),
+            "source_comparison_persisted": result.source_comparison_persisted,
             "workday_transport": {
                 "attempted_tenants": result.workday_transport.attempted_tenants,
                 "successful_tenants": result.workday_transport.successful_tenants,
@@ -1142,6 +1354,13 @@ def _write_result_health_report(result: RunResult, path: str | Path) -> None:
 
 def _health_value(summary: HealthSummary | None, field_name: str) -> int:
     return int(getattr(summary, field_name, 0) or 0)
+
+
+def _comparison_value(
+    report: SourceComparisonReport | None,
+    category: str,
+) -> int:
+    return int(report.counts.get(category, 0)) if report else 0
 
 
 def _log_season_status(

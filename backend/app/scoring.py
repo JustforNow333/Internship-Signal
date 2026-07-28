@@ -14,6 +14,11 @@ from datetime import date
 import re
 
 from .config import BUCKET_THRESHOLDS, SCORE_WEIGHTS
+from .eligibility import (
+    GRADUATE_ONLY,
+    PHD_ONLY,
+    assess_student_eligibility,
+)
 from .normalize import days_until
 from .salary import hourly_mid
 
@@ -108,40 +113,6 @@ ANALYTICS_REPORTING_RE = re.compile(r"\banalytics\b|\breporting\b|\breports?\b|\
 DATA_SOFTWARE_RE = re.compile(r"data engineer|pipeline|etl|software|python|sql|pandas|model|machine learning|ml\b|api", re.I)
 VAGUE_TITLE_RE = re.compile(r"\btechnical intern\b|\btechnical co[- ]?op\b", re.I)
 COMMERCIAL_SUPPORT_RE = re.compile(r"commercial|customer[- ]facing|customer support|technical support|solutions?|sales|pre[- ]?sales|implementation consultant", re.I)
-PHD_TERM = r"(?:ph\.?\s*d\.?|phd|doctoral|doctorate)"
-MASTERS_TERM = r"(?:master(?:['\u2019])?s|masters|m\.s\.|master of science)"
-PHD_INTERNSHIP_RE = re.compile(
-    rf"\b{PHD_TERM}(?=\W|$).{{0,60}}\b(intern(ship)?|co[- ]?op|university grad)\b|"
-    rf"\b(intern(ship)?|co[- ]?op|research intern|engineer)\b.{{0,60}}\b{PHD_TERM}(?=\W|$)|"
-    r"\bphd university grad\b",
-    re.I,
-)
-MASTERS_INTERNSHIP_RE = re.compile(
-    rf"\b{MASTERS_TERM}(?=\W|$).{{0,60}}\b(intern(ship)?|co[- ]?op|students?|candidates?)\b|"
-    rf"\b(intern(ship)?|co[- ]?op)\b.{{0,60}}\b{MASTERS_TERM}(?=\W|$)|"
-    r"\bms intern(ship)?\b",
-    re.I,
-)
-MBA_INTERNSHIP_RE = re.compile(
-    r"\bmba\b.{0,60}\b(intern(ship)?|co[- ]?op|students?|candidates?)\b|"
-    r"\b(intern(ship)?|co[- ]?op)\b.{0,60}\bmba\b",
-    re.I,
-)
-GRADUATE_INTERNSHIP_RE = re.compile(
-    r"\bgraduate student intern(ship)?\b|\bgraduate intern(ship)?\b|"
-    r"\bgraduate\b.{0,40}\b(intern(ship)?|co[- ]?op)\b|"
-    r"\bintern(ship)?\b.{0,60}\bgraduate students?\b|"
-    r"\badvanced degree intern(ship)?\b|\badvanced degree candidates?\b",
-    re.I,
-)
-POSTDOC_RE = re.compile(r"\bpost\s*doc(?:toral)?\b|\bpostdoctoral\b", re.I)
-UNDERGRAD_RE = re.compile(
-    r"\bundergraduate\b|\bbachelor(?:['\u2019])?s\b|\bbachelors\b|\bbs\b|\bba\b|"
-    r"\bsophomore\b|\bjunior\b|\bsenior\b",
-    re.I,
-)
-
-
 def _clamp(x, lo=0, hi=100):
     return max(lo, min(hi, x))
 
@@ -149,20 +120,14 @@ def _clamp(x, lo=0, hi=100):
 def detect_degree_eligibility(row) -> tuple[str, bool, str | None]:
     """Return watcher degree eligibility for undergraduate-targeted internships."""
 
-    text = " ".join([row.get("title", ""), row.get("description", ""), row.get("requirements", "")])
-    if POSTDOC_RE.search(text):
-        return "postdoctoral", False, "Graduate/PhD-level internship outside undergraduate target."
-    if PHD_INTERNSHIP_RE.search(text):
-        return "phd", False, "Graduate/PhD-level internship outside undergraduate target."
-    if MASTERS_INTERNSHIP_RE.search(text):
-        return "masters", False, "Graduate/PhD-level internship outside undergraduate target."
-    if MBA_INTERNSHIP_RE.search(text):
-        return "mba", False, "Graduate/PhD-level internship outside undergraduate target."
-    if GRADUATE_INTERNSHIP_RE.search(text):
-        return "graduate", False, "Graduate/PhD-level internship outside undergraduate target."
-    if UNDERGRAD_RE.search(text):
-        return "undergraduate", True, None
-    return "unspecified", True, None
+    decision = assess_student_eligibility(row)
+    degree_eligible = decision.exclusion_reason not in {PHD_ONLY, GRADUATE_ONLY}
+    reason = (
+        "Graduate/PhD-level internship outside undergraduate target."
+        if not degree_eligible
+        else None
+    )
+    return decision.degree_level, degree_eligible, reason
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +413,18 @@ def score_deadline(row, today):
 
 def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, profile, tools, today=None):
     today = today or date.today()
-    degree_level, degree_eligible, degree_ineligible_reason = detect_degree_eligibility(row)
+    student_eligibility = assess_student_eligibility(row)
+    degree_level = student_eligibility.degree_level
+    degree_eligible = student_eligibility.exclusion_reason not in {
+        PHD_ONLY,
+        GRADUATE_ONLY,
+    }
+    degree_ineligible_reason = (
+        "Graduate/PhD-level internship outside undergraduate target."
+        if not degree_eligible
+        else None
+    )
+    categorical_eligible = student_eligibility.eligible
 
     cat = {}
     cat["role_relevance"] = score_role_relevance(row, role_cls, pmatch, profile)
@@ -467,13 +443,13 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
     }
     total = round(sum(c["score"] * c["weight"] for c in categories.values()))
     fit_score = categories["role_relevance"]["score"]
-    if not degree_eligible:
+    if not categorical_eligible:
         fit_score = 0
-    watcher_eligible = fit_score > 0 and degree_eligible
+    watcher_eligible = fit_score > 0 and categorical_eligible
     fit_explanation = categories["role_relevance"]["explanation"]
     watcher_ineligible_reason = (
-        degree_ineligible_reason
-        if not degree_eligible
+        student_eligibility.exclusion_reason
+        if not categorical_eligible
         else _watcher_ineligible_reason(role_cls, profile) or (fit_explanation if not watcher_eligible else None)
     )
 
@@ -519,8 +495,13 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
     watcher_action = _watcher_action(fit_score, watcher_eligible, expired)
     reasons = _top_reasons(positive, categories, fit_explanation=fit_explanation, watcher_eligible=watcher_eligible)
     concerns = _top_concerns(red_flags, categories, expired)
-    if watcher_ineligible_reason and watcher_ineligible_reason not in concerns:
-        concerns.insert(0, watcher_ineligible_reason)
+    concern_reason = (
+        student_eligibility.explanation
+        if not categorical_eligible
+        else watcher_ineligible_reason
+    )
+    if concern_reason and concern_reason not in concerns:
+        concerns.insert(0, concern_reason)
         concerns = concerns[:3]
 
     explanation = (
@@ -540,6 +521,9 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
         "degree_level": degree_level,
         "degree_eligible": bool(degree_eligible),
         "degree_ineligible_reason": degree_ineligible_reason,
+        "student_eligibility": student_eligibility.as_dict(),
+        "eligibility_exclusion_reason": student_eligibility.exclusion_reason,
+        "eligibility_explanation": student_eligibility.explanation,
         "watcher_action": watcher_action,
         "watcher_action_label": ACTION_LABELS[watcher_action],
         "bucket": bucket,

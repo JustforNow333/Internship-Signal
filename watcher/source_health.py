@@ -686,6 +686,8 @@ def render_github_actions_report(
         f"- Season status: `{run.get('season_status', 'unknown')}`",
         f"- Rows/jobs/matches/new/errors: {run.get('rows_fetched', 'unknown')} / {run.get('jobs_scored', 'unknown')} / {run.get('matches', 'unknown')} / {run.get('new_matches', 'unknown')} / {run.get('errors', 'unknown')}",
         f"- Seen store: loaded {seen_loaded} ({load_status}); saved {seen_saved} ({save_status})",
+        f"- Match email sent: `{run.get('digest_sent', False)}`",
+        f"- Health email: mode `{run.get('health_email_mode', 'unknown')}`, sent `{run.get('health_alert_sent', False)}`, candidates {run.get('health_alert_candidates', 0)}, cooldown-suppressed {run.get('health_alert_suppressed_by_cooldown', 0)}",
         "",
         "### Source health",
         "",

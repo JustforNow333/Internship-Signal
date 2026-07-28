@@ -47,13 +47,21 @@ def _cell_has_text(value) -> bool:
     return bool(str(value or "").strip())
 
 
-def _analyze_rows_with_report(rows: list[dict], today: date | None = None) -> tuple[list[dict], list]:
+def _analyze_rows_with_report(
+    rows: list[dict],
+    today: date | None = None,
+    *,
+    include_audit_diagnostics: bool = False,
+) -> tuple[list[dict], list]:
     """Shared analysis engine plus dedupe report for CSV cleaning metadata."""
     today = today or date.today()
     profile = load_profile()
     known = config.load_known_companies()
 
-    unique_rows, dup_report = dedupe(rows)
+    unique_rows, dup_report = dedupe(
+        rows,
+        include_identity_diagnostics=include_audit_diagnostics,
+    )
 
     jobs = []
     for row in unique_rows:
@@ -80,6 +88,9 @@ def _analyze_rows_with_report(rows: list[dict], today: date | None = None) -> tu
             "degree_level": score.get("degree_level"),
             "degree_eligible": score.get("degree_eligible"),
             "degree_ineligible_reason": score.get("degree_ineligible_reason"),
+            "student_eligibility": score.get("student_eligibility"),
+            "eligibility_exclusion_reason": score.get("eligibility_exclusion_reason"),
+            "eligibility_explanation": score.get("eligibility_explanation"),
             "description": row.get("description", ""),
             "requirements": row.get("requirements", ""),
             "compensation": comp,
@@ -97,13 +108,23 @@ def _analyze_rows_with_report(rows: list[dict], today: date | None = None) -> tu
     return jobs, dup_report
 
 
-def analyze_rows(rows: list[dict], today: date | None = None, *, include_dedupe_report: bool = False):
+def analyze_rows(
+    rows: list[dict],
+    today: date | None = None,
+    *,
+    include_dedupe_report: bool = False,
+    include_audit_diagnostics: bool = False,
+):
     """Dedupe, analyze, and score already-built canonical rows.
 
     By default this returns only the scored jobs. `process_csv` asks for the
     dedupe report too so its cleaning report can keep the existing shape.
     """
-    jobs, dup_report = _analyze_rows_with_report(rows, today=today)
+    jobs, dup_report = _analyze_rows_with_report(
+        rows,
+        today=today,
+        include_audit_diagnostics=include_audit_diagnostics,
+    )
     if include_dedupe_report:
         return jobs, dup_report
     return jobs

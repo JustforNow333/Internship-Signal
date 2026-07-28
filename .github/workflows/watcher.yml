@@ -20,6 +20,16 @@ name: watcher
         required: true
         default: false
         type: boolean
+      health_email_mode:
+        description: "Independent source-health email mode for this manual run."
+        required: true
+        default: "off"
+        type: choice
+        options:
+          - "off"
+          - "transitions_only"
+          - "failure_only"
+          - "daily_summary"
 
 permissions:
   contents: write
@@ -52,6 +62,7 @@ jobs:
         env:
           PYTHONPATH: .:backend
           WATCHER_SEND_EMAIL: "0"
+          WATCHER_HEALTH_EMAIL_MODE: "off"
           WATCHER_WORKDAY_MIN_INTERVAL_SECONDS: ${{ vars.WATCHER_WORKDAY_MIN_INTERVAL_SECONDS }}
         run: |
           set -euo pipefail
@@ -74,8 +85,13 @@ jobs:
       DATA_DB_FILE: seen.sqlite
       SEEN_DB_PATH: ${{ github.workspace }}/.watcher-state/seen.sqlite
       HEALTH_REPORT_PATH: ${{ github.workspace }}/.watcher-state/watcher-source-health.json
+      COMPARISON_REPORT_PATH: ${{ github.workspace }}/.watcher-state/watcher-source-comparison.json
       ACTIONS_WATCHER_SEND_EMAIL: ${{ vars.WATCHER_SEND_EMAIL }}
       ACTIONS_WATCHER_PRIME_SEEN: ${{ vars.WATCHER_PRIME_SEEN }}
+      ACTIONS_WATCHER_HEALTH_EMAIL_MODE: ${{ vars.WATCHER_HEALTH_EMAIL_MODE }}
+      WATCHER_HEALTH_EMAIL_HOUR_UTC: ${{ vars.WATCHER_HEALTH_EMAIL_HOUR_UTC }}
+      WATCHER_HEALTH_ALERT_COOLDOWN_HOURS: ${{ vars.WATCHER_HEALTH_ALERT_COOLDOWN_HOURS }}
+      WATCHER_FEED_STALE_HOURS: ${{ vars.WATCHER_FEED_STALE_HOURS }}
       WATCHER_WORKDAY_MIN_INTERVAL_SECONDS: ${{ vars.WATCHER_WORKDAY_MIN_INTERVAL_SECONDS }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
@@ -112,9 +128,11 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             raw_send="${{ inputs.send_email }}"
             raw_prime="${{ inputs.prime_seen }}"
+            raw_health_mode="${{ inputs.health_email_mode }}"
           else
             raw_send="${ACTIONS_WATCHER_SEND_EMAIL:-}"
             raw_prime="${ACTIONS_WATCHER_PRIME_SEEN:-}"
+            raw_health_mode="${ACTIONS_WATCHER_HEALTH_EMAIL_MODE:-transitions_only}"
           fi
 
           normalized_send="$(printf '%s' "$raw_send" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
@@ -126,6 +144,15 @@ jobs:
           case "$normalized_prime" in
             1|true|yes|y|on) prime_seen=true ;;
             *) prime_seen=false ;;
+          esac
+          health_email_mode="$(printf '%s' "$raw_health_mode" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          [ -n "$health_email_mode" ] || health_email_mode=transitions_only
+          case "$health_email_mode" in
+            off|transitions_only|failure_only|daily_summary) ;;
+            *)
+              echo "::error::Invalid source-health email mode: $health_email_mode"
+              exit 1
+              ;;
           esac
 
           if [ "$send_email" = "true" ] && [ "$prime_seen" = "true" ]; then
@@ -147,7 +174,8 @@ jobs:
 
           echo "send_email=$send_email" >> "$GITHUB_OUTPUT"
           echo "prime_seen=$prime_seen" >> "$GITHUB_OUTPUT"
-          echo "SEND-MODE: send_email=$send_email prime_seen=$prime_seen"
+          echo "health_email_mode=$health_email_mode" >> "$GITHUB_OUTPUT"
+          echo "SEND-MODE: send_email=$send_email prime_seen=$prime_seen health_email_mode=$health_email_mode"
 
       - name: Restore seen-store from data branch
         id: load_seen
@@ -293,6 +321,7 @@ jobs:
           PYTHONPATH: .:backend
           WATCHER_SEEN_DB: ${{ env.SEEN_DB_PATH }}
           WATCHER_HEALTH_REPORT_PATH: ${{ env.HEALTH_REPORT_PATH }}
+          WATCHER_HEALTH_EMAIL_MODE: ${{ steps.mode.outputs.health_email_mode }}
         run: |
           set -u -o pipefail
 
@@ -357,6 +386,15 @@ jobs:
           uncovered_companies="$(extract_count uncovered_companies)"
           health_transitions="$(extract_count health_transitions)"
           health_recoveries="$(extract_count health_recoveries)"
+          health_email_mode="$(printf '%s\n' "$heartbeat" | sed -n 's/.*health_email_mode=\([^,]*\).*/\1/p')"
+          health_alert_candidates="$(extract_count health_alert_candidates)"
+          health_alert_sent="$(printf '%s\n' "$heartbeat" | sed -n 's/.*health_alert_sent=\(yes\|no\).*/\1/p')"
+          health_alert_suppressed_by_cooldown="$(extract_count health_alert_suppressed_by_cooldown)"
+          health_recovery_alerts="$(extract_count health_recovery_alerts)"
+          health_alert_error="$(printf '%s\n' "$heartbeat" | sed -n 's/.*health_alert_error=\(yes\|no\).*/\1/p')"
+          source_comparison_github_only="$(extract_count source_comparison_github_only)"
+          source_comparison_direct_only="$(extract_count source_comparison_direct_only)"
+          source_comparison_both="$(extract_count source_comparison_both)"
           alumni_records="$(extract_count alumni_records_loaded)"
           alumni_employers="$(extract_count alumni_employers_indexed)"
           marked="$(extract_count seen_marked)"
@@ -382,6 +420,15 @@ jobs:
           echo "uncovered_companies=${uncovered_companies:-unknown}" >> "$GITHUB_OUTPUT"
           echo "health_transitions=${health_transitions:-unknown}" >> "$GITHUB_OUTPUT"
           echo "health_recoveries=${health_recoveries:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "health_email_mode=${health_email_mode:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "health_alert_candidates=${health_alert_candidates:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "health_alert_sent=${health_alert_sent:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "health_alert_suppressed_by_cooldown=${health_alert_suppressed_by_cooldown:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "health_recovery_alerts=${health_recovery_alerts:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "health_alert_error=${health_alert_error:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "source_comparison_github_only=${source_comparison_github_only:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "source_comparison_direct_only=${source_comparison_direct_only:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "source_comparison_both=${source_comparison_both:-unknown}" >> "$GITHUB_OUTPUT"
           echo "alumni_csv_status=${alumni_csv_status:-unknown}" >> "$GITHUB_OUTPUT"
           echo "alumni_records_loaded=${alumni_records:-unknown}" >> "$GITHUB_OUTPUT"
           echo "alumni_employers_indexed=${alumni_employers:-unknown}" >> "$GITHUB_OUTPUT"
@@ -400,6 +447,9 @@ jobs:
 
           if [ "$status" -ne 0 ]; then
             exit "$status"
+          fi
+          if [ "${health_alert_error:-no}" = "yes" ]; then
+            echo "::warning::Source-health email delivery failed; internship-match outcome is unaffected."
           fi
 
       - name: Save seen-store to data branch
@@ -484,6 +534,25 @@ jobs:
         run: |
           test -n "$GITHUB_STEP_SUMMARY"
           python -m watcher.source_health workflow-report "$HEALTH_REPORT_PATH"
+          comparison_markdown="$RUNNER_TEMP/source-comparison.md"
+          python -m watcher.audit \
+            --state-only \
+            --comparison \
+            --seen-db "$SEEN_DB_PATH" \
+            --comparison-json "$COMPARISON_REPORT_PATH" \
+            --comparison-markdown "$comparison_markdown"
+          cat "$comparison_markdown" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized watcher diagnostics
+        if: always() && steps.run_watcher.outputs.status == '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: watcher-diagnostics-${{ steps.run_watcher.outputs.run_id }}
+          path: |
+            ${{ env.HEALTH_REPORT_PATH }}
+            ${{ env.COMPARISON_REPORT_PATH }}
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Final heartbeat
         if: always()

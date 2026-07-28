@@ -20,6 +20,7 @@ from watcher.sources import (
     WorkableSource,
     WorkdaySource,
 )
+from watcher.sources.base import iso_date
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TEST_GITHUB_FEED_URL = "https://fixtures.example.test/internships/listings.json"
@@ -77,6 +78,14 @@ def test_fixture_json_round_trips_utf8_non_ascii(tmp_path):
     assert json.loads(output.read_text(encoding="utf-8")) == expected
     assert b"\xe2\x80\x99" in output.read_bytes()
     assert b"\xc2\xae" in output.read_bytes()
+
+
+@pytest.mark.parametrize(
+    "value",
+    (10**100, -(10**100), float("inf"), float("nan")),
+)
+def test_iso_date_treats_out_of_range_numeric_source_values_as_unknown(value):
+    assert iso_date(value) == ""
 
 
 def test_greenhouse_fixture_to_canonical_rows():

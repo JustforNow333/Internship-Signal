@@ -42,6 +42,9 @@ This file tracks completed watcher steps and the next handoff target.
 - Production watcher eligibility now conservatively rejects explicit non-U.S.
   locations with `outside_us` while retaining U.S., multi-location U.S., and
   country-ambiguous roles without changing backend scores or role decisions.
+- Categorical student eligibility now excludes only clear PhD-only,
+  graduate-only, freshman-only, and returning-intern-only restrictions, with
+  stable evidence-backed audit reasons and mixed/ambiguous cases retained.
 - A separate frozen U.S. role-fit benchmark now preserves the historical
   location-gate benchmark while measuring role relevance only on production
   location statuses `us` and `ambiguous`.
@@ -397,6 +400,54 @@ This file tracks completed watcher steps and the next handoff target.
    - Isolated temporary-SQLite integration output:
      `eligible=6 dry_new=6 seen_after_dry=0 live_emailed=6 rerun_new=0
      primed_seventh=1 after_prime_new=0 cross_source_merged=1`.
+20. Conservative categorical student eligibility:
+   - `backend/app/eligibility.py` evaluates structured eligibility, title,
+     required qualifications, and mandatory description evidence in fixed
+     priority order. Preferred, incidental, mixed-group, and ambiguous
+     evidence remains eligible.
+   - Stable reasons are `phd_only`, `graduate_only`, `freshman_only`, and
+     `returning_intern_only`. Excluded jobs keep their technical role/track and
+     original fields while using the existing zero-fit/skip convention.
+   - Watcher and benchmark audit output exposes the stable reason, bounded
+     triggering evidence, and evidence source. Normal run reports list
+     categorical exclusions without placing them into email or seen-state
+     selection.
+   - The Northrop Grumman `2027 Returning Intern Software Engineer` fixture is
+     excluded from dry/live digests as `returning_intern_only`; a separate
+     open requisition remains distinct and is the only row marked emailed.
+   - Offline backend/watcher validation: `588 passed, 1 warning`.
+21. Posting audit, source comparison, and independent health alerts:
+   - `python -m watcher.audit` supports state-only and live read-only tracing by
+     company/alias, title, URL, requisition, analyzed ID, or canonical identity.
+     Structured console/JSON output exposes every pipeline stage, dedupe
+     provenance, notification timestamps, and stable final reasons.
+   - Sanitized source-comparison snapshots classify GitHub-only, direct-only,
+     merged, rejected, and no-posting results. Aggregate history retains 30
+     runs; posting details retain three.
+   - Source-health mail has independent modes, rendering, SMTP invocation,
+     cooldown/recovery/daily-summary tables, and heartbeat fields. It never
+     writes internship `emailed_at` or `primed_at`.
+   - Offline backend/watcher validation: `639 passed, 1 warning`; Python
+     compileall completed successfully.
+22. Evidence-backed repository audit:
+   - ATS date normalization now treats non-finite and platform-out-of-range
+     numeric timestamps as unknown instead of letting one malformed external
+     value abort adapter parsing.
+   - Source-comparison traces recursively sanitize arbitrary persisted text and
+     strip credentials/query data from URL identities while leaving production
+     posting identity and dedupe decisions unchanged.
+   - A recovery alert whose SMTP delivery fails remains pending and is retried
+     once on a later healthy run; a successful retry restores normal
+     suppression.
+   - `watcher.audit` opens an in-memory migrated snapshot of seen state and a
+     read-only comparison connection. State-only audit no longer creates a
+     missing SQLite file or migrates an existing database on disk.
+   - Removed one unreferenced private renderer, unused daily-summary inputs,
+     duplicated alert sorting, and verified unused imports. A benchmark
+     module-level re-export that appeared unused was retained after its public
+     test dependency was confirmed.
+   - Offline backend/watcher validation: `647 passed, 1 warning`; frontend:
+     `23 passed`; production build and Python compileall completed successfully.
 
 ## Next
 
@@ -409,8 +460,8 @@ This file tracks completed watcher steps and the next handoff target.
 - After confirming the data branch exists and the heartbeat looks right, set
   the repo Actions variable `WATCHER_SEND_EMAIL=true` to enable scheduled sends;
   leave `WATCHER_PRIME_SEEN` unset/false for normal operation.
-- A future, separately scoped enhancement may add a dedicated source-health
-  email policy; it must not be coupled to internship-match digest conditions.
+- Keep source-health mode and internship-match send mode independently
+  configured; use manual `health_email_mode=off` for transport probes.
 
 ## Validation Command
 
@@ -426,8 +477,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after notification identity/state repair:
+Latest local validation after the evidence-backed repository audit:
 
 ```text
-554 passed, 1 warning in 5.62s
+647 passed, 1 warning in 10.13s
 ```

@@ -27,7 +27,6 @@ from watcher.source_health import (
     SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
     STATUS_HEALTHY,
-    STATUS_UNSUPPORTED,
     SourceHealthStore,
     render_final_heartbeat,
 )
@@ -189,6 +188,79 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
         rows = conn.execute("select emailed_at from seen order by job_id").fetchall()
     assert len(rows) == 2
     assert all(row[0] == "2026-06-09T00:00:00+00:00" for row in rows)
+
+
+def test_categorical_exclusion_is_audited_but_never_emailed_or_marked_seen(
+    tmp_path,
+):
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(name="Northrop Grumman", ats="greenhouse", token="northrop"),
+        )
+    )
+    direct_rows = [
+        row(
+            "Northrop Grumman",
+            "2027 Returning Intern Software Engineer",
+            url="https://example.test/jobs/returning-101",
+        ),
+        row(
+            "Northrop Grumman",
+            "2027 Software Engineer Intern",
+            url="https://example.test/jobs/open-202",
+        ),
+    ]
+    digest_sender = FakeDigestSender(sent=True)
+    db_path = tmp_path / "seen.sqlite"
+
+    with SeenStore(db_path) as store:
+        dry = run_once(
+            config,
+            seen_store=store,
+            direct_sources={
+                "greenhouse": FakeSource({"Northrop Grumman": direct_rows})
+            },
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=digest_sender,
+            today=date(2026, 7, 28),
+            notification_mode=RUN_MODE_DRY,
+        )
+        with sqlite3.connect(db_path) as conn:
+            assert conn.execute("select count(*) from seen").fetchone()[0] == 0
+
+        live = run_once(
+            config,
+            seen_store=store,
+            direct_sources={
+                "greenhouse": FakeSource({"Northrop Grumman": direct_rows})
+            },
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=digest_sender,
+            today=date(2026, 7, 28),
+            seen_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+            notification_mode=RUN_MODE_LIVE,
+        )
+
+    for result in (dry, live):
+        assert [job["title"] for job in result.new_matches] == [
+            "2027 Software Engineer Intern"
+        ]
+        assert len(result.eligibility_exclusions) == 1
+        exclusion = result.eligibility_exclusions[0]
+        assert exclusion["title"] == "2027 Returning Intern Software Engineer"
+        assert exclusion["exclusion_reason"] == "returning_intern_only"
+        assert exclusion["evidence_source"] == "title"
+        assert exclusion["role"] == "swe"
+        assert exclusion["role_track"] == "general_swe"
+
+    assert [len(call) for call in digest_sender.calls] == [1, 1]
+    with sqlite3.connect(db_path) as conn:
+        stored = conn.execute("select title, url from seen").fetchall()
+    assert stored == [
+        ("2027 Software Engineer Intern", "https://example.test/jobs/open-202")
+    ]
 
 
 def test_run_once_does_not_mark_seen_when_digest_not_sent(tmp_path):
@@ -1346,6 +1418,13 @@ def test_print_report_for_matches_and_empty(capsys):
             "score": {"total": 80, "action_label": "Apply now", "reasons": ["Strong role match"]},
             "red_flags": [{"label": "Compensation unclear or unstated"}],
         }],
+        "eligibility_exclusions": ({
+            "company": "Northrop Grumman",
+            "title": "2027 Returning Intern Software Engineer",
+            "exclusion_reason": "returning_intern_only",
+            "evidence_source": "title",
+            "evidence": "2027 Returning Intern Software Engineer",
+        },),
     })()
 
     print_report(result)
@@ -1356,6 +1435,8 @@ def test_print_report_for_matches_and_empty(capsys):
     assert "GitHub backstop feeds: 0 configured, 0 succeeded" in output
     assert "[direct] DirectCo" in output
     assert "Strong role match" in output
+    assert "Categorical eligibility exclusions: 1" in output
+    assert "returning_intern_only [title]" in output
 
     empty = type("Result", (), {"errors": [], "new_matches": []})()
     print_report(empty)
@@ -1397,7 +1478,11 @@ def test_print_heartbeat(capsys):
         "companies_configured=0, direct_healthy=0, direct_empty=0, direct_degraded=0, "
         "direct_failing=0, direct_unsupported=0, github_feeds_healthy=0, "
         "backstop_only_companies=0, uncovered_companies=0, health_transitions=0, "
-        "health_recoveries=0, "
+        "health_recoveries=0, health_email_mode=off, health_alert_candidates=0, "
+        "health_alert_sent=no, health_alert_suppressed_by_cooldown=0, "
+        "health_recovery_alerts=0, health_alert_error=no, "
+        "source_comparison_github_only=0, source_comparison_direct_only=0, "
+        "source_comparison_both=0, source_comparison_persisted=no, "
         "workday_attempted=3, workday_succeeded=2, workday_failed=1, "
         "workday_retry_attempts=2, workday_shared_incident=0, "
         "alumni_csv_status=loaded, alumni_records_loaded=124, "
@@ -1463,12 +1548,45 @@ def test_workflow_workday_probe_is_isolated_from_email_seen_and_data_branch():
     assert "workday_transport_probe" in workflow
     assert "python scripts/probe_workday_transport.py" in workflow
     assert 'WATCHER_SEND_EMAIL: "0"' in workflow
+    assert 'WATCHER_HEALTH_EMAIL_MODE: "off"' in workflow
     assert "WATCHER_WORKDAY_MIN_INTERVAL_SECONDS" in workflow
     probe_job = workflow.split("  workday-transport-probe:", 1)[1].split("  watcher:", 1)[0]
     assert "--mark-seen-without-send" not in probe_job
     assert "watcher-data" not in probe_job
     assert "WATCHER_SEEN_DB" not in probe_job
     assert "SMTP_" not in probe_job
+
+
+def test_workflow_health_email_is_independent_and_comparison_is_reported():
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "health_email_mode:" in workflow
+    assert "WATCHER_HEALTH_EMAIL_MODE" in workflow
+    assert "WATCHER_HEALTH_EMAIL_HOUR_UTC" in workflow
+    assert "WATCHER_HEALTH_ALERT_COOLDOWN_HOURS" in workflow
+    assert "WATCHER_FEED_STALE_HOURS" in workflow
+    for mode in ("off", "transitions_only", "failure_only", "daily_summary"):
+        assert f'- "{mode}"' in workflow
+    for field in (
+        "health_alert_candidates",
+        "health_alert_suppressed_by_cooldown",
+        "health_recovery_alerts",
+        "source_comparison_github_only",
+        "source_comparison_direct_only",
+        "source_comparison_both",
+    ):
+        assert f"extract_count {field}" in workflow
+        assert f'echo "{field}=' in workflow
+    assert "python -m watcher.audit" in workflow
+    assert "--comparison-json" in workflow
+    assert "--comparison-markdown" in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert (
+        "Source-health email delivery failed; internship-match outcome is unaffected."
+        in workflow
+    )
 
 
 def test_workflow_forwards_exact_application_heartbeat_and_keeps_existing_outputs():

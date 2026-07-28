@@ -77,6 +77,10 @@
 - `watcher/eligibility.py` is the only watcher-side target-role/degree wrapper;
   `watcher/filters.py` then requires eligible, positive-fit, open
   internships/co-ops and applies optional `min_score`.
+- Categorical student eligibility exclusions live only in
+  `watcher/eligibility.py`. Exclude clear mandatory `phd_only`,
+  `graduate_only`, `freshman_only`, and `returning_intern_only` restrictions;
+  mixed, preferred, incidental, and ambiguous evidence remains eligible.
 - `watcher/eligibility.py::assess_us_location` owns the conservative location
   gate. Explicit U.S. evidence wins across multiple locations; explicit
   foreign country/region evidence yields `outside_us`; ambiguous text passes.
@@ -109,6 +113,12 @@
 - Digest policy: no default score gate; exclude ineligible jobs; sort by fit,
   generic score, role priority, company, and title; send nothing for zero new
   matches.
+- `watcher.audit` is read-only: state-only mode makes no requests, live mode
+  reuses normal collection/analysis with email and priming disabled, and
+  neither mode may mutate `seen` or health history.
+- Source-comparison snapshots are sanitized and bounded. Health-alert
+  fingerprints/cooldowns use dedicated tables, never `seen`; health SMTP is
+  independently configured and cannot affect match-email delivery or marking.
 
 ## Alumni and private data
 
@@ -212,6 +222,8 @@ git status --short --ignored
 
 - Bug audits require a reproducible failure or clear violated invariant. Add a
   regression test before fixing behavior; do not change code for style alone.
+- Repository-wide cleanup must preserve public shapes and side effects; remove
+  duplication only after tests cover every consolidated caller.
 - Holdout construction is two-stage: commit reusable tooling first, then
   collect from that exact clean SHA. Exclude both prior benchmarks by stable
   ID, normalized URL, and fallback key without reading their human labels.

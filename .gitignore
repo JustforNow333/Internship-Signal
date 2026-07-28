@@ -125,6 +125,15 @@ evaluation/scoring_*_metrics.json
 # Throwaway probe/debug scripts run from the repository root.
 _probe*.py
 _scratch*.py
+# Local eligibility demonstrations are audit scratch, not repository fixtures.
+eligibility-demo*.json
+# Read-only audit/comparison exports may contain operational posting metadata.
+watcher-audit*.json
+watcher-source-comparison*.json
+source-comparison*.json
+# Repository audit scratch output is local unless promoted to a fixture.
+code-audit*.json
+code-audit*.log
 # Temporary notification-state integration reports belong outside source
 # control; their SQLite databases are covered by the global SQLite patterns.
 watcher-notification-integration*.json

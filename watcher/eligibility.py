@@ -7,6 +7,8 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Mapping
 
+from backend.app.eligibility import CATEGORICAL_EXCLUSION_REASONS
+
 DEFAULT_TARGET_ROLES = frozenset({"swe"})
 OUTSIDE_US = "outside_us"
 LOCATION_US = "us"
@@ -457,6 +459,18 @@ def determine_watcher_eligibility(
     role_track = score.get("role_track") or role_cls.get("role_track") or role or "unknown"
     fit_score = _int_score(score.get("fit_score", score.get("total", 0)))
     location = assess_us_location(job)
+    student = job.get("student_eligibility") or score.get("student_eligibility") or {}
+    if not isinstance(student, Mapping):
+        student = {}
+    student_reason = student.get("exclusion_reason")
+    student_fields = {
+        "eligibility_exclusion_reason": (
+            str(student_reason) if student_reason in CATEGORICAL_EXCLUSION_REASONS else None
+        ),
+        "eligibility_evidence_source": student.get("evidence_source"),
+        "eligibility_evidence": student.get("evidence"),
+        "eligibility_explanation": student.get("explanation"),
+    }
     if location.reason == OUTSIDE_US:
         return {
             "watcher_eligible": False,
@@ -465,6 +479,17 @@ def determine_watcher_eligibility(
             "ineligible_reason": OUTSIDE_US,
             "location_status": location.status,
             "location_explanation": location.explanation,
+            **student_fields,
+        }
+    if student_reason in CATEGORICAL_EXCLUSION_REASONS:
+        return {
+            "watcher_eligible": False,
+            "fit_score": 0,
+            "eligible_reason": None,
+            "ineligible_reason": student_reason,
+            "location_status": location.status,
+            "location_explanation": location.explanation,
+            **student_fields,
         }
     degree_eligible = job.get("degree_eligible", score.get("degree_eligible", True))
     if degree_eligible is False:
@@ -480,6 +505,7 @@ def determine_watcher_eligibility(
             "ineligible_reason": reason,
             "location_status": location.status,
             "location_explanation": location.explanation,
+            **student_fields,
         }
     scorer_eligible = bool(score.get("watcher_eligible", fit_score > 0))
 
@@ -496,6 +522,7 @@ def determine_watcher_eligibility(
             "ineligible_reason": None,
             "location_status": location.status,
             "location_explanation": location.explanation,
+            **student_fields,
         }
 
     reason = score.get("watcher_ineligible_reason")
@@ -510,6 +537,7 @@ def determine_watcher_eligibility(
         "ineligible_reason": reason,
         "location_status": location.status,
         "location_explanation": location.explanation,
+        **student_fields,
     }
 
 

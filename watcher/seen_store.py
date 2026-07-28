@@ -27,11 +27,29 @@ class NotificationSelection:
 
 
 class SeenStore:
-    def __init__(self, path: str | Path):
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        read_only: bool = False,
+    ):
         self.path = Path(path)
-        if self.path.parent:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
+        self.read_only = read_only
+        if read_only:
+            self._conn = sqlite3.connect(":memory:")
+            if self.path.is_file():
+                source = sqlite3.connect(
+                    f"{self.path.resolve().as_uri()}?mode=ro",
+                    uri=True,
+                )
+                try:
+                    source.backup(self._conn)
+                finally:
+                    source.close()
+        else:
+            if self.path.parent:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(self.path)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
 
@@ -58,6 +76,53 @@ class SeenStore:
 
     def unseen(self, jobs: Iterable[dict]) -> list[dict]:
         return self.partition(jobs).pending
+
+    def records(self) -> list[dict[str, object]]:
+        """Return notification records for read-only diagnostics."""
+
+        rows = self._conn.execute(
+            """
+            select job_id, analyzed_job_id, identity_key, requisition_key,
+                   company, title, location, url, first_source, first_seen,
+                   emailed_at, primed_at
+            from seen
+            order by first_seen desc, job_id
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def matching_records(
+        self,
+        job: dict,
+        *,
+        posting_universe: Iterable[dict] = (),
+    ) -> list[dict[str, object]]:
+        """Return every historical row matching a current posting.
+
+        This deliberately calls the same identity matcher used by
+        :meth:`partition`; audit code therefore cannot drift from notification
+        suppression semantics.
+        """
+
+        universe = [job, *list(posting_universe)]
+        non_specific_urls = non_specific_posting_urls(universe)
+        rows = self._conn.execute(
+            """
+            select job_id, analyzed_job_id, identity_key, requisition_key,
+                   company, title, location, url, first_source, first_seen,
+                   emailed_at, primed_at
+            from seen
+            """
+        ).fetchall()
+        return [
+            dict(row)
+            for row in rows
+            if self._row_matches_job(
+                row,
+                job,
+                non_specific_urls=non_specific_urls,
+            )
+        ]
 
     def partition(self, jobs: Iterable[dict]) -> NotificationSelection:
         candidates = list(jobs)
@@ -169,6 +234,7 @@ class SeenStore:
         state: str,
         timestamp: datetime,
     ) -> None:
+        self._require_writable()
         postings = list(jobs)
         non_specific_urls = non_specific_posting_urls(postings)
         with self._conn:
@@ -186,6 +252,7 @@ class SeenStore:
         *,
         seen_at: datetime | None,
     ) -> None:
+        self._require_writable()
         postings = list(jobs)
         timestamp = seen_at or datetime.now(timezone.utc)
         non_specific_urls = non_specific_posting_urls(postings)
@@ -433,6 +500,10 @@ class SeenStore:
             self._conn.execute(
                 "create index if not exists seen_analyzed_job_id_idx on seen(analyzed_job_id)"
             )
+
+    def _require_writable(self) -> None:
+        if self.read_only:
+            raise RuntimeError("SeenStore was opened read-only")
 
 
 def _iso(value: datetime) -> str:

@@ -425,7 +425,14 @@ def test_graduate_level_internships_are_watcher_ineligible():
         assert score["watcher_eligible"] is False
         assert score["fit_score"] == 0
         assert score["watcher_action"] == "skip"
-        assert "Graduate/PhD-level" in score["watcher_ineligible_reason"]
+        expected_reason = (
+            "phd_only"
+            if any(token in title.casefold() for token in ("phd", "ph.d", "doctoral"))
+            else "graduate_only"
+        )
+        assert score["watcher_ineligible_reason"] == expected_reason
+        assert score["student_eligibility"]["exclusion_reason"] == expected_reason
+        assert score["student_eligibility"]["evidence_source"] == "title"
 
 
 def test_undergraduate_or_unspecified_software_internships_are_not_degree_excluded():

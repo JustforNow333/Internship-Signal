@@ -9,6 +9,10 @@
   Never duplicate backend scoring, classification, signals, dedupe, or IDs.
 - Source adapters only fetch canonical rows. Eligibility belongs in
   `watcher/eligibility.py`; filters add internship/open/min-score checks.
+- Student-status exclusions require clear mandatory evidence and use stable
+  `phd_only`, `graduate_only`, `freshman_only`, or
+  `returning_intern_only` reasons. Mixed, preferred, incidental, or ambiguous
+  mentions remain eligible.
 - `assess_us_location` is the sole location gate: explicit U.S. wins,
   explicit foreign country/region yields `outside_us`, and ambiguity passes.
   Prefer collected structured country/location metadata, keep city-only
@@ -27,6 +31,12 @@
 - Dry runs never change notification state. Live sends populate `emailed_at`
   only after success; explicit priming has its own marker, and unmarked legacy
   rows remain pending.
+- Watcher audits are read-only and reuse production identity, dedupe,
+  classification, eligibility, scoring, and seen lookup; state-only audits
+  never fetch, and live audits never email, prime, or persist health attempts.
+- Source comparisons persist only bounded sanitized metadata. Health-alert
+  cooldowns use dedicated tables and an independent email switch/renderer;
+  they never update internship `emailed_at` or `primed_at`.
 - Collection and notification share one identity policy: stable requisition
   ID, posting-specific normalized URL, then exact company/title/location.
   Generic URLs never collapse distinct stable requisitions.
@@ -51,6 +61,8 @@
 - Use the validation commands in `agents.md`; always run `git diff --check`.
 - Bug audits require a reproducible failure or clear violated invariant. Add a
   regression test before fixing behavior; do not change code for style alone.
+- Repository-wide cleanup must preserve public shapes and side effects; remove
+  duplication only after tests cover every consolidated caller.
 - Holdout construction is two-stage: commit reusable tooling first, then
   collect from that exact clean SHA. Exclude both prior benchmarks by stable
   ID, normalized URL, and fallback key without reading their human labels.

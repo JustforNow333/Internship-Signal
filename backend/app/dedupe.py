@@ -341,7 +341,7 @@ def postings_match(
     ) is not None
 
 
-def dedupe(rows):
+def dedupe(rows, *, include_identity_diagnostics: bool = False):
     """Returns (unique_rows, duplicate_report_entries).
 
     Each report entry: {row_number, duplicate_of, matched_on, merged_fields}.
@@ -353,6 +353,10 @@ def dedupe(rows):
     by_url: dict[str, list[dict]] = defaultdict(list)
     report = []
     ordered_rows = list(rows)
+    input_positions = {
+        id(row): index
+        for index, row in enumerate(ordered_rows, start=1)
+    }
     non_specific_urls = non_specific_posting_urls(ordered_rows)
 
     def index_row(row: dict) -> None:
@@ -423,7 +427,7 @@ def dedupe(rows):
         duplicate_source = _source_identity(
             row.get("extra") if isinstance(row.get("extra"), dict) else {}
         )
-        report.append({
+        report_entry = {
             "row_number": row.get("_row_number"),
             "duplicate_of": existing.get("_row_number"),
             "company": row.get("company", ""),
@@ -433,7 +437,13 @@ def dedupe(rows):
             "cross_source": existing_source != duplicate_source,
             "kept_source": existing_source,
             "duplicate_source": duplicate_source,
-        })
+        }
+        if include_identity_diagnostics:
+            report_entry["_audit_row_index"] = input_positions[id(row)]
+            report_entry["_audit_duplicate_of_index"] = input_positions[
+                id(existing)
+            ]
+        report.append(report_entry)
 
     return kept, report
 

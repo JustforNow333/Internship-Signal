@@ -1,6 +1,5 @@
 import hashlib
 import gzip
-import io
 import logging
 from email.message import Message
 from urllib.error import URLError

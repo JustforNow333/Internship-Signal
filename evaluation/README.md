@@ -150,6 +150,13 @@ then joins by stable job ID. The frozen date matters because deadlines and
 expiry decisions are date-sensitive. Missing, duplicate, or changed IDs fail
 instead of silently changing the evaluated dataset.
 
+Current predictions expose categorical student-eligibility audit fields:
+`eligibility_exclusion_reason`, `eligibility_evidence_source`,
+`eligibility_evidence`, and `eligibility_explanation`. Stable categorical
+reasons are `phd_only`, `graduate_only`, `freshman_only`, and
+`returning_intern_only`; historical frozen prediction artifacts are not
+rewritten.
+
 By default every benchmark row must be present and `human_eligible` must be
 `yes`, `no`, or `uncertain`. During labeling, `--allow-partial-labels` permits
 blank labels or missing CSV rows and reports exact coverage. Optional free-text

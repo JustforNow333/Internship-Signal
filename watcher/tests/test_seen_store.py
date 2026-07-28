@@ -130,6 +130,27 @@ def test_schema_migration_preserves_rows_and_adds_primed_marker(tmp_path):
     )
 
 
+def test_read_only_store_migrates_an_in_memory_snapshot_without_touching_disk(
+    tmp_path,
+):
+    db_path = tmp_path / "legacy-read-only.sqlite"
+    legacy = job("legacy-read-only")
+    _create_legacy_seen_db(db_path, legacy, emailed_at=None)
+
+    with SeenStore(db_path, read_only=True) as store:
+        assert store.records()[0]["job_id"] == "legacy-read-only"
+        with pytest.raises(RuntimeError, match="opened read-only"):
+            store.mark_emailed(legacy)
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {
+            row[1]
+            for row in conn.execute("pragma table_info(seen)").fetchall()
+        }
+    assert "primed_at" not in columns
+    assert "identity_key" not in columns
+
+
 def test_seen_store_uses_same_requisition_identity_as_collection_dedupe(tmp_path):
     direct = job("content-direct", source="direct")
     direct["company"] = "Identity Co"

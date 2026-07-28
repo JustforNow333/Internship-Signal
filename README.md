@@ -298,6 +298,79 @@ central technical evidence remain excluded.
 
 ---
 
+## Categorical student eligibility
+
+The scorer applies conservative student-status restrictions before the watcher
+digest. Evidence is evaluated in this order: explicit structured eligibility
+fields, title, minimum/required qualifications, then clear mandatory
+description language. Preferred-qualification sections and phrases such as
+`preferred`, `encouraged`, or `a plus` never exclude by themselves.
+
+Clear restrictions use stable reasons:
+
+- `phd_only`: current PhD/doctoral enrollment or a PhD/doctoral internship.
+- `graduate_only`: graduate, master's, MBA, JD, or other advanced-degree
+  candidates when no undergraduate option is present.
+- `freshman_only`: freshmen/first-year students only, including an explicitly
+  restricted rising-sophomore program for students finishing freshman year.
+- `returning_intern_only`: returning/former interns, invitation-only return
+  programs, or mandatory prior internship at the same employer.
+
+Mixed eligibility stays allowed: undergraduate-or-graduate,
+bachelor's/master's/PhD, freshmen-and-sophomores, and similar alternatives.
+Ordinary graduation dates, recent-graduate acceptance, preferred experience,
+working with PhD researchers, and returning to school after the internship
+also remain eligible. Ambiguity always passes.
+
+A categorical exclusion retains the backend role/track and original posting
+text, but follows the existing hard-ineligibility convention: watcher fit is
+zero, the watcher action is `skip`, and the job is omitted before email/seen
+selection. Normal run reports include a bounded audit entry with company,
+title, stable reason, evidence source, evidence, and preserved role track.
+
+---
+
+## Watcher posting audit
+
+`python -m watcher.audit` explains each watcher stage without loading alumni
+data. The safe default is state-only: it reads the latest sanitized comparison
+snapshot and notification records without making network requests.
+
+```bash
+PYTHONPATH=.:backend python3 -m watcher.audit --company Google
+PYTHONPATH=.:backend python3 -m watcher.audit --company Uber --title "Software Engineering Intern"
+PYTHONPATH=.:backend python3 -m watcher.audit --url "https://jobs.uber.com/en/jobs/300697/"
+PYTHONPATH=.:backend python3 -m watcher.audit --requisition-id 300697 --json audit.json
+PYTHONPATH=.:backend python3 -m watcher.audit --job-id "<analyzed-id>" --live
+```
+
+Queries may use configured company names or aliases, partial titles, exact or
+normalized URLs, native requisition IDs, analyzed job IDs, or canonical
+identity keys. `--limit 25` bounds ambiguous results. `--live` performs normal
+collection, dedupe, analysis, classification, eligibility, scoring, and
+identity decisions, but never sends email, primes postings, writes seen rows,
+persists source-health attempts, or requires alumni data.
+
+The trace independently reports collection/provenance, watchlist matching,
+identity, deduplication and its exact merge tier, season, internship/open and
+U.S. status, role confidence/evidence, watcher eligibility, scoring, historical
+notification state, and one stable final reason. `--json` emits stable JSON.
+
+The same command exposes the bounded source comparison:
+
+```bash
+PYTHONPATH=.:backend python3 -m watcher.audit --comparison
+PYTHONPATH=.:backend python3 -m watcher.audit --comparison --live \
+  --comparison-json source-comparison.json \
+  --comparison-markdown source-comparison.md
+```
+
+Snapshots contain only sanitized identity/company/title/URL/provenance and
+decision evidence—not descriptions or alumni. SQLite retains 30 aggregate runs
+and posting details for the newest three runs. GitHub Actions also uploads the
+sanitized health and source-comparison JSON reports for 14 days and appends the
+bounded Markdown comparison to the job summary.
+
 ## Watcher source health
 
 Every watcher execution assigns a unique run ID and records exactly one direct
@@ -362,10 +435,27 @@ sources and recoveries, plus an error annotation for each currently uncovered
 company; these annotations do not fail the watcher run.
 
 Set `WATCHER_HEALTH_REPORT_PATH` or pass `--health-report` to write the sanitized
-JSON report used by the workflow. No source-health warning email exists yet,
-and health changes do not change digest sending or seen marking. A future task
-could add a separate health-email policy without coupling it to internship
-matches.
+JSON report used by the workflow. Source-health email has a separate renderer,
+send call, cooldown state, and daily-summary state from the internship digest.
+It never calls posting email/prime writes and never includes alumni data.
+
+Configure it independently with:
+
+- `WATCHER_HEALTH_EMAIL_MODE`: `off`, `transitions_only` (default),
+  `failure_only`, or `daily_summary`.
+- `WATCHER_HEALTH_EMAIL_HOUR_UTC`: daily-summary hour, default `12`.
+- `WATCHER_HEALTH_ALERT_COOLDOWN_HOURS`: repeated-failure cooldown, default
+  `24`.
+- `WATCHER_FEED_STALE_HOURS`: configured-season feed inactivity threshold,
+  default `48`.
+
+`transitions_only` sends new failures, recoveries, newly silent productive
+direct boards, coverage regressions, and both-tier outages. `failure_only` also
+allows continued failures after cooldown. `daily_summary` sends at most once
+per UTC day after the configured hour and includes source-state totals,
+backstop-only/uncovered companies, recent transitions, stale feeds, and source
+comparison counts. A structurally valid GitHub fetch with zero matching roles
+is not a failure; stale-feed alerts require prior configured-season activity.
 
 Inspect a local database with SQLite:
 

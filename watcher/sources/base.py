@@ -635,10 +635,17 @@ def iso_date(value: Any) -> str:
     if value in (None, ""):
         return ""
     if isinstance(value, (int, float)):
-        timestamp = float(value)
-        if timestamp > 10_000_000_000:
-            timestamp /= 1000
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat()
+        try:
+            timestamp = float(value)
+            if timestamp > 10_000_000_000:
+                timestamp /= 1000
+            return (
+                datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                .date()
+                .isoformat()
+            )
+        except (OSError, OverflowError, ValueError):
+            return ""
 
     raw = str(value).strip()
     if not raw:
