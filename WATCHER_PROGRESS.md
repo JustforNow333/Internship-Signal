@@ -92,11 +92,10 @@ This file tracks completed watcher steps and the next handoff target.
    - Save commits and pushes back to `watcher-data`; push rejection triggers a
      bounded three-attempt fetch/reset/retry loop. Final push failure is a hard
      workflow failure.
-   - Workflow dispatch input `send_email=false` is the priming mode: it exports
-     `WATCHER_SEND_EMAIL=0`, suppresses the digest body so private alumni details
-     do not enter Actions logs, marks new matches seen via
-     `--mark-seen-without-send`, and saves the DB. This prevents the first later
-     send from emailing the whole backlog.
+   - Workflow dispatch separates `send_email` from `prime_seen`. Email-disabled
+     runs are side-effect-free for job-notification state unless priming is
+     explicitly requested; priming stores `primed_at`, while successful live
+     sends store `emailed_at`.
    - Scheduled runs read the repository Actions variable `WATCHER_SEND_EMAIL`;
      live sends require repository secrets `SMTP_USER`, `SMTP_APP_PASSWORD`, and
      `EMAIL_TO`.
@@ -145,7 +144,7 @@ This file tracks completed watcher steps and the next handoff target.
      rows, and all 14,973 rows matched the expected required-key/list-field
      schema. The payload contained 269 `Summer 2027` rows.
    - Safe full dry probe used `/tmp/internship_signal_season_probe.sqlite`,
-     forced email off, omitted `--mark-seen-without-send`, and completed with:
+     forced email off, omitted explicit priming, and completed with:
      `HEARTBEAT: ran, rows_fetched=17069, jobs_scored=15897, matches=68, new=68, errors=0, season_status=ok, configured_terms=Summer_2027, github_feeds_configured=1, github_feeds_succeeded=1, alumni_csv_status=loaded-csv, alumni_records_loaded=306, alumni_employers_indexed=278, sent=no, seen_marked=0`.
      The isolated DB contained zero seen rows afterward.
 7. Persistent source-health monitoring:
@@ -380,6 +379,24 @@ This file tracks completed watcher steps and the next handoff target.
      later clean run performs live collection and freezes holdout artifacts.
    - Offline backend/watcher validation: `533 passed, 1 warning`; compileall
      completed successfully.
+19. Notification state and posting identity:
+   - Live send, dry run, and explicit prime are separate modes. Dry runs do not
+     insert or update `seen`; successful sends populate `emailed_at`; explicit
+     priming populates `primed_at`; failed sends leave postings pending.
+   - Legacy rows with blank `emailed_at` and no `primed_at` are pending rather
+     than suppressed. SQLite migrates existing databases in place without
+     deleting or rebuilding `seen`.
+   - Collection dedupe and notification suppression share requisition-first,
+     posting-URL-second, exact fallback identity. Generic/shared careers URLs
+     cannot collapse distinct stable requisitions, and direct ATS provenance
+     still wins genuine direct/GitHub duplicates.
+   - Run reports expose eligible/new/emailed-suppressed/primed-suppressed/
+     dry-pending counts plus cross-source merges and bounded suppressed labels.
+   - Offline backend/watcher validation: `554 passed, 1 warning`; frontend:
+     `23 passed`; production build and Python compileall completed successfully.
+   - Isolated temporary-SQLite integration output:
+     `eligible=6 dry_new=6 seen_after_dry=0 live_emailed=6 rerun_new=0
+     primed_seventh=1 after_prime_new=0 cross_source_merged=1`.
 
 ## Next
 
@@ -387,9 +404,11 @@ This file tracks completed watcher steps and the next handoff target.
   reevaluation for separately scoped production changes.
 - Commit the independent holdout tooling, then collect the holdout only from
   that exact clean committed SHA.
-- Run the first manual GitHub Actions priming dispatch with `send_email=false`.
-- After confirming the data branch exists and the heartbeat looks right, set the
-  repo Actions variable `WATCHER_SEND_EMAIL=true` to enable scheduled sends.
+- Use manual `send_email=false, prime_seen=false` for a notification-state-safe
+  dry run. Use `prime_seen=true` only for an intentional one-time suppression.
+- After confirming the data branch exists and the heartbeat looks right, set
+  the repo Actions variable `WATCHER_SEND_EMAIL=true` to enable scheduled sends;
+  leave `WATCHER_PRIME_SEEN` unset/false for normal operation.
 - A future, separately scoped enhancement may add a dedicated source-health
   email policy; it must not be coupled to internship-match digest conditions.
 
@@ -407,8 +426,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the independent holdout tooling stage:
+Latest local validation after notification identity/state repair:
 
 ```text
-533 passed, 1 warning in 4.24s
+554 passed, 1 warning in 5.62s
 ```

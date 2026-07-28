@@ -288,6 +288,8 @@ class WorkdaySource:
             remote_status=_remote_status(posting),
             extra={
                 "source_id": _source_id(posting),
+                "source_requisition_id": _source_id(posting),
+                "source_system": self.name,
                 "external_path": external_path,
                 "time_type": str(posting.get("timeType") or "").strip(),
                 "workday_tenant": token,

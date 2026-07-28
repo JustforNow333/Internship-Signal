@@ -24,8 +24,13 @@
 - Row provenance keys off `extra.source_adapter`, which `make_row` always sets.
   CSV `extra` is user data and never drives dedupe ordering or provenance.
 - Track each GitHub source independently; valid feeds with zero matches succeed.
-- Mark jobs seen only after a live send or explicit priming. Alumni data is
-  additive and private.
+- Dry runs never change notification state. Live sends populate `emailed_at`
+  only after success; explicit priming has its own marker, and unmarked legacy
+  rows remain pending.
+- Collection and notification share one identity policy: stable requisition
+  ID, posting-specific normalized URL, then exact company/title/location.
+  Generic URLs never collapse distinct stable requisitions.
+- Alumni data is additive and private.
 - Never commit `.env`, credentials, alumni data, SQLite state, probe/health
   output, or `evaluation/private/`.
 - Workday: log safe metadata only; retry only transient failures; never treat

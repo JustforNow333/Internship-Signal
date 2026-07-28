@@ -97,15 +97,52 @@ independent of source configuration order:
 2. Simplify structured JSON;
 3. configured GitHub Markdown tables.
 
-Normalized application URL is the strongest duplicate key; tracking parameters
-and harmless URL formatting differences are removed. The existing normalized
-company/title/location key is the fallback. The winner keeps its canonical
-fields, missing fields may be filled from lower-priority rows, and provenance
-records `primary_source`, every discovering source in `sources`, plus per-source
+Posting identity is shared by collection dedupe and notification suppression.
+It uses, in order:
+
+1. a stable source-native ATS requisition/posting ID;
+2. a posting-specific normalized application URL;
+3. exact normalized company/title/location when neither stronger key exists.
+
+Tracking parameters and harmless URL formatting differences are removed.
+Careers landing pages, search results, generic internship/program pages, and
+URLs shared by multiple distinct source-native IDs are not treated as
+posting-specific. Different stable requisition IDs always remain separate,
+even when their titles, locations, role tracks, or generic careers URLs match.
+The analyzed backend `job["id"]` remains the existing content hash and is not
+treated as an ATS requisition ID.
+
+For a genuine duplicate, the winner keeps its canonical fields, missing fields
+may be filled from lower-priority rows, and provenance records
+`primary_source`, every discovering source in `sources`, plus per-source
 details. A lower-priority closed marker never closes an active direct or
-Simplify result. Seen suppression also checks the same normalized URL, so a
-later higher-priority sighting is not re-notified merely because its canonical
-wording produces a different content ID.
+Simplify result. A direct ATS and GitHub sighting of the same requisition still
+produce one notification, with direct provenance winning.
+
+### Watcher notification modes
+
+The watcher has three explicit modes:
+
+- **Live send:** set `WATCHER_SEND_EMAIL=1` (or manual `send_email=true`).
+  Current pending matches are emailed, then and only then written with
+  `emailed_at`. SMTP failure leaves every posting pending.
+- **Dry run:** set `WATCHER_SEND_EMAIL=0`, leave `prime_seen=false`, and do not
+  pass `--prime-seen`. Matches are previewed/reported and no rows are inserted
+  or updated in the `seen` notification table.
+- **Explicit prime:** keep email disabled and pass `--prime-seen` (or manual
+  `prime_seen=true`). Current pending matches are intentionally suppressed with
+  `primed_at`; email transport is not invoked.
+
+`send_email=true` and `prime_seen=true` are rejected as incompatible. Scheduled
+runs read `WATCHER_SEND_EMAIL` and the separate optional repository variable
+`WATCHER_PRIME_SEEN`; an email-disabled schedule is an ordinary side-effect-free
+notification dry run unless that second variable is explicitly enabled.
+
+Older SQLite files migrate in place with nullable `primed_at`,
+`analyzed_job_id`, `identity_key`, `requisition_key`, and `location` columns.
+The table is neither deleted nor rebuilt. Legacy rows whose `emailed_at` is
+blank and which have no `primed_at` remain pending, so still-open eligible jobs
+can be included in the next successful live digest.
 
 The Markdown parser finds the table by its
 `Company | Role | Location | Apply | Added` headers, extracts Markdown apply
@@ -158,7 +195,7 @@ WATCHER_SEND_EMAIL=0 PYTHONPATH=.:backend python3 -m watcher.run \
   --health-report "$probe_report"
 ```
 
-Do not add `--mark-seen-without-send` to the probe. Tests never access the
+Do not add `--prime-seen` to the probe. Tests never access the
 network: adapter tests use saved UTF-8 fixtures and run-loop tests use mocks.
 Use an explicit false value rather than unsetting `WATCHER_SEND_EMAIL`, because
 the repository dotenv loader may otherwise restore a local `.env` send setting.

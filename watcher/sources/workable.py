@@ -57,6 +57,8 @@ class WorkableSource:
             internship_type=str(job.get("type") or "").strip(),
             extra={
                 "source_id": str(job.get("id") or ""),
+                "source_requisition_id": shortcode,
+                "source_system": self.name,
                 "shortcode": shortcode,
                 "department": _join(job.get("department")),
                 "workplace": str(job.get("workplace") or ""),

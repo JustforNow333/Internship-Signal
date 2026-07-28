@@ -6,7 +6,12 @@ name: watcher
   workflow_dispatch:
     inputs:
       send_email:
-        description: "Send the live email digest. Leave off for a priming dry-run."
+        description: "Send the live email digest. Leave off for a side-effect-free dry run."
+        required: true
+        default: false
+        type: boolean
+      prime_seen:
+        description: "Explicitly suppress current eligible postings without emailing them."
         required: true
         default: false
         type: boolean
@@ -70,6 +75,7 @@ jobs:
       SEEN_DB_PATH: ${{ github.workspace }}/.watcher-state/seen.sqlite
       HEALTH_REPORT_PATH: ${{ github.workspace }}/.watcher-state/watcher-source-health.json
       ACTIONS_WATCHER_SEND_EMAIL: ${{ vars.WATCHER_SEND_EMAIL }}
+      ACTIONS_WATCHER_PRIME_SEEN: ${{ vars.WATCHER_PRIME_SEEN }}
       WATCHER_WORKDAY_MIN_INTERVAL_SECONDS: ${{ vars.WATCHER_WORKDAY_MIN_INTERVAL_SECONDS }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
@@ -105,15 +111,27 @@ jobs:
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             raw_send="${{ inputs.send_email }}"
+            raw_prime="${{ inputs.prime_seen }}"
           else
             raw_send="${ACTIONS_WATCHER_SEND_EMAIL:-}"
+            raw_prime="${ACTIONS_WATCHER_PRIME_SEEN:-}"
           fi
 
-          normalized="$(printf '%s' "$raw_send" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-          case "$normalized" in
+          normalized_send="$(printf '%s' "$raw_send" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          case "$normalized_send" in
             1|true|yes|y|on) send_email=true ;;
             *) send_email=false ;;
           esac
+          normalized_prime="$(printf '%s' "$raw_prime" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          case "$normalized_prime" in
+            1|true|yes|y|on) prime_seen=true ;;
+            *) prime_seen=false ;;
+          esac
+
+          if [ "$send_email" = "true" ] && [ "$prime_seen" = "true" ]; then
+            echo "::error::send_email and prime_seen cannot both be true"
+            exit 1
+          fi
 
           if [ "$send_email" = "true" ]; then
             missing=()
@@ -128,7 +146,8 @@ jobs:
           fi
 
           echo "send_email=$send_email" >> "$GITHUB_OUTPUT"
-          echo "SEND-MODE: send_email=$send_email"
+          echo "prime_seen=$prime_seen" >> "$GITHUB_OUTPUT"
+          echo "SEND-MODE: send_email=$send_email prime_seen=$prime_seen"
 
       - name: Restore seen-store from data branch
         id: load_seen
@@ -284,7 +303,9 @@ jobs:
           else
             export WATCHER_SEND_EMAIL=0
             export WATCHER_SUPPRESS_DRY_RUN_DIGEST=1
-            args+=(--mark-seen-without-send)
+            if [ "${{ steps.mode.outputs.prime_seen }}" = "true" ]; then
+              args+=(--prime-seen)
+            fi
           fi
 
           set +e

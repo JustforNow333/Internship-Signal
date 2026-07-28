@@ -125,6 +125,7 @@ class GitHubListingsSource:
             internship_type=terms,
             extra={
                 "source_id": str(entry.get("id") or ""),
+                "listing_id": str(entry.get("id") or ""),
                 "category": str(entry.get("category") or ""),
                 "listing_source": str(entry.get("source") or ""),
                 "terms": entry["terms"],

@@ -9,6 +9,9 @@ from watcher.config import CompanyCfg, GitHubListingSourceCfg, WatcherConfig
 from watcher.notify import render_digest
 from watcher.run import (
     CollectionStats,
+    RUN_MODE_DRY,
+    RUN_MODE_LIVE,
+    RUN_MODE_PRIME,
     WorkdayTransportSummary,
     collect_rows,
     print_heartbeat,
@@ -159,6 +162,7 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
             digest_sender=digest_sender,
             today=date(2026, 6, 9),
             seen_at=datetime(2026, 6, 9, tzinfo=timezone.utc),
+            notification_mode=RUN_MODE_LIVE,
         )
         second = run_once(
             config,
@@ -168,6 +172,7 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
             digest_sender=digest_sender,
             today=date(2026, 6, 9),
             seen_at=datetime(2026, 6, 9, tzinfo=timezone.utc),
+            notification_mode=RUN_MODE_LIVE,
         )
 
     assert [job["title"] for job in first.new_matches] == [
@@ -199,6 +204,7 @@ def test_run_once_does_not_mark_seen_when_digest_not_sent(tmp_path):
             github_source=FakeGithub([]),
             digest_sender=digest_sender,
             today=date(2026, 6, 9),
+            notification_mode=RUN_MODE_LIVE,
         )
         second = run_once(
             config,
@@ -207,6 +213,7 @@ def test_run_once_does_not_mark_seen_when_digest_not_sent(tmp_path):
             github_source=FakeGithub([]),
             digest_sender=digest_sender,
             today=date(2026, 6, 9),
+            notification_mode=RUN_MODE_LIVE,
         )
 
     assert [job["title"] for job in first.new_matches] == ["Software Engineer Intern"]
@@ -214,6 +221,62 @@ def test_run_once_does_not_mark_seen_when_digest_not_sent(tmp_path):
     assert first.digest_sent is False
     assert first.seen_marked == 0
     assert [len(call) for call in digest_sender.calls] == [1, 1]
+    with sqlite3.connect(tmp_path / "seen.sqlite") as conn:
+        assert conn.execute("select count(*) from seen").fetchone()[0] == 0
+
+
+def test_run_once_failed_live_send_exception_does_not_mark_emailed(tmp_path):
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="DirectCo", ats="greenhouse", token="directco"),)
+    )
+    db_path = tmp_path / "seen.sqlite"
+
+    def failed_sender(_matches):
+        raise RuntimeError("simulated SMTP failure")
+
+    with SeenStore(db_path) as store:
+        with pytest.raises(RuntimeError, match="simulated SMTP failure"):
+            run_once(
+                config,
+                seen_store=store,
+                direct_sources={
+                    "greenhouse": FakeSource(
+                        {"DirectCo": [row("DirectCo", "Software Engineer Intern")]}
+                    )
+                },
+                github_source=FakeGithub([]),
+                alumni_index={},
+                digest_sender=failed_sender,
+                today=date(2026, 6, 9),
+                notification_mode=RUN_MODE_LIVE,
+            )
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("select count(*) from seen").fetchone()[0] == 0
+
+
+def test_run_once_ordinary_dry_run_does_not_alter_notification_state(tmp_path):
+    config = WatcherConfig(companies=(CompanyCfg(name="DirectCo", ats="greenhouse", token="directco"),))
+    direct_rows = [row("DirectCo", "Software Engineer Intern")]
+    digest_sender = FakeDigestSender(sent=False)
+    db_path = tmp_path / "seen.sqlite"
+
+    with SeenStore(db_path) as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"DirectCo": direct_rows})},
+            github_source=FakeGithub([]),
+            digest_sender=digest_sender,
+            today=date(2026, 6, 9),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert len(result.new_matches) == 1
+    assert result.dry_run_pending == 1
+    assert result.seen_marked == 0
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("select count(*) from seen").fetchone()[0] == 0
 
 
 def test_run_once_can_prime_seen_store_without_sending(tmp_path):
@@ -231,7 +294,7 @@ def test_run_once_can_prime_seen_store_without_sending(tmp_path):
             digest_sender=digest_sender,
             today=date(2026, 6, 9),
             seen_at=datetime(2026, 6, 9, tzinfo=timezone.utc),
-            mark_seen_without_send=True,
+            notification_mode=RUN_MODE_PRIME,
         )
         second = run_once(
             config,
@@ -240,17 +303,235 @@ def test_run_once_can_prime_seen_store_without_sending(tmp_path):
             github_source=FakeGithub([]),
             digest_sender=digest_sender,
             today=date(2026, 6, 9),
-            mark_seen_without_send=True,
+            notification_mode=RUN_MODE_PRIME,
         )
 
     assert [job["title"] for job in first.new_matches] == ["Software Engineer Intern"]
     assert second.new_matches == []
     assert first.digest_sent is False
     assert first.seen_marked == 1
-    assert [len(call) for call in digest_sender.calls] == [1, 0]
+    assert digest_sender.calls == []
     with sqlite3.connect(db_path) as conn:
-        seen_row = conn.execute("select first_seen, emailed_at from seen").fetchone()
-    assert seen_row == ("2026-06-09T00:00:00+00:00", None)
+        seen_row = conn.execute("select first_seen, emailed_at, primed_at from seen").fetchone()
+    assert seen_row == ("2026-06-09T00:00:00+00:00", None, "2026-06-09T00:00:00+00:00")
+
+
+def test_six_distinct_requisitions_at_one_company_produce_six_matches(tmp_path):
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="Google", ats="greenhouse", token="google"),)
+    )
+    google_rows = []
+    for index in range(1, 7):
+        posting = row(
+            "Google",
+            "Software Engineering Intern",
+            url="https://careers.google.com/internships",
+        )
+        posting["extra"].update(
+            {
+                "source_adapter": "greenhouse",
+                "source_system": "greenhouse",
+                "source_requisition_id": f"GOOG-{index}",
+            }
+        )
+        google_rows.append(posting)
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"Google": google_rows})},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 7, 28),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert len(result.matches) == 6
+    assert len(result.new_matches) == 6
+    assert result.dry_run_pending == 6
+
+
+def test_same_requisition_from_direct_and_github_produces_one_match(tmp_path):
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="DirectCo", ats="greenhouse", token="directco"),)
+    )
+    direct = row(
+        "DirectCo",
+        "Software Engineering Intern",
+        source="direct",
+        url="https://careers.example.test/internships",
+    )
+    direct["extra"].update(
+        {
+            "source_adapter": "greenhouse",
+            "source_system": "greenhouse",
+            "source_requisition_id": "REQ-42",
+        }
+    )
+    github = row(
+        "DirectCo",
+        "SWE Intern display wording",
+        source="github",
+        url="https://careers.example.test/internships",
+    )
+    github["extra"].update(
+        {
+            "source_adapter": "github_listings",
+            "source_system": "greenhouse",
+            "source_requisition_id": "REQ-42",
+        }
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"DirectCo": [direct]})},
+            github_source=FakeGithub([github]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 7, 28),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert len(result.matches) == 1
+    assert len(result.new_matches) == 1
+    assert result.cross_source_duplicates_merged == 1
+    assert result.matches[0]["extra"]["source"] == "direct"
+
+
+def test_notification_identity_integration_six_requisitions_and_cross_source_duplicate(
+    tmp_path,
+):
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="Google", ats="greenhouse", token="google"),)
+    )
+    db_path = tmp_path / "notification-integration.sqlite"
+
+    def google_posting(requisition_id):
+        posting = row(
+            "Google",
+            "Software Engineering Intern",
+            url="https://careers.google.com/internships",
+        )
+        posting["extra"].update(
+            {
+                "source_adapter": "greenhouse",
+                "source_system": "greenhouse",
+                "source_requisition_id": requisition_id,
+            }
+        )
+        return posting
+
+    first_six = [google_posting(f"GOOG-{index}") for index in range(1, 7)]
+    github_duplicate = google_posting("GOOG-1")
+    github_duplicate["title"] = "SWE Intern - GitHub display wording"
+    github_duplicate["location"] = "Remote"
+    github_duplicate["extra"].update(
+        {
+            "source": "github",
+            "source_adapter": "github_listings",
+        }
+    )
+
+    with SeenStore(db_path) as store:
+        dry = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"Google": first_six})},
+            github_source=FakeGithub([github_duplicate]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 7, 28),
+            notification_mode=RUN_MODE_DRY,
+        )
+        seen_after_dry = store._conn.execute("select count(*) from seen").fetchone()[0]
+
+        live_sender = FakeDigestSender(sent=True)
+        live = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"Google": first_six})},
+            github_source=FakeGithub([github_duplicate]),
+            alumni_index={},
+            digest_sender=live_sender,
+            today=date(2026, 7, 28),
+            seen_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+            notification_mode=RUN_MODE_LIVE,
+        )
+        emailed_after_live = store._conn.execute(
+            "select count(*) from seen where emailed_at is not null"
+        ).fetchone()[0]
+
+        rerun = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"Google": first_six})},
+            github_source=FakeGithub([github_duplicate]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=True),
+            today=date(2026, 7, 28),
+            notification_mode=RUN_MODE_LIVE,
+        )
+
+        seventh = google_posting("GOOG-7")
+        primed = run_once(
+            config,
+            seen_store=store,
+            direct_sources={
+                "greenhouse": FakeSource({"Google": [*first_six, seventh]})
+            },
+            github_source=FakeGithub([github_duplicate]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=True),
+            today=date(2026, 7, 28),
+            seen_at=datetime(2026, 7, 28, 1, tzinfo=timezone.utc),
+            notification_mode=RUN_MODE_PRIME,
+        )
+        primed_rows = store._conn.execute(
+            "select count(*) from seen where primed_at is not null"
+        ).fetchone()[0]
+
+        after_prime = run_once(
+            config,
+            seen_store=store,
+            direct_sources={
+                "greenhouse": FakeSource({"Google": [*first_six, seventh]})
+            },
+            github_source=FakeGithub([github_duplicate]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=True),
+            today=date(2026, 7, 28),
+            notification_mode=RUN_MODE_LIVE,
+        )
+
+    assert len(dry.matches) == 6
+    assert len(dry.new_matches) == 6
+    assert dry.cross_source_duplicates_merged == 1
+    assert seen_after_dry == 0
+    assert len(live.new_matches) == 6
+    assert [len(batch) for batch in live_sender.calls] == [6]
+    assert emailed_after_live == 6
+    assert rerun.new_matches == []
+    assert len(primed.new_matches) == 1
+    assert primed_rows == 1
+    assert after_prime.new_matches == []
+    assert len(after_prime.previously_emailed) == 6
+    assert len(after_prime.explicitly_primed) == 1
+
+    print(
+        "INTEGRATION "
+        f"eligible={len(dry.matches)} "
+        f"dry_new={len(dry.new_matches)} "
+        f"seen_after_dry={seen_after_dry} "
+        f"live_emailed={emailed_after_live} "
+        f"rerun_new={len(rerun.new_matches)} "
+        f"primed_seventh={primed_rows} "
+        f"after_prime_new={len(after_prime.new_matches)} "
+        f"cross_source_merged={dry.cross_source_duplicates_merged}"
+    )
 
 
 def test_run_once_passes_watchlist_aliases_to_alumni_join(tmp_path):
@@ -1109,7 +1390,9 @@ def test_print_heartbeat(capsys):
 
     assert capsys.readouterr().out == (
         "HEARTBEAT: ran, rows_fetched=3, jobs_scored=2, matches=2, "
-        "new=1, errors=1, season_status=ok, configured_terms=Fall_2026|Summer_2027, "
+        "new=1, emailed_suppressed=0, primed_suppressed=0, dry_run_pending=0, "
+        "cross_source_duplicates_merged=0, errors=1, notification_mode=unknown, "
+        "season_status=ok, configured_terms=Fall_2026|Summer_2027, "
         "github_feeds_configured=2, github_feeds_succeeded=1, "
         "companies_configured=0, direct_healthy=0, direct_empty=0, direct_degraded=0, "
         "direct_failing=0, direct_unsupported=0, github_feeds_healthy=0, "
@@ -1245,15 +1528,37 @@ def test_workflow_forwards_exact_application_heartbeat_and_keeps_existing_output
         assert f'echo "{field}=' in workflow
 
 
-def test_workflow_false_mode_explicitly_disables_email_and_keeps_priming():
+def test_workflow_dry_and_prime_modes_are_explicit_and_incompatible_with_live_send():
     workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml").read_text(
         encoding="utf-8"
     )
 
+    assert "prime_seen:" in workflow
+    assert "inputs.prime_seen" in workflow
+    assert "ACTIONS_WATCHER_PRIME_SEEN" in workflow
     assert "export WATCHER_SEND_EMAIL=0" in workflow
     assert "export WATCHER_SUPPRESS_DRY_RUN_DIGEST=1" in workflow
     assert "unset WATCHER_SEND_EMAIL" not in workflow
-    assert "args+=(--mark-seen-without-send)" in workflow
+    assert 'if [ "${{ steps.mode.outputs.prime_seen }}" = "true" ]; then' in workflow
+    assert "args+=(--prime-seen)" in workflow
+    assert "cannot both be true" in workflow
+
+    run_step = workflow.split("      - name: Run watcher", 1)[1].split(
+        "      - name: Save seen-store", 1
+    )[0]
+    dry_branch = run_step.split("else", 1)[1]
+    assert "--mark-seen-without-send" not in workflow
+    assert "args+=(--prime-seen)" in dry_branch
+
+
+def test_workflow_scheduled_dry_runs_do_not_silently_prime():
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "raw_prime=\"${ACTIONS_WATCHER_PRIME_SEEN:-}\"" in workflow
+    assert 'ACTIONS_WATCHER_PRIME_SEEN: ${{ vars.WATCHER_PRIME_SEEN }}' in workflow
+    assert "prime_seen=false" in workflow
 
 
 def test_workflow_yaml_parses_successfully():

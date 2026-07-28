@@ -1,6 +1,14 @@
 from copy import deepcopy
 
-from app.dedupe import canonical_key, dedupe, job_id, norm_company, norm_url
+from app.dedupe import (
+    canonical_key,
+    dedupe,
+    is_posting_specific_url,
+    job_id,
+    norm_company,
+    norm_url,
+    posting_identity_key,
+)
 
 
 def _row(n, **kw):
@@ -234,3 +242,180 @@ def test_csv_extra_source_column_does_not_become_watcher_provenance():
     assert [row["_row_number"] for row in kept] == [1, 2]
     assert kept[0]["extra"] == {"source": "LinkedIn"}
     assert kept[1]["extra"] == {"source": "Indeed"}
+
+
+def _watcher_row(
+    n,
+    *,
+    requisition_id="",
+    source="direct",
+    source_adapter="greenhouse",
+    company="Google",
+    title="Software Engineering Intern",
+    location="Mountain View, CA",
+    source_url="https://careers.example.test/internships",
+):
+    extra = {
+        "source": source,
+        "source_adapter": source_adapter,
+    }
+    if requisition_id:
+        extra["source_requisition_id"] = requisition_id
+        extra["source_system"] = "greenhouse"
+    return _row(
+        n,
+        company=company,
+        title=title,
+        location=location,
+        source_url=source_url,
+        extra=extra,
+    )
+
+
+def test_six_distinct_requisition_ids_at_one_company_all_survive_dedupe():
+    rows = [
+        _watcher_row(index, requisition_id=f"GOOG-{index}")
+        for index in range(1, 7)
+    ]
+
+    kept, report = dedupe(rows)
+
+    assert len(kept) == 6
+    assert report == []
+    assert len({posting_identity_key(row) for row in kept}) == 6
+
+
+def test_distinct_requisition_ids_survive_even_with_same_generic_url():
+    first = _watcher_row(1, requisition_id="GOOG-1")
+    second = _watcher_row(2, requisition_id="GOOG-2")
+
+    kept, report = dedupe([first, second])
+
+    assert len(kept) == 2
+    assert report == []
+    assert is_posting_specific_url(first["source_url"]) is False
+    assert (
+        is_posting_specific_url(
+            "https://careers.example.test/students/internships/software-engineering"
+        )
+        is False
+    )
+
+
+def test_same_requisition_id_from_direct_and_github_merges_with_direct_priority():
+    direct = _watcher_row(
+        1,
+        requisition_id="4611422005",
+        source_url="https://boards.greenhouse.io/google/jobs/4611422005?gh_src=direct",
+    )
+    github = _watcher_row(
+        2,
+        source="github",
+        source_adapter="github_listings",
+        company="Google LLC",
+        title="SWE Intern - display wording",
+        location="Remote",
+        source_url="https://job-boards.greenhouse.io/google/jobs/4611422005?utm_source=github",
+    )
+
+    kept, report = dedupe([github, direct])
+
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "requisition_id"
+    assert report[0]["cross_source"] is True
+    assert kept[0]["extra"]["source"] == "direct"
+    assert kept[0]["extra"]["primary_source"] == "direct_ats"
+
+
+def test_posting_specific_url_tracking_variants_merge_without_requisition_id():
+    first = _watcher_row(
+        1,
+        source_adapter="github_markdown_table",
+        source="github",
+        source_url="https://careers.example.test/jobs/backend-intern?utm_source=one",
+    )
+    second = _watcher_row(
+        2,
+        source_adapter="github_listings",
+        source="github",
+        source_url="https://careers.example.test/jobs/backend-intern/?ref=two",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "source_url"
+
+
+def test_different_posting_specific_urls_remain_distinct_despite_same_fallback():
+    first = _watcher_row(
+        1,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs/backend-intern-east",
+    )
+    second = _watcher_row(
+        2,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs/backend-intern-west",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert {row["source_url"] for row in kept} == {
+        first["source_url"],
+        second["source_url"],
+    }
+    assert report == []
+
+
+def test_generic_url_uses_full_fallback_and_keeps_different_roles():
+    first = _watcher_row(1, requisition_id="")
+    second = _watcher_row(
+        2,
+        requisition_id="",
+        title="Software Engineering Intern, Cloud",
+        location="New York, NY",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert {row["title"] for row in kept} == {
+        "Software Engineering Intern",
+        "Software Engineering Intern, Cloud",
+    }
+    assert report == []
+
+
+def test_exact_fallback_duplicate_merges_when_no_stronger_identity_exists():
+    first = _watcher_row(1, requisition_id="")
+    second = _watcher_row(2, requisition_id="")
+
+    kept, report = dedupe([first, second])
+
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "company+title+location"
+
+
+def test_similar_titles_alone_do_not_merge():
+    first = _watcher_row(
+        1,
+        requisition_id="",
+        title="Software Engineer Intern I",
+        location="",
+        source_url="",
+    )
+    second = _watcher_row(
+        2,
+        requisition_id="",
+        title="Software Engineer Intern II",
+        location="",
+        source_url="",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert {row["title"] for row in kept} == {
+        "Software Engineer Intern I",
+        "Software Engineer Intern II",
+    }
+    assert report == []

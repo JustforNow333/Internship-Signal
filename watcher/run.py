@@ -22,7 +22,7 @@ from watcher.config import (
     load_watchlist,
 )
 from watcher.filters import filter_matches
-from watcher.notify import send_digest
+from watcher.notify import email_sending_enabled, send_digest
 from watcher.season import (
     SEASON_ROLLOVER_DUE,
     SEASON_STALE,
@@ -81,9 +81,14 @@ class RunResult:
     jobs_scored: int
     matches: list[dict]
     new_matches: list[dict]
+    previously_emailed: list[dict]
+    explicitly_primed: list[dict]
     errors: list[str]
+    notification_mode: str
     digest_sent: bool
     seen_marked: int
+    dry_run_pending: int
+    cross_source_duplicates_merged: int
     alumni_csv_status: str
     alumni_records_loaded: int
     alumni_employers_indexed: int
@@ -143,6 +148,10 @@ WORKDAY_TRANSPORT_ERROR_CODES = frozenset(
         "unsupported_content_type",
     }
 )
+RUN_MODE_LIVE = "live_send"
+RUN_MODE_DRY = "dry_run"
+RUN_MODE_PRIME = "explicit_prime"
+RUN_MODES = frozenset({RUN_MODE_LIVE, RUN_MODE_DRY, RUN_MODE_PRIME})
 
 
 def run_once(
@@ -156,10 +165,26 @@ def run_once(
     today: date | None = None,
     seen_at: datetime | None = None,
     mark_seen_without_send: bool = False,
+    notification_mode: str | None = None,
     health_store: SourceHealthStore | None = None,
     run_id: str | None = None,
     health_observed_at: datetime | None = None,
 ) -> RunResult:
+    if mark_seen_without_send:
+        if notification_mode not in {None, RUN_MODE_PRIME}:
+            raise ValueError(
+                "mark_seen_without_send is only compatible with explicit-prime mode"
+            )
+        notification_mode = RUN_MODE_PRIME
+    if notification_mode is None:
+        notification_mode = (
+            RUN_MODE_LIVE
+            if digest_sender is not None or email_sending_enabled()
+            else RUN_MODE_DRY
+        )
+    if notification_mode not in RUN_MODES:
+        raise ValueError(f"Unknown notification mode: {notification_mode}")
+
     observed_at = utc_datetime(health_observed_at or datetime.now(timezone.utc))
     active_run_id = run_id or new_run_id(observed_at)
     LOGGER.info("Watcher run ID: %s", active_run_id)
@@ -211,7 +236,16 @@ def run_once(
         collection_stats.github_feeds_succeeded,
     )
     LOGGER.info("Analyzing %d fetched row(s)...", len(rows))
-    jobs = analyze_rows(rows, today=today)
+    jobs, duplicate_report = analyze_rows(
+        rows,
+        today=today,
+        include_dedupe_report=True,
+    )
+    cross_source_duplicates_merged = sum(
+        1
+        for duplicate in duplicate_report
+        if duplicate.get("cross_source") is True
+    )
     LOGGER.info("Filtering %d scored job(s)...", len(jobs))
     matches = filter_matches(jobs, target_roles=config.target_roles, min_score=config.min_score)
     if alumni_index is None:
@@ -229,10 +263,28 @@ def run_once(
         alumni_index,
         companies=config.companies,
     )
-    new_matches = seen_store.unseen(matches)
-    LOGGER.info("%d match(es), %d new.", len(matches), len(new_matches))
-    LOGGER.info("Sending digest if needed...")
-    if digest_sender is None:
+    notification_selection = seen_store.partition(matches)
+    new_matches = notification_selection.pending
+    previously_emailed = notification_selection.emailed
+    explicitly_primed = notification_selection.primed
+    dry_run_pending = len(new_matches) if notification_mode == RUN_MODE_DRY else 0
+    LOGGER.info(
+        "Notification summary: eligible=%d new=%d emailed_suppressed=%d "
+        "primed_suppressed=%d dry_run_pending=%d cross_source_duplicates_merged=%d",
+        len(matches),
+        len(new_matches),
+        len(previously_emailed),
+        len(explicitly_primed),
+        dry_run_pending,
+        cross_source_duplicates_merged,
+    )
+    _log_suppressed_postings("previously emailed", previously_emailed)
+    _log_suppressed_postings("explicitly primed", explicitly_primed)
+
+    digest_sent = False
+    if notification_mode == RUN_MODE_PRIME:
+        LOGGER.info("Explicit-prime mode: email transport was not invoked.")
+    elif digest_sender is None:
         digest_sent = send_digest(
             new_matches,
             alumni_summary=alumni_status.as_dict(),
@@ -241,29 +293,50 @@ def run_once(
         )
     else:
         digest_sent = digest_sender(new_matches)
-    should_mark_seen = digest_sent or (mark_seen_without_send and bool(new_matches))
-    seen_marked = len(new_matches) if should_mark_seen else 0
-    if should_mark_seen:
-        timestamp = seen_at or datetime.now(timezone.utc)
-        seen_store.mark_many_seen(
-            new_matches,
-            seen_at=timestamp,
-            emailed_at=timestamp if digest_sent else None,
+
+    if notification_mode == RUN_MODE_DRY:
+        digest_sent = False
+        seen_marked = 0
+        LOGGER.info(
+            "Dry-run mode: left %d posting(s) pending; notification state unchanged.",
+            len(new_matches),
         )
-        if digest_sent:
-            LOGGER.info("Digest sent; marked %d job(s) seen.", seen_marked)
-        else:
-            LOGGER.info("Digest not sent; priming mode marked %d job(s) seen.", seen_marked)
+    elif notification_mode == RUN_MODE_PRIME:
+        seen_marked = len(new_matches)
+        if new_matches:
+            timestamp = seen_at or datetime.now(timezone.utc)
+            seen_store.mark_many_primed(new_matches, primed_at=timestamp)
+        LOGGER.info(
+            "Explicit-prime mode: marked %d posting(s) with primed_at.",
+            seen_marked,
+        )
+    elif digest_sent:
+        seen_marked = len(new_matches)
+        timestamp = seen_at or datetime.now(timezone.utc)
+        seen_store.mark_many_emailed(new_matches, emailed_at=timestamp)
+        LOGGER.info(
+            "Digest sent; marked %d posting(s) with emailed_at.",
+            seen_marked,
+        )
     else:
-        LOGGER.info("Digest not sent; seen-store unchanged.")
+        seen_marked = 0
+        LOGGER.info(
+            "Live digest was not sent; left %d posting(s) pending.",
+            len(new_matches),
+        )
     return RunResult(
         rows_fetched=len(rows),
         jobs_scored=len(jobs),
         matches=matches,
         new_matches=new_matches,
+        previously_emailed=previously_emailed,
+        explicitly_primed=explicitly_primed,
         errors=errors,
+        notification_mode=notification_mode,
         digest_sent=digest_sent,
         seen_marked=seen_marked,
+        dry_run_pending=dry_run_pending,
+        cross_source_duplicates_merged=cross_source_duplicates_merged,
         alumni_csv_status=alumni_status.status,
         alumni_records_loaded=alumni_status.records_loaded,
         alumni_employers_indexed=alumni_status.employers_indexed,
@@ -541,6 +614,26 @@ def print_report(result: RunResult, *, output: TextIO | None = None) -> None:
         for error in result.errors:
             print(f"  - {error}", file=output)
 
+    previously_emailed = list(getattr(result, "previously_emailed", ()) or ())
+    explicitly_primed = list(getattr(result, "explicitly_primed", ()) or ())
+    print("Notification summary:", file=output)
+    print(f"  Mode: {getattr(result, 'notification_mode', 'unknown')}", file=output)
+    print(f"  Total eligible matches: {len(getattr(result, 'matches', ()) or ())}", file=output)
+    print(f"  New postings eligible for email: {len(result.new_matches)}", file=output)
+    print(f"  Previously emailed postings suppressed: {len(previously_emailed)}", file=output)
+    print(f"  Explicitly primed postings suppressed: {len(explicitly_primed)}", file=output)
+    print(
+        f"  Current dry-run postings left pending: {getattr(result, 'dry_run_pending', 0)}",
+        file=output,
+    )
+    print(
+        "  Genuine cross-source duplicates merged: "
+        f"{getattr(result, 'cross_source_duplicates_merged', 0)}",
+        file=output,
+    )
+    _print_suppressed_postings("Previously emailed", previously_emailed, output=output)
+    _print_suppressed_postings("Explicitly primed", explicitly_primed, output=output)
+
     if not result.new_matches:
         print("No new matches.", file=output)
         return
@@ -580,7 +673,12 @@ def print_heartbeat(result: RunResult, *, output: TextIO | None = None) -> None:
         f"jobs_scored={result.jobs_scored}, "
         f"matches={len(result.matches)}, "
         f"new={len(result.new_matches)}, "
+        f"emailed_suppressed={len(getattr(result, 'previously_emailed', ()) or ())}, "
+        f"primed_suppressed={len(getattr(result, 'explicitly_primed', ()) or ())}, "
+        f"dry_run_pending={getattr(result, 'dry_run_pending', 0)}, "
+        f"cross_source_duplicates_merged={getattr(result, 'cross_source_duplicates_merged', 0)}, "
         f"errors={len(result.errors)}, "
+        f"notification_mode={getattr(result, 'notification_mode', 'unknown')}, "
         f"season_status={getattr(result, 'season_status', 'unknown')}, "
         f"configured_terms={_heartbeat_terms(getattr(result, 'configured_terms', ()))}, "
         f"github_feeds_configured={getattr(result, 'github_feeds_configured', 0)}, "
@@ -619,9 +717,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Write the sanitized machine-readable source-health JSON report to this path.",
     )
     parser.add_argument(
+        "--prime-seen",
         "--mark-seen-without-send",
+        dest="prime_seen",
         action="store_true",
-        help="Mark new matches seen even when the digest dry-runs; intended for CI priming.",
+        help="Explicitly prime/suppress current matches without sending email.",
     )
     args = parser.parse_args(argv)
 
@@ -629,9 +729,25 @@ def main(argv: list[str] | None = None) -> int:
     config = load_watchlist(args.watchlist)
     if args.seen_db:
         config = replace(config, seen_db_path=Path(args.seen_db))
+    send_enabled = email_sending_enabled()
+    if send_enabled and args.prime_seen:
+        parser.error(
+            "WATCHER_SEND_EMAIL and --prime-seen cannot both be enabled"
+        )
+    notification_mode = (
+        RUN_MODE_PRIME
+        if args.prime_seen
+        else RUN_MODE_LIVE
+        if send_enabled
+        else RUN_MODE_DRY
+    )
 
     with SeenStore(config.seen_db_path) as seen_store:
-        result = run_once(config, seen_store=seen_store, mark_seen_without_send=args.mark_seen_without_send)
+        result = run_once(
+            config,
+            seen_store=seen_store,
+            notification_mode=notification_mode,
+        )
     health_report_path = args.health_report or os.getenv("WATCHER_HEALTH_REPORT_PATH", "").strip()
     if health_report_path:
         _write_result_health_report(result, health_report_path)
@@ -692,6 +808,42 @@ def _record_error(errors: list[str], message: str) -> None:
     safe_message = sanitize_error(message)
     LOGGER.warning(safe_message)
     errors.append(safe_message)
+
+
+def _log_suppressed_postings(label: str, jobs: list[dict], *, limit: int = 10) -> None:
+    for job in jobs[:limit]:
+        LOGGER.info(
+            "Suppressed (%s): %s - %s",
+            label,
+            str(job.get("company") or "")[:120],
+            str(job.get("title") or "")[:160],
+        )
+    if len(jobs) > limit:
+        LOGGER.info(
+            "Suppressed (%s): %d additional posting(s) omitted from diagnostics.",
+            label,
+            len(jobs) - limit,
+        )
+
+
+def _print_suppressed_postings(
+    label: str,
+    jobs: list[dict],
+    *,
+    output: TextIO,
+    limit: int = 10,
+) -> None:
+    if not jobs:
+        return
+    print(f"{label} (bounded list):", file=output)
+    for job in jobs[:limit]:
+        print(
+            f"  - {str(job.get('company') or '')[:120]} - "
+            f"{str(job.get('title') or '')[:160]}",
+            file=output,
+        )
+    if len(jobs) > limit:
+        print(f"  - ... {len(jobs) - limit} more", file=output)
 
 
 def _successful_attempt(

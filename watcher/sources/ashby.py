@@ -53,6 +53,8 @@ class AshbySource:
             internship_type=str(job.get("employmentType") or "").strip(),
             extra={
                 "source_id": str(job.get("id") or ""),
+                "source_requisition_id": str(job.get("id") or ""),
+                "source_system": self.name,
                 "job_url": str(job.get("jobUrl") or ""),
                 "team": str(job.get("team") or ""),
                 "department": str(job.get("department") or ""),

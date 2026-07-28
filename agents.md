@@ -97,8 +97,15 @@
   collection.
 - `watcher/seen_store.py` uses analyzed job IDs. GitHub/direct sightings of the
   same job are not new. Batch marking is transactional.
-- Mark seen only after a successful live send, except explicit
-  `--mark-seen-without-send` priming.
+- Mark emailed only after a successful live send; explicit `--prime-seen`
+  writes the separate priming marker.
+- Dry runs never change notification state. Explicit priming uses a distinct
+  persisted marker, while live sends populate `emailed_at` only after success;
+  legacy rows with neither marker remain pending.
+- Collection dedupe and seen suppression share one posting-identity policy:
+  stable source requisition ID, then posting-specific normalized URL, then a
+  conservative company/title/location fallback. Generic URLs never collapse
+  distinct stable requisitions.
 - Digest policy: no default score gate; exclude ineligible jobs; sort by fit,
   generic score, role priority, company, and title; send nothing for zero new
   matches.

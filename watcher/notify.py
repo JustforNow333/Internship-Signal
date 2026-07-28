@@ -254,6 +254,12 @@ def _send_enabled() -> bool:
     return _env_truthy("WATCHER_SEND_EMAIL")
 
 
+def email_sending_enabled() -> bool:
+    """Return whether live SMTP sending is explicitly enabled."""
+
+    return _send_enabled()
+
+
 def _env_truthy(name: str) -> bool:
     return str(os.getenv(name) or "").strip().lower() in TRUTHY_ENV_VALUES
 

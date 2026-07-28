@@ -1,10 +1,9 @@
-"""Duplicate detection and merging.
+"""Duplicate detection, posting identity, and source-aware merging.
 
-Two rows are duplicates if they share a normalized source URL, or the same
-normalized (company, title, location) key. Normalization strips case,
-punctuation, extra whitespace, and corporate suffixes, so
-"  DATADOG Inc. | software engineer intern " matches
-"Datadog | Software Engineer Intern".
+Watcher rows use the strongest reliable identity available: a stable
+source-native requisition/posting ID, then a posting-specific normalized URL,
+then normalized company/title/location. Plain CSV rows naturally use the latter
+two levels. Similar titles alone never establish duplication.
 
 When duplicates collide we keep the first row and copy any fields the kept row
 was missing — duplicates often disagree on which columns they bothered to fill
@@ -14,11 +13,86 @@ fed before GitHub backstop rows, preserving the direct source tag.
 
 import hashlib
 import re
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from collections import defaultdict
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 from .normalize import CANONICAL_COLUMNS
 
 _CORP_SUFFIX = re.compile(r"\b(inc|llc|ltd|pvt|co|corp|corporation|company|gmbh)\b\.?", re.I)
+_ATS_ADAPTERS = frozenset(
+    {
+        "ashby",
+        "greenhouse",
+        "lever",
+        "smartrecruiters",
+        "workable",
+        "workday",
+    }
+)
+_TRACKING_QUERY_KEYS = frozenset(
+    {
+        "gh_src",
+        "lever-source",
+        "ref",
+        "referrer",
+        "source",
+        "src",
+        "tracking",
+        "trk",
+    }
+)
+_POSTING_ID_QUERY_KEYS = frozenset(
+    {
+        "gh_jid",
+        "jid",
+        "job_id",
+        "jobid",
+        "posting_id",
+        "postingid",
+        "req_id",
+        "reqid",
+        "requisition_id",
+        "requisitionid",
+    }
+)
+_GENERIC_TERMINAL_SEGMENTS = frozenset(
+    {
+        "career",
+        "careers",
+        "early-career",
+        "early-careers",
+        "intern",
+        "internship",
+        "internships",
+        "job",
+        "jobs",
+        "join-us",
+        "openings",
+        "opportunities",
+        "positions",
+        "results",
+        "roles",
+        "search",
+        "students",
+        "university",
+    }
+)
+_GENERIC_PATH_MARKERS = (
+    "/job-search",
+    "/jobs/search",
+    "/search-jobs",
+    "/search-results",
+)
+_SEARCH_QUERY_KEYS = frozenset(
+    {
+        "keyword",
+        "keywords",
+        "location",
+        "q",
+        "query",
+        "search",
+    }
+)
 
 
 def _squash(text: str) -> str:
@@ -52,13 +126,25 @@ def norm_url(url: str) -> str:
         (k, v)
         for k, v in parse_qsl(parts.query)
         if not k.lower().startswith("utm_")
-        and k.lower() not in {"ref", "gh_src"}
+        and k.lower() not in _TRACKING_QUERY_KEYS
         and not (k.lower() == "gh_jid" and v == path_job_id)
     )
     host = parts.netloc.lower()
     if host == "boards.greenhouse.io":
         host = "job-boards.greenhouse.io"
-    return urlunsplit((parts.scheme.lower(), host, path, urlencode(query), ""))
+    scheme = parts.scheme.lower()
+    if scheme == "http" and host.endswith(
+        (
+            ".ashbyhq.com",
+            ".greenhouse.io",
+            ".lever.co",
+            ".myworkdayjobs.com",
+            ".smartrecruiters.com",
+            ".workable.com",
+        )
+    ):
+        scheme = "https"
+    return urlunsplit((scheme, host, path, urlencode(query), ""))
 
 
 def canonical_key(row: dict) -> str:
@@ -70,6 +156,191 @@ def job_id(row: dict) -> str:
     return hashlib.sha1(canonical_key(row).encode("utf-8")).hexdigest()[:10]
 
 
+def stable_requisition_key(row: dict) -> str:
+    """Return a normalized, source-scoped stable requisition identity."""
+
+    extra = row.get("extra")
+    if not isinstance(extra, dict):
+        extra = {}
+    preserved = str(extra.get("posting_requisition_key") or "").strip()
+    if preserved:
+        return preserved
+
+    url_identity = _ats_url_requisition(row.get("source_url", ""))
+    source_adapter = str(extra.get("source_adapter") or "").strip().casefold()
+    source_system = str(extra.get("source_system") or "").strip().casefold()
+    native_id = str(extra.get("source_requisition_id") or "").strip()
+    if not native_id and extra.get("source") == "direct" and source_adapter in _ATS_ADAPTERS:
+        native_id = str(extra.get("source_id") or "").strip()
+
+    if native_id:
+        provider = source_system or (url_identity[0] if url_identity else "") or source_adapter
+        if provider:
+            scope = (
+                url_identity[1]
+                if url_identity and url_identity[0] == provider
+                else _squash(str(extra.get("source_scope") or ""))
+                or norm_company(row.get("company", ""))
+            )
+            return _requisition_key(provider, scope, native_id)
+
+    if url_identity:
+        return _requisition_key(*url_identity)
+    return ""
+
+
+def is_posting_specific_url(url: str) -> bool:
+    """Conservatively distinguish posting URLs from landing/search URLs."""
+
+    normalized = norm_url(url)
+    if not normalized:
+        return False
+    try:
+        parts = urlsplit(normalized)
+        segments = [
+            unquote(segment).strip().casefold()
+            for segment in parts.path.split("/")
+            if unquote(segment).strip()
+        ]
+        query = {
+            key.casefold(): value
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        }
+    except (TypeError, ValueError):
+        return False
+
+    if _ats_url_requisition(normalized):
+        return True
+    if any(key in _POSTING_ID_QUERY_KEYS and str(value).strip() for key, value in query.items()):
+        return True
+
+    path = "/" + "/".join(segments)
+    if any(marker in path for marker in _GENERIC_PATH_MARKERS):
+        return False
+    if any(key in _SEARCH_QUERY_KEYS for key in query):
+        return False
+    if not segments or segments[-1] in _GENERIC_TERMINAL_SEGMENTS:
+        return False
+    if (
+        any(
+            segment in {"early-career", "early-careers", "internships", "students", "university"}
+            for segment in segments[:-1]
+        )
+        and not re.search(r"\d", segments[-1])
+        and segments[-2] not in {"job", "jobs", "position", "positions", "roles"}
+    ):
+        return False
+    if len(segments) >= 2 and segments[-2] in {"job", "jobs", "position", "positions", "roles"}:
+        return True
+    if len(segments) >= 2:
+        return True
+    terminal = segments[-1]
+    return bool(
+        re.search(r"\d", terminal)
+        or (
+            "-" in terminal
+            and any(token in terminal for token in ("engineer", "intern", "developer", "analyst"))
+        )
+    )
+
+
+def non_specific_posting_urls(rows) -> frozenset[str]:
+    """Return generic URLs, including URLs shared by distinct requisitions."""
+
+    requisitions_by_url: dict[str, set[str]] = defaultdict(set)
+    non_specific: set[str] = set()
+    for row in rows:
+        normalized = norm_url(row.get("source_url", ""))
+        if not normalized:
+            continue
+        if not is_posting_specific_url(normalized):
+            non_specific.add(normalized)
+        requisition = stable_requisition_key(row)
+        if requisition:
+            requisitions_by_url[normalized].add(requisition)
+    non_specific.update(
+        url
+        for url, requisitions in requisitions_by_url.items()
+        if len(requisitions) > 1
+    )
+    return frozenset(non_specific)
+
+
+def posting_specific_url_key(
+    row: dict,
+    *,
+    non_specific_urls: frozenset[str] = frozenset(),
+) -> str:
+    normalized = norm_url(row.get("source_url", ""))
+    if not normalized or normalized in non_specific_urls:
+        return ""
+    return normalized if is_posting_specific_url(normalized) else ""
+
+
+def posting_identity_key(
+    row: dict,
+    *,
+    non_specific_urls: frozenset[str] = frozenset(),
+) -> str:
+    """Return the strongest notification/dedupe identity for one posting."""
+
+    requisition = stable_requisition_key(row)
+    if requisition:
+        return f"requisition|{requisition}"
+    url = posting_specific_url_key(row, non_specific_urls=non_specific_urls)
+    if url:
+        return f"url|{url}"
+    fallback = canonical_key(row)
+    return f"fallback|{fallback}" if fallback.strip("|") else ""
+
+
+def posting_match_reason(
+    first: dict,
+    second: dict,
+    *,
+    non_specific_urls: frozenset[str] = frozenset(),
+) -> str | None:
+    """Return the shared identity tier, or ``None`` for distinct postings."""
+
+    first_req = stable_requisition_key(first)
+    second_req = stable_requisition_key(second)
+    if first_req and second_req:
+        return "requisition_id" if first_req == second_req else None
+
+    first_url = posting_specific_url_key(first, non_specific_urls=non_specific_urls)
+    second_url = posting_specific_url_key(second, non_specific_urls=non_specific_urls)
+    if first_req or second_req:
+        if first_url and second_url and first_url == second_url:
+            return "source_url"
+        return None
+
+    if first_url and second_url:
+        return "source_url" if first_url == second_url else None
+
+    first_fallback = canonical_key(first)
+    second_fallback = canonical_key(second)
+    if (
+        first_fallback.strip("|")
+        and first_fallback == second_fallback
+        and not (first_url and second_url)
+    ):
+        return "company+title+location"
+    return None
+
+
+def postings_match(
+    first: dict,
+    second: dict,
+    *,
+    non_specific_urls: frozenset[str] = frozenset(),
+) -> bool:
+    return posting_match_reason(
+        first,
+        second,
+        non_specific_urls=non_specific_urls,
+    ) is not None
+
+
 def dedupe(rows):
     """Returns (unique_rows, duplicate_report_entries).
 
@@ -77,33 +348,61 @@ def dedupe(rows):
     Row numbers are 1-based positions in the cleaned input (header excluded).
     """
     kept = []
-    by_key = {}
-    by_url = {}
+    by_requisition: dict[str, list[dict]] = defaultdict(list)
+    by_key: dict[str, list[dict]] = defaultdict(list)
+    by_url: dict[str, list[dict]] = defaultdict(list)
     report = []
+    ordered_rows = list(rows)
+    non_specific_urls = non_specific_posting_urls(ordered_rows)
 
     def index_row(row: dict) -> None:
+        requisition = stable_requisition_key(row)
         key = canonical_key(row)
-        url = norm_url(row.get("source_url", ""))
+        url = posting_specific_url_key(row, non_specific_urls=non_specific_urls)
+        if requisition:
+            by_requisition[requisition].append(row)
         if key.strip("|"):
-            by_key.setdefault(key, row)
+            by_key[key].append(row)
         if url:
-            by_url.setdefault(url, row)
+            by_url[url].append(row)
 
-    ordered_rows = list(rows)
     if any(_has_source_metadata(row) for row in ordered_rows):
         ordered_rows.sort(key=_source_row_sort_key)
 
     for row in ordered_rows:
         _ensure_source_provenance(row)
+        requisition = stable_requisition_key(row)
         key = canonical_key(row)
-        url = norm_url(row.get("source_url", ""))
+        url = posting_specific_url_key(row, non_specific_urls=non_specific_urls)
 
         existing = None
         matched_on = None
-        if url and url in by_url:
-            existing, matched_on = by_url[url], "source_url"
-        elif key.strip("|") and key in by_key:
-            existing, matched_on = by_key[key], "company+title+location"
+        candidates = []
+        if requisition:
+            candidates.extend(by_requisition.get(requisition, ()))
+            if url:
+                candidates.extend(by_url.get(url, ()))
+        elif url:
+            candidates.extend(by_url.get(url, ()))
+            if key.strip("|"):
+                candidates.extend(by_key.get(key, ()))
+        elif key.strip("|"):
+            candidates.extend(by_key.get(key, ()))
+
+        checked: set[int] = set()
+        for candidate in candidates:
+            candidate_marker = id(candidate)
+            if candidate_marker in checked:
+                continue
+            checked.add(candidate_marker)
+            reason = posting_match_reason(
+                candidate,
+                row,
+                non_specific_urls=non_specific_urls,
+            )
+            if reason:
+                existing, matched_on = candidate, reason
+                break
 
         if existing is None:
             kept.append(row)
@@ -118,6 +417,12 @@ def dedupe(rows):
         _merge_source_provenance(existing, row)
         if merged_fields:
             index_row(existing)
+        existing_source = _source_identity(
+            existing.get("extra") if isinstance(existing.get("extra"), dict) else {}
+        )
+        duplicate_source = _source_identity(
+            row.get("extra") if isinstance(row.get("extra"), dict) else {}
+        )
         report.append({
             "row_number": row.get("_row_number"),
             "duplicate_of": existing.get("_row_number"),
@@ -125,9 +430,72 @@ def dedupe(rows):
             "title": row.get("title", ""),
             "matched_on": matched_on,
             "merged_fields": merged_fields,
+            "cross_source": existing_source != duplicate_source,
+            "kept_source": existing_source,
+            "duplicate_source": duplicate_source,
         })
 
     return kept, report
+
+
+def _requisition_key(provider: str, scope: str, native_id: str) -> str:
+    normalized_provider = _squash(provider).replace(" ", "_")
+    normalized_scope = _squash(scope).replace(" ", "_") or "global"
+    normalized_id = re.sub(r"\s+", "", str(native_id or "")).casefold()
+    if not normalized_provider or not normalized_id:
+        return ""
+    return f"{normalized_provider}|{normalized_scope}|{normalized_id}"
+
+
+def _ats_url_requisition(url: str) -> tuple[str, str, str] | None:
+    normalized = norm_url(url)
+    if not normalized:
+        return None
+    try:
+        parts = urlsplit(normalized)
+        host = (parts.hostname or "").casefold()
+        segments = [unquote(segment).strip() for segment in parts.path.split("/") if segment.strip()]
+        query = {
+            key.casefold(): value.strip()
+            for key, value in parse_qsl(parts.query)
+            if value.strip()
+        }
+    except (TypeError, ValueError):
+        return None
+
+    if host in {"boards.greenhouse.io", "job-boards.greenhouse.io"}:
+        if len(segments) >= 3 and segments[-2].casefold() == "jobs":
+            return "greenhouse", segments[0], segments[-1]
+        gh_jid = query.get("gh_jid")
+        if gh_jid:
+            return "greenhouse", segments[0] if segments else host, gh_jid
+    if host == "jobs.lever.co" and len(segments) >= 2:
+        candidate = segments[1]
+        if candidate.casefold() != "apply":
+            return "lever", segments[0], candidate
+    if host == "jobs.ashbyhq.com" and len(segments) >= 2:
+        return "ashby", segments[0], segments[1]
+    if host == "jobs.smartrecruiters.com" and len(segments) >= 2:
+        candidate = re.match(r"([A-Za-z0-9]+)", segments[1])
+        if candidate:
+            return "smartrecruiters", segments[0], candidate.group(1)
+    if host == "apply.workable.com" and len(segments) >= 3 and segments[1].casefold() == "j":
+        return "workable", segments[0], segments[2]
+    if host.endswith(".myworkdayjobs.com") and segments:
+        match = re.search(r"_([A-Za-z]+\d[A-Za-z0-9-]*)$", segments[-1])
+        if match:
+            scope = f"{host.split('.', 1)[0]}:{segments[0] if segments else ''}"
+            native_id = re.sub(r"(?<=\d)-\d+$", "", match.group(1))
+            return "workday", scope, native_id
+    if host in {"careers.google.com", "www.google.com"} and "results" in {
+        segment.casefold() for segment in segments
+    }:
+        for index, segment in enumerate(segments[:-1]):
+            if segment.casefold() == "results":
+                candidate = re.match(r"([A-Za-z0-9]+)", segments[index + 1])
+                if candidate:
+                    return "google_careers", host, candidate.group(1)
+    return None
 
 
 def _has_source_metadata(row: dict) -> bool:
@@ -282,6 +650,8 @@ def _source_detail(extra: dict, priority: int) -> dict:
     }
     for key in (
         "feed_url",
+        "source_requisition_id",
+        "source_system",
         "source_added_date",
         "active",
         "closed",

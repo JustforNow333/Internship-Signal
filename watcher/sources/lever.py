@@ -67,6 +67,8 @@ class LeverSource:
             remote_status=_remote_status(posting.get("workplaceType")),
             extra={
                 "source_id": str(posting.get("id") or ""),
+                "source_requisition_id": str(posting.get("id") or ""),
+                "source_system": self.name,
                 "posting_url": str(posting.get("hostedUrl") or ""),
                 "country": str(posting.get("country") or "").strip(),
             },

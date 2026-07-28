@@ -83,6 +83,8 @@ class SmartRecruitersSource:
             or _label(posting.get("typeOfEmployment")),
             extra={
                 "source_id": posting_id,
+                "source_requisition_id": posting_id,
+                "source_system": self.name,
                 "ref_number": str(posting.get("refNumber") or ""),
                 "smartrecruiters_company": _company_name(posting.get("company")),
                 "function": _label(posting.get("function")),

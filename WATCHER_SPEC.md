@@ -123,9 +123,9 @@ internship-signal/
         └── test_run.py          end-to-end with mocked sources + fake SMTP
 ```
 
-Reuse, do not reimplement: `dedupe.job_id`, `dedupe.norm_company`,
-`dedupe.norm_url`, and `ingest.analyze_rows`. The watcher must never compute its
-own score.
+Reuse, do not reimplement: centralized posting identity and URL/company
+normalization from `dedupe`, plus `ingest.analyze_rows`. The watcher must never
+compute its own score or treat the analyzed content-hash ID as an ATS ID.
 
 ---
 
@@ -288,7 +288,7 @@ tenants and reports only company, shard, attempts, status, content metadata,
 body length/hash prefix, JSON decode status, and jobs-field presence. The manual
 Actions `workday_transport_probe` mode runs it without SMTP, alumni data, a seen
 database, or `watcher-data` restore/save. Local probes must explicitly set
-`WATCHER_SEND_EMAIL=0` and must not use `--mark-seen-without-send`.
+`WATCHER_SEND_EMAIL=0` and must not use `--prime-seen`.
 
 ### Bespoke (`sources/bespoke/*.py`)
 
@@ -369,11 +369,13 @@ and `|` between terms so comma-delimited parsing remains safe.
 
 1. Collect rows from every source. Fixed precedence is direct ATS, Simplify
    JSON, then Markdown, independent of configured feed order.
-2. Run them through `analyze_rows()`. Normalized application URL is the
-   strongest duplicate key; normalized company/title/location is the fallback.
-   Preserve the highest-priority canonical fields, fill missing fields from
-   lower-priority rows when safe, and never let lower-priority closed state
-   override an active higher-priority result.
+2. Run them through `analyze_rows()`. Shared posting identity uses stable
+   source-native ATS requisition/posting ID first, a posting-specific normalized
+   application URL second, and normalized company/title/location only as the
+   fallback. Careers/search/program landing pages and URLs shared by distinct
+   stable IDs are not posting-specific. Preserve the highest-priority canonical
+   fields, fill missing fields from lower-priority rows when safe, and never let
+   lower-priority closed state override an active higher-priority result.
 3. Preserve `extra.source` compatibility and record `primary_source`, ordered
    `sources`, and per-source details. Emit one analyzed job and one
    notification.
@@ -390,19 +392,29 @@ state and the thing that prevents duplicate emails.
 
 ```
 table seen(
-  job_id      TEXT PRIMARY KEY,   -- existing dedupe.job_id
+  job_id      TEXT PRIMARY KEY,   -- watcher notification identity storage key
   company     TEXT,
   title       TEXT,
   url         TEXT,
   first_source TEXT,              -- direct | github
   first_seen  TEXT,               -- ISO timestamp
-  emailed_at  TEXT                -- ISO timestamp, null until emailed
+  emailed_at  TEXT,               -- ISO timestamp, null until emailed
+  primed_at   TEXT                -- ISO timestamp, null unless explicitly suppressed
 )
 ```
 
-Flow each run: compute `job_id` for every filtered match → `id NOT IN seen` is
-new → email those → insert them with `emailed_at`. Because `job_id` is content-
-derived and identical to the UI's, re-runs and re-scrapes never re-notify.
+Do not assume the analyzed backend `job["id"]` is a reliable ATS requisition
+ID. Collection dedupe and notification suppression use the same shared posting
+identity described in §5. A row suppresses a future digest only when
+`emailed_at` or `primed_at` is populated. Existing rows with only `first_seen`
+and blank notification markers remain pending.
+
+Live runs email pending matches and populate `emailed_at` only after a
+successful digest send. Ordinary dry runs preview/report matches without
+inserting or updating notification rows. Explicit priming runs email nothing
+and populate `primed_at`. Existing databases migrate in place with
+`CREATE TABLE IF NOT EXISTS` plus guarded `ALTER TABLE`; never delete or rebuild
+the table.
 
 Edge rule: if a job first appeared via `github` and is later seen via `direct`,
 it is **not** new (already emailed) — do not re-send. The point of first-wave is
@@ -473,7 +485,10 @@ Anduril, etc.), so most direct-scrape hits will carry a referral contact.
 
 `.github/workflows/watcher.yml`: cron (e.g. `0 * * * *` hourly — note GitHub
 cron is best-effort and can lag under load), `workflow_dispatch` for manual
-runs. Steps: checkout, set up Python, `pip install -r requirements.txt`, run
+runs. Manual dispatch has separate `send_email` and `prime_seen` booleans;
+email-disabled runs do not imply priming, and live send plus prime is invalid.
+Scheduled priming, if ever needed, uses a separate explicit setting. Steps:
+checkout, set up Python, `pip install -r requirements.txt`, run
 `python -m watcher.run`. SMTP creds and any tokens come from repo secrets.
 
 **Persisting the seen-store across runs** (Actions runners are ephemeral) —
@@ -539,8 +554,9 @@ breadth, added one tested adapter at a time.
 
 - Additive only. No change to scoring, classification, salary, or signal logic
   beyond the mechanical `analyze_rows` extraction.
-- Reuse `dedupe.job_id` / `norm_company` / `norm_url` / `analyze_rows`
-  verbatim. The bot must never invent its own scoring or id scheme.
+- Reuse centralized posting identity / `norm_company` / `norm_url` /
+  `analyze_rows` verbatim. The bot must never invent its own scoring or
+  notification identity scheme.
 - Every external fetch is defensive: time out, catch, log, continue. One bad
   source never blocks the others or the email.
 - Respect robots/rate limits; space out requests. The GitHub file is one GET —

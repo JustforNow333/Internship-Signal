@@ -65,6 +65,9 @@ class GreenhouseSource:
             internship_type=_metadata_value(job.get("metadata"), "Role Type"),
             extra={
                 "source_id": str(job.get("id") or ""),
+                "source_requisition_id": str(job.get("id") or ""),
+                "source_system": self.name,
+                "requisition_id": str(job.get("requisition_id") or ""),
                 "greenhouse_company_name": str(job.get("company_name") or ""),
                 "location": location or {},
             },

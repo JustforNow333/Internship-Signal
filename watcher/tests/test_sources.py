@@ -98,6 +98,8 @@ def test_greenhouse_fixture_to_canonical_rows():
     assert first["internship_type"] == "Internship"
     assert first["extra"]["source"] == "direct"
     assert first["extra"]["source_adapter"] == "greenhouse"
+    assert first["extra"]["source_requisition_id"] == "4611422005"
+    assert first["extra"]["requisition_id"] == "2035"
     assert first["extra"]["greenhouse_company_name"] == "Astera Labs Early Career"
     assert first["extra"]["location"] == {"name": "Toronto, Ontario, Canada"}
     assert assess_us_location(first).status == OUTSIDE_US
@@ -140,6 +142,7 @@ def test_lever_fixture_to_canonical_rows():
     assert first["compensation"] == "$100,000 - $140,000 per year"
     assert first["extra"]["source"] == "direct"
     assert first["extra"]["source_adapter"] == "lever"
+    assert first["extra"]["source_requisition_id"] == "5342e333-61b9-406d-bfea-61a687a94d1f"
     assert first["extra"]["posting_url"] == "https://jobs.lever.co/ifm-us/5342e333-61b9-406d-bfea-61a687a94d1f"
     assert first["extra"]["country"] == "US"
     assert assess_us_location(first).status == LOCATION_US
@@ -196,6 +199,7 @@ def test_workday_fixture_to_canonical_rows():
     assert first["internship_type"] == ""
     assert first["extra"]["source"] == "direct"
     assert first["extra"]["source_adapter"] == "workday"
+    assert first["extra"]["source_requisition_id"] == "R241466"
     assert first["extra"]["workday_tenant"] == "capitalone"
     assert first["extra"]["workday_shard"] == "wd12"
     assert first["extra"]["workday_site"] == "Capital_One"
@@ -525,6 +529,7 @@ def test_ashby_fixture_to_canonical_rows():
     assert first["remote_status"] == "Hybrid"
     assert first["internship_type"] == "FullTime"
     assert first["extra"]["source_adapter"] == "ashby"
+    assert first["extra"]["source_requisition_id"] == "02989a06-0562-4074-8f64-963716ae9801"
     assert first["extra"]["locations"][0]["address"]["postalAddress"]["addressCountry"] == "Denmark"
     assert assess_us_location(first).status == OUTSIDE_US
     assert "Chainalysis" in first["description"]
@@ -550,6 +555,7 @@ def test_smartrecruiters_fixture_to_canonical_rows():
     assert first["source_url"] == "https://jobs.smartrecruiters.com/BoschGroup/744000134596109-adas-xc"
     assert first["date_posted"] == "2026-06-27"
     assert first["extra"]["source_adapter"] == "smartrecruiters"
+    assert first["extra"]["source_requisition_id"] == "744000134596109"
     assert first["extra"]["smartrecruiters_company"] == "Bosch Group"
     assert first["extra"]["location"]["country"] == "cn"
     assert assess_us_location(first).status == OUTSIDE_US
@@ -577,6 +583,7 @@ def test_workable_fixture_to_canonical_rows():
     assert first["remote_status"] == "Remote"
     assert first["internship_type"] == "full"
     assert first["extra"]["source_adapter"] == "workable"
+    assert first["extra"]["source_requisition_id"] == "F8427A442D"
     assert first["extra"]["shortcode"] == "F8427A442D"
     assert first["extra"]["locations"][0]["countryCode"] == "US"
     assert assess_us_location(first).status == LOCATION_US
