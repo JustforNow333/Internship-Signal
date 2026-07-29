@@ -475,6 +475,18 @@ This file tracks completed watcher steps and the next handoff target.
      with two 1,000-detail runs, zero free pages, and `quick_check=ok`.
    - Offline backend/watcher validation: `649 passed, 1 warning`; focused
      audit/comparison/seen/run validation: `94 passed`.
+24. Actions rollout eligibility audit:
+   - Safe manual run `30420413509` completed on the bounded comparison
+     implementation with 99 seen rows loaded/saved, `sent=no`,
+     `seen_marked=0`, no health email, and a 14.6 MB validated state database.
+   - Production traces exposed two conservative-classification gaps:
+     `Advanced degree not required` was treated as mandatory, and a current
+     bachelor's/current master's alternative was treated as graduate-only.
+   - Negated degree requirements are now removed before mandatory-pattern
+     matching, while explicit mixed current-student alternatives remain
+     eligible. Genuine MS-or-higher requirements remain graduate-only.
+   - Offline backend/watcher validation: `651 passed, 1 warning`; Python
+     compileall completed successfully.
 
 ## Next
 
@@ -504,8 +516,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the Actions rollout performance fix:
+Latest local validation after the Actions rollout eligibility fix:
 
 ```text
-649 passed, 1 warning in 10.54s
+651 passed, 1 warning in 12.29s
 ```

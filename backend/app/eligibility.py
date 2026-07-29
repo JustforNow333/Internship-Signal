@@ -49,6 +49,15 @@ _PREFERENCE_RE = re.compile(
     r"ideally|encouraged|welcome to apply)\b",
     re.I,
 )
+_NEGATED_DEGREE_REQUIREMENT_RE = re.compile(
+    rf"(?:"
+    rf"\b(?:{_PHD_TERM}|{_GRADUATE_TERM})\b"
+    rf"(?:\s+\w+){{0,3}}\s+(?:is |are )?not (?:required|mandatory)\b"
+    rf"|\bno\s+(?:{_PHD_TERM}|{_GRADUATE_TERM})\b"
+    rf"(?:\s+\w+){{0,3}}\s+(?:is |are )?required\b"
+    rf")",
+    re.I,
+)
 _PREFERRED_HEADING_RE = re.compile(
     r"^\s*(?:preferred|desired|bonus|nice[- ]to[- ]have)"
     r"(?:\s+(?:qualifications?|requirements?|skills?))?\s*:?\s*(.*)$",
@@ -232,6 +241,7 @@ def _restriction(item: _Evidence, *, company: str) -> tuple[str, str] | None:
     text = _normalize_text(item.text)
     if not text or _PREFERENCE_RE.search(text):
         return None
+    text = _NEGATED_DEGREE_REQUIREMENT_RE.sub(" ", text)
     direct_structured = (
         item.kind == "structured"
         and _key_token(item.source.rsplit(".", 1)[-1])
@@ -418,6 +428,12 @@ def _mixed_degree_eligibility(text: str) -> bool:
             "/" in text
             and re.search(rf"\b{_UNDERGRAD_TERM}\b", text)
             and re.search(rf"\b(?:{_PHD_TERM}|{_GRADUATE_TERM})\b", text)
+        )
+        or re.search(
+            rf"\bcurrent students?\b.{{0,80}}\b{_UNDERGRAD_TERM}\b.{{0,50}},"
+            rf"\s*currently (?:enrolled in|pursuing)\b.{{0,40}}"
+            rf"\b(?:{_PHD_TERM}|{_GRADUATE_TERM})\b",
+            text,
         )
     )
 

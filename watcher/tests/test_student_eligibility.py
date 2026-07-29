@@ -166,6 +166,14 @@ def test_clear_categorical_restrictions_are_excluded(posting, reason):
             requirements="Undergraduate or graduate students are eligible to apply."
         ),
         lambda: scored(requirements="Bachelor's or Master's students are accepted."),
+        lambda: scored(
+            requirements=(
+                "Current student in their third year or beyond of a bachelor's "
+                "program, currently enrolled in a master's program, or within "
+                "one year of graduation."
+            )
+        ),
+        lambda: scored(requirements="Advanced degree not required."),
         lambda: scored(requirements="Must graduate in 2028."),
         lambda: scored(requirements="Current students and recent graduates are accepted."),
         lambda: scored(requirements="Freshmen and sophomores are accepted."),
