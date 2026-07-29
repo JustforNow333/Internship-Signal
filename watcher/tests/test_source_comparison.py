@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timedelta, timezone
 
+import watcher.audit_trace as audit_trace_module
+import watcher.seen_store as seen_store_module
 from backend.app.ingest import analyze_rows
 from watcher.config import CompanyCfg, WatcherConfig
 from watcher.seen_store import SeenStore
@@ -291,3 +293,75 @@ def test_comparison_distinguishes_failed_feed_from_valid_zero_row_feed(tmp_path)
     assert by_label["healthy feed"]["rows_returned"] == 0
     assert by_label["failed feed"]["succeeded"] is False
     assert by_label["failed feed"]["error_kind"] == "schema_failure"
+
+
+def test_comparison_precomputes_posting_universe_once(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    jobs = analyze_rows(
+        [
+            _row("Direct Co", "direct", "greenhouse", f"scale-{index}")
+            for index in range(40)
+        ],
+        today=date(2026, 7, 28),
+    )
+    audit_universe_scans = 0
+    seen_universe_scans = 0
+    similarity_fallback_scans = 0
+    original_audit_scan = audit_trace_module.non_specific_posting_urls
+    original_seen_scan = seen_store_module.non_specific_posting_urls
+    original_similarity_scan = (
+        audit_trace_module._similar_distinct_requisitions
+    )
+
+    def count_audit_scan(postings):
+        nonlocal audit_universe_scans
+        audit_universe_scans += 1
+        return original_audit_scan(postings)
+
+    def count_seen_scan(postings):
+        nonlocal seen_universe_scans
+        seen_universe_scans += 1
+        return original_seen_scan(postings)
+
+    def count_similarity_scan(*args, **kwargs):
+        nonlocal similarity_fallback_scans
+        similarity_fallback_scans += 1
+        return original_similarity_scan(*args, **kwargs)
+
+    monkeypatch.setattr(
+        audit_trace_module,
+        "non_specific_posting_urls",
+        count_audit_scan,
+    )
+    monkeypatch.setattr(
+        seen_store_module,
+        "non_specific_posting_urls",
+        count_seen_scan,
+    )
+    monkeypatch.setattr(
+        audit_trace_module,
+        "_similar_distinct_requisitions",
+        count_similarity_scan,
+    )
+
+    with SeenStore(config.seen_db_path) as seen:
+        report = build_source_comparison(
+            config=config,
+            jobs=jobs,
+            seen_store=seen,
+            run_id="scale-regression",
+            observed_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+        )
+
+    assert audit_universe_scans == 1
+    assert seen_universe_scans == 0
+    assert similarity_fallback_scans == 0
+    posting_entries = [
+        entry for entry in report.entries if entry.company == "Direct Co"
+    ]
+    assert len(posting_entries) == 40
+    assert all(
+        len(entry.trace["deduplication"]["similar_distinct_requisitions"])
+        == 25
+        for entry in posting_entries
+    )

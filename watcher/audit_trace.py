@@ -87,6 +87,68 @@ class PostingAuditTrace:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class PostingAuditContext:
+    """Run-wide identity data reused by every posting trace."""
+
+    non_specific_urls: frozenset[str]
+    notification_records: tuple[dict[str, object], ...]
+    similar_requisitions: dict[
+        tuple[str, str],
+        tuple[dict[str, str], ...],
+    ]
+
+
+def build_posting_audit_context(
+    posting_universe: Sequence[dict],
+    *,
+    seen_store: SeenStore,
+) -> PostingAuditContext:
+    """Precompute whole-run identity inputs in linear time."""
+
+    universe = tuple(posting_universe)
+    non_specific_urls = non_specific_posting_urls(universe)
+    requisitions_by_role: dict[
+        tuple[str, str],
+        dict[str, dict[str, str]],
+    ] = {}
+    for posting in universe:
+        requisition_key = stable_requisition_key(posting)
+        if not requisition_key:
+            continue
+        role_key = (
+            norm_company(str(posting.get("company") or "")),
+            norm_title(str(posting.get("title") or "")),
+        )
+        requisitions_by_role.setdefault(role_key, {}).setdefault(
+            requisition_key,
+            {
+                "identity_key": posting_identity_key(
+                    posting,
+                    non_specific_urls=non_specific_urls,
+                ),
+                "requisition_key": requisition_key,
+                "normalized_url": safe_posting_url(
+                    norm_url(str(posting.get("source_url") or ""))
+                ),
+            },
+        )
+    similar_requisitions = {
+        role_key: tuple(
+            sorted(
+                requisitions.values(),
+                key=lambda item: item["identity_key"],
+            )
+        )
+        for role_key, requisitions in requisitions_by_role.items()
+    }
+    return PostingAuditContext(
+        non_specific_urls=non_specific_urls,
+        notification_records=tuple(seen_store.records()),
+        similar_requisitions=similar_requisitions,
+    )
+
+
 def build_posting_trace(
     job: dict,
     *,
@@ -96,11 +158,16 @@ def build_posting_trace(
     duplicate_entries: Sequence[Mapping[str, object]] = (),
     source_coverage: Mapping[str, object] | None = None,
     query_match: Mapping[str, object] | None = None,
+    context: PostingAuditContext | None = None,
 ) -> PostingAuditTrace:
     """Build one structured trace from a production-analyzed job."""
 
-    universe = [job, *posting_universe]
-    non_specific_urls = non_specific_posting_urls(universe)
+    if context is None:
+        universe = [job, *posting_universe]
+        non_specific_urls = non_specific_posting_urls(universe)
+    else:
+        universe = []
+        non_specific_urls = context.non_specific_urls
     identity_key = posting_identity_key(
         job,
         non_specific_urls=non_specific_urls,
@@ -129,10 +196,17 @@ def build_posting_trace(
     watcher_eligible = bool(eligibility.get("watcher_eligible"))
     threshold_eligible = config.min_score is None or fit_score >= config.min_score
 
-    matching_records = seen_store.matching_records(
-        job,
-        posting_universe=posting_universe,
-    )
+    if context is None:
+        matching_records = seen_store.matching_records(
+            job,
+            posting_universe=posting_universe,
+        )
+    else:
+        matching_records = seen_store.matching_records(
+            job,
+            precomputed_non_specific_urls=non_specific_urls,
+            preloaded_records=context.notification_records,
+        )
     emailed = any(record.get("emailed_at") for record in matching_records)
     primed = any(record.get("primed_at") for record in matching_records)
     pending = bool(
@@ -172,10 +246,14 @@ def build_posting_trace(
             == norm_title(str(job.get("title") or ""))
         )
     ]
-    similar_distinct = _similar_distinct_requisitions(
-        job,
-        posting_universe,
-        non_specific_urls=non_specific_urls,
+    similar_distinct = (
+        _similar_distinct_requisitions(
+            job,
+            posting_universe,
+            non_specific_urls=non_specific_urls,
+        )
+        if context is None
+        else _context_similar_distinct_requisitions(context, job)
     )
 
     coverage = dict(source_coverage or {})
@@ -783,6 +861,24 @@ def _similar_distinct_requisitions(
             }
         )
     return sorted(results, key=lambda item: item["identity_key"])[:25]
+
+
+def _context_similar_distinct_requisitions(
+    context: PostingAuditContext,
+    job: Mapping[str, object],
+) -> list[dict[str, str]]:
+    current_requisition = stable_requisition_key(dict(job))
+    if not current_requisition:
+        return []
+    role_key = (
+        norm_company(str(job.get("company") or "")),
+        norm_title(str(job.get("title") or "")),
+    )
+    return [
+        dict(item)
+        for item in context.similar_requisitions.get(role_key, ())
+        if item["requisition_key"] != current_requisition
+    ][:25]
 
 
 def _native_requisition_id(extra: Mapping[str, object]) -> str:

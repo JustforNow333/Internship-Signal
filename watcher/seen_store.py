@@ -7,7 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from backend.app.dedupe import (
     non_specific_posting_urls,
@@ -96,6 +96,8 @@ class SeenStore:
         job: dict,
         *,
         posting_universe: Iterable[dict] = (),
+        precomputed_non_specific_urls: frozenset[str] | None = None,
+        preloaded_records: Iterable[Mapping[str, object]] | None = None,
     ) -> list[dict[str, object]]:
         """Return every historical row matching a current posting.
 
@@ -104,23 +106,30 @@ class SeenStore:
         suppression semantics.
         """
 
-        universe = [job, *list(posting_universe)]
-        non_specific_urls = non_specific_posting_urls(universe)
-        rows = self._conn.execute(
-            """
-            select job_id, analyzed_job_id, identity_key, requisition_key,
-                   company, title, location, url, first_source, first_seen,
-                   emailed_at, primed_at
-            from seen
-            """
-        ).fetchall()
+        if precomputed_non_specific_urls is None:
+            universe = [job, *list(posting_universe)]
+            active_non_specific_urls = non_specific_posting_urls(universe)
+        else:
+            active_non_specific_urls = precomputed_non_specific_urls
+        rows = (
+            self._conn.execute(
+                """
+                select job_id, analyzed_job_id, identity_key, requisition_key,
+                       company, title, location, url, first_source, first_seen,
+                       emailed_at, primed_at
+                from seen
+                """
+            ).fetchall()
+            if preloaded_records is None
+            else list(preloaded_records)
+        )
         return [
             dict(row)
             for row in rows
             if self._row_matches_job(
                 row,
                 job,
-                non_specific_urls=non_specific_urls,
+                non_specific_urls=active_non_specific_urls,
             )
         ]
 
@@ -416,7 +425,7 @@ class SeenStore:
 
     @staticmethod
     def _row_matches_job(
-        row: sqlite3.Row,
+        row: sqlite3.Row | Mapping[str, object],
         job: dict,
         *,
         non_specific_urls: frozenset[str],

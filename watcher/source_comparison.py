@@ -13,6 +13,7 @@ from typing import Mapping, Sequence, TextIO
 from backend.app.dedupe import norm_company
 from watcher.audit_trace import (
     AuditQuery,
+    build_posting_audit_context,
     build_posting_trace,
     not_collected_trace,
     safe_posting_url,
@@ -121,6 +122,10 @@ def build_source_comparison(
         names = company.match_names() if company else (item.company,)
         for name in names:
             coverage_by_company[norm_company(name)] = data
+    audit_context = build_posting_audit_context(
+        jobs,
+        seen_store=seen_store,
+    )
     entries: list[SourceComparisonEntry] = []
     observed_companies: set[str] = set()
     for job in jobs:
@@ -133,6 +138,7 @@ def build_source_comparison(
             posting_universe=jobs,
             duplicate_entries=duplicate_report,
             source_coverage=coverage_by_company.get(company_key),
+            context=audit_context,
         )
         trace_data = _sanitize_trace(trace.as_dict())
         sources = tuple(str(value) for value in trace.collection.get("sources", ()))

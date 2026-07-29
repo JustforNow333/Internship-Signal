@@ -45,6 +45,8 @@ This file tracks completed watcher steps and the next handoff target.
 - Categorical student eligibility now excludes only clear PhD-only,
   graduate-only, freshman-only, and returning-intern-only restrictions, with
   stable evidence-backed audit reasons and mixed/ambiguous cases retained.
+- Source-comparison tracing now builds one run-wide posting-identity context
+  instead of rescanning the full posting universe for every analyzed job.
 - A separate frozen U.S. role-fit benchmark now preserves the historical
   location-gate benchmark while measuring role relevance only on production
   location statuses `us` and `ambiguous`.
@@ -448,6 +450,21 @@ This file tracks completed watcher steps and the next handoff target.
      test dependency was confirmed.
    - Offline backend/watcher validation: `647 passed, 1 warning`; frontend:
      `23 passed`; production build and Python compileall completed successfully.
+23. Actions rollout performance regression:
+   - Safe manual run `30418538731` confirmed
+     `send_email=false`, `prime_seen=false`, `health_email_mode=off`, and 99
+     loaded seen rows, then reached dry-run notification selection without
+     changing notification state.
+   - The run exposed quadratic source-comparison work: after analyzing 17,566
+     rows and filtering 17,533 jobs, per-posting whole-universe identity and
+     similar-requisition scans prevented the application heartbeat from
+     completing. The obsolete run was canceled before persistence.
+   - Audit tracing now precomputes non-specific URLs, notification records, and
+     similar requisitions once per run. A scale regression asserts one universe
+     scan and no per-posting fallback scans while preserving bounded similar
+     requisition diagnostics.
+   - Offline backend/watcher validation: `648 passed, 1 warning`; focused
+     audit/comparison/seen/run validation: `93 passed`.
 
 ## Next
 
@@ -477,8 +494,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the evidence-backed repository audit:
+Latest local validation after the Actions rollout performance fix:
 
 ```text
-647 passed, 1 warning in 10.13s
+648 passed, 1 warning in 8.50s
 ```
