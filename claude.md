@@ -12,7 +12,8 @@
 - Student-status exclusions require clear mandatory evidence and use stable
   `phd_only`, `graduate_only`, `freshman_only`, or
   `returning_intern_only` reasons. Mixed, preferred, incidental, or ambiguous
-  mentions remain eligible.
+  mentions remain eligible. Evaluate them only after internship/student-program
+  and open checks; traces retain mandatory, negation, and mixed diagnostics.
 - `assess_us_location` is the sole location gate: explicit U.S. wins,
   explicit foreign country/region yields `outside_us`, and ambiguity passes.
   Prefer collected structured country/location metadata, keep city-only
@@ -34,7 +35,9 @@
 - Watcher audits are read-only and reuse production identity, dedupe,
   classification, eligibility, scoring, and seen lookup; state-only audits
   never fetch, and live audits never email, prime, or persist health attempts.
-- Source comparisons persist only bounded sanitized metadata. Health-alert
+- Source comparisons retain 30 aggregate runs, three detail runs, all bounded
+  eligible/anomaly detail, and deterministic routine-rejection samples per
+  reason; compact only after material cleanup. Health-alert
   cooldowns use dedicated tables and an independent email switch/renderer;
   they never update internship `emailed_at` or `primed_at`.
 - Rollout verification disables internship email, priming, Workday probes, and

@@ -300,11 +300,19 @@ central technical evidence remain excluded.
 
 ## Categorical student eligibility
 
-The scorer applies conservative student-status restrictions before the watcher
-digest. Evidence is evaluated in this order: explicit structured eligibility
-fields, title, minimum/required qualifications, then clear mandatory
-description language. Preferred-qualification sections and phrases such as
-`preferred`, `encouraged`, or `a plus` never exclude by themselves.
+The watcher first confirms that a posting is an internship, co-op, or student
+program and that it is open. Only then does it apply conservative
+student-status restrictions, followed by location and target-role eligibility.
+This keeps full-time senior and manager roles classified as `not_internship`
+instead of assigning a categorical student restriction.
+
+Within that gated evaluation, evidence is checked in this order: explicit
+structured eligibility fields, title, minimum/required qualifications, then
+clear mandatory description language. Preferred-qualification sections and
+phrases such as `preferred`, `encouraged`, or `a plus` never exclude by
+themselves. A degree keyword without mandatory enrollment context is
+insufficient. Negated requirements such as `Advanced degree not required` and
+mixed eligibility such as `Bachelor's or master's` take precedence.
 
 Clear restrictions use stable reasons:
 
@@ -326,7 +334,8 @@ A categorical exclusion retains the backend role/track and original posting
 text, but follows the existing hard-ineligibility convention: watcher fit is
 zero, the watcher action is `skip`, and the job is omitted before email/seen
 selection. Normal run reports include a bounded audit entry with company,
-title, stable reason, evidence source, evidence, and preserved role track.
+title, stable reason, evidence source, evidence, preserved role track, and
+whether mandatory, negated, or mixed evidence was detected.
 
 ---
 
@@ -366,8 +375,17 @@ PYTHONPATH=.:backend python3 -m watcher.audit --comparison --live \
 ```
 
 Snapshots contain only sanitized identity/company/title/URL/provenance and
-decision evidence—not descriptions or alumni. SQLite retains 30 aggregate runs
-and posting details for the newest three runs. GitHub Actions also uploads the
+decision evidence—not descriptions or alumni. SQLite retains exact aggregate
+counts for 30 runs and posting details for the newest three runs. Each detailed
+run keeps all eligible comparisons, no-posting coverage, and operational
+anomalies; routine rejection reasons retain a deterministic sample of 25
+postings per reason. A hard ceiling of 2,000 details per run bounds unusual
+cases too. JSON artifacts use the same limits.
+
+Retention cleanup runs transactionally with the comparison save and never
+touches notification or source-health tables. SQLite compaction is not an
+hourly default: `VACUUM` runs only after cleanup deletes at least 500 detail
+rows and at least 25% of database pages are free. GitHub Actions uploads the
 sanitized health and source-comparison JSON reports for 14 days and appends the
 bounded Markdown comparison to the job summary.
 

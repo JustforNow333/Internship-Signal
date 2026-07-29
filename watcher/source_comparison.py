@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import sys
@@ -48,7 +49,21 @@ CATEGORIES = (
 DEFAULT_EXAMPLE_LIMIT = 10
 DEFAULT_RUN_RETENTION = 30
 DEFAULT_DETAIL_RUN_RETENTION = 3
-DEFAULT_MAX_POSTINGS_PER_RUN = 1_000
+DEFAULT_MAX_POSTINGS_PER_RUN = 2_000
+DEFAULT_ROUTINE_REJECTION_SAMPLE_LIMIT = 25
+DEFAULT_COMPACTION_MIN_DELETED_ROWS = 500
+DEFAULT_COMPACTION_FREE_PAGE_RATIO = 0.25
+ROUTINE_REJECTION_REASONS = frozenset(
+    {
+        "not_internship",
+        "closed",
+        "wrong_season",
+        "nontechnical_role",
+        "watcher_role_ineligible",
+        "outside_us",
+        "below_min_score",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -74,6 +89,7 @@ class SourceComparisonReport:
     counts: dict[str, int]
     entries: tuple[SourceComparisonEntry, ...]
     health: dict[str, object] = field(default_factory=dict)
+    aggregates: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self, *, example_limit: int | None = None) -> dict[str, object]:
         entries = self.entries
@@ -92,6 +108,7 @@ class SourceComparisonReport:
             "run_id": self.run_id,
             "observed_at": self.observed_at,
             "counts": dict(self.counts),
+            "aggregates": _aggregate_counts(self.counts, self.health),
             "health": dict(self.health),
             "entries": [asdict(entry) for entry in entries],
         }
@@ -225,16 +242,18 @@ def build_source_comparison(
         category: sum(entry.category == category for entry in entries)
         for category in CATEGORIES
     }
+    health = _comparison_health(
+        source_attempts,
+        source_health_states or {},
+    )
     return SourceComparisonReport(
         schema_version=1,
         run_id=safe_run_id(run_id),
         observed_at=iso_utc(observed_at),
         counts=counts,
         entries=tuple(entries),
-        health=_comparison_health(
-            source_attempts,
-            source_health_states or {},
-        ),
+        health=health,
+        aggregates=_aggregate_counts(counts, health),
     )
 
 
@@ -340,9 +359,19 @@ def write_json(
 ) -> None:
     report_path = Path(path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = report.as_dict(example_limit=example_limit)
+    if example_limit is None:
+        payload["entries"] = [
+            asdict(entry)
+            for entry in _select_detail_entries(
+                report.entries,
+                routine_sample_limit=DEFAULT_ROUTINE_REJECTION_SAMPLE_LIMIT,
+                limit=DEFAULT_MAX_POSTINGS_PER_RUN,
+            )
+        ]
     report_path.write_text(
         json.dumps(
-            report.as_dict(example_limit=example_limit),
+            payload,
             indent=2,
             sort_keys=True,
             ensure_ascii=False,
@@ -362,6 +391,7 @@ class SourceComparisonStore:
         run_retention: int = DEFAULT_RUN_RETENTION,
         detail_run_retention: int = DEFAULT_DETAIL_RUN_RETENTION,
         max_postings_per_run: int = DEFAULT_MAX_POSTINGS_PER_RUN,
+        routine_rejection_sample_limit: int = DEFAULT_ROUTINE_REJECTION_SAMPLE_LIMIT,
         initialize: bool = True,
         read_only: bool = False,
     ):
@@ -370,6 +400,10 @@ class SourceComparisonStore:
         self.run_retention = max(1, int(run_retention))
         self.detail_run_retention = max(1, int(detail_run_retention))
         self.max_postings_per_run = max(1, int(max_postings_per_run))
+        self.routine_rejection_sample_limit = max(
+            0,
+            int(routine_rejection_sample_limit),
+        )
         if read_only and self.path.is_file():
             self._conn = sqlite3.connect(
                 f"{self.path.resolve().as_uri()}?mode=ro",
@@ -401,11 +435,16 @@ class SourceComparisonStore:
         summary_json = json.dumps(
             {
                 "counts": report.counts,
+                "aggregates": _aggregate_counts(
+                    report.counts,
+                    report.health,
+                ),
                 "health": _sanitize_trace(report.health),
             },
             sort_keys=True,
             separators=(",", ":"),
         )
+        deleted_rows = 0
         with self._conn:
             self._conn.execute(
                 """
@@ -422,57 +461,19 @@ class SourceComparisonStore:
                     summary_json,
                 ),
             )
-            self._conn.execute(
+            cursor = self._conn.execute(
                 "delete from source_comparison_postings where run_id = ?",
                 (safe_run_id_value,),
             )
-            persisted_entries = _bounded_entries(
+            deleted_rows += max(0, cursor.rowcount)
+            persisted_entries = _select_detail_entries(
                 report.entries,
+                routine_sample_limit=self.routine_rejection_sample_limit,
                 limit=self.max_postings_per_run,
             )
-            for sequence, entry in enumerate(persisted_entries):
-                self._conn.execute(
-                    """
-                    insert into source_comparison_postings(
-                      run_id, sequence, category, company, title, identity_key,
-                      analyzed_job_id, source_kinds_json, final_reason,
-                      direct_status, direct_coverage,
-                      github_backstop_available, trace_json
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        safe_run_id_value,
-                        sequence,
-                        entry.category,
-                        sanitize_error(entry.company),
-                        sanitize_error(entry.title),
-                        sanitize_error(entry.identity_key),
-                        sanitize_error(entry.analyzed_job_id),
-                        json.dumps(
-                            tuple(
-                                sanitize_error(source)
-                                for source in entry.source_kinds
-                            ),
-                            separators=(",", ":"),
-                        ),
-                        sanitize_error(entry.final_reason),
-                        sanitize_error(entry.direct_status),
-                        sanitize_error(entry.direct_coverage),
-                        (
-                            None
-                            if entry.github_backstop_available is None
-                            else int(entry.github_backstop_available)
-                        ),
-                        json.dumps(
-                            _sanitize_trace(entry.trace),
-                            sort_keys=True,
-                            separators=(",", ":"),
-                            ensure_ascii=False,
-                        ),
-                    ),
-                )
-            self._prune()
-        self._compact_if_needed()
+            self._insert_entries(safe_run_id_value, persisted_entries)
+            deleted_rows += self._prune()
+        self._compact_if_needed(deleted_rows=deleted_rows)
 
     def latest_report(self) -> SourceComparisonReport | None:
         table = self._conn.execute(
@@ -508,9 +509,11 @@ class SourceComparisonStore:
         if "counts" in summary_payload:
             counts = summary_payload["counts"]
             health = summary_payload.get("health", {})
+            aggregates = summary_payload.get("aggregates", {})
         else:  # schema-version-one snapshots written before health metadata
             counts = summary_payload
             health = {}
+            aggregates = {}
         return SourceComparisonReport(
             schema_version=1,
             run_id=run["run_id"],
@@ -518,6 +521,10 @@ class SourceComparisonStore:
             counts={str(key): int(value) for key, value in counts.items()},
             entries=entries,
             health=dict(health),
+            aggregates={
+                str(key): int(value)
+                for key, value in aggregates.items()
+            } or _aggregate_counts(counts, health),
         )
 
     def run_count(self) -> int:
@@ -534,7 +541,8 @@ class SourceComparisonStore:
             ).fetchone()[0]
         )
 
-    def _prune(self) -> None:
+    def _prune(self) -> int:
+        deleted_rows = 0
         retained_runs = [
             row[0]
             for row in self._conn.execute(
@@ -549,42 +557,109 @@ class SourceComparisonStore:
         ]
         if retained_runs:
             placeholders = ",".join("?" for _ in retained_runs)
-            self._conn.execute(
+            cursor = self._conn.execute(
                 f"delete from source_comparison_runs where run_id not in ({placeholders})",
                 retained_runs,
             )
+            deleted_rows += max(0, cursor.rowcount)
         detail_runs = retained_runs[: self.detail_run_retention]
         if detail_runs:
             placeholders = ",".join("?" for _ in detail_runs)
-            self._conn.execute(
+            cursor = self._conn.execute(
                 f"delete from source_comparison_postings where run_id not in ({placeholders})",
                 detail_runs,
             )
+            deleted_rows += max(0, cursor.rowcount)
             for run_id in detail_runs:
-                self._conn.execute(
+                rows = self._conn.execute(
                     """
-                    delete from source_comparison_postings
+                    select *
+                    from source_comparison_postings
                     where run_id = ?
-                      and sequence not in (
-                        select sequence
-                        from source_comparison_postings
-                        where run_id = ?
-                        order by sequence
-                        limit ?
-                      )
+                    order by sequence
                     """,
-                    (run_id, run_id, self.max_postings_per_run),
+                    (run_id,),
+                ).fetchall()
+                current = tuple(_entry_from_row(row) for row in rows)
+                selected = _select_detail_entries(
+                    current,
+                    routine_sample_limit=self.routine_rejection_sample_limit,
+                    limit=self.max_postings_per_run,
                 )
+                if _entry_keys(current) == _entry_keys(selected):
+                    continue
+                cursor = self._conn.execute(
+                    "delete from source_comparison_postings where run_id = ?",
+                    (run_id,),
+                )
+                deleted_rows += max(0, cursor.rowcount)
+                self._insert_entries(run_id, selected)
+        return deleted_rows
 
-    def _compact_if_needed(self) -> None:
+    def _compact_if_needed(self, *, deleted_rows: int) -> bool:
+        if deleted_rows < DEFAULT_COMPACTION_MIN_DELETED_ROWS:
+            return False
         page_count = int(
             self._conn.execute("pragma page_count").fetchone()[0]
         )
         free_pages = int(
             self._conn.execute("pragma freelist_count").fetchone()[0]
         )
-        if page_count and free_pages * 4 >= page_count:
+        if (
+            page_count
+            and free_pages / page_count
+            >= DEFAULT_COMPACTION_FREE_PAGE_RATIO
+        ):
             self._conn.execute("vacuum")
+            return True
+        return False
+
+    def _insert_entries(
+        self,
+        run_id: str,
+        entries: Sequence[SourceComparisonEntry],
+    ) -> None:
+        for sequence, entry in enumerate(entries):
+            self._conn.execute(
+                """
+                insert into source_comparison_postings(
+                  run_id, sequence, category, company, title, identity_key,
+                  analyzed_job_id, source_kinds_json, final_reason,
+                  direct_status, direct_coverage,
+                  github_backstop_available, trace_json
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    sequence,
+                    entry.category,
+                    sanitize_error(entry.company),
+                    sanitize_error(entry.title),
+                    sanitize_error(entry.identity_key),
+                    sanitize_error(entry.analyzed_job_id),
+                    json.dumps(
+                        tuple(
+                            sanitize_error(source)
+                            for source in entry.source_kinds
+                        ),
+                        separators=(",", ":"),
+                    ),
+                    sanitize_error(entry.final_reason),
+                    sanitize_error(entry.direct_status),
+                    sanitize_error(entry.direct_coverage),
+                    (
+                        None
+                        if entry.github_backstop_available is None
+                        else int(entry.github_backstop_available)
+                    ),
+                    json.dumps(
+                        _sanitize_trace(entry.trace),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
 
     def _init_schema(self) -> None:
         self._conn.executescript(
@@ -621,46 +696,132 @@ class SourceComparisonStore:
         self._conn.commit()
 
 
-def _bounded_entries(
+def _select_detail_entries(
     entries: Sequence[SourceComparisonEntry],
     *,
+    routine_sample_limit: int,
     limit: int,
 ) -> tuple[SourceComparisonEntry, ...]:
-    """Bound persisted details while retaining examples from every category."""
+    """Retain useful details and deterministically sample routine rejections."""
 
-    if len(entries) <= limit:
-        return tuple(entries)
-    buckets: dict[str, list[tuple[int, SourceComparisonEntry]]] = {
-        category: []
-        for category in CATEGORIES
-    }
-    other: list[tuple[int, SourceComparisonEntry]] = []
-    for index, entry in enumerate(entries):
-        bucket = buckets.get(entry.category)
-        if bucket is None:
-            other.append((index, entry))
+    important: list[SourceComparisonEntry] = []
+    routine: dict[str, list[SourceComparisonEntry]] = {}
+    for entry in entries:
+        if _is_routine_rejection(entry):
+            routine.setdefault(entry.final_reason, []).append(entry)
         else:
-            bucket.append((index, entry))
-    ordered_buckets = [buckets[category] for category in CATEGORIES]
-    if other:
-        ordered_buckets.append(other)
-    positions = [0] * len(ordered_buckets)
-    selected: list[tuple[int, SourceComparisonEntry]] = []
-    while len(selected) < limit:
-        progressed = False
-        for bucket_index, bucket in enumerate(ordered_buckets):
-            position = positions[bucket_index]
-            if position >= len(bucket):
-                continue
-            selected.append(bucket[position])
-            positions[bucket_index] += 1
-            progressed = True
-            if len(selected) >= limit:
-                break
-        if not progressed:
-            break
-    selected.sort(key=lambda item: item[0])
-    return tuple(entry for _index, entry in selected)
+            important.append(entry)
+    sampled = [
+        entry
+        for reason in sorted(routine)
+        for entry in sorted(routine[reason], key=_stable_sample_key)[
+            :routine_sample_limit
+        ]
+    ]
+    candidates = [*important, *sampled]
+    if len(candidates) > limit:
+        candidates = sorted(
+            candidates,
+            key=lambda entry: (
+                _detail_priority(entry),
+                _stable_sample_key(entry),
+            ),
+        )[:limit]
+    return tuple(sorted(candidates, key=_detail_display_key))
+
+
+def _is_routine_rejection(entry: SourceComparisonEntry) -> bool:
+    return bool(
+        entry.category == CATEGORY_REJECTED
+        and entry.final_reason in ROUTINE_REJECTION_REASONS
+        and not _has_operational_anomaly(entry)
+    )
+
+
+def _has_operational_anomaly(entry: SourceComparisonEntry) -> bool:
+    if entry.direct_status in {"degraded", "failing"}:
+        return True
+    if entry.direct_coverage and any(
+        marker in entry.direct_coverage
+        for marker in ("degraded", "failing", "uncovered")
+    ):
+        return True
+    identity = entry.trace.get("identity")
+    if isinstance(identity, Mapping) and identity.get("generic_or_shared_url"):
+        return True
+    dedupe = entry.trace.get("deduplication")
+    if not isinstance(dedupe, Mapping):
+        return False
+    return bool(
+        dedupe.get("deduplicated_into_another")
+        or dedupe.get("duplicate_sightings")
+        or dedupe.get("merge_diagnostics")
+        or dedupe.get("similar_distinct_requisitions")
+    )
+
+
+def _detail_priority(entry: SourceComparisonEntry) -> int:
+    if entry.category in {
+        CATEGORY_GITHUB_ONLY,
+        CATEGORY_DIRECT_ONLY,
+        CATEGORY_BOTH,
+    }:
+        return 0
+    if _has_operational_anomaly(entry):
+        return 1
+    if entry.category == CATEGORY_NO_POSTINGS:
+        return 2
+    if entry.final_reason not in ROUTINE_REJECTION_REASONS:
+        return 3
+    return 4
+
+
+def _stable_sample_key(entry: SourceComparisonEntry) -> tuple[str, ...]:
+    seed = "\x1f".join(
+        (
+            entry.identity_key,
+            entry.analyzed_job_id,
+            entry.company.casefold(),
+            entry.title.casefold(),
+            entry.final_reason,
+        )
+    )
+    return (
+        hashlib.sha256(seed.encode("utf-8")).hexdigest(),
+        entry.identity_key,
+        entry.analyzed_job_id,
+        entry.company.casefold(),
+        entry.title.casefold(),
+    )
+
+
+def _detail_display_key(entry: SourceComparisonEntry) -> tuple[object, ...]:
+    category_index = (
+        CATEGORIES.index(entry.category)
+        if entry.category in CATEGORIES
+        else len(CATEGORIES)
+    )
+    return (
+        category_index,
+        entry.company.casefold(),
+        entry.title.casefold(),
+        entry.identity_key,
+        entry.final_reason,
+    )
+
+
+def _entry_keys(
+    entries: Sequence[SourceComparisonEntry],
+) -> tuple[tuple[object, ...], ...]:
+    return tuple(
+        (
+            entry.category,
+            entry.identity_key,
+            entry.analyzed_job_id,
+            entry.final_reason,
+        )
+        for entry in entries
+    )
 
 
 def _entry_from_row(row: sqlite3.Row) -> SourceComparisonEntry:
@@ -716,6 +877,60 @@ def _sanitize_trace_value(value: object, *, field_name: str) -> object:
             return safe_posting_url(value)
         return sanitize_error(value)
     return value
+
+
+def _aggregate_counts(
+    counts: Mapping[str, object],
+    health: Mapping[str, object],
+) -> dict[str, int]:
+    direct_sources = health.get("direct_sources")
+    if not isinstance(direct_sources, list):
+        direct_sources = []
+    github_feeds = health.get("github_feeds")
+    if not isinstance(github_feeds, list):
+        github_feeds = []
+    return {
+        "github_only_eligible": int(counts.get(CATEGORY_GITHUB_ONLY, 0)),
+        "direct_only_eligible": int(counts.get(CATEGORY_DIRECT_ONLY, 0)),
+        "both_found_and_merged": int(counts.get(CATEGORY_BOTH, 0)),
+        "collected_rejected": int(counts.get(CATEGORY_REJECTED, 0)),
+        "no_postings": int(counts.get(CATEGORY_NO_POSTINGS, 0)),
+        "direct_healthy": sum(
+            item.get("attempted") is True
+            and item.get("succeeded") is True
+            and int(item.get("rows_returned") or 0) > 0
+            for item in direct_sources
+            if isinstance(item, Mapping)
+        ),
+        "direct_empty": sum(
+            item.get("attempted") is True
+            and item.get("succeeded") is True
+            and int(item.get("rows_returned") or 0) == 0
+            for item in direct_sources
+            if isinstance(item, Mapping)
+        ),
+        "direct_failed": sum(
+            item.get("attempted") is True
+            and item.get("succeeded") is False
+            for item in direct_sources
+            if isinstance(item, Mapping)
+        ),
+        "direct_unsupported": sum(
+            item.get("attempted") is False
+            for item in direct_sources
+            if isinstance(item, Mapping)
+        ),
+        "github_healthy": sum(
+            item.get("succeeded") is True
+            for item in github_feeds
+            if isinstance(item, Mapping)
+        ),
+        "github_failed": sum(
+            item.get("succeeded") is False
+            for item in github_feeds
+            if isinstance(item, Mapping)
+        ),
+    }
 
 
 def _comparison_health(

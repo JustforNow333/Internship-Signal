@@ -445,6 +445,8 @@ def assess_us_location(job: Mapping[str, object]) -> LocationDecision:
 def determine_watcher_eligibility(
     job: dict,
     target_roles: set[str] | frozenset[str] = DEFAULT_TARGET_ROLES,
+    *,
+    apply_student_restrictions: bool = True,
 ) -> dict:
     """Return the watcher gate result for a scored job.
 
@@ -458,35 +460,72 @@ def determine_watcher_eligibility(
     role = role_cls.get("role")
     role_track = score.get("role_track") or role_cls.get("role_track") or role or "unknown"
     fit_score = _int_score(score.get("fit_score", score.get("total", 0)))
-    location = assess_us_location(job)
     student = job.get("student_eligibility") or score.get("student_eligibility") or {}
     if not isinstance(student, Mapping):
         student = {}
-    student_reason = student.get("exclusion_reason")
+    raw_student_reason = student.get("exclusion_reason")
+    student_reason = (
+        raw_student_reason
+        if apply_student_restrictions
+        and raw_student_reason in CATEGORICAL_EXCLUSION_REASONS
+        else None
+    )
     student_fields = {
+        "categorical_evaluation_applied": apply_student_restrictions,
         "eligibility_exclusion_reason": (
             str(student_reason) if student_reason in CATEGORICAL_EXCLUSION_REASONS else None
         ),
-        "eligibility_evidence_source": student.get("evidence_source"),
-        "eligibility_evidence": student.get("evidence"),
-        "eligibility_explanation": student.get("explanation"),
+        "eligibility_evidence_source": (
+            student.get("evidence_source")
+            if apply_student_restrictions
+            else None
+        ),
+        "eligibility_evidence": (
+            student.get("evidence")
+            if apply_student_restrictions
+            else None
+        ),
+        "eligibility_explanation": (
+            student.get("explanation")
+            if apply_student_restrictions
+            else (
+                "Categorical student restrictions were not evaluated because "
+                "the posting is not an open internship or student program."
+            )
+        ),
+        "eligibility_mandatory_language_detected": (
+            bool(student.get("mandatory_language_detected"))
+            if apply_student_restrictions
+            else False
+        ),
+        "eligibility_negation_detected": (
+            bool(student.get("negation_detected"))
+            if apply_student_restrictions
+            else False
+        ),
+        "eligibility_mixed_eligibility_detected": (
+            bool(student.get("mixed_eligibility_detected"))
+            if apply_student_restrictions
+            else False
+        ),
     }
-    if location.reason == OUTSIDE_US:
-        return {
-            "watcher_eligible": False,
-            "fit_score": 0,
-            "eligible_reason": None,
-            "ineligible_reason": OUTSIDE_US,
-            "location_status": location.status,
-            "location_explanation": location.explanation,
-            **student_fields,
-        }
+    location = assess_us_location(job)
     if student_reason in CATEGORICAL_EXCLUSION_REASONS:
         return {
             "watcher_eligible": False,
             "fit_score": 0,
             "eligible_reason": None,
             "ineligible_reason": student_reason,
+            "location_status": location.status,
+            "location_explanation": location.explanation,
+            **student_fields,
+        }
+    if location.reason == OUTSIDE_US:
+        return {
+            "watcher_eligible": False,
+            "fit_score": 0,
+            "eligible_reason": None,
+            "ineligible_reason": OUTSIDE_US,
             "location_status": location.status,
             "location_explanation": location.explanation,
             **student_fields,
@@ -526,6 +565,11 @@ def determine_watcher_eligibility(
         }
 
     reason = score.get("watcher_ineligible_reason")
+    if (
+        not apply_student_restrictions
+        and reason in CATEGORICAL_EXCLUSION_REASONS
+    ):
+        reason = None
     if not reason and not target_match:
         reason = f"{role_track} does not match watcher target roles."
     if not reason:

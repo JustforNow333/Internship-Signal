@@ -81,6 +81,8 @@
   `watcher/eligibility.py`. Exclude clear mandatory `phd_only`,
   `graduate_only`, `freshman_only`, and `returning_intern_only` restrictions;
   mixed, preferred, incidental, and ambiguous evidence remains eligible.
+  Apply categorical rules only after internship/student-program and open-status
+  checks; traces retain mandatory, negation, and mixed-evidence diagnostics.
 - `watcher/eligibility.py::assess_us_location` owns the conservative location
   gate. Explicit U.S. evidence wins across multiple locations; explicit
   foreign country/region evidence yields `outside_us`; ambiguous text passes.
@@ -116,7 +118,10 @@
 - `watcher.audit` is read-only: state-only mode makes no requests, live mode
   reuses normal collection/analysis with email and priming disabled, and
   neither mode may mutate `seen` or health history.
-- Source-comparison snapshots are sanitized and bounded. Health-alert
+- Source-comparison snapshots keep 30 aggregate runs, three detail runs, all
+  bounded eligible/anomaly detail, and deterministic routine-rejection samples
+  per reason. Compact only after material cleanup, never every hourly run.
+  Health-alert
   fingerprints/cooldowns use dedicated tables, never `seen`; health SMTP is
   independently configured and cannot affect match-email delivery or marking.
 

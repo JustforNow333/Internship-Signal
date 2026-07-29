@@ -188,7 +188,11 @@ def build_posting_trace(
     season = posting_season(job, config, company_cfg)
     internship = is_internship(job)
     open_now = is_open(job)
-    eligibility = determine_watcher_eligibility(job, config.target_roles)
+    eligibility = determine_watcher_eligibility(
+        job,
+        config.target_roles,
+        apply_student_restrictions=internship and open_now,
+    )
     location_status = str(eligibility.get("location_status") or "ambiguous")
     role_cls = job.get("role_classification") or {}
     score = job.get("score") or {}
@@ -367,6 +371,18 @@ def build_posting_trace(
             "exclusion_reason": eligibility.get("eligibility_exclusion_reason"),
             "evidence_source": eligibility.get("eligibility_evidence_source"),
             "evidence": eligibility.get("eligibility_evidence"),
+            "categorical_evaluation_applied": eligibility.get(
+                "categorical_evaluation_applied"
+            ),
+            "mandatory_language_detected": eligibility.get(
+                "eligibility_mandatory_language_detected"
+            ),
+            "negation_detected": eligibility.get(
+                "eligibility_negation_detected"
+            ),
+            "mixed_eligibility_detected": eligibility.get(
+                "eligibility_mixed_eligibility_detected"
+            ),
         },
         scoring={
             "fit_score": fit_score,
@@ -507,8 +523,6 @@ def final_reason_for(
         return "not_internship"
     if not open_now:
         return "closed"
-    if eligibility.get("location_status") == OUTSIDE_US:
-        return "outside_us"
     categorical = eligibility.get("eligibility_exclusion_reason")
     if categorical in {
         "phd_only",
@@ -517,6 +531,8 @@ def final_reason_for(
         "returning_intern_only",
     }:
         return str(categorical)
+    if eligibility.get("location_status") == OUTSIDE_US:
+        return "outside_us"
     if not eligibility.get("watcher_eligible"):
         return (
             "nontechnical_role"

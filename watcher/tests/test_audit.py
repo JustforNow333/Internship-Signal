@@ -281,6 +281,54 @@ def test_trace_reports_pipeline_exclusions(tmp_path, row, reason):
     assert "evidence" in trace.role
 
 
+@pytest.mark.parametrize(
+    ("title", "requirements"),
+    [
+        (
+            "Senior Thermal Analyst",
+            "Currently pursuing or have obtained an MS or higher degree.",
+        ),
+        (
+            "Senior Thermal Engineer",
+            "Currently pursuing or have obtained an MS or higher degree.",
+        ),
+        (
+            "Senior Mechanical Engineer, Thermal Analysis",
+            "Currently pursuing or have obtained an MS or higher degree.",
+        ),
+        (
+            "Design Manager, Engineering - Home Environment",
+            "Advanced degree not required.",
+        ),
+    ],
+)
+def test_clear_nonintern_roles_do_not_report_categorical_exclusions(
+    tmp_path,
+    title,
+    requirements,
+):
+    config = _config(tmp_path)
+    jobs, duplicates = _analyze(
+        _row(
+            title=title,
+            internship_type="Full Time",
+            requirements=requirements,
+        )
+    )
+
+    with SeenStore(config.seen_db_path) as seen:
+        trace = build_posting_trace(
+            jobs[0],
+            config=config,
+            seen_store=seen,
+            duplicate_entries=duplicates,
+        )
+
+    assert trace.final_result["reason"] == "not_internship"
+    assert trace.watcher_eligibility["exclusion_reason"] is None
+    assert trace.watcher_eligibility["categorical_evaluation_applied"] is False
+
+
 def test_notification_reports_emailed_primed_and_pending(tmp_path):
     config = _config(tmp_path)
     jobs, duplicates = _analyze(

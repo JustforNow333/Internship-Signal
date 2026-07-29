@@ -487,6 +487,27 @@ This file tracks completed watcher steps and the next handoff target.
      eligible. Genuine MS-or-higher requirements remain graduate-only.
    - Offline backend/watcher validation: `651 passed, 1 warning`; Python
      compileall completed successfully.
+25. Eligibility-order and comparison-retention correction:
+   - Normal watcher decisions now establish internship/co-op/student-program
+     and open status before categorical student restrictions. Full-time senior
+     and manager roles therefore resolve as `not_internship`; open internships
+     retain the existing categorical outcomes.
+   - Categorical traces preserve bounded evidence plus explicit mandatory,
+     negation, and mixed-eligibility diagnostics. Degree keywords, preferred
+     qualifications, negated requirements, and undergraduate/graduate
+     alternatives do not establish graduate-only or PhD-only eligibility.
+   - Comparison summaries retain exact aggregate counts for 30 runs. Detailed
+     rows retain three runs, all eligible/no-posting/anomaly details, 25
+     deterministic routine-rejection samples per reason, and at most 2,000
+     total rows per run. JSON artifacts use the same policy.
+   - Legacy detail cleanup is transactional and leaves notification,
+     source-health, and alert tables untouched. Compaction runs only after at
+     least 500 deleted detail rows and at least 25% free pages.
+   - Offline backend/watcher validation: `665 passed, 1 warning`; Python
+     compileall and `git diff --check` completed successfully.
+   - An isolated 20,000-rejection migration retained exact aggregates and 25
+     routine details per run, preserved notification/health/alert state, and
+     compacted its temporary database from 40.95 MiB to 0.22 MiB.
 
 ## Next
 

@@ -29,12 +29,12 @@ def is_match(
     target_roles: set[str] | frozenset[str] = TARGET_ROLES,
     min_score: int | None = MIN_SCORE,
 ) -> bool:
-    eligibility = determine_watcher_eligibility(job, target_roles)
-    if not eligibility["watcher_eligible"] or eligibility["fit_score"] <= 0:
-        return False
     if not is_internship(job):
         return False
     if not is_open(job):
+        return False
+    eligibility = determine_watcher_eligibility(job, target_roles)
+    if not eligibility["watcher_eligible"] or eligibility["fit_score"] <= 0:
         return False
     if min_score is not None and eligibility["fit_score"] < min_score:
         return False

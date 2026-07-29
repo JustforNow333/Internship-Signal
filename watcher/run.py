@@ -23,7 +23,7 @@ from watcher.config import (
     load_watchlist,
 )
 from watcher.eligibility import determine_watcher_eligibility
-from watcher.filters import filter_matches
+from watcher.filters import filter_matches, is_internship, is_open
 from watcher.health_alerts import (
     MODE_OFF as HEALTH_EMAIL_OFF,
     HealthAlertPolicy,
@@ -704,6 +704,8 @@ def _categorical_exclusion_audit(
 ) -> tuple[dict[str, object], ...]:
     exclusions: list[dict[str, object]] = []
     for job in jobs:
+        if not is_internship(job) or not is_open(job):
+            continue
         eligibility = determine_watcher_eligibility(job, target_roles)
         reason = eligibility.get("eligibility_exclusion_reason")
         if not reason:
@@ -722,6 +724,15 @@ def _categorical_exclusion_audit(
                 "exclusion_reason": reason,
                 "evidence_source": eligibility.get("eligibility_evidence_source"),
                 "evidence": eligibility.get("eligibility_evidence"),
+                "mandatory_language_detected": eligibility.get(
+                    "eligibility_mandatory_language_detected"
+                ),
+                "negation_detected": eligibility.get(
+                    "eligibility_negation_detected"
+                ),
+                "mixed_eligibility_detected": eligibility.get(
+                    "eligibility_mixed_eligibility_detected"
+                ),
             }
         )
     return tuple(exclusions)

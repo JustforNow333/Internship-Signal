@@ -52,6 +52,15 @@ def assert_excluded(posting, reason):
     assert posting["student_eligibility"]["exclusion_reason"] == reason
     assert posting["student_eligibility"]["evidence_source"]
     assert posting["student_eligibility"]["evidence"]
+    assert posting["student_eligibility"]["mandatory_language_detected"] is True
+    assert isinstance(
+        posting["student_eligibility"]["negation_detected"],
+        bool,
+    )
+    assert isinstance(
+        posting["student_eligibility"]["mixed_eligibility_detected"],
+        bool,
+    )
     assert posting["role_classification"]["role"] == "swe"
     assert posting["score"]["fit_score"] == 0
     assert posting["score"]["watcher_action"] == "skip"
@@ -174,6 +183,13 @@ def test_clear_categorical_restrictions_are_excluded(posting, reason):
             )
         ),
         lambda: scored(requirements="Advanced degree not required."),
+        lambda: scored(requirements="Graduate degree preferred."),
+        lambda: scored(requirements="Master's preferred."),
+        lambda: scored(
+            requirements=(
+                "Undergraduate and graduate candidates are eligible to apply."
+            )
+        ),
         lambda: scored(requirements="Must graduate in 2028."),
         lambda: scored(requirements="Current students and recent graduates are accepted."),
         lambda: scored(requirements="Freshmen and sophomores are accepted."),
@@ -205,6 +221,20 @@ def test_preferred_qualifications_section_never_excludes_by_itself():
     )
 
     assert_retained(posting)
+
+
+def test_negation_and_mixed_degree_diagnostics_are_explicit():
+    negated = scored(requirements="Advanced degree not required.")
+    mixed = scored(
+        requirements="Open to undergraduate and graduate students."
+    )
+
+    assert_retained(negated)
+    assert negated["student_eligibility"]["negation_detected"] is True
+    assert negated["student_eligibility"]["mixed_eligibility_detected"] is False
+    assert_retained(mixed)
+    assert mixed["student_eligibility"]["negation_detected"] is False
+    assert mixed["student_eligibility"]["mixed_eligibility_detected"] is True
 
 
 def test_explicit_structured_eligibility_has_priority_over_title():

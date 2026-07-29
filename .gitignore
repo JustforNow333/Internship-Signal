@@ -134,6 +134,10 @@ eligibility-demo*.json
 watcher-audit*.json
 watcher-source-comparison*.json
 source-comparison*.json
+# Temporary bounded-persistence stress demonstrations are never production
+# state or fixtures.
+comparison-stress*.sqlite
+comparison-stress*.json
 # Repository audit scratch output is local unless promoted to a fixture.
 code-audit*.json
 code-audit*.log

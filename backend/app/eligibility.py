@@ -165,6 +165,9 @@ class StudentEligibilityDecision:
     evidence_source: str | None
     evidence: str | None
     explanation: str
+    mandatory_language_detected: bool
+    negation_detected: bool
+    mixed_eligibility_detected: bool
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -195,6 +198,20 @@ def assess_student_eligibility(row: Mapping[str, object]) -> StudentEligibilityD
             if not preferred
         ),
     ]
+    normalized_evidence = [
+        _normalize_text(item.text)
+        for item in evidence
+        if item.text.strip()
+    ]
+    negation_detected = any(
+        _NEGATED_DEGREE_REQUIREMENT_RE.search(text)
+        for text in normalized_evidence
+    )
+    mixed_eligibility_detected = any(
+        _mixed_degree_eligibility(text)
+        or _mixed_class_year_eligibility(text)
+        for text in normalized_evidence
+    )
     structured_allowances: set[str] = set()
     for item in evidence:
         if not item.text.strip():
@@ -222,6 +239,9 @@ def assess_student_eligibility(row: Mapping[str, object]) -> StudentEligibilityD
                 f"Clear mandatory {reason} restriction found in {item.source}: "
                 f'"{snippet}"'
             ),
+            mandatory_language_detected=True,
+            negation_detected=negation_detected,
+            mixed_eligibility_detected=mixed_eligibility_detected,
         )
 
     return StudentEligibilityDecision(
@@ -234,6 +254,9 @@ def assess_student_eligibility(row: Mapping[str, object]) -> StudentEligibilityD
             "No title, structured field, required qualification, or mandatory "
             "description language clearly limits eligibility to an excluded group."
         ),
+        mandatory_language_detected=False,
+        negation_detected=negation_detected,
+        mixed_eligibility_detected=mixed_eligibility_detected,
     )
 
 
@@ -415,13 +438,13 @@ def _mixed_degree_eligibility(text: str) -> bool:
         return False
     return bool(
         re.search(
-            rf"\b{_UNDERGRAD_TERM}\b.{{0,80}}(?:\b(?:or|and/or)\b|/|;).{{0,80}}"
+            rf"\b{_UNDERGRAD_TERM}\b.{{0,80}}(?:\b(?:and|or|and/or)\b|/|;).{{0,80}}"
             rf"\b(?:{_PHD_TERM}|{_GRADUATE_TERM})\b",
             text,
         )
         or re.search(
             rf"\b(?:{_PHD_TERM}|{_GRADUATE_TERM})\b.{{0,80}}"
-            rf"(?:\b(?:or|and/or)\b|/|;).{{0,80}}\b{_UNDERGRAD_TERM}\b",
+            rf"(?:\b(?:and|or|and/or)\b|/|;).{{0,80}}\b{_UNDERGRAD_TERM}\b",
             text,
         )
         or (
