@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
 import watcher.audit_trace as audit_trace_module
@@ -14,6 +16,7 @@ from watcher.source_comparison import (
     CATEGORY_GITHUB_ONLY,
     CATEGORY_NO_POSTINGS,
     CATEGORY_REJECTED,
+    CATEGORIES,
     SourceComparisonStore,
     build_source_comparison,
     render_markdown,
@@ -244,6 +247,66 @@ def test_comparison_store_retention_is_bounded(tmp_path):
         assert store.run_count() == 3
         assert store.detail_run_count() == 2
         assert store.latest_report().run_id == "run-5"
+
+
+def test_comparison_store_caps_and_compacts_legacy_oversized_details(tmp_path):
+    _config_value, report = _report(tmp_path)
+    templates = {
+        category: next(
+            entry for entry in report.entries if entry.category == category
+        )
+        for category in CATEGORIES
+    }
+    entries = tuple(
+        replace(
+            templates[category],
+            identity_key=f"{category}-{offset}",
+            analyzed_job_id=f"job-{category}-{offset}",
+        )
+        for offset in range(800)
+        for category in CATEGORIES
+    )
+    counts = {category: 800 for category in CATEGORIES}
+    oversized = replace(
+        report,
+        run_id="oversized",
+        counts=counts,
+        entries=entries,
+    )
+    path = tmp_path / "bounded-comparison.sqlite"
+    with SourceComparisonStore(
+        path,
+        max_postings_per_run=len(entries),
+    ) as store:
+        store.save(oversized)
+        assert len(store.latest_report().entries) == len(entries)
+
+    bounded = replace(
+        oversized,
+        run_id="bounded",
+        observed_at=(
+            datetime.fromisoformat(oversized.observed_at)
+            + timedelta(hours=1)
+        ).isoformat(),
+    )
+    with SourceComparisonStore(path) as store:
+        store.save(bounded)
+        latest = store.latest_report()
+        assert len(latest.entries) == 1_000
+        assert {entry.category for entry in latest.entries} == set(CATEGORIES)
+
+    with sqlite3.connect(path) as connection:
+        per_run = connection.execute(
+            """
+            select run_id, count(*)
+            from source_comparison_postings
+            group by run_id
+            """
+        ).fetchall()
+        page_count = connection.execute("pragma page_count").fetchone()[0]
+        free_pages = connection.execute("pragma freelist_count").fetchone()[0]
+    assert per_run == [("bounded", 1_000), ("oversized", 1_000)]
+    assert free_pages * 4 < page_count
 
 
 def test_comparison_distinguishes_failed_feed_from_valid_zero_row_feed(tmp_path):

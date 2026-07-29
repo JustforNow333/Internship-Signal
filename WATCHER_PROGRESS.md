@@ -463,8 +463,18 @@ This file tracks completed watcher steps and the next handoff target.
      similar requisitions once per run. A scale regression asserts one universe
      scan and no per-posting fallback scans while preserving bounded similar
      requisition diagnostics.
-   - Offline backend/watcher validation: `648 passed, 1 warning`; focused
-     audit/comparison/seen/run validation: `93 passed`.
+   - Corrected safe run `30419701605` completed in 9m20s with an exact dry-run
+     heartbeat and unchanged notification timestamps, then exposed a separate
+     state-size bound: one 17,600-entry comparison snapshot grew SQLite from
+     5.7 MB to 86.9 MB and triggered GitHub's large-file warning.
+   - Persisted comparison details now retain at most 1,000 category-balanced
+     entries per run, retroactively cap retained legacy runs, and vacuum only
+     when free pages are at least 25% of the database. Exact aggregate counts
+     remain in the 30-run summaries.
+   - A copy of the real oversized database compacted from 86.9 MB to 14.6 MB
+     with two 1,000-detail runs, zero free pages, and `quick_check=ok`.
+   - Offline backend/watcher validation: `649 passed, 1 warning`; focused
+     audit/comparison/seen/run validation: `94 passed`.
 
 ## Next
 
@@ -497,5 +507,5 @@ cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\bu
 Latest local validation after the Actions rollout performance fix:
 
 ```text
-648 passed, 1 warning in 8.50s
+649 passed, 1 warning in 10.54s
 ```

@@ -48,7 +48,7 @@ CATEGORIES = (
 DEFAULT_EXAMPLE_LIMIT = 10
 DEFAULT_RUN_RETENTION = 30
 DEFAULT_DETAIL_RUN_RETENTION = 3
-DEFAULT_MAX_POSTINGS_PER_RUN = 20_000
+DEFAULT_MAX_POSTINGS_PER_RUN = 1_000
 
 
 @dataclass(frozen=True)
@@ -426,9 +426,11 @@ class SourceComparisonStore:
                 "delete from source_comparison_postings where run_id = ?",
                 (safe_run_id_value,),
             )
-            for sequence, entry in enumerate(
-                report.entries[: self.max_postings_per_run]
-            ):
+            persisted_entries = _bounded_entries(
+                report.entries,
+                limit=self.max_postings_per_run,
+            )
+            for sequence, entry in enumerate(persisted_entries):
                 self._conn.execute(
                     """
                     insert into source_comparison_postings(
@@ -470,6 +472,7 @@ class SourceComparisonStore:
                     ),
                 )
             self._prune()
+        self._compact_if_needed()
 
     def latest_report(self) -> SourceComparisonReport | None:
         table = self._conn.execute(
@@ -557,6 +560,31 @@ class SourceComparisonStore:
                 f"delete from source_comparison_postings where run_id not in ({placeholders})",
                 detail_runs,
             )
+            for run_id in detail_runs:
+                self._conn.execute(
+                    """
+                    delete from source_comparison_postings
+                    where run_id = ?
+                      and sequence not in (
+                        select sequence
+                        from source_comparison_postings
+                        where run_id = ?
+                        order by sequence
+                        limit ?
+                      )
+                    """,
+                    (run_id, run_id, self.max_postings_per_run),
+                )
+
+    def _compact_if_needed(self) -> None:
+        page_count = int(
+            self._conn.execute("pragma page_count").fetchone()[0]
+        )
+        free_pages = int(
+            self._conn.execute("pragma freelist_count").fetchone()[0]
+        )
+        if page_count and free_pages * 4 >= page_count:
+            self._conn.execute("vacuum")
 
     def _init_schema(self) -> None:
         self._conn.executescript(
@@ -591,6 +619,48 @@ class SourceComparisonStore:
             """
         )
         self._conn.commit()
+
+
+def _bounded_entries(
+    entries: Sequence[SourceComparisonEntry],
+    *,
+    limit: int,
+) -> tuple[SourceComparisonEntry, ...]:
+    """Bound persisted details while retaining examples from every category."""
+
+    if len(entries) <= limit:
+        return tuple(entries)
+    buckets: dict[str, list[tuple[int, SourceComparisonEntry]]] = {
+        category: []
+        for category in CATEGORIES
+    }
+    other: list[tuple[int, SourceComparisonEntry]] = []
+    for index, entry in enumerate(entries):
+        bucket = buckets.get(entry.category)
+        if bucket is None:
+            other.append((index, entry))
+        else:
+            bucket.append((index, entry))
+    ordered_buckets = [buckets[category] for category in CATEGORIES]
+    if other:
+        ordered_buckets.append(other)
+    positions = [0] * len(ordered_buckets)
+    selected: list[tuple[int, SourceComparisonEntry]] = []
+    while len(selected) < limit:
+        progressed = False
+        for bucket_index, bucket in enumerate(ordered_buckets):
+            position = positions[bucket_index]
+            if position >= len(bucket):
+                continue
+            selected.append(bucket[position])
+            positions[bucket_index] += 1
+            progressed = True
+            if len(selected) >= limit:
+                break
+        if not progressed:
+            break
+    selected.sort(key=lambda item: item[0])
+    return tuple(entry for _index, entry in selected)
 
 
 def _entry_from_row(row: sqlite3.Row) -> SourceComparisonEntry:
