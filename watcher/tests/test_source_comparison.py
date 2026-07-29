@@ -602,6 +602,43 @@ def test_routine_rejection_sampling_is_deterministic(tmp_path):
     assert selected[0] == selected[1]
 
 
+def test_similar_distinct_requisitions_do_not_make_routine_rows_anomalies(
+    tmp_path,
+):
+    report = _high_volume_report(tmp_path, routine_count=200)
+    entries = tuple(
+        replace(
+            entry,
+            trace={
+                **entry.trace,
+                "deduplication": {
+                    **entry.trace.get("deduplication", {}),
+                    "similar_distinct_requisitions": [
+                        {
+                            "identity_key": "stable:other-requisition",
+                            "requisition_key": "example:other-requisition",
+                        }
+                    ],
+                },
+            },
+        )
+        if entry.final_reason == "not_internship"
+        else entry
+        for entry in report.entries
+    )
+    report = replace(report, entries=entries)
+    path = tmp_path / "similar-requisitions.sqlite"
+
+    with SourceComparisonStore(path) as store:
+        store.save(report)
+        saved = store.latest_report()
+
+    assert sum(
+        entry.final_reason == "not_internship"
+        for entry in saved.entries
+    ) == 25
+
+
 def test_json_artifact_uses_the_same_bounded_detail_policy(tmp_path):
     report = _high_volume_report(tmp_path, routine_count=200)
     path = tmp_path / "comparison.json"

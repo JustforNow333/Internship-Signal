@@ -756,7 +756,6 @@ def _has_operational_anomaly(entry: SourceComparisonEntry) -> bool:
         dedupe.get("deduplicated_into_another")
         or dedupe.get("duplicate_sightings")
         or dedupe.get("merge_diagnostics")
-        or dedupe.get("similar_distinct_requisitions")
     )
 
 

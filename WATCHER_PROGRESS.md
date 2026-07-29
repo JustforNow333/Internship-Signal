@@ -503,7 +503,10 @@ This file tracks completed watcher steps and the next handoff target.
    - Legacy detail cleanup is transactional and leaves notification,
      source-health, and alert tables untouched. Compaction runs only after at
      least 500 deleted detail rows and at least 25% free pages.
-   - Offline backend/watcher validation: `665 passed, 1 warning`; Python
+   - Distinct requisitions with similar titles remain identity diagnostics, not
+     persistence anomalies; treating them as routine prevents ordinary
+     full-time postings from filling the hard detail ceiling.
+   - Offline backend/watcher validation: `666 passed, 1 warning`; Python
      compileall and `git diff --check` completed successfully.
    - An isolated 20,000-rejection migration retained exact aggregates and 25
      routine details per run, preserved notification/health/alert state, and
