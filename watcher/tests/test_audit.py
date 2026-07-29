@@ -327,6 +327,9 @@ def test_clear_nonintern_roles_do_not_report_categorical_exclusions(
     assert trace.final_result["reason"] == "not_internship"
     assert trace.watcher_eligibility["exclusion_reason"] is None
     assert trace.watcher_eligibility["categorical_evaluation_applied"] is False
+    assert "graduate" not in str(
+        trace.watcher_eligibility["ineligible_reason"]
+    ).casefold()
 
 
 def test_notification_reports_emailed_primed_and_pending(tmp_path):

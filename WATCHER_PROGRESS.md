@@ -506,6 +506,9 @@ This file tracks completed watcher steps and the next handoff target.
    - Distinct requisitions with similar titles remain identity diagnostics, not
      persistence anomalies; treating them as routine prevents ordinary
      full-time postings from filling the hard detail ceiling.
+   - Non-intern traces also suppress stale categorical scoring explanations;
+     their final reason and watcher diagnostics now consistently report
+     `not_internship` without graduate-only evidence.
    - Offline backend/watcher validation: `666 passed, 1 warning`; Python
      compileall and `git diff --check` completed successfully.
    - An isolated 20,000-rejection migration retained exact aggregates and 25

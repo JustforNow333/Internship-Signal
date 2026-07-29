@@ -531,7 +531,7 @@ def determine_watcher_eligibility(
             **student_fields,
         }
     degree_eligible = job.get("degree_eligible", score.get("degree_eligible", True))
-    if degree_eligible is False:
+    if degree_eligible is False and apply_student_restrictions:
         reason = (
             job.get("degree_ineligible_reason")
             or score.get("degree_ineligible_reason")
@@ -567,7 +567,10 @@ def determine_watcher_eligibility(
     reason = score.get("watcher_ineligible_reason")
     if (
         not apply_student_restrictions
-        and reason in CATEGORICAL_EXCLUSION_REASONS
+        and (
+            raw_student_reason in CATEGORICAL_EXCLUSION_REASONS
+            or reason in CATEGORICAL_EXCLUSION_REASONS
+        )
     ):
         reason = None
     if not reason and not target_match:
