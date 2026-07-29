@@ -159,6 +159,9 @@
 
 - The workflow persists `seen.sqlite` on `watcher-data`. Priming uses
   `send_email=false`; the isolated Workday probe uses no state, alumni, or SMTP.
+- Rollout verification must dispatch with internship email, priming, Workday
+  probe, and health email disabled; preserve notification timestamps and restore
+  preexisting repository variables before enabling conservative health alerts.
 - Preserve the application's exact final `HEARTBEAT:` and append only
   `seen_loaded`, `seen_saved`, and `seen_store`. A missing heartbeat or corrupt
   seen-store is fatal; source failures remain warnings.

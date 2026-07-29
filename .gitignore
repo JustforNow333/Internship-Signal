@@ -122,6 +122,9 @@ evaluation/scoring_*_report.md
 evaluation/scoring_*_metrics.json
 
 # Local watcher scratch artifacts
+# Downloaded GitHub Actions verification bundles stay outside source control.
+.gh-run-artifacts/
+github-actions-verification*/
 # Throwaway probe/debug scripts run from the repository root.
 _probe*.py
 _scratch*.py

@@ -37,6 +37,9 @@
 - Source comparisons persist only bounded sanitized metadata. Health-alert
   cooldowns use dedicated tables and an independent email switch/renderer;
   they never update internship `emailed_at` or `primed_at`.
+- Rollout verification disables internship email, priming, Workday probes, and
+  health email; preserve notification timestamps and existing repository
+  variables before enabling conservative health alerts.
 - Collection and notification share one identity policy: stable requisition
   ID, posting-specific normalized URL, then exact company/title/location.
   Generic URLs never collapse distinct stable requisitions.
