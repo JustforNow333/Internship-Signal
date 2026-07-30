@@ -132,6 +132,8 @@
 ## Alumni and private data
 
 - Alumni data is additive only: never gate, reorder, or rescore jobs.
+- Ignore private/generated payloads, not reusable helper scripts or test
+  fixtures; new code and fixtures must remain visible for review.
 - Loading priority is compact JSON env/text/path, then CSV env/path. Live sends
   require usable alumni data; dry runs may report matching disabled.
 - Matching order is normalized exact, built-in aliases, watchlist

@@ -104,8 +104,6 @@ watcher/alumni.csv
 watcher/alumni.csv.b64
 watcher/alumni.b64
 .watcher-state/
-make_alumni_b64.py
-watcher/make_alumni_b64.py
 
 # Real-posting scoring benchmarks contain posting text and private human labels.
 # Keep historical location-gate and all U.S. role-fit frozen inputs,
@@ -131,9 +129,9 @@ watcher-diagnostics-*.zip
 # Throwaway probe/debug scripts run from the repository root.
 _probe*.py
 _scratch*.py
-# Local eligibility demonstrations are audit scratch, not repository fixtures.
+# Local eligibility demonstrations are audit scratch; regression fixtures stay
+# visible for review.
 eligibility-demo*.json
-eligibility-regression*.json
 # Read-only audit/comparison exports may contain operational posting metadata.
 watcher-audit*.json
 watcher-source-comparison*.json
@@ -151,7 +149,6 @@ repository-audit*.log
 # control; their SQLite databases are covered by the global SQLite patterns.
 watcher-notification-integration*.json
 watcher/notification-integration*.json
-check_alumni_coverage.py
 watcher/add_company_batch.txt
 watcher/additions_detect.json
 watcher/additions_report.md

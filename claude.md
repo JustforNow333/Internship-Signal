@@ -52,6 +52,8 @@
   ID, posting-specific normalized URL, then exact company/title/location.
   Generic URLs never collapse distinct stable requisitions.
 - Alumni data is additive and private.
+- Ignore private/generated payloads, not reusable helper scripts or test
+  fixtures; new code and fixtures must remain visible for review.
 - Never commit `.env`, credentials, alumni data, SQLite state, probe/health
   output, downloaded or extracted Actions diagnostics, or
   `evaluation/private/`.
