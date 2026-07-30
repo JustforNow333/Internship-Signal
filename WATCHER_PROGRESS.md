@@ -528,6 +528,26 @@ This file tracks completed watcher steps and the next handoff target.
      rendering, and posting identity helpers.
    - Offline backend/watcher validation: `671 passed, 1 warning`; frontend:
      `23 passed`; production build and Python compileall completed successfully.
+27. Master-data eligibility false-positive correction:
+   - Bare `master` now counts as graduate-degree terminology only with explicit
+     degree, program, student, or candidate context. Operational phrases such
+     as `master data management`, `master database`, `master record`,
+     `master dataset`, and `master schedule` remain categorically eligible.
+   - Exact Bosch and generic master-data title regressions pass, while
+     `Currently pursuing a master's degree` and `Master's students only`
+     remain `graduate_only`.
+   - Offline backend/watcher validation: `680 passed, 1 warning`; Python
+     compileall and `git diff --check` completed successfully.
+   - Safe Actions run `30511581407` completed successfully on
+     `43bc3806d58821161127696f2ce856dcdd084418` with email, priming, health
+     email, and Workday probe disabled. Its complete categorical audit retained
+     only the genuine Capital One master's and PhD examples.
+   - Final heartbeat reported `notification_mode=dry_run`, `sent=no`,
+     `seen_marked=0`, `health_email_mode=off`, `health_alert_sent=no`,
+     `errors=0`, and `seen_loaded=100, seen_saved=100`.
+   - All persisted notification rows and timestamps were unchanged. Bosch
+     `Autonomous Driving – Internship in Machine Learning` remained pending
+     with null `emailed_at` and `primed_at`.
 
 ## Next
 
@@ -557,8 +577,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the maintenance audit:
+Latest local validation after the master-data eligibility correction:
 
 ```text
-671 passed, 1 warning in 14.97s
+680 passed, 1 warning in 16.04s
 ```
