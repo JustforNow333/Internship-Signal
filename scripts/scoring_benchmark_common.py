@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import json
 import os
 import tempfile
+from collections import Counter
+from datetime import date
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from watcher.eligibility import determine_watcher_eligibility
 
@@ -25,6 +28,46 @@ HUMAN_LABEL_COLUMNS = (
 
 class BenchmarkError(ValueError):
     """Raised for invalid benchmark input or an inconsistent benchmark set."""
+
+
+def parse_date(value: str) -> date:
+    """Parse a benchmark CLI date with a consistent argparse error."""
+
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from exc
+
+
+def nonnegative_int(value: str) -> int:
+    """Parse a benchmark sample count without accepting negative values."""
+
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "sample count must be an integer"
+        ) from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("sample count must be nonnegative")
+    return parsed
+
+
+def source_counts(
+    jobs: Sequence[Mapping[str, object]],
+) -> dict[str, dict[str, int]]:
+    """Count sanitized source provenance for benchmark manifests."""
+
+    sources: Counter[str] = Counter()
+    adapters: Counter[str] = Counter()
+    for job in jobs:
+        extra = job.get("extra") if isinstance(job.get("extra"), Mapping) else {}
+        sources[str(extra.get("source") or "unknown")] += 1
+        adapters[str(extra.get("source_adapter") or "unknown")] += 1
+    return {
+        "source": dict(sorted(sources.items())),
+        "source_adapter": dict(sorted(adapters.items())),
+    }
 
 
 def score_value(job_or_prediction: Mapping[str, object], field: str, default: int = 0) -> int:

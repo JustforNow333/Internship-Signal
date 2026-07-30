@@ -28,8 +28,9 @@
 
 ## Backend safety
 
-- Use `backend/app/main.py::_json_object` for JSON endpoints. Malformed JSON,
-  non-object bodies, and non-string `csv_text`/`question` values are HTTP 400.
+- Use `backend/app/main.py::_json_object` for JSON endpoints. Malformed or
+  excessively nested JSON, non-object bodies, and non-string
+  `csv_text`/`question` values are HTTP 400.
 - Multipart `file` must be an upload. CSV input is limited to 10 MiB; oversized
   input is HTTP 413.
 - Keep frontend CSV formula-injection protection.
@@ -132,9 +133,9 @@
   require usable alumni data; dry runs may report matching disabled.
 - Matching order is normalized exact, built-in aliases, watchlist
   aliases/`alumni_match`, then conservative fuzzy fallback.
-- Keep `.env`, `private/`, alumni files, SQLite state, health/probe reports, and
-  `evaluation/private/` out of Git. Never log private contacts or SMTP
-  recipients.
+- Keep `.env`, `private/`, alumni files, SQLite state, health/probe reports,
+  downloaded or extracted Actions diagnostics, and `evaluation/private/` out
+  of Git. Never log private contacts or SMTP recipients.
 
 ## Source health and Workday
 

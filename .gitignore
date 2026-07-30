@@ -122,9 +122,12 @@ evaluation/scoring_*_report.md
 evaluation/scoring_*_metrics.json
 
 # Local watcher scratch artifacts
-# Downloaded GitHub Actions verification bundles stay outside source control.
+# Downloaded or extracted GitHub Actions verification bundles stay outside
+# source control; direct JSON extracts are also covered by report rules below.
 .gh-run-artifacts/
 github-actions-verification*/
+watcher-diagnostics-*/
+watcher-diagnostics-*.zip
 # Throwaway probe/debug scripts run from the repository root.
 _probe*.py
 _scratch*.py
@@ -141,6 +144,8 @@ comparison-stress*.json
 # Repository audit scratch output is local unless promoted to a fixture.
 code-audit*.json
 code-audit*.log
+repository-audit*.json
+repository-audit*.log
 # Temporary notification-state integration reports belong outside source
 # control; their SQLite databases are covered by the global SQLite patterns.
 watcher-notification-integration*.json

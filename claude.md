@@ -5,6 +5,8 @@
 - Read `agents.md` before repository work. Before watcher work, also read
   `WATCHER_SPEC.md` in full; use `WATCHER_PROGRESS.md` only for current status.
 - Change only the requested layer and preserve unrelated work.
+- Route JSON endpoints through `_json_object`; malformed or excessively nested
+  JSON and invalid request shapes are HTTP 400, never internal errors.
 - Keep CSV cleanup in `process_csv`; use `analyze_rows` for canonical rows.
   Never duplicate backend scoring, classification, signals, dedupe, or IDs.
 - Source adapters only fetch canonical rows. Eligibility belongs in
@@ -48,7 +50,8 @@
   Generic URLs never collapse distinct stable requisitions.
 - Alumni data is additive and private.
 - Never commit `.env`, credentials, alumni data, SQLite state, probe/health
-  output, or `evaluation/private/`.
+  output, downloaded or extracted Actions diagnostics, or
+  `evaluation/private/`.
 - Workday: log safe metadata only; retry only transient failures; never treat
   HTML as empty or use anti-bot evasion; never reset persistent state.
 - Sanitizers are total: `sanitize_error`, `sanitize_feed_label`, and `_safe_url`

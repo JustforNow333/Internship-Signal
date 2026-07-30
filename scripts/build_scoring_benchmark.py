@@ -31,7 +31,9 @@ from scripts.scoring_benchmark_common import (  # noqa: E402
     BenchmarkError,
     atomic_write_many,
     json_bytes,
+    nonnegative_int,
     ordered_groups,
+    parse_date,
     prediction_from_job,
     ranking_key,
     render_csv_bytes,
@@ -402,23 +404,6 @@ def git_metadata(repo_root: Path) -> tuple[str, bool | str]:
         return commit, bool(status.strip())
     except (OSError, subprocess.SubprocessError):
         return "unknown", "unknown"
-
-
-def parse_date(value: str) -> date:
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from exc
-
-
-def nonnegative_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("sample count must be an integer") from exc
-    if parsed < 0:
-        raise argparse.ArgumentTypeError("sample count must be nonnegative")
-    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -8,6 +8,10 @@ from tests.conftest import SAMPLE
 client = TestClient(app)
 
 
+def _deeply_nested_json(field: str, *, depth: int = 2_000) -> str:
+    return f'{{"{field}":' + "[" * depth + "0" + "]" * depth + "}"
+
+
 @pytest.fixture(scope="module")
 def dataset_id():
     res = client.get("/api/sample")
@@ -96,6 +100,16 @@ def test_ask_rejects_malformed_or_wrong_shape_json(dataset_id, content, headers)
     assert res.status_code == 400
 
 
+def test_ask_rejects_json_beyond_decoder_nesting_limit(dataset_id):
+    res = client.post(
+        f"/api/datasets/{dataset_id}/ask",
+        content=_deeply_nested_json("question"),
+        headers={"content-type": "application/json"},
+    )
+
+    assert res.status_code == 400
+
+
 def test_ingest_json_paste():
     csv_text = SAMPLE.read_text(encoding="utf-8")
     res = client.post("/api/ingest", json={"csv_text": csv_text})
@@ -122,6 +136,16 @@ def test_ingest_multipart_upload():
 )
 def test_ingest_rejects_malformed_or_wrong_shape_json(content, headers):
     res = client.post("/api/ingest", content=content, headers=headers)
+
+    assert res.status_code == 400
+
+
+def test_ingest_rejects_json_beyond_decoder_nesting_limit():
+    res = client.post(
+        "/api/ingest",
+        content=_deeply_nested_json("csv_text"),
+        headers={"content-type": "application/json"},
+    )
 
     assert res.status_code == 400
 

@@ -41,9 +41,12 @@ from scripts.scoring_benchmark_common import (  # noqa: E402
     BenchmarkError,
     atomic_write_many,
     json_bytes,
+    nonnegative_int,
+    parse_date,
     render_csv_bytes,
     role_track,
     sha256_bytes,
+    source_counts,
 )
 
 BENCHMARK_KIND = "us_rolefit"
@@ -385,7 +388,7 @@ def export_benchmark(
             )
             for group in GROUPS
         },
-        "source_counts": _source_counts(selected),
+        "source_counts": source_counts(selected),
         "company_counts": dict(sorted(Counter(str(job.get("company") or "unknown") for job in selected).items())),
         "role_track_counts": dict(sorted(Counter(role_track(job) for job in selected).items())),
         "location_status_counts": dict(sorted(location_counts.items())),
@@ -458,19 +461,6 @@ def _overlap_counts(memberships: Mapping[str, Sequence[str]]) -> dict[str, objec
     }
 
 
-def _source_counts(jobs: Sequence[Mapping[str, object]]) -> dict[str, dict[str, int]]:
-    sources: Counter[str] = Counter()
-    adapters: Counter[str] = Counter()
-    for job in jobs:
-        extra = job.get("extra") if isinstance(job.get("extra"), Mapping) else {}
-        sources[str(extra.get("source") or "unknown")] += 1
-        adapters[str(extra.get("source_adapter") or "unknown")] += 1
-    return {
-        "source": dict(sorted(sources.items())),
-        "source_adapter": dict(sorted(adapters.items())),
-    }
-
-
 def validate_frozen_artifact_hashes(
     manifest: Mapping[str, object],
     paths: Mapping[str, Path],
@@ -503,23 +493,6 @@ def validate_frozen_artifact_hashes(
         raise BenchmarkError(f"cannot validate frozen watchlist: {watchlist}") from exc
     if sha256_bytes(watchlist_payload) != str(hashes.get("watchlist_sha256") or ""):
         raise BenchmarkError(f"watchlist_sha256 mismatch for {watchlist}")
-
-
-def parse_date(value: str) -> date:
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from exc
-
-
-def nonnegative_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("sample count must be an integer") from exc
-    if parsed < 0:
-        raise argparse.ArgumentTypeError("sample count must be nonnegative")
-    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -514,6 +514,20 @@ This file tracks completed watcher steps and the next handoff target.
    - An isolated 20,000-rejection migration retained exact aggregates and 25
      routine details per run, preserved notification/health/alert state, and
      compacted its temporary database from 40.95 MiB to 0.22 MiB.
+26. Evidence-backed maintenance audit:
+   - Confirmed both JSON endpoint paths raised an uncaught `RecursionError` for
+     payloads beyond the decoder nesting limit. `_json_object` now returns the
+     existing HTTP 400 client-error response for that case.
+   - Consolidated identical benchmark CLI date/count parsing and source
+     provenance counting in `scripts/scoring_benchmark_common.py`; all three
+     exporters retain their names and behavior.
+   - Retained adapter fetch wrappers, separate health/alert SQLite stores, and
+     the standalone alumni-map row builder because they preserve intentional
+     isolation or script boundaries.
+   - Malformed/Unicode fuzz checks passed for source sanitizers, safe URL
+     rendering, and posting identity helpers.
+   - Offline backend/watcher validation: `671 passed, 1 warning`; frontend:
+     `23 passed`; production build and Python compileall completed successfully.
 
 ## Next
 
@@ -543,8 +557,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the Actions rollout eligibility fix:
+Latest local validation after the maintenance audit:
 
 ```text
-651 passed, 1 warning in 12.29s
+671 passed, 1 warning in 14.97s
 ```

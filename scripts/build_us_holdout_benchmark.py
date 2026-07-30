@@ -57,10 +57,13 @@ from scripts.scoring_benchmark_common import (  # noqa: E402
     BenchmarkError,
     atomic_write_many,
     json_bytes,
+    nonnegative_int,
+    parse_date,
     render_csv_bytes,
     role_track,
     score_value,
     sha256_bytes,
+    source_counts,
 )
 
 BENCHMARK_KIND = "us_holdout"
@@ -923,21 +926,6 @@ def cohort_overlap_counts(
     }
 
 
-def source_counts(
-    jobs: Sequence[Mapping[str, object]],
-) -> dict[str, dict[str, int]]:
-    sources: Counter[str] = Counter()
-    adapters: Counter[str] = Counter()
-    for job in jobs:
-        extra = job.get("extra") if isinstance(job.get("extra"), Mapping) else {}
-        sources[str(extra.get("source") or "unknown")] += 1
-        adapters[str(extra.get("source_adapter") or "unknown")] += 1
-    return {
-        "source": dict(sorted(sources.items())),
-        "source_adapter": dict(sorted(adapters.items())),
-    }
-
-
 def model_positive(job: Mapping[str, object]) -> bool:
     return bool(determine_watcher_eligibility(dict(job))["watcher_eligible"])
 
@@ -1040,23 +1028,6 @@ def _display_path(path: Path) -> str:
         return str(resolved.relative_to(REPO_ROOT.resolve()).as_posix())
     except ValueError:
         return str(resolved.as_posix())
-
-
-def parse_date(value: str) -> date:
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from exc
-
-
-def nonnegative_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("sample count must be an integer") from exc
-    if parsed < 0:
-        raise argparse.ArgumentTypeError("sample count must be nonnegative")
-    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:

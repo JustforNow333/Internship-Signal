@@ -160,7 +160,7 @@ async def _json_object(request: Request, *, max_bytes: int | None = None) -> dic
                 if len(raw) > max_bytes:
                     raise HTTPException(status_code=413, detail="Request body is too large.")
             body = json.loads(raw.decode("utf-8"))
-    except (JSONDecodeError, UnicodeDecodeError) as exc:
+    except (JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
         raise HTTPException(status_code=400, detail="Request body must contain valid JSON.") from exc
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
