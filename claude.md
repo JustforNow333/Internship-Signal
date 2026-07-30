@@ -16,6 +16,9 @@
   `returning_intern_only` reasons. Mixed, preferred, incidental, or ambiguous
   mentions remain eligible. Evaluate them only after internship/student-program
   and open checks; traces retain mandatory, negation, and mixed diagnostics.
+- `Master data`, `master record`, `master dataset`, and `master schedule` are
+  operational terms, not graduate-degree evidence; bare `master` needs explicit
+  degree, program, student, or candidate context.
 - `assess_us_location` is the sole location gate: explicit U.S. wins,
   explicit foreign country/region yields `outside_us`, and ambiguity passes.
   Prefer collected structured country/location metadata, keep city-only

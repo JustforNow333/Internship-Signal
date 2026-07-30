@@ -82,6 +82,9 @@
   `watcher/eligibility.py`. Exclude clear mandatory `phd_only`,
   `graduate_only`, `freshman_only`, and `returning_intern_only` restrictions;
   mixed, preferred, incidental, and ambiguous evidence remains eligible.
+- Operational terms such as `master data`, `master record`, and
+  `master schedule` are not graduate-degree evidence; bare `master` requires
+  explicit degree, program, student, or candidate context.
   Apply categorical rules only after internship/student-program and open-status
   checks; traces retain mandatory, negation, and mixed-evidence diagnostics.
 - `watcher/eligibility.py::assess_us_location` owns the conservative location

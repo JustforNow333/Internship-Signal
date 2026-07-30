@@ -155,6 +155,36 @@ def test_clear_categorical_restrictions_are_excluded(posting, reason):
 
 
 @pytest.mark.parametrize(
+    "title",
+    (
+        "Extracurricular Internship - Master Data Management (f/m/div.)",
+        "Master Data Management Intern",
+        "Master Data Governance Intern",
+        "Master Database Intern",
+        "Master Record Intern",
+        "Master Dataset Intern",
+        "Master Schedule Intern",
+    ),
+)
+def test_master_data_titles_are_not_graduate_degree_evidence(title):
+    posting = scored(company="Bosch", title=title)
+
+    assert posting["student_eligibility"]["eligible"] is True
+    assert posting["student_eligibility"]["exclusion_reason"] is None
+
+
+@pytest.mark.parametrize(
+    "requirements",
+    (
+        "Currently pursuing a master's degree.",
+        "Master's students only.",
+    ),
+)
+def test_explicit_masters_enrollment_remains_graduate_only(requirements):
+    assert_excluded(scored(requirements=requirements), "graduate_only")
+
+
+@pytest.mark.parametrize(
     "posting",
     [
         lambda: scored(requirements="Minimum: bachelor's degree. PhD preferred."),

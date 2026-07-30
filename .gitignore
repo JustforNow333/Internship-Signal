@@ -133,6 +133,7 @@ _probe*.py
 _scratch*.py
 # Local eligibility demonstrations are audit scratch, not repository fixtures.
 eligibility-demo*.json
+eligibility-regression*.json
 # Read-only audit/comparison exports may contain operational posting metadata.
 watcher-audit*.json
 watcher-source-comparison*.json

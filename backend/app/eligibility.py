@@ -20,7 +20,10 @@ CATEGORICAL_EXCLUSION_REASONS = frozenset(
 )
 
 _PHD_TERM = r"(?:phd|doctoral|doctorate|post[- ]?doctoral|post[- ]?doc)"
-_MASTERS_TERM = r"(?:master(?:'s|s)?|ms|master of (?:science|arts))"
+_MASTERS_TERM = (
+    r"(?:master(?:'s|s)|ms|master of (?:science|arts)|"
+    r"master(?=\s+(?:degree|program|students?|candidates?)\b))"
+)
 _GRADUATE_TERM = (
     rf"(?:graduate (?:degree|program|student|students|candidate|candidates)|"
     rf"{_MASTERS_TERM}(?: degree| program| student| students| candidate| candidates)?|"
