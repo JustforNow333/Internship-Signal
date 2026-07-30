@@ -881,22 +881,30 @@ def render_final_heartbeat(
     seen_saved: object = "unknown",
     load_status: object = "unknown",
     save_status: object = "unknown",
+    scheduled_email_enabled: object = "unknown",
+    pending_due_to_email_disabled: object = "unknown",
+    scheduled_email_config: object = "unknown",
 ) -> str:
-    """Append workflow persistence fields to an exact application heartbeat."""
+    """Append workflow-only diagnostics to an exact application heartbeat."""
 
     if not application_heartbeat or not application_heartbeat.startswith("HEARTBEAT: "):
         raise ValueError("application heartbeat is missing or invalid")
     if "\n" in application_heartbeat or "\r" in application_heartbeat:
         raise ValueError("application heartbeat must be exactly one line")
     values = (
+        _heartbeat_workflow_value(scheduled_email_enabled),
+        _heartbeat_workflow_value(pending_due_to_email_disabled),
+        _heartbeat_workflow_value(scheduled_email_config),
         _heartbeat_workflow_value(seen_loaded),
         _heartbeat_workflow_value(seen_saved),
         _heartbeat_workflow_value(load_status),
         _heartbeat_workflow_value(save_status),
     )
     return (
-        f"{application_heartbeat}, seen_loaded={values[0]}, seen_saved={values[1]}, "
-        f"seen_store={values[2]}/{values[3]}"
+        f"{application_heartbeat}, scheduled_email_enabled={values[0]}, "
+        f"pending_due_to_email_disabled={values[1]}, scheduled_email_config={values[2]}, "
+        f"seen_loaded={values[3]}, seen_saved={values[4]}, "
+        f"seen_store={values[5]}/{values[6]}"
     )
 
 
@@ -932,6 +940,18 @@ def _main(argv: list[str] | None = None) -> int:
                     seen_saved=os.getenv("SEEN_SAVED", "unknown"),
                     load_status=os.getenv("LOAD_STATUS", "unknown"),
                     save_status=os.getenv("SAVE_STATUS", "unknown"),
+                    scheduled_email_enabled=os.getenv(
+                        "SCHEDULED_EMAIL_ENABLED",
+                        "unknown",
+                    ),
+                    pending_due_to_email_disabled=os.getenv(
+                        "PENDING_DUE_TO_EMAIL_DISABLED",
+                        "unknown",
+                    ),
+                    scheduled_email_config=os.getenv(
+                        "SCHEDULED_EMAIL_CONFIG",
+                        "unknown",
+                    ),
                 )
             )
         except ValueError as exc:

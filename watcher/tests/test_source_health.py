@@ -487,6 +487,9 @@ def test_final_heartbeat_forwards_every_application_field_and_appends_persistenc
         seen_saved=70,
         load_status="loaded",
         save_status="pushed",
+        scheduled_email_enabled="no",
+        pending_due_to_email_disabled=1,
+        scheduled_email_config="recognized_false",
     )
 
     assert final.startswith(application)
@@ -496,6 +499,9 @@ def test_final_heartbeat_forwards_every_application_field_and_appends_persistenc
     assert "direct_degraded=1" in final
     assert "alumni_records_loaded=150" in final
     assert "sent=no, seen_marked=0" in final
+    assert "scheduled_email_enabled=no" in final
+    assert "pending_due_to_email_disabled=1" in final
+    assert "scheduled_email_config=recognized_false" in final
     assert final.endswith("seen_loaded=70, seen_saved=70, seen_store=loaded/pushed")
     assert "\n" not in final
     assert "\r" not in final

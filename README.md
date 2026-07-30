@@ -138,6 +138,21 @@ runs read `WATCHER_SEND_EMAIL` and the separate optional repository variable
 `WATCHER_PRIME_SEEN`; an email-disabled schedule is an ordinary side-effect-free
 notification dry run unless that second variable is explicitly enabled.
 
+Scheduled send-mode parsing accepts `1`, `true`, `yes`, `y`, and `on` as true,
+and `0`, `false`, `no`, `n`, and `off` as false, ignoring case and surrounding
+whitespace. A missing or blank `WATCHER_SEND_EMAIL` is reported separately from
+an explicit false value. Any other nonblank value is invalid, emits an Actions
+warning naming the variable, and resolves conservatively to false.
+
+Every normal Actions run starts its job summary with **Scheduled delivery**.
+Scheduled runs report whether delivery is enabled and how many otherwise-new
+postings remain pending because it is disabled. A disabled schedule emits a
+nonfatal warning even when the pending count is zero; manual dry runs show
+`not applicable` and do not receive that warning. The final workflow heartbeat
+preserves the complete application heartbeat and adds
+`scheduled_email_enabled`, `pending_due_to_email_disabled`, and
+`scheduled_email_config` before the existing seen-store persistence fields.
+
 Older SQLite files migrate in place with nullable `primed_at`,
 `analyzed_job_id`, `identity_key`, `requisition_key`, and `location` columns.
 The table is neither deleted nor rebuilt. Legacy rows whose `emailed_at` is

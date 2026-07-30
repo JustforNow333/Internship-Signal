@@ -103,12 +103,15 @@ This file tracks completed watcher steps and the next handoff target.
      sends store `emailed_at`.
    - Scheduled runs read the repository Actions variable `WATCHER_SEND_EMAIL`;
      live sends require repository secrets `SMTP_USER`, `SMTP_APP_PASSWORD`, and
-     `EMAIL_TO`.
+     `EMAIL_TO`. Recognized true/false values are explicit; missing/blank and
+     invalid nonblank values remain distinguishable while resolving safely to
+     false.
    - The workflow uses concurrency group `watcher-seen-store` with
      `cancel-in-progress: false` to serialize data-branch writes.
    - The app prints one heartbeat containing run, season, feed, source-health,
      alumni, send, and seen-marking fields. The workflow forwards that exact
-     line and appends only `seen_loaded`, `seen_saved`, and `seen_store`.
+     line, appends scheduled-delivery diagnostics, then appends `seen_loaded`,
+     `seen_saved`, and `seen_store`.
    - Live validation by actual GitHub manual dispatch remains for the user to
      run.
 5. Alumni-company watchlist expansion:

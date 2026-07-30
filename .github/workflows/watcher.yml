@@ -135,11 +135,10 @@ jobs:
             raw_health_mode="${ACTIONS_WATCHER_HEALTH_EMAIL_MODE:-transitions_only}"
           fi
 
-          normalized_send="$(printf '%s' "$raw_send" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-          case "$normalized_send" in
-            1|true|yes|y|on) send_email=true ;;
-            *) send_email=false ;;
-          esac
+          read -r send_email send_email_config scheduled_email_enabled < <(
+            WATCHER_SEND_EMAIL_RAW="$raw_send" \
+              python -m watcher.workflow_diagnostics resolve-send-mode
+          )
           normalized_prime="$(printf '%s' "$raw_prime" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
           case "$normalized_prime" in
             1|true|yes|y|on) prime_seen=true ;;
@@ -173,9 +172,11 @@ jobs:
           fi
 
           echo "send_email=$send_email" >> "$GITHUB_OUTPUT"
+          echo "send_email_config=$send_email_config" >> "$GITHUB_OUTPUT"
+          echo "scheduled_email_enabled=$scheduled_email_enabled" >> "$GITHUB_OUTPUT"
           echo "prime_seen=$prime_seen" >> "$GITHUB_OUTPUT"
           echo "health_email_mode=$health_email_mode" >> "$GITHUB_OUTPUT"
-          echo "SEND-MODE: send_email=$send_email prime_seen=$prime_seen health_email_mode=$health_email_mode"
+          echo "SEND-MODE: send_email=$send_email send_email_config=$send_email_config scheduled_email_enabled=$scheduled_email_enabled prime_seen=$prime_seen health_email_mode=$health_email_mode"
 
       - name: Restore seen-store from data branch
         id: load_seen
@@ -452,6 +453,19 @@ jobs:
             echo "::warning::Source-health email delivery failed; internship-match outcome is unaffected."
           fi
 
+      - name: Scheduled delivery diagnostics
+        id: scheduled_delivery
+        if: always() && steps.run_watcher.outputs.status == '0'
+        shell: bash
+        env:
+          RESOLVED_SEND_EMAIL: ${{ steps.mode.outputs.send_email }}
+          SCHEDULED_EMAIL_ENABLED: ${{ steps.mode.outputs.scheduled_email_enabled }}
+          SCHEDULED_EMAIL_CONFIG: ${{ steps.mode.outputs.send_email_config }}
+          NEW_POSTINGS: ${{ steps.run_watcher.outputs.new }}
+        run: |
+          set -euo pipefail
+          python -m watcher.workflow_diagnostics scheduled-report
+
       - name: Save seen-store to data branch
         id: save_seen
         if: steps.run_watcher.outputs.status == '0'
@@ -564,6 +578,9 @@ jobs:
           LOAD_STATUS: ${{ steps.load_seen.outputs.load_status }}
           SEEN_SAVED: ${{ steps.save_seen.outputs.saved }}
           SAVE_STATUS: ${{ steps.save_seen.outputs.save_status }}
+          SCHEDULED_EMAIL_ENABLED: ${{ steps.scheduled_delivery.outputs.scheduled_email_enabled }}
+          PENDING_DUE_TO_EMAIL_DISABLED: ${{ steps.scheduled_delivery.outputs.pending_due_to_email_disabled }}
+          SCHEDULED_EMAIL_CONFIG: ${{ steps.scheduled_delivery.outputs.scheduled_email_config }}
         run: |
           set -u -o pipefail
 

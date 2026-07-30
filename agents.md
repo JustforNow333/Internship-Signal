@@ -173,9 +173,12 @@
 - Rollout verification must dispatch with internship email, priming, Workday
   probe, and health email disabled; preserve notification timestamps and restore
   preexisting repository variables before enabling conservative health alerts.
-- Preserve the application's exact final `HEARTBEAT:` and append only
-  `seen_loaded`, `seen_saved`, and `seen_store`. A missing heartbeat or corrupt
-  seen-store is fatal; source failures remain warnings.
+- Preserve every application `HEARTBEAT:` field. Final workflow diagnostics
+  may append scheduled-delivery and persistence fields; a missing heartbeat or
+  corrupt seen-store is fatal, while source failures remain warnings.
+- Scheduled send configuration distinguishes recognized true/false,
+  missing/blank, and invalid values. Disabled schedules warn with the pending
+  count; intentional manual dry runs do not receive that warning.
 - Benchmark export uses `collect_rows()` then `analyze_rows()`. Candidates use
   only `is_internship()` and `is_open()`, never `filter_matches()`.
 - Keep international rows in frozen benchmark exports. Current benchmark

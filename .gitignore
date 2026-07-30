@@ -120,8 +120,9 @@ evaluation/scoring_*_report.md
 evaluation/scoring_*_metrics.json
 
 # Local watcher scratch artifacts
-# Downloaded or extracted GitHub Actions verification bundles stay outside
-# source control; direct JSON extracts are also covered by report rules below.
+# Downloaded or extracted GitHub Actions verification bundles, including
+# scheduled-delivery diagnostics, stay outside source control; direct JSON
+# extracts are also covered by report rules below.
 .gh-run-artifacts/
 github-actions-verification*/
 watcher-diagnostics-*/

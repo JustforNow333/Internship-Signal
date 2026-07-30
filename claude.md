@@ -37,6 +37,9 @@
 - Dry runs never change notification state. Live sends populate `emailed_at`
   only after success; explicit priming has its own marker, and unmarked legacy
   rows remain pending.
+- Scheduled send configuration distinguishes recognized true/false,
+  missing/blank, and invalid values; disabled schedules warn with the pending
+  count, while manual dry runs do not.
 - Watcher audits are read-only and reuse production identity, dedupe,
   classification, eligibility, scoring, and seen lookup; state-only audits
   never fetch, and live audits never email, prime, or persist health attempts.
