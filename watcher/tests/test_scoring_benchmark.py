@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import inspect
@@ -12,12 +13,28 @@ import pytest
 from backend.app.dedupe import job_id
 from backend.app.ingest import analyze_rows
 from scripts import build_scoring_benchmark as exporter
+from scripts import build_us_holdout_benchmark as holdout_exporter
+from scripts import build_us_rolefit_benchmark as rolefit_exporter
 from scripts import evaluate_scoring_benchmark as evaluator
 from scripts.scoring_benchmark_common import BenchmarkError, csv_safe, render_csv_bytes
 from watcher.sources.base import make_row
 
 
 AS_OF = date(2026, 7, 20)
+
+
+@pytest.mark.parametrize(
+    "module",
+    (exporter, holdout_exporter, rolefit_exporter),
+)
+def test_benchmark_cli_value_parsers_are_consistent(module):
+    assert module.parse_date("2026-07-20") == AS_OF
+    assert module.nonnegative_int("0") == 0
+
+    with pytest.raises(argparse.ArgumentTypeError, match="YYYY-MM-DD"):
+        module.parse_date("07/20/2026")
+    with pytest.raises(argparse.ArgumentTypeError, match="nonnegative"):
+        module.nonnegative_int("-1")
 
 
 def canonical_row(
