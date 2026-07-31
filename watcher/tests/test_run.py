@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -14,6 +15,7 @@ from watcher.run import (
     RUN_MODE_PRIME,
     WorkdayTransportSummary,
     collect_rows,
+    main as watcher_main,
     print_heartbeat,
     print_report,
     run_once,
@@ -43,6 +45,22 @@ class FakeSource:
         if self.error:
             raise self.error
         return self.rows_by_company.get(company.name, [])
+
+
+class DiagnosticFakeSource(FakeSource):
+    def __init__(
+        self,
+        rows_by_company=None,
+        *,
+        error=None,
+        requests=0,
+        retries=0,
+    ):
+        super().__init__(rows_by_company, error=error)
+        self.last_diagnostics = SimpleNamespace(
+            request_attempts=requests,
+            retry_attempts=retries,
+        )
 
 
 class FakeGithub:
@@ -181,6 +199,10 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
     assert first.new_matches[0]["extra"]["source"] == "direct"
     assert first.new_matches[1]["extra"]["source"] == "github"
     assert second.new_matches == []
+    assert first.analysis_cache_stats.hits == 0
+    assert first.analysis_cache_stats.misses == first.jobs_scored
+    assert second.analysis_cache_stats.hits == second.jobs_scored
+    assert second.analysis_cache_stats.misses == 0
     assert first.digest_sent is True
     assert first.seen_marked == 2
     assert [len(call) for call in digest_sender.calls] == [2, 0]
@@ -255,7 +277,7 @@ def test_categorical_exclusion_is_audited_but_never_emailed_or_marked_seen(
         assert exclusion["role"] == "swe"
         assert exclusion["role_track"] == "general_swe"
 
-    assert [len(call) for call in digest_sender.calls] == [1, 1]
+    assert [len(call) for call in digest_sender.calls] == [1]
     with sqlite3.connect(db_path) as conn:
         stored = conn.execute("select title, url from seen").fetchall()
     assert stored == [
@@ -330,7 +352,7 @@ def test_run_once_failed_live_send_exception_does_not_mark_emailed(tmp_path):
 def test_run_once_ordinary_dry_run_does_not_alter_notification_state(tmp_path):
     config = WatcherConfig(companies=(CompanyCfg(name="DirectCo", ats="greenhouse", token="directco"),))
     direct_rows = [row("DirectCo", "Software Engineer Intern")]
-    digest_sender = FakeDigestSender(sent=False)
+    digest_sender = FakeDigestSender(sent=True)
     db_path = tmp_path / "seen.sqlite"
 
     with SeenStore(db_path) as store:
@@ -346,7 +368,9 @@ def test_run_once_ordinary_dry_run_does_not_alter_notification_state(tmp_path):
 
     assert len(result.new_matches) == 1
     assert result.dry_run_pending == 1
+    assert result.digest_sent is False
     assert result.seen_marked == 0
+    assert digest_sender.calls == []
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("select count(*) from seen").fetchone()[0] == 0
 
@@ -660,6 +684,97 @@ def test_collect_rows_logs_source_failure_and_keeps_going():
     assert errors == ["BrokenCo: boom"]
 
 
+def test_collect_rows_logs_successful_and_failed_source_timings(caplog):
+    caplog.set_level("INFO", logger="watcher.run")
+    successful_github = GitHubListingSourceCfg(
+        name="safe_feed",
+        format="simplify_json",
+        url="https://example.test/safe.json",
+    )
+    failed_github = GitHubListingSourceCfg(
+        name="failed_feed",
+        format="github_markdown_table",
+        url="https://example.test/failed.md",
+        default_term="Summer 2027",
+    )
+    direct_row = row("Timed Direct", "Software Engineer Intern")
+    github_row_value = row(
+        "Timed Direct",
+        "Backend Intern",
+        source="github",
+    )
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(name="Timed Direct", ats="workday", token="timed"),
+            CompanyCfg(name="Broken Direct", ats="greenhouse", token="broken"),
+        ),
+        terms=("Summer 2027",),
+        github_listing_sources=(successful_github, failed_github),
+    )
+
+    rows, errors = collect_rows(
+        config,
+        direct_sources={
+            "workday": DiagnosticFakeSource(
+                {"Timed Direct": [direct_row]},
+                requests=3,
+                retries=1,
+            ),
+            "greenhouse": FakeSource(error=SourceError("fetch failed")),
+        },
+        github_source=[
+            CountingGithub(successful_github.url, [github_row_value]),
+            CountingGithub(failed_github.url, error=SourceFetchError("backstop failed")),
+        ],
+    )
+
+    assert rows == [direct_row, github_row_value]
+    assert errors == [
+        "Broken Direct: fetch failed",
+        "github listings (failed_feed [https://example.test/failed.md]): backstop failed",
+    ]
+    timing_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("SOURCE-TIMING ")
+    ]
+    assert len(timing_lines) == 4
+    assert any(
+        line.startswith(
+            "SOURCE-TIMING company=Timed_Direct adapter=workday "
+            "success=true "
+        )
+        and " rows=1 requests=3 retries=1" in line
+        for line in timing_lines
+    )
+    assert any(
+        line.startswith(
+            "SOURCE-TIMING company=Broken_Direct adapter=greenhouse "
+            "success=false "
+        )
+        and " rows=0" in line
+        for line in timing_lines
+    )
+    assert any(
+        "company=all adapter=simplify_json source=safe_feed success=true "
+        in line
+        and " rows=1" in line
+        for line in timing_lines
+    )
+    assert any(
+        "company=all adapter=github_markdown_table source=failed_feed "
+        "success=false "
+        in line
+        and " rows=0" in line
+        for line in timing_lines
+    )
+    assert all("https://" not in line for line in timing_lines)
+    assert all(
+        len(line.split(" seconds=", 1)[1].split(" ", 1)[0].split(".")[1]) == 3
+        for line in timing_lines
+    )
+
+
 def test_collect_rows_skips_bespoke_and_github_only_for_direct_fetch():
     config = WatcherConfig(
         companies=(
@@ -677,6 +792,84 @@ def test_collect_rows_skips_bespoke_and_github_only_for_direct_fetch():
 
     assert rows == github_rows
     assert errors == []
+
+
+def test_run_once_logs_every_pipeline_stage_without_changing_results(tmp_path, caplog):
+    caplog.set_level("INFO", logger="watcher.run")
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="StageCo", ats="greenhouse", token="stage"),)
+    )
+    expected = row("StageCo", "Software Engineer Intern")
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"StageCo": [expected]})},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            digest_sender=FakeDigestSender(sent=False),
+            today=date(2026, 7, 30),
+            run_id="timing-stage-test",
+        )
+
+    assert result.rows_fetched == 1
+    assert result.jobs_scored == 1
+    assert [match["company"] for match in result.matches] == ["StageCo"]
+    stage_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("STAGE-TIMING ")
+    ]
+    expected_stages = {
+        "direct_source_collection",
+        "github_backstop_collection",
+        "collection",
+        "health_state_persistence",
+        "analysis",
+        "filtering_eligibility",
+        "alumni_loading_matching",
+        "seen_store_partitioning",
+        "digest_email_handling",
+        "source_comparison_generation_persistence",
+        "health_alert_evaluation",
+    }
+    assert {
+        line.split("stage=", 1)[1].split(" ", 1)[0]
+        for line in stage_lines
+    } == expected_stages
+    assert all(
+        len(line.rsplit("seconds=", 1)[1].split(".")[1]) == 3
+        for line in stage_lines
+    )
+
+
+def test_main_logs_startup_and_total_runtime_stages(tmp_path, monkeypatch, caplog):
+    caplog.set_level("INFO", logger="watcher.run")
+    config = WatcherConfig(companies=())
+    sentinel = object()
+    monkeypatch.setattr("watcher.run.load_watchlist", lambda _path: config)
+    monkeypatch.setattr("watcher.run.email_sending_enabled", lambda: False)
+    monkeypatch.setattr("watcher.run.load_health_alert_policy", lambda: None)
+    monkeypatch.setattr("watcher.run.run_once", lambda *_args, **_kwargs: sentinel)
+    monkeypatch.setattr("watcher.run.print_report", lambda result: None)
+    monkeypatch.setattr("watcher.run.print_heartbeat", lambda result: None)
+
+    exit_code = watcher_main(
+        [
+            "--watchlist",
+            str(tmp_path / "unused.yml"),
+            "--seen-db",
+            str(tmp_path / "seen.sqlite"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert [
+        record.getMessage().split("stage=", 1)[1].split(" ", 1)[0]
+        for record in caplog.records
+        if record.getMessage().startswith("STAGE-TIMING ")
+    ] == ["configuration_startup", "watcher_runtime"]
 
 
 def test_collect_rows_records_exactly_one_direct_outcome_per_company_and_one_per_feed():

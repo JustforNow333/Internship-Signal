@@ -40,7 +40,7 @@ def load_dotenv(path: str | Path = DEFAULT_DOTENV_PATH) -> None:
 
 
 def _parse_env_assignment(line: str) -> tuple[str, str] | None:
-    line = _strip_env_comment(line).strip()
+    line = _strip_comment(line).strip()
     if not line:
         return None
 
@@ -62,7 +62,7 @@ def _parse_env_value(value: str) -> str:
     return value
 
 
-def _strip_env_comment(line: str) -> str:
+def _strip_comment(line: str) -> str:
     in_single = False
     in_double = False
     for index, char in enumerate(line):
@@ -81,6 +81,7 @@ DEFAULT_WATCHLIST_PATH = WATCHER_DIR / "watchlist.yml"
 DEFAULT_SEEN_DB_PATH = Path(os.getenv("WATCHER_SEEN_DB", WATCHER_DIR / "seen.sqlite"))
 DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS = 0.5
 MAX_WORKDAY_MIN_INTERVAL_SECONDS = 10.0
+DEFAULT_ANALYSIS_CACHE_ENABLED = True
 SUPPORTED_ATS = {
     "greenhouse",
     "lever",
@@ -99,6 +100,30 @@ SUPPORTED_GITHUB_LISTING_FORMATS = {
 
 class ConfigError(ValueError):
     """Raised when watcher config is missing or invalid."""
+
+
+def analysis_cache_enabled(value: str | bool | None = None) -> bool:
+    """Return the validated watcher static-analysis cache switch."""
+
+    raw = (
+        os.getenv("WATCHER_ANALYSIS_CACHE_ENABLED")
+        if value is None
+        else value
+    )
+    if raw is None:
+        return DEFAULT_ANALYSIS_CACHE_ENABLED
+    if isinstance(raw, bool):
+        return raw
+    normalized = str(raw).strip().casefold()
+    if not normalized:
+        return DEFAULT_ANALYSIS_CACHE_ENABLED
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError(
+        "WATCHER_ANALYSIS_CACHE_ENABLED must be true/false, yes/no, on/off, or 1/0"
+    )
 
 
 def workday_min_interval_seconds(value: str | float | int | None = None) -> float:
@@ -164,6 +189,7 @@ class WatcherConfig:
     target_roles: frozenset[str] = frozenset({"swe"})
     min_score: int | None = None
     seen_db_path: Path = DEFAULT_SEEN_DB_PATH
+    analysis_cache_enabled: bool = DEFAULT_ANALYSIS_CACHE_ENABLED
 
     def effective_github_listing_sources(self) -> tuple[GitHubListingSourceCfg, ...]:
         """Return typed sources plus deterministic adapters for legacy URLs."""
@@ -218,6 +244,7 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
         target_roles=target_roles,
         min_score=min_score,
         seen_db_path=DEFAULT_SEEN_DB_PATH,
+        analysis_cache_enabled=analysis_cache_enabled(),
     )
 
 
@@ -356,19 +383,6 @@ def _parse_watchlist_yaml(text: str) -> dict:
     return data
 
 
-def _strip_comment(line: str) -> str:
-    in_single = False
-    in_double = False
-    for i, char in enumerate(line):
-        if char == "'" and not in_double:
-            in_single = not in_single
-        elif char == '"' and not in_single:
-            in_double = not in_double
-        elif char == "#" and not in_single and not in_double:
-            return line[:i]
-    return line
-
-
 def _split_key_value(text: str) -> tuple[str, str]:
     if ":" not in text:
         raise ConfigError(f"Expected key/value pair: {text}")
@@ -495,7 +509,10 @@ def _validated_feed_url(
     if not isinstance(raw_url, str) or not raw_url.strip():
         raise ConfigError(f"{label} values must be nonblank HTTP or HTTPS URLs")
     url = raw_url.strip()
-    parsed = urlsplit(url)
+    try:
+        parsed = urlsplit(url)
+    except ValueError as exc:
+        raise ConfigError(f"{label} contains an invalid HTTP/HTTPS URL") from exc
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
         raise ConfigError(f"{label} contains an invalid HTTP/HTTPS URL")
     if parsed.username or parsed.password:

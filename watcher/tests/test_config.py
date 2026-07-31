@@ -12,6 +12,7 @@ from watcher.config import (
     WatcherConfig,
     _parse_env_assignment,
     _parse_watchlist_yaml,
+    analysis_cache_enabled,
     load_dotenv,
     load_watchlist,
 )
@@ -116,6 +117,19 @@ def test_load_dotenv_sets_missing_values_without_overriding_existing(tmp_path, m
     assert os.environ["SMTP_USER"] == "already-set@gmail.com"
     assert os.environ["SMTP_APP_PASSWORD"] == "from-file-password"
     assert os.environ["EMAIL_TO"] == "to-file@gmail.com"
+
+
+def test_watchlist_comments_preserve_hashes_inside_quotes(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer # 2027"] # trailing comment\n',
+        '  - name: "Example #1"\n    ats: github_only # trailing comment\n',
+    )
+
+    config = load_watchlist(path)
+
+    assert config.terms == ("Summer # 2027",)
+    assert config.companies[0].name == "Example #1"
 
 
 def test_default_watchlist_loads_and_preserves_core_invariants():
@@ -366,6 +380,7 @@ def test_empty_defaults_terms_is_rejected(tmp_path, value):
         '[""]',
         '["https://user:secret@example.com/listings.json"]',
         '["https://example.com:invalid/listings.json"]',
+        '["https://[broken/listings.json"]',
         "[123]",
     ],
 )
@@ -399,3 +414,38 @@ def test_dataclass_defaults_do_not_insert_a_season_or_feed():
     assert config.terms == ()
     assert config.github_listing_sources == ()
     assert config.github_listing_urls == ()
+    assert config.analysis_cache_enabled is True
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("no", False),
+        ("off", False),
+        ("", True),
+        ("  ", True),
+    ],
+)
+def test_analysis_cache_enabled_parses_recognized_values(value, expected):
+    assert analysis_cache_enabled(value) is expected
+
+
+def test_analysis_cache_enabled_rejects_invalid_value():
+    with pytest.raises(ConfigError, match="WATCHER_ANALYSIS_CACHE_ENABLED"):
+        analysis_cache_enabled("sometimes")
+
+
+def test_load_watchlist_reads_analysis_cache_switch_from_environment(
+    monkeypatch,
+):
+    monkeypatch.setenv("WATCHER_ANALYSIS_CACHE_ENABLED", "false")
+
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+
+    assert config.analysis_cache_enabled is False

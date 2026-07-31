@@ -7,20 +7,32 @@ import logging
 import os
 import re
 import sys
+import time
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable, TextIO
+from typing import Callable, Iterator, TextIO
 
-from backend.app.ingest import analyze_rows
 from watcher.audit_trace import enrich_duplicate_entries
 from watcher.alumni import AlumniIndex, attach_alumni, load_default_alumni, status_for_injected_index
+from watcher.analysis_cache import (
+    AnalysisCacheStats,
+    analyze_rows_with_cache,
+)
 from watcher.config import (
     DEFAULT_WATCHLIST_PATH,
     GitHubListingSourceCfg,
     WatcherConfig,
     load_watchlist,
+)
+from watcher.collection_snapshot import (
+    CollectionBatch,
+    CollectionSnapshotError,
+    collection_config_fingerprint,
+    load_collection_snapshot,
+    save_collection_snapshot,
 )
 from watcher.eligibility import determine_watcher_eligibility
 from watcher.filters import filter_matches, is_internship, is_open
@@ -65,6 +77,7 @@ from watcher.source_health import (
     SourceAttempt,
     SourceHealthState,
     SourceHealthStore,
+    calculate_next_state,
     calculate_company_coverage,
     direct_health_key,
     github_feed_health_key,
@@ -72,6 +85,7 @@ from watcher.source_health import (
     sanitize_error,
     sanitize_feed_label,
     summarize_health,
+    transition_for,
     utc_datetime,
     write_health_report,
 )
@@ -122,6 +136,7 @@ class RunResult:
     company_coverage: tuple[CompanyCoverage, ...]
     health_summary: HealthSummary
     workday_transport: "WorkdayTransportSummary"
+    analysis_cache_stats: AnalysisCacheStats
     alumni_status_message: str = ""
     eligibility_exclusions: tuple[dict[str, object], ...] = ()
     source_comparison: SourceComparisonReport | None = None
@@ -138,6 +153,9 @@ class RunResult:
         )
     )
     source_comparison_persisted: bool = False
+    jobs: list[dict] = field(default_factory=list)
+    duplicate_report: list[dict] = field(default_factory=list)
+    collection_replayed: bool = False
 
 
 @dataclass
@@ -148,6 +166,7 @@ class CollectionStats:
     workday_attempted: int = 0
     workday_succeeded: int = 0
     workday_failed: int = 0
+    workday_request_attempts: int = 0
     workday_retry_attempts: int = 0
     workday_failure_codes: Counter[str] = field(default_factory=Counter)
 
@@ -186,6 +205,103 @@ RUN_MODE_PRIME = "explicit_prime"
 RUN_MODES = frozenset({RUN_MODE_LIVE, RUN_MODE_DRY, RUN_MODE_PRIME})
 
 
+@contextmanager
+def _timed_stage(stage: str) -> Iterator[None]:
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        LOGGER.info(
+            "STAGE-TIMING stage=%s seconds=%.3f",
+            _timing_log_value(stage),
+            time.perf_counter() - started,
+        )
+
+
+def _log_source_timing(
+    *,
+    company: str,
+    adapter: str,
+    success: bool,
+    elapsed_seconds: float,
+    rows_returned: int,
+    source: object,
+    source_name: str | None = None,
+    error: Exception | None = None,
+) -> None:
+    fields = [
+        "SOURCE-TIMING",
+        f"company={_timing_log_value(company)}",
+        f"adapter={_timing_log_value(adapter)}",
+    ]
+    if source_name is not None:
+        fields.append(f"source={_timing_log_value(source_name)}")
+    fields.extend(
+        (
+            f"success={'true' if success else 'false'}",
+            f"seconds={elapsed_seconds:.3f}",
+            f"rows={max(0, int(rows_returned))}",
+        )
+    )
+    request_count, retry_count = _source_request_counts(source, error=error)
+    if request_count is not None:
+        fields.append(f"requests={request_count}")
+    if retry_count is not None:
+        fields.append(f"retries={retry_count}")
+    LOGGER.info(" ".join(fields))
+
+
+def _source_request_counts(
+    source: object,
+    *,
+    error: Exception | None,
+) -> tuple[int | None, int | None]:
+    try:
+        diagnostics = getattr(source, "last_diagnostics", None)
+    except Exception:
+        diagnostics = None
+    request_count = _nonnegative_optional_int(
+        _safe_attribute(diagnostics, "request_attempts")
+    )
+    retry_count = _nonnegative_optional_int(
+        _safe_attribute(diagnostics, "retry_attempts")
+    )
+    if request_count is None:
+        attempt_count = _nonnegative_optional_int(
+            _safe_attribute(error, "attempt_count")
+        )
+        if attempt_count is not None:
+            request_count = max(1, attempt_count)
+            if retry_count is None:
+                retry_count = max(0, request_count - 1)
+    return request_count, retry_count
+
+
+def _safe_attribute(value: object, name: str) -> object | None:
+    if value is None:
+        return None
+    try:
+        return getattr(value, name, None)
+    except Exception:
+        return None
+
+
+def _nonnegative_optional_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return max(0, int(value))
+    except Exception:
+        return None
+
+
+def _timing_log_value(value: object) -> str:
+    text = re.sub(r"[\x00-\x20\x7f]+", "_", str(value or "").strip())
+    text = re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_.-")
+    text = re.sub(r"_+", "_", text)
+    return text[:120] or "unknown"
+
+
 def run_once(
     config: WatcherConfig,
     *,
@@ -203,7 +319,39 @@ def run_once(
     health_observed_at: datetime | None = None,
     health_alert_policy: HealthAlertPolicy | None = None,
     health_alert_sender: Callable[[str, str], bool] | None = None,
+    collection_batch: CollectionBatch | None = None,
+    capture_collection_snapshot_path: str | Path | None = None,
+    replay_collection_snapshot_path: str | Path | None = None,
+    allow_collection_config_mismatch: bool = False,
 ) -> RunResult:
+    replay_mode = collection_batch is not None
+    if replay_mode and capture_collection_snapshot_path is not None:
+        raise ValueError(
+            "Collection snapshot capture and replay are mutually exclusive"
+        )
+    config_fingerprint = collection_config_fingerprint(config)
+    config_matches_snapshot = True
+    if replay_mode:
+        assert collection_batch is not None
+        config_matches_snapshot = (
+            collection_batch.collection_config_fingerprint == config_fingerprint
+        )
+        if not config_matches_snapshot and not allow_collection_config_mismatch:
+            raise CollectionSnapshotError(
+                "Collection snapshot configuration does not match the current "
+                "collection-affecting watchlist settings; use "
+                "--allow-collection-config-mismatch only when this is intentional"
+            )
+        if mark_seen_without_send or notification_mode in {
+            RUN_MODE_LIVE,
+            RUN_MODE_PRIME,
+        }:
+            raise ValueError(
+                "Collection replay is permanently dry-run and cannot send or "
+                "mark notification state"
+            )
+        notification_mode = RUN_MODE_DRY
+
     if mark_seen_without_send:
         if notification_mode not in {None, RUN_MODE_PRIME}:
             raise ValueError(
@@ -219,10 +367,22 @@ def run_once(
     if notification_mode not in RUN_MODES:
         raise ValueError(f"Unknown notification mode: {notification_mode}")
 
-    observed_at = utc_datetime(health_observed_at or datetime.now(timezone.utc))
-    active_run_id = run_id or new_run_id(observed_at)
+    if replay_mode:
+        assert collection_batch is not None
+        observed_at = utc_datetime(collection_batch.captured_at)
+        active_run_id = (
+            collection_batch.source_attempts[0].run_id
+            if collection_batch.source_attempts
+            else f"replay-{observed_at:%Y%m%dT%H%M%SZ}-"
+            f"{collection_batch.collection_config_fingerprint[:12]}"
+        )
+    else:
+        observed_at = utc_datetime(health_observed_at or datetime.now(timezone.utc))
+        active_run_id = run_id or new_run_id(observed_at)
     LOGGER.info("Watcher run ID: %s", active_run_id)
-    current_date = today or date.today()
+    current_date = today or (
+        observed_at.date() if replay_mode else date.today()
+    )
     active_season_status = season_status(config.terms, today=current_date)
     override_warnings = company_season_warnings(
         config.companies,
@@ -230,27 +390,57 @@ def run_once(
         today=current_date,
     )
     _log_season_status(config.terms, active_season_status, override_warnings)
-    LOGGER.info("Collecting watcher rows...")
-    collection_stats = CollectionStats()
-    rows, errors = collect_rows(
-        config,
-        direct_sources=direct_sources,
-        github_source=github_source,
-        stats=collection_stats,
-        run_id=active_run_id,
-        observed_at=observed_at,
-    )
+    if replay_mode:
+        assert collection_batch is not None
+        LOGGER.info(
+            "COLLECTION-SNAPSHOT mode=replay path=%s rows=%d captured_at=%s "
+            "config_match=%s",
+            _timing_log_value(replay_collection_snapshot_path or "injected"),
+            len(collection_batch.rows),
+            collection_batch.captured_at.isoformat(),
+            "true" if config_matches_snapshot else "false",
+        )
+    else:
+        LOGGER.info("Collecting watcher rows...")
+        collection_batch = collect_batch(
+            config,
+            direct_sources=direct_sources,
+            github_source=github_source,
+            run_id=active_run_id,
+            observed_at=observed_at,
+        )
+        if capture_collection_snapshot_path is not None:
+            save_collection_snapshot(
+                collection_batch,
+                capture_collection_snapshot_path,
+            )
+            LOGGER.info(
+                "COLLECTION-SNAPSHOT mode=capture path=%s rows=%d captured_at=%s",
+                _timing_log_value(capture_collection_snapshot_path),
+                len(collection_batch.rows),
+                collection_batch.captured_at.isoformat(),
+            )
+    assert collection_batch is not None
+    collection_stats = _collection_stats_from_batch(collection_batch)
+    rows = collection_batch.mutable_rows()
+    errors = list(collection_batch.errors)
     workday_transport = summarize_workday_transport(collection_stats)
     _log_workday_transport(workday_transport)
-    owned_health_store = health_store is None
-    active_health_store = health_store or SourceHealthStore(seen_store.path)
-    try:
-        health_states, health_transitions = active_health_store.record_attempts(
-            collection_stats.source_attempts
-        )
-    finally:
-        if owned_health_store:
-            active_health_store.close()
+    with _timed_stage("health_state_persistence"):
+        if replay_mode:
+            health_states, health_transitions = _ephemeral_health_state(
+                collection_stats.source_attempts
+            )
+        else:
+            owned_health_store = health_store is None
+            active_health_store = health_store or SourceHealthStore(seen_store.path)
+            try:
+                health_states, health_transitions = active_health_store.record_attempts(
+                    collection_stats.source_attempts
+                )
+            finally:
+                if owned_health_store:
+                    active_health_store.close()
     company_coverage = calculate_company_coverage(
         config.companies,
         collection_stats.source_attempts,
@@ -270,52 +460,68 @@ def run_once(
         collection_stats.github_feeds_succeeded,
     )
     LOGGER.info("Analyzing %d fetched row(s)...", len(rows))
-    jobs, duplicate_report = analyze_rows(
-        rows,
-        today=today,
-        include_dedupe_report=True,
-        include_audit_diagnostics=True,
-    )
-    duplicate_report = enrich_duplicate_entries(rows, duplicate_report)
-    cross_source_duplicates_merged = sum(
-        1
-        for duplicate in duplicate_report
-        if duplicate.get("cross_source") is True
-    )
-    LOGGER.info("Filtering %d scored job(s)...", len(jobs))
-    eligibility_exclusions = _categorical_exclusion_audit(
-        jobs,
-        target_roles=config.target_roles,
-    )
-    if eligibility_exclusions:
-        reason_counts = Counter(
-            str(item["exclusion_reason"]) for item in eligibility_exclusions
-        )
-        LOGGER.info(
-            "Categorical eligibility exclusions: total=%d reasons=%s",
-            len(eligibility_exclusions),
-            ",".join(
-                f"{reason}={count}"
-                for reason, count in sorted(reason_counts.items())
+    with _timed_stage("analysis"):
+        cached_analysis = analyze_rows_with_cache(
+            rows,
+            db_path=seen_store.path,
+            enabled=config.analysis_cache_enabled,
+            today=current_date,
+            include_audit_diagnostics=True,
+            accessed_at=(
+                datetime.now(timezone.utc)
+                if replay_mode
+                else observed_at
             ),
         )
-    matches = filter_matches(jobs, target_roles=config.target_roles, min_score=config.min_score)
-    if alumni_index is None:
-        alumni_index, alumni_status = load_default_alumni()
-    else:
-        alumni_status = status_for_injected_index(alumni_index)
-    LOGGER.info(
-        "Alumni CSV status: alumni_csv_status=%s alumni_records_loaded=%d alumni_employers_indexed=%d",
-        alumni_status.status,
-        alumni_status.records_loaded,
-        alumni_status.employers_indexed,
-    )
-    matches = attach_alumni(
-        matches,
-        alumni_index,
-        companies=config.companies,
-    )
-    notification_selection = seen_store.partition(matches)
+        jobs = cached_analysis.jobs
+        duplicate_report = cached_analysis.duplicate_report
+        duplicate_report = enrich_duplicate_entries(rows, duplicate_report)
+        cross_source_duplicates_merged = sum(
+            1
+            for duplicate in duplicate_report
+            if duplicate.get("cross_source") is True
+        )
+    LOGGER.info("Filtering %d scored job(s)...", len(jobs))
+    with _timed_stage("filtering_eligibility"):
+        eligibility_exclusions = _categorical_exclusion_audit(
+            jobs,
+            target_roles=config.target_roles,
+        )
+        if eligibility_exclusions:
+            reason_counts = Counter(
+                str(item["exclusion_reason"]) for item in eligibility_exclusions
+            )
+            LOGGER.info(
+                "Categorical eligibility exclusions: total=%d reasons=%s",
+                len(eligibility_exclusions),
+                ",".join(
+                    f"{reason}={count}"
+                    for reason, count in sorted(reason_counts.items())
+                ),
+            )
+        matches = filter_matches(
+            jobs,
+            target_roles=config.target_roles,
+            min_score=config.min_score,
+        )
+    with _timed_stage("alumni_loading_matching"):
+        if alumni_index is None:
+            alumni_index, alumni_status = load_default_alumni()
+        else:
+            alumni_status = status_for_injected_index(alumni_index)
+        LOGGER.info(
+            "Alumni CSV status: alumni_csv_status=%s alumni_records_loaded=%d alumni_employers_indexed=%d",
+            alumni_status.status,
+            alumni_status.records_loaded,
+            alumni_status.employers_indexed,
+        )
+        matches = attach_alumni(
+            matches,
+            alumni_index,
+            companies=config.companies,
+        )
+    with _timed_stage("seen_store_partitioning"):
+        notification_selection = seen_store.partition(matches)
     new_matches = notification_selection.pending
     previously_emailed = notification_selection.emailed
     explicitly_primed = notification_selection.primed
@@ -333,99 +539,127 @@ def run_once(
     _log_suppressed_postings("previously emailed", previously_emailed)
     _log_suppressed_postings("explicitly primed", explicitly_primed)
 
-    digest_sent = False
-    if notification_mode == RUN_MODE_PRIME:
-        LOGGER.info("Explicit-prime mode: email transport was not invoked.")
-    elif digest_sender is None:
-        digest_sent = send_digest(
-            new_matches,
-            alumni_summary=alumni_status.as_dict(),
-            active_terms=config.terms,
-            season_status=active_season_status,
-        )
-    else:
-        digest_sent = digest_sender(new_matches)
-
-    if notification_mode == RUN_MODE_DRY:
+    with _timed_stage("digest_email_handling"):
         digest_sent = False
-        seen_marked = 0
-        LOGGER.info(
-            "Dry-run mode: left %d posting(s) pending; notification state unchanged.",
-            len(new_matches),
-        )
-    elif notification_mode == RUN_MODE_PRIME:
-        seen_marked = len(new_matches)
-        if new_matches:
+        if replay_mode:
+            LOGGER.info(
+                "Collection replay: email transport and notification writes were not invoked."
+            )
+        elif notification_mode == RUN_MODE_DRY:
+            LOGGER.info(
+                "Dry-run mode: email transport was not invoked."
+            )
+        elif notification_mode == RUN_MODE_PRIME:
+            LOGGER.info("Explicit-prime mode: email transport was not invoked.")
+        elif digest_sender is None:
+            digest_sent = send_digest(
+                new_matches,
+                alumni_summary=alumni_status.as_dict(),
+                active_terms=config.terms,
+                season_status=active_season_status,
+            )
+        else:
+            digest_sent = digest_sender(new_matches)
+
+        if notification_mode == RUN_MODE_DRY:
+            seen_marked = 0
+            LOGGER.info(
+                "Dry-run mode: left %d posting(s) pending; notification state unchanged.",
+                len(new_matches),
+            )
+        elif notification_mode == RUN_MODE_PRIME:
+            seen_marked = len(new_matches)
+            if new_matches:
+                timestamp = seen_at or datetime.now(timezone.utc)
+                seen_store.mark_many_primed(new_matches, primed_at=timestamp)
+            LOGGER.info(
+                "Explicit-prime mode: marked %d posting(s) with primed_at.",
+                seen_marked,
+            )
+        elif digest_sent:
+            seen_marked = len(new_matches)
             timestamp = seen_at or datetime.now(timezone.utc)
-            seen_store.mark_many_primed(new_matches, primed_at=timestamp)
-        LOGGER.info(
-            "Explicit-prime mode: marked %d posting(s) with primed_at.",
-            seen_marked,
+            seen_store.mark_many_emailed(new_matches, emailed_at=timestamp)
+            LOGGER.info(
+                "Digest sent; marked %d posting(s) with emailed_at.",
+                seen_marked,
+            )
+        else:
+            seen_marked = 0
+            LOGGER.info(
+                "Live digest was not sent; left %d posting(s) pending.",
+                len(new_matches),
+            )
+    with _timed_stage("source_comparison_generation_persistence"):
+        source_comparison = build_source_comparison(
+            config=config,
+            jobs=jobs,
+            seen_store=seen_store,
+            run_id=active_run_id,
+            observed_at=observed_at,
+            duplicate_report=duplicate_report,
+            coverage=company_coverage,
+            source_attempts=collection_stats.source_attempts,
+            source_health_states=health_states,
         )
-    elif digest_sent:
-        seen_marked = len(new_matches)
-        timestamp = seen_at or datetime.now(timezone.utc)
-        seen_store.mark_many_emailed(new_matches, emailed_at=timestamp)
-        LOGGER.info(
-            "Digest sent; marked %d posting(s) with emailed_at.",
-            seen_marked,
-        )
-    else:
-        seen_marked = 0
-        LOGGER.info(
-            "Live digest was not sent; left %d posting(s) pending.",
-            len(new_matches),
-        )
-    source_comparison = build_source_comparison(
-        config=config,
-        jobs=jobs,
-        seen_store=seen_store,
-        run_id=active_run_id,
-        observed_at=observed_at,
-        duplicate_report=duplicate_report,
-        coverage=company_coverage,
-        source_attempts=collection_stats.source_attempts,
-        source_health_states=health_states,
-    )
-    source_comparison_persisted = False
-    try:
-        with SourceComparisonStore(seen_store.path) as comparison_store:
-            comparison_store.save(source_comparison)
-        source_comparison_persisted = True
-    except Exception as exc:  # observability must not alter notification semantics
-        LOGGER.error(
-            "Source-comparison persistence failed: %s",
-            sanitize_error(exc),
-        )
+        source_comparison_persisted = False
+        if replay_mode:
+            LOGGER.info(
+                "Collection replay: source comparison built in memory and not persisted."
+            )
+        else:
+            try:
+                with SourceComparisonStore(seen_store.path) as comparison_store:
+                    comparison_store.save(source_comparison)
+                source_comparison_persisted = True
+            except Exception as exc:  # observability must not alter notification semantics
+                LOGGER.error(
+                    "Source-comparison persistence failed: %s",
+                    sanitize_error(exc),
+                )
     active_health_alert_policy = health_alert_policy or HealthAlertPolicy(
         mode=HEALTH_EMAIL_OFF
     )
-    try:
-        health_alert_result = evaluate_and_send_health_alerts(
-            db_path=seen_store.path,
-            policy=active_health_alert_policy,
-            run_id=active_run_id,
-            observed_at=observed_at,
-            states=health_states,
-            transitions=health_transitions,
-            coverage=company_coverage,
-            summary=health_summary,
-            comparison=source_comparison,
-            sender=health_alert_sender,
-        )
-    except Exception as exc:  # alert diagnostics must not alter match delivery
-        alert_error = sanitize_error(exc)
-        LOGGER.error("Source-health alert evaluation failed: %s", alert_error)
-        health_alert_result = HealthAlertResult(
-            mode=active_health_alert_policy.mode,
-            candidates=0,
-            sent=False,
-            suppressed_by_cooldown=0,
-            recovery_alerts=0,
-            subject="",
-            error=alert_error,
-            daily_summary_sent=False,
-        )
+    with _timed_stage("health_alert_evaluation"):
+        if replay_mode:
+            health_alert_result = HealthAlertResult(
+                mode=HEALTH_EMAIL_OFF,
+                candidates=0,
+                sent=False,
+                suppressed_by_cooldown=0,
+                recovery_alerts=0,
+                subject="",
+                error=None,
+                daily_summary_sent=False,
+            )
+            LOGGER.info("Collection replay: source-health alerts were not evaluated.")
+        else:
+            try:
+                health_alert_result = evaluate_and_send_health_alerts(
+                    db_path=seen_store.path,
+                    policy=active_health_alert_policy,
+                    run_id=active_run_id,
+                    observed_at=observed_at,
+                    states=health_states,
+                    transitions=health_transitions,
+                    coverage=company_coverage,
+                    summary=health_summary,
+                    comparison=source_comparison,
+                    sender=health_alert_sender,
+                )
+            except Exception as exc:  # alert diagnostics must not alter match delivery
+                alert_error = sanitize_error(exc)
+                LOGGER.error("Source-health alert evaluation failed: %s", alert_error)
+                health_alert_result = HealthAlertResult(
+                    mode=active_health_alert_policy.mode,
+                    candidates=0,
+                    sent=False,
+                    suppressed_by_cooldown=0,
+                    recovery_alerts=0,
+                    subject="",
+                    error=alert_error,
+                    daily_summary_sent=False,
+                )
     return RunResult(
         rows_fetched=len(rows),
         jobs_scored=len(jobs),
@@ -455,15 +689,109 @@ def run_once(
         company_coverage=company_coverage,
         health_summary=health_summary,
         workday_transport=workday_transport,
+        analysis_cache_stats=cached_analysis.stats,
         alumni_status_message=alumni_status.message,
         eligibility_exclusions=eligibility_exclusions,
         source_comparison=source_comparison,
         health_alert_result=health_alert_result,
         source_comparison_persisted=source_comparison_persisted,
+        jobs=jobs,
+        duplicate_report=duplicate_report,
+        collection_replayed=replay_mode,
     )
 
 
 def collect_rows(
+    config: WatcherConfig,
+    *,
+    direct_sources: dict[str, object] | None = None,
+    github_source: object | None = None,
+    stats: CollectionStats | None = None,
+    run_id: str | None = None,
+    observed_at: datetime | None = None,
+) -> tuple[list[dict], list[str]]:
+    batch = collect_batch(
+        config,
+        direct_sources=direct_sources,
+        github_source=github_source,
+        stats=stats,
+        run_id=run_id,
+        observed_at=observed_at,
+    )
+    return batch.mutable_rows(), list(batch.errors)
+
+
+def collect_batch(
+    config: WatcherConfig,
+    *,
+    direct_sources: dict[str, object] | None = None,
+    github_source: object | None = None,
+    stats: CollectionStats | None = None,
+    run_id: str | None = None,
+    observed_at: datetime | None = None,
+    captured_at: datetime | None = None,
+) -> CollectionBatch:
+    """Run normal live collection and return its complete replayable result."""
+
+    active_stats = stats if stats is not None else CollectionStats()
+    with _timed_stage("collection"):
+        rows, errors = _collect_rows(
+            config,
+            direct_sources=direct_sources,
+            github_source=github_source,
+            stats=active_stats,
+            run_id=run_id,
+            observed_at=observed_at,
+        )
+    return CollectionBatch.create(
+        captured_at=captured_at or datetime.now(timezone.utc),
+        collection_config_fingerprint=collection_config_fingerprint(config),
+        rows=rows,
+        errors=errors,
+        source_attempts=active_stats.source_attempts,
+        github_feeds_configured=active_stats.github_feeds_configured,
+        github_feeds_succeeded=active_stats.github_feeds_succeeded,
+        workday_attempted=active_stats.workday_attempted,
+        workday_succeeded=active_stats.workday_succeeded,
+        workday_failed=active_stats.workday_failed,
+        workday_request_attempts=active_stats.workday_request_attempts,
+        workday_retry_attempts=active_stats.workday_retry_attempts,
+        workday_failure_codes=active_stats.workday_failure_codes,
+    )
+
+
+def _collection_stats_from_batch(batch: CollectionBatch) -> CollectionStats:
+    return CollectionStats(
+        github_feeds_configured=batch.github_feeds_configured,
+        github_feeds_succeeded=batch.github_feeds_succeeded,
+        source_attempts=list(batch.source_attempts),
+        workday_attempted=batch.workday_attempted,
+        workday_succeeded=batch.workday_succeeded,
+        workday_failed=batch.workday_failed,
+        workday_request_attempts=batch.workday_request_attempts,
+        workday_retry_attempts=batch.workday_retry_attempts,
+        workday_failure_codes=Counter(dict(batch.workday_failure_codes)),
+    )
+
+
+def _ephemeral_health_state(
+    attempts: list[SourceAttempt],
+) -> tuple[dict[str, SourceHealthState], tuple[HealthTransition, ...]]:
+    """Calculate replay diagnostics without reading or writing health history."""
+
+    states: dict[str, SourceHealthState] = {}
+    transitions: list[HealthTransition] = []
+    for attempt in attempts:
+        previous = states.get(attempt.health_key)
+        current = calculate_next_state(previous, attempt)
+        states[current.health_key] = current
+        transition = transition_for(previous, current)
+        if transition is not None:
+            transitions.append(transition)
+    return states, tuple(transitions)
+
+
+def _collect_rows(
     config: WatcherConfig,
     *,
     direct_sources: dict[str, object] | None = None,
@@ -500,197 +828,293 @@ def collect_rows(
     github_rows: list[dict] = []
     errors: list[str] = []
 
-    for company in config.companies:
-        if company.ats in {"bespoke", "github_only"}:
-            LOGGER.info("Skipping direct fetch for %s (%s).", company.name, company.ats)
-            stats.source_attempts.append(
-                SourceAttempt(
-                    health_key=direct_health_key(company.name, company.ats),
-                    run_id=active_run_id,
-                    observed_at=active_observed_at,
-                    source_kind=SOURCE_KIND_DIRECT,
+    with _timed_stage("direct_source_collection"):
+        for company in config.companies:
+            if company.ats in {"bespoke", "github_only"}:
+                LOGGER.info("Skipping direct fetch for %s (%s).", company.name, company.ats)
+                stats.source_attempts.append(
+                    SourceAttempt(
+                        health_key=direct_health_key(company.name, company.ats),
+                        run_id=active_run_id,
+                        observed_at=active_observed_at,
+                        source_kind=SOURCE_KIND_DIRECT,
+                        company=company.name,
+                        adapter=company.ats,
+                        attempted=False,
+                        succeeded=None,
+                        rows_returned=None,
+                        unsupported_reason=company.ats,
+                    )
+                )
+                continue
+            source = direct_sources.get(company.ats)
+            if source is None:
+                _record_error(
+                    errors,
+                    f"{company.name}: no source registered for ats '{company.ats}'",
+                )
+                stats.source_attempts.append(
+                    _failed_attempt(
+                        health_key=direct_health_key(company.name, company.ats),
+                        run_id=active_run_id,
+                        observed_at=active_observed_at,
+                        source_kind=SOURCE_KIND_DIRECT,
+                        company=company.name,
+                        adapter=company.ats,
+                        error_kind=ERROR_MISSING_ADAPTER,
+                        error=RuntimeError(
+                            f"no source registered for ats '{company.ats}'"
+                        ),
+                    )
+                )
+                continue
+            is_workday = company.ats == "workday"
+            if is_workday:
+                stats.workday_attempted += 1
+            fetch_started = time.perf_counter()
+            fetch_succeeded = False
+            fetch_rows = 0
+            fetch_error: Exception | None = None
+            try:
+                LOGGER.info("Fetching %s via %s...", company.name, company.ats)
+                rows = source.fetch(company)
+                direct_rows.extend(rows)
+                fetch_rows = len(rows)
+                fetch_succeeded = True
+                LOGGER.info("Fetched %d direct row(s) for %s.", len(rows), company.name)
+                stats.source_attempts.append(
+                    _successful_attempt(
+                        health_key=direct_health_key(company.name, company.ats),
+                        run_id=active_run_id,
+                        observed_at=active_observed_at,
+                        source_kind=SOURCE_KIND_DIRECT,
+                        company=company.name,
+                        adapter=company.ats,
+                        rows_returned=len(rows),
+                    )
+                )
+                if is_workday:
+                    stats.workday_succeeded += 1
+                    stats.workday_request_attempts += _workday_request_count(
+                        source
+                    )
+                    stats.workday_retry_attempts += _workday_retry_count(source)
+            except SourceSchemaError as exc:
+                fetch_error = exc
+                if is_workday:
+                    _record_workday_failure(stats, source, "schema_failure")
+                _record_error(errors, f"{company.name}: {exc}")
+                stats.source_attempts.append(
+                    _failed_direct_attempt(
+                        company,
+                        active_run_id,
+                        active_observed_at,
+                        ERROR_SCHEMA,
+                        exc,
+                    )
+                )
+            except SourceFetchError as exc:
+                fetch_error = exc
+                if is_workday:
+                    _record_workday_failure(stats, source, exc.error_code, error=exc)
+                _record_error(errors, f"{company.name}: {exc}")
+                stats.source_attempts.append(
+                    _failed_direct_attempt(
+                        company,
+                        active_run_id,
+                        active_observed_at,
+                        _fetch_error_kind(exc),
+                        exc,
+                    )
+                )
+            except SourceError as exc:
+                fetch_error = exc
+                if is_workday:
+                    _record_workday_failure(stats, source, "source_failure")
+                _record_error(errors, f"{company.name}: {exc}")
+                stats.source_attempts.append(
+                    _failed_direct_attempt(
+                        company,
+                        active_run_id,
+                        active_observed_at,
+                        ERROR_SOURCE,
+                        exc,
+                    )
+                )
+            except Exception as exc:  # defensive run-loop boundary
+                fetch_error = exc
+                if is_workday:
+                    _record_workday_failure(stats, source, "unexpected_exception")
+                _record_error(
+                    errors,
+                    f"{company.name}: unexpected {type(exc).__name__}: {exc}",
+                )
+                stats.source_attempts.append(
+                    _failed_direct_attempt(
+                        company,
+                        active_run_id,
+                        active_observed_at,
+                        ERROR_UNEXPECTED,
+                        exc,
+                    )
+                )
+            finally:
+                _log_source_timing(
                     company=company.name,
                     adapter=company.ats,
-                    attempted=False,
-                    succeeded=None,
-                    rows_returned=None,
-                    unsupported_reason=company.ats,
+                    success=fetch_succeeded,
+                    elapsed_seconds=time.perf_counter() - fetch_started,
+                    rows_returned=fetch_rows,
+                    source=source,
+                    error=fetch_error,
                 )
-            )
-            continue
-        source = direct_sources.get(company.ats)
-        if source is None:
-            _record_error(errors, f"{company.name}: no source registered for ats '{company.ats}'")
-            stats.source_attempts.append(
-                _failed_attempt(
-                    health_key=direct_health_key(company.name, company.ats),
-                    run_id=active_run_id,
-                    observed_at=active_observed_at,
-                    source_kind=SOURCE_KIND_DIRECT,
-                    company=company.name,
-                    adapter=company.ats,
-                    error_kind=ERROR_MISSING_ADAPTER,
-                    error=RuntimeError(f"no source registered for ats '{company.ats}'"),
-                )
-            )
-            continue
-        is_workday = company.ats == "workday"
-        if is_workday:
-            stats.workday_attempted += 1
-        try:
-            LOGGER.info("Fetching %s via %s...", company.name, company.ats)
-            rows = source.fetch(company)
-            direct_rows.extend(rows)
-            LOGGER.info("Fetched %d direct row(s) for %s.", len(rows), company.name)
-            stats.source_attempts.append(
-                _successful_attempt(
-                    health_key=direct_health_key(company.name, company.ats),
-                    run_id=active_run_id,
-                    observed_at=active_observed_at,
-                    source_kind=SOURCE_KIND_DIRECT,
-                    company=company.name,
-                    adapter=company.ats,
-                    rows_returned=len(rows),
-                )
-            )
-            if is_workday:
-                stats.workday_succeeded += 1
-                stats.workday_retry_attempts += _workday_retry_count(source)
-        except SourceSchemaError as exc:
-            if is_workday:
-                _record_workday_failure(stats, source, "schema_failure")
-            _record_error(errors, f"{company.name}: {exc}")
-            stats.source_attempts.append(
-                _failed_direct_attempt(company, active_run_id, active_observed_at, ERROR_SCHEMA, exc)
-            )
-        except SourceFetchError as exc:
-            if is_workday:
-                _record_workday_failure(stats, source, exc.error_code, error=exc)
-            _record_error(errors, f"{company.name}: {exc}")
-            stats.source_attempts.append(
-                _failed_direct_attempt(
-                    company,
-                    active_run_id,
-                    active_observed_at,
-                    _fetch_error_kind(exc),
-                    exc,
-                )
-            )
-        except SourceError as exc:
-            if is_workday:
-                _record_workday_failure(stats, source, "source_failure")
-            _record_error(errors, f"{company.name}: {exc}")
-            stats.source_attempts.append(
-                _failed_direct_attempt(company, active_run_id, active_observed_at, ERROR_SOURCE, exc)
-            )
-        except Exception as exc:  # defensive run-loop boundary
-            if is_workday:
-                _record_workday_failure(stats, source, "unexpected_exception")
-            _record_error(errors, f"{company.name}: unexpected {type(exc).__name__}: {exc}")
-            stats.source_attempts.append(
-                _failed_direct_attempt(company, active_run_id, active_observed_at, ERROR_UNEXPECTED, exc)
-            )
 
-    for source_config, source in github_sources:
-        configured_url = source_config.url if source_config else _github_source_url(source)
-        source_name = source_config.name if source_config else _github_source_name(source)
-        adapter = source_config.format if source_config else _github_source_adapter(source)
-        safe_url = sanitize_feed_label(configured_url or _github_source_label(source))
-        label = (
-            safe_url
-            if source_config and source_config.name.startswith("legacy_simplify_")
-            else sanitize_feed_label(f"{source_name} [{safe_url}]")
-        )
-        health_key = github_feed_health_key(configured_url or safe_url)
-        before = len(github_rows)
-        try:
-            LOGGER.info("Fetching GitHub listings backstop source %s...", label)
-            if hasattr(source, "fetch_many"):
-                github_rows.extend(source.fetch_many(config.companies))
-            else:
-                for company in config.companies:
-                    github_rows.extend(source.fetch(company))
-            stats.github_feeds_succeeded += 1
-            LOGGER.info(
-                "Fetched %d GitHub backstop row(s) from %s.",
-                len(github_rows) - before,
-                label,
+    with _timed_stage("github_backstop_collection"):
+        for source_config, source in github_sources:
+            configured_url = (
+                source_config.url if source_config else _github_source_url(source)
             )
-            stats.source_attempts.append(
-                _successful_attempt(
-                    health_key=health_key,
-                    run_id=active_run_id,
-                    observed_at=active_observed_at,
-                    source_kind=SOURCE_KIND_GITHUB_FEED,
-                    company=None,
-                    adapter=adapter,
-                    rows_returned=len(github_rows) - before,
-                    feed_label=label,
+            source_name = (
+                source_config.name if source_config else _github_source_name(source)
+            )
+            adapter = (
+                source_config.format
+                if source_config
+                else _github_source_adapter(source)
+            )
+            safe_url = sanitize_feed_label(
+                configured_url or _github_source_label(source)
+            )
+            label = (
+                safe_url
+                if source_config
+                and source_config.name.startswith("legacy_simplify_")
+                else sanitize_feed_label(f"{source_name} [{safe_url}]")
+            )
+            health_key = github_feed_health_key(configured_url or safe_url)
+            before = len(github_rows)
+            fetch_started = time.perf_counter()
+            fetch_succeeded = False
+            fetch_rows = 0
+            fetch_error: Exception | None = None
+            try:
+                LOGGER.info(
+                    "Fetching GitHub listings backstop source %s...",
+                    label,
                 )
-            )
-        except SourceSchemaError as exc:
-            _record_error(errors, f"github listings ({label}): {_sanitize_error(exc)}")
-            stats.source_attempts.append(
-                _failed_attempt(
-                    health_key=health_key,
-                    run_id=active_run_id,
-                    observed_at=active_observed_at,
-                    source_kind=SOURCE_KIND_GITHUB_FEED,
-                    company=None,
-                    adapter=adapter,
-                    error_kind=ERROR_SCHEMA,
-                    error=exc,
-                    feed_label=label,
+                if hasattr(source, "fetch_many"):
+                    github_rows.extend(source.fetch_many(config.companies))
+                else:
+                    for company in config.companies:
+                        github_rows.extend(source.fetch(company))
+                fetch_rows = len(github_rows) - before
+                fetch_succeeded = True
+                stats.github_feeds_succeeded += 1
+                LOGGER.info(
+                    "Fetched %d GitHub backstop row(s) from %s.",
+                    len(github_rows) - before,
+                    label,
                 )
-            )
-        except SourceFetchError as exc:
-            _record_error(errors, f"github listings ({label}): {_sanitize_error(exc)}")
-            stats.source_attempts.append(
-                _failed_attempt(
-                    health_key=health_key,
-                    run_id=active_run_id,
-                    observed_at=active_observed_at,
-                    source_kind=SOURCE_KIND_GITHUB_FEED,
-                    company=None,
-                    adapter=adapter,
-                    error_kind=ERROR_FETCH,
-                    error=exc,
-                    feed_label=label,
+                stats.source_attempts.append(
+                    _successful_attempt(
+                        health_key=health_key,
+                        run_id=active_run_id,
+                        observed_at=active_observed_at,
+                        source_kind=SOURCE_KIND_GITHUB_FEED,
+                        company=None,
+                        adapter=adapter,
+                        rows_returned=len(github_rows) - before,
+                        feed_label=label,
+                    )
                 )
-            )
-        except SourceError as exc:
-            _record_error(errors, f"github listings ({label}): {_sanitize_error(exc)}")
-            stats.source_attempts.append(
-                _failed_attempt(
-                    health_key=health_key,
-                    run_id=active_run_id,
-                    observed_at=active_observed_at,
-                    source_kind=SOURCE_KIND_GITHUB_FEED,
-                    company=None,
-                    adapter=adapter,
-                    error_kind=ERROR_SOURCE,
-                    error=exc,
-                    feed_label=label,
+            except SourceSchemaError as exc:
+                fetch_error = exc
+                _record_error(
+                    errors,
+                    f"github listings ({label}): {_sanitize_error(exc)}",
                 )
-            )
-        except Exception as exc:  # defensive run-loop boundary
-            _record_error(
-                errors,
-                f"github listings ({label}): unexpected {type(exc).__name__}: {_sanitize_error(exc)}",
-            )
-            stats.source_attempts.append(
-                _failed_attempt(
-                    health_key=health_key,
-                    run_id=active_run_id,
-                    observed_at=active_observed_at,
-                    source_kind=SOURCE_KIND_GITHUB_FEED,
-                    company=None,
-                    adapter=adapter,
-                    error_kind=ERROR_UNEXPECTED,
-                    error=exc,
-                    feed_label=label,
+                stats.source_attempts.append(
+                    _failed_attempt(
+                        health_key=health_key,
+                        run_id=active_run_id,
+                        observed_at=active_observed_at,
+                        source_kind=SOURCE_KIND_GITHUB_FEED,
+                        company=None,
+                        adapter=adapter,
+                        error_kind=ERROR_SCHEMA,
+                        error=exc,
+                        feed_label=label,
+                    )
                 )
-            )
+            except SourceFetchError as exc:
+                fetch_error = exc
+                _record_error(
+                    errors,
+                    f"github listings ({label}): {_sanitize_error(exc)}",
+                )
+                stats.source_attempts.append(
+                    _failed_attempt(
+                        health_key=health_key,
+                        run_id=active_run_id,
+                        observed_at=active_observed_at,
+                        source_kind=SOURCE_KIND_GITHUB_FEED,
+                        company=None,
+                        adapter=adapter,
+                        error_kind=ERROR_FETCH,
+                        error=exc,
+                        feed_label=label,
+                    )
+                )
+            except SourceError as exc:
+                fetch_error = exc
+                _record_error(
+                    errors,
+                    f"github listings ({label}): {_sanitize_error(exc)}",
+                )
+                stats.source_attempts.append(
+                    _failed_attempt(
+                        health_key=health_key,
+                        run_id=active_run_id,
+                        observed_at=active_observed_at,
+                        source_kind=SOURCE_KIND_GITHUB_FEED,
+                        company=None,
+                        adapter=adapter,
+                        error_kind=ERROR_SOURCE,
+                        error=exc,
+                        feed_label=label,
+                    )
+                )
+            except Exception as exc:  # defensive run-loop boundary
+                fetch_error = exc
+                _record_error(
+                    errors,
+                    f"github listings ({label}): unexpected "
+                    f"{type(exc).__name__}: {_sanitize_error(exc)}",
+                )
+                stats.source_attempts.append(
+                    _failed_attempt(
+                        health_key=health_key,
+                        run_id=active_run_id,
+                        observed_at=active_observed_at,
+                        source_kind=SOURCE_KIND_GITHUB_FEED,
+                        company=None,
+                        adapter=adapter,
+                        error_kind=ERROR_UNEXPECTED,
+                        error=exc,
+                        feed_label=label,
+                    )
+                )
+            finally:
+                _log_source_timing(
+                    company="all",
+                    adapter=adapter,
+                    source_name=source_name,
+                    success=fetch_succeeded,
+                    elapsed_seconds=time.perf_counter() - fetch_started,
+                    rows_returned=fetch_rows,
+                    source=source,
+                    error=fetch_error,
+                )
 
     # Direct rows first: backend dedupe keeps the first row's extra metadata,
     # so this implements the direct-over-GitHub source-priority rule.
@@ -909,54 +1333,158 @@ def print_heartbeat(result: RunResult, *, output: TextIO | None = None) -> None:
     )
 
 
+def _parse_today(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "--today must use YYYY-MM-DD"
+        ) from exc
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the internship watcher once and print new matches.")
-    parser.add_argument("--watchlist", default=str(DEFAULT_WATCHLIST_PATH), help="Path to watchlist.yml")
-    parser.add_argument("--seen-db", help="Path to SQLite seen-store")
-    parser.add_argument(
-        "--health-report",
-        help="Write the sanitized machine-readable source-health JSON report to this path.",
-    )
-    parser.add_argument(
-        "--prime-seen",
-        "--mark-seen-without-send",
-        dest="prime_seen",
-        action="store_true",
-        help="Explicitly prime/suppress current matches without sending email.",
-    )
-    args = parser.parse_args(argv)
+    with _timed_stage("watcher_runtime"):
+        with _timed_stage("configuration_startup"):
+            parser = argparse.ArgumentParser(
+                description="Run the internship watcher once and print new matches."
+            )
+            parser.add_argument(
+                "--watchlist",
+                default=str(DEFAULT_WATCHLIST_PATH),
+                help="Path to watchlist.yml",
+            )
+            parser.add_argument("--seen-db", help="Path to SQLite seen-store")
+            parser.add_argument(
+                "--health-report",
+                help="Write the sanitized machine-readable source-health JSON report to this path.",
+            )
+            parser.add_argument(
+                "--prime-seen",
+                "--mark-seen-without-send",
+                dest="prime_seen",
+                action="store_true",
+                help="Explicitly prime/suppress current matches without sending email.",
+            )
+            snapshot_group = parser.add_mutually_exclusive_group()
+            snapshot_group.add_argument(
+                "--capture-collection-snapshot",
+                metavar="PATH",
+                help=(
+                    "Save live collection as an atomic .json.gz snapshot, then "
+                    "continue through the normal watcher pipeline."
+                ),
+            )
+            snapshot_group.add_argument(
+                "--replay-collection-snapshot",
+                metavar="PATH",
+                help=(
+                    "Skip all network collection and process a saved .json.gz "
+                    "collection snapshot in side-effect-free dry-run mode."
+                ),
+            )
+            parser.add_argument(
+                "--allow-collection-config-mismatch",
+                action="store_true",
+                help=(
+                    "Intentionally replay a snapshot captured with different "
+                    "collection-affecting configuration."
+                ),
+            )
+            parser.add_argument(
+                "--today",
+                type=_parse_today,
+                help=(
+                    "Override the effective analysis date as YYYY-MM-DD; replay "
+                    "otherwise uses the snapshot capture date."
+                ),
+            )
+            args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    config = load_watchlist(args.watchlist)
-    if args.seen_db:
-        config = replace(config, seen_db_path=Path(args.seen_db))
-    send_enabled = email_sending_enabled()
-    if send_enabled and args.prime_seen:
-        parser.error(
-            "WATCHER_SEND_EMAIL and --prime-seen cannot both be enabled"
-        )
-    notification_mode = (
-        RUN_MODE_PRIME
-        if args.prime_seen
-        else RUN_MODE_LIVE
-        if send_enabled
-        else RUN_MODE_DRY
-    )
+            logging.basicConfig(
+                level=logging.INFO,
+                format="%(levelname)s %(name)s: %(message)s",
+            )
+            config = load_watchlist(args.watchlist)
+            if args.seen_db:
+                config = replace(config, seen_db_path=Path(args.seen_db))
+            if (
+                args.allow_collection_config_mismatch
+                and not args.replay_collection_snapshot
+            ):
+                parser.error(
+                    "--allow-collection-config-mismatch requires "
+                    "--replay-collection-snapshot"
+                )
+            if args.replay_collection_snapshot and args.prime_seen:
+                parser.error(
+                    "--replay-collection-snapshot cannot be combined with --prime-seen"
+                )
+            replay_batch = None
+            if args.replay_collection_snapshot:
+                try:
+                    replay_batch = load_collection_snapshot(
+                        args.replay_collection_snapshot
+                    )
+                except CollectionSnapshotError as exc:
+                    parser.error(str(exc))
+            send_enabled = email_sending_enabled()
+            if send_enabled and args.prime_seen:
+                parser.error(
+                    "WATCHER_SEND_EMAIL and --prime-seen cannot both be enabled"
+                )
+            notification_mode = (
+                RUN_MODE_DRY
+                if replay_batch is not None
+                else
+                RUN_MODE_PRIME
+                if args.prime_seen
+                else RUN_MODE_LIVE
+                if send_enabled
+                else RUN_MODE_DRY
+            )
 
-    with SeenStore(config.seen_db_path) as seen_store:
-        result = run_once(
-            config,
-            seen_store=seen_store,
-            notification_mode=notification_mode,
-            health_alert_policy=load_health_alert_policy(),
+        try:
+            with SeenStore(
+                config.seen_db_path,
+                read_only=replay_batch is not None,
+            ) as seen_store:
+                result = run_once(
+                    config,
+                    seen_store=seen_store,
+                    notification_mode=notification_mode,
+                    health_alert_policy=(
+                        HealthAlertPolicy(mode=HEALTH_EMAIL_OFF)
+                        if replay_batch is not None
+                        else load_health_alert_policy()
+                    ),
+                    today=args.today,
+                    collection_batch=replay_batch,
+                    capture_collection_snapshot_path=(
+                        args.capture_collection_snapshot
+                    ),
+                    replay_collection_snapshot_path=(
+                        args.replay_collection_snapshot
+                    ),
+                    allow_collection_config_mismatch=(
+                        args.allow_collection_config_mismatch
+                    ),
+                )
+        except CollectionSnapshotError as exc:
+            parser.error(str(exc))
+        health_report_path = (
+            args.health_report
+            or os.getenv("WATCHER_HEALTH_REPORT_PATH", "").strip()
         )
-    health_report_path = args.health_report or os.getenv("WATCHER_HEALTH_REPORT_PATH", "").strip()
-    if health_report_path:
-        _write_result_health_report(result, health_report_path)
-        LOGGER.info("Wrote source-health JSON report: %s", health_report_path)
-    print_report(result)
-    print_heartbeat(result)
-    return 0
+        if health_report_path and replay_batch is not None:
+            LOGGER.info(
+                "Collection replay: source-health report was not written."
+            )
+        elif health_report_path:
+            _write_result_health_report(result, health_report_path)
+            LOGGER.info("Wrote source-health JSON report: %s", health_report_path)
+        print_report(result)
+        print_heartbeat(result)
+        return 0
 
 
 def _default_direct_sources() -> dict[str, object]:
@@ -1107,10 +1635,16 @@ def _fetch_error_kind(error: SourceFetchError) -> str:
 
 
 def _workday_retry_count(source: object, error: SourceFetchError | None = None) -> int:
-    diagnostics = getattr(source, "last_diagnostics", None)
-    from_source = int(getattr(diagnostics, "retry_attempts", 0) or 0)
-    from_error = max(0, int(getattr(error, "attempt_count", 1) or 1) - 1) if error else 0
-    return max(from_source, from_error)
+    _requests, retries = _source_request_counts(source, error=error)
+    return retries or 0
+
+
+def _workday_request_count(
+    source: object,
+    error: SourceFetchError | None = None,
+) -> int:
+    requests, _retries = _source_request_counts(source, error=error)
+    return requests if requests is not None else 1
 
 
 def _record_workday_failure(
@@ -1122,6 +1656,7 @@ def _record_workday_failure(
 ) -> None:
     stable_code = re.sub(r"[^a-z0-9_.-]+", "_", str(code or "unknown").casefold()).strip("_")
     stats.workday_failed += 1
+    stats.workday_request_attempts += _workday_request_count(source, error)
     stats.workday_retry_attempts += _workday_retry_count(source, error)
     stats.workday_failure_codes[stable_code or "unknown"] += 1
 

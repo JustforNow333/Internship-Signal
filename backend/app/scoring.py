@@ -17,6 +17,8 @@ from .config import BUCKET_THRESHOLDS, SCORE_WEIGHTS
 from .eligibility import (
     GRADUATE_ONLY,
     PHD_ONLY,
+    StudentEligibilityAnalysis,
+    analyze_student_eligibility,
     assess_student_eligibility,
 )
 from .normalize import days_until
@@ -45,6 +47,15 @@ SOFTWARE_FIT_TRACKS = {
     "sdet_qa_automation",
 }
 LOW_PRIORITY_FIT_TRACKS = {"it_support", "quality_test", "solutions_engineering"}
+STATIC_SCORE_CATEGORIES = (
+    "role_relevance",
+    "compensation",
+    "legitimacy",
+    "learning_value",
+    "technical_depth",
+    "effort_vs_value",
+    "location_convenience",
+)
 ROLE_TRACK_PRIORITY = {
     "backend": 0,
     "full_stack": 1,
@@ -77,7 +88,7 @@ CORE_RESUME_STACK_RE = re.compile(
     r"\bpandas\b|\bpostgres(?:ql)?\b|\bsqlite\b",
     re.I,
 )
-RESUME_STRONG_SKILL_PATTERNS = [
+_RESUME_STRONG_SKILL_PATTERN_TEXT = (
     ("Python", r"\bpython\b"),
     ("Java", r"\bjava\b(?!\s*script)"),
     ("SQL", r"\bsql\b"),
@@ -97,13 +108,21 @@ RESUME_STRONG_SKILL_PATTERNS = [
     ("spreadsheet/data apps", r"\bspreadsheet\b|\bdata apps?\b|\bdashboards?\b"),
     ("full-stack web apps", r"\bfull[- ]?stack\b|\bweb apps?\b"),
     ("Pytest/testing/evals", r"\bpytest\b|\btesting\b|\bunit tests?\b|\bevals?\b|\bevaluations?\b"),
-]
-SMALL_FIT_BONUS_PATTERNS = [
+)
+RESUME_STRONG_SKILL_PATTERNS = tuple(
+    (label, re.compile(pattern, re.I))
+    for label, pattern in _RESUME_STRONG_SKILL_PATTERN_TEXT
+)
+_SMALL_FIT_BONUS_PATTERN_TEXT = (
     ("Git/GitHub", r"\bgit\b|\bgithub\b", 2),
     ("OpenAI API/LLM app work", r"\bopenai api\b|\bllm\b|\blarge language model", 2),
     ("Vercel/Render deployment", r"\bvercel\b|\brender\b|\bdeploy(ment|ed)?\b", 2),
     ("finance/data app relevance", r"\bfinance\b|\bmarket data\b|\btrading data\b|\bspreadsheet\b|\bdata apps?\b", 2),
-]
+)
+SMALL_FIT_BONUS_PATTERNS = tuple(
+    (label, re.compile(pattern, re.I), amount)
+    for label, pattern, amount in _SMALL_FIT_BONUS_PATTERN_TEXT
+)
 CPLUS_RE = re.compile(r"\bc\+\+\b|\bcpp\b", re.I)
 GO_RUST_RE = re.compile(r"(?i:\bgolang\b|\brust\b)|\b(?:Go|GO)\b")
 LOW_LEVEL_RE = re.compile(r"low[- ]level|kernel|driver|firmware|embedded|robotics?|hardware|electrical|mechanical|manufactur|cad\b", re.I)
@@ -113,6 +132,11 @@ ANALYTICS_REPORTING_RE = re.compile(r"\banalytics\b|\breporting\b|\breports?\b|\
 DATA_SOFTWARE_RE = re.compile(r"data engineer|pipeline|etl|software|python|sql|pandas|model|machine learning|ml\b|api", re.I)
 VAGUE_TITLE_RE = re.compile(r"\btechnical intern\b|\btechnical co[- ]?op\b", re.I)
 COMMERCIAL_SUPPORT_RE = re.compile(r"commercial|customer[- ]facing|customer support|technical support|solutions?|sales|pre[- ]?sales|implementation consultant", re.I)
+ADJACENT_SOFTWARE_OWNERSHIP_RE = re.compile(
+    r"developer tooling|automation code|platform services?|cloud APIs?|"
+    r"software ownership",
+    re.I,
+)
 def _clamp(x, lo=0, hi=100):
     return max(lo, min(hi, x))
 
@@ -162,19 +186,36 @@ def _watcher_action(fit_score: int, eligible: bool, expired: bool) -> str:
     return "research_more"
 
 
-def score_role_relevance(row, role_cls, pmatch, profile):
+def score_role_relevance(
+    row,
+    role_cls,
+    pmatch,
+    profile,
+    *,
+    analysis_context=None,
+):
     track = role_cls.get("role_track") or role_cls.get("role") or "unknown"
     base = _role_track_affinity(role_cls, profile)
     if base <= 0:
         reason = _watcher_ineligible_reason(role_cls, profile) or "Role is outside the watcher target track."
         return 0, reason
 
-    text = " ".join([row.get("title", ""), row.get("description", ""), row.get("requirements", "")])
+    text = (
+        analysis_context.title_description_requirements
+        if analysis_context is not None
+        else " ".join(
+            [
+                row.get("title", ""),
+                row.get("description", ""),
+                row.get("requirements", ""),
+            ]
+        )
+    )
     backend_hit = BACKEND_FIT_RE.search(text)
     adjacent_software_ownership = bool(
         backend_hit
         or PRODUCTION_CODE_RE.search(text)
-        or re.search(r"developer tooling|automation code|platform services?|cloud APIs?|software ownership", text, re.I)
+        or ADJACENT_SOFTWARE_OWNERSHIP_RE.search(text)
     )
     if track in {"cloud", "devops"} and not adjacent_software_ownership:
         return 0, f"{role_cls.get('role_track_label')} title lacks clear coding/backend/platform software ownership."
@@ -191,7 +232,7 @@ def score_role_relevance(row, role_cls, pmatch, profile):
     small_matches = []
     small_bonus = 0
     for label, pattern, amount in SMALL_FIT_BONUS_PATTERNS:
-        if re.search(pattern, text, re.I):
+        if pattern.search(text):
             small_matches.append(label)
             small_bonus += amount
     small_bonus = min(small_bonus, 6)
@@ -236,7 +277,7 @@ def score_role_relevance(row, role_cls, pmatch, profile):
 def _pattern_labels(patterns, text: str) -> list[str]:
     labels = []
     for label, pattern in patterns:
-        if re.search(pattern, text, re.I):
+        if pattern.search(text):
             labels.append(label)
     return labels
 
@@ -349,26 +390,39 @@ def score_technical_depth(row, role_cls, tools):
     return score, expl + "."
 
 
-HOOPS = [
+_HOOP_PATTERN_TEXT = (
     (r"cover letter", "cover letter", 8),
     (r"take[- ]home|coding challenge|assessment", "take-home/assessment", 8),
     (r"video (submission|introduction|essay)", "video submission", 10),
     (r"\bessays?\b", "essay questions", 8),
     (r"\btranscript\b", "transcript", 4),
     (r"(two|three|2|3) references", "references", 5),
-]
+)
+HOOPS = tuple(
+    (re.compile(pattern, re.I), label, cost)
+    for pattern, label, cost in _HOOP_PATTERN_TEXT
+)
+EASY_APPLICATION_RE = re.compile(
+    r"easy apply|apply with (your )?resume|resume only",
+    re.I,
+)
 
 
-def score_effort(row):
-    import re
-    text = " ".join([row.get("description", ""), row.get("requirements", "")])
+def score_effort(row, *, analysis_context=None):
+    text = (
+        analysis_context.description_requirements
+        if analysis_context is not None
+        else " ".join(
+            [row.get("description", ""), row.get("requirements", "")]
+        )
+    )
     score = 70
     parts = []
     for pat, label, cost in HOOPS:
-        if re.search(pat, text, re.I):
+        if pat.search(text):
             score -= cost
             parts.append(f"-{cost} {label}")
-    if re.search(r"easy apply|apply with (your )?resume|resume only", text, re.I):
+    if EASY_APPLICATION_RE.search(text):
         score += 12
         parts.append("+12 resume-only application")
     expl = "Base 70; " + ", ".join(parts) + "." if parts else "Base 70 — no unusual application hoops mentioned."
@@ -411,11 +465,104 @@ def score_deadline(row, today):
 # Assembly
 # ---------------------------------------------------------------------------
 
-def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, profile, tools, today=None):
+def build_static_scoring_artifact(
+    row,
+    comp,
+    role_cls,
+    company_cls,
+    red_flags,
+    positive,
+    pmatch,
+    profile,
+    tools,
+    *,
+    analysis_context=None,
+    eligibility_analysis: StudentEligibilityAnalysis | None = None,
+) -> dict[str, object]:
+    """Build JSON-safe scoring inputs that cannot vary with analysis date."""
+
+    eligibility = eligibility_analysis or analyze_student_eligibility(row)
+    category_values = {
+        "role_relevance": score_role_relevance(
+            row,
+            role_cls,
+            pmatch,
+            profile,
+            analysis_context=analysis_context,
+        ),
+        "compensation": score_compensation(comp, profile),
+        "legitimacy": score_legitimacy(
+            red_flags,
+            company_cls,
+            comp,
+            positive,
+        ),
+        "learning_value": score_learning(red_flags, positive),
+        "technical_depth": score_technical_depth(row, role_cls, tools),
+        "effort_vs_value": score_effort(
+            row,
+            analysis_context=analysis_context,
+        ),
+        "location_convenience": score_location(row, profile),
+    }
+    categories = {
+        name: {
+            "score": int(round(score)),
+            "explanation": explanation,
+        }
+        for name, (score, explanation) in category_values.items()
+    }
+    return {
+        "student_eligibility": eligibility.decision.as_dict(),
+        "categories": categories,
+        "role_ineligible_reason": _watcher_ineligible_reason(
+            role_cls,
+            profile,
+        ),
+        "has_critical_red_flag": any(
+            flag["severity"] == "critical"
+            for flag in red_flags
+        ),
+        "major_red_flag_count": sum(
+            1
+            for flag in red_flags
+            if flag["severity"] == "major"
+        ),
+    }
+
+
+def score_job(
+    row,
+    comp,
+    role_cls,
+    company_cls,
+    red_flags,
+    positive,
+    pmatch,
+    profile,
+    tools,
+    today=None,
+    *,
+    analysis_context=None,
+    static_scoring=None,
+):
     today = today or date.today()
-    student_eligibility = assess_student_eligibility(row)
-    degree_level = student_eligibility.degree_level
-    degree_eligible = student_eligibility.exclusion_reason not in {
+    static = static_scoring or build_static_scoring_artifact(
+        row,
+        comp,
+        role_cls,
+        company_cls,
+        red_flags,
+        positive,
+        pmatch,
+        profile,
+        tools,
+        analysis_context=analysis_context,
+    )
+    student_eligibility = static["student_eligibility"]
+    exclusion_reason = student_eligibility.get("exclusion_reason")
+    degree_level = student_eligibility.get("degree_level")
+    degree_eligible = exclusion_reason not in {
         PHD_ONLY,
         GRADUATE_ONLY,
     }
@@ -424,22 +571,21 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
         if not degree_eligible
         else None
     )
-    categorical_eligible = student_eligibility.eligible
+    categorical_eligible = bool(student_eligibility.get("eligible"))
 
-    cat = {}
-    cat["role_relevance"] = score_role_relevance(row, role_cls, pmatch, profile)
-    cat["compensation"] = score_compensation(comp, profile)
-    cat["legitimacy"] = score_legitimacy(red_flags, company_cls, comp, positive)
-    cat["learning_value"] = score_learning(red_flags, positive)
-    cat["technical_depth"] = score_technical_depth(row, role_cls, tools)
-    cat["effort_vs_value"] = score_effort(row)
-    cat["location_convenience"] = score_location(row, profile)
     dl_score, dl_expl, days_left = score_deadline(row, today)
-    cat["deadline_urgency"] = (dl_score, dl_expl)
-
     categories = {
-        name: {"score": int(round(s)), "weight": SCORE_WEIGHTS[name], "explanation": e}
-        for name, (s, e) in cat.items()
+        name: {
+            "score": int(static["categories"][name]["score"]),
+            "weight": SCORE_WEIGHTS[name],
+            "explanation": static["categories"][name]["explanation"],
+        }
+        for name in STATIC_SCORE_CATEGORIES
+    }
+    categories["deadline_urgency"] = {
+        "score": int(round(dl_score)),
+        "weight": SCORE_WEIGHTS["deadline_urgency"],
+        "explanation": dl_expl,
     }
     total = round(sum(c["score"] * c["weight"] for c in categories.values()))
     fit_score = categories["role_relevance"]["score"]
@@ -448,13 +594,14 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
     watcher_eligible = fit_score > 0 and categorical_eligible
     fit_explanation = categories["role_relevance"]["explanation"]
     watcher_ineligible_reason = (
-        student_eligibility.exclusion_reason
+        exclusion_reason
         if not categorical_eligible
-        else _watcher_ineligible_reason(role_cls, profile) or (fit_explanation if not watcher_eligible else None)
+        else static.get("role_ineligible_reason")
+        or (fit_explanation if not watcher_eligible else None)
     )
 
-    has_critical = any(f["severity"] == "critical" for f in red_flags)
-    majors = sum(1 for f in red_flags if f["severity"] == "major")
+    has_critical = bool(static["has_critical_red_flag"])
+    majors = int(static["major_red_flag_count"])
     expired = days_left is not None and days_left < 0
 
     if not watcher_eligible:
@@ -496,7 +643,7 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
     reasons = _top_reasons(positive, categories, fit_explanation=fit_explanation, watcher_eligible=watcher_eligible)
     concerns = _top_concerns(red_flags, categories, expired)
     concern_reason = (
-        student_eligibility.explanation
+        student_eligibility.get("explanation")
         if not categorical_eligible
         else watcher_ineligible_reason
     )
@@ -521,9 +668,9 @@ def score_job(row, comp, role_cls, company_cls, red_flags, positive, pmatch, pro
         "degree_level": degree_level,
         "degree_eligible": bool(degree_eligible),
         "degree_ineligible_reason": degree_ineligible_reason,
-        "student_eligibility": student_eligibility.as_dict(),
-        "eligibility_exclusion_reason": student_eligibility.exclusion_reason,
-        "eligibility_explanation": student_eligibility.explanation,
+        "student_eligibility": dict(student_eligibility),
+        "eligibility_exclusion_reason": exclusion_reason,
+        "eligibility_explanation": student_eligibility.get("explanation"),
         "watcher_action": watcher_action,
         "watcher_action_label": ACTION_LABELS[watcher_action],
         "bucket": bucket,

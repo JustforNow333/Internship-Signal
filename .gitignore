@@ -23,6 +23,7 @@ build/
 pip-wheel-metadata/
 __pypackages__/
 *.prof
+*.pstats
 *.log
 *.tmp
 tmp/
@@ -120,6 +121,21 @@ evaluation/scoring_*_report.md
 evaluation/scoring_*_metrics.json
 
 # Local watcher scratch artifacts
+# Ad-hoc timing captures from isolated watcher runs are operational scratch.
+watcher-timing*.json
+watcher/watcher-timing*.json
+# Local performance-audit summaries stay scratch; reusable profiler scripts
+# and regression fixtures remain trackable.
+watcher-performance*.json
+watcher/watcher-performance*.json
+# Local analysis benchmark captures are scratch; the reusable benchmark
+# harness and equivalence tests stay tracked.
+analysis-benchmark*.json
+watcher/analysis-benchmark*.json
+# Local disabled/cold/warm cache benchmark summaries are scratch; cache code
+# and offline regression fixtures remain visible.
+analysis-cache-benchmark*.json
+watcher/analysis-cache-benchmark*.json
 # Downloaded or extracted GitHub Actions verification bundles, including
 # scheduled-delivery diagnostics, stay outside source control; direct JSON
 # extracts are also covered by report rules below.
@@ -183,6 +199,28 @@ workday-transport-probe*.json
 workday-transport-probe*.log
 watcher/workday-transport-probe*.json
 watcher/workday-transport-probe*.log
+# Collection snapshots contain full posting text and are local replay inputs.
+*.json.gz
+collection-snapshots/
+watcher/collection-snapshots/
+# Replay benchmark reports may include local paths and production row counts.
+collection-replay-benchmark*.json
+watcher/collection-replay-benchmark*.json
+# Focused replay profiler captures are local diagnostics.
+warm-replay-profile*.prof
+warm-replay-profile*.json
+warm-replay-profile*.log
+watcher/warm-replay-profile*.prof
+watcher/warm-replay-profile*.json
+watcher/warm-replay-profile*.log
+# Static-scoring cache benchmark reports are local performance diagnostics.
+static-scoring-cache-benchmark*.json
+watcher/static-scoring-cache-benchmark*.json
+# Repository-cleanup audit logs are local diagnostics, not source artifacts.
+cleanup-audit*.log
+cleanup-audit*.json
+watcher/cleanup-audit*.log
+watcher/cleanup-audit*.json
 # Prompt-maintained guidance and bug-audit scratch copies stay local.
 agents.local.md
 agents.*.md

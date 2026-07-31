@@ -71,6 +71,17 @@ _REQUIRED_HEADING_RE = re.compile(
     r"(?:\s+(?:qualifications?|requirements?|skills?|education))?\s*:?\s*(.*)$",
     re.I,
 )
+_QUALIFICATION_HEADING_BOUNDARY_RE = re.compile(
+    r"(?i)(?<!^)(?=\b(?:preferred|desired|minimum|required|basic|mandatory)"
+    r"(?:\s+(?:qualifications?|requirements?|skills?|education))?\s*:)"
+)
+_QUALIFICATION_LINE_SPLIT_RE = re.compile(r"[\r\n]+")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_QUALIFICATION_SEGMENT_SPLIT_RE = re.compile(r"[.!?;•]+")
+_KEY_TOKEN_RE = re.compile(r"[^a-z0-9]+")
+_CANONICAL_PHD_RE = re.compile(r"\bph\s*\.\s*d\s*\.?", re.I)
+_CANONICAL_MS_RE = re.compile(r"\bm\s*\.\s*s\s*\.?", re.I)
+_WHITESPACE_RE = re.compile(r"\s+")
 _STRUCTURED_ELIGIBILITY_KEYS = frozenset(
     {
         "academiclevel",
@@ -177,6 +188,37 @@ class StudentEligibilityDecision:
 
 
 @dataclass(frozen=True)
+class StudentEligibilityAnalysis:
+    """Date-independent eligibility result plus reusable parsed text."""
+
+    decision: StudentEligibilityDecision
+    normalized_evidence: tuple[str, ...]
+    requirements_segments: tuple[tuple[str, bool], ...]
+    description_segments: tuple[tuple[str, bool], ...]
+    restriction: dict[str, str] | None
+
+    def context_dict(self) -> dict[str, object]:
+        return {
+            "normalized_evidence": list(self.normalized_evidence),
+            "qualification_segments": {
+                "requirements": [
+                    {"text": text, "preferred": preferred}
+                    for text, preferred in self.requirements_segments
+                ],
+                "description": [
+                    {"text": text, "preferred": preferred}
+                    for text, preferred in self.description_segments
+                ],
+            },
+            "restriction": (
+                dict(self.restriction)
+                if self.restriction is not None
+                else None
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class _Evidence:
     source: str
     text: str
@@ -186,26 +228,45 @@ class _Evidence:
 def assess_student_eligibility(row: Mapping[str, object]) -> StudentEligibilityDecision:
     """Apply explicit structured, title, required, then description evidence."""
 
+    return analyze_student_eligibility(row).decision
+
+
+def analyze_student_eligibility(
+    row: Mapping[str, object],
+) -> StudentEligibilityAnalysis:
+    """Compute static eligibility once and retain its reusable parsing context."""
+
     company = str(row.get("company") or "")
+    normalized_company = _normalize_text(company)
+    requirements_segments = tuple(
+        _qualification_segments(row.get("requirements"))
+    )
+    description_segments = tuple(
+        _qualification_segments(row.get("description"))
+    )
     evidence = [
         *_structured_evidence(row),
         _Evidence("title", str(row.get("title") or ""), "title"),
         *(
             _Evidence("requirements", segment, "requirements")
-            for segment, preferred in _qualification_segments(row.get("requirements"))
+            for segment, preferred in requirements_segments
             if not preferred
         ),
         *(
             _Evidence("description", segment, "description")
-            for segment, preferred in _qualification_segments(row.get("description"))
+            for segment, preferred in description_segments
             if not preferred
         ),
     ]
-    normalized_evidence = [
-        _normalize_text(item.text)
+    prepared_evidence = [
+        (item, _normalize_text(item.text))
         for item in evidence
         if item.text.strip()
     ]
+    normalized_evidence = tuple(
+        normalized
+        for _item, normalized in prepared_evidence
+    )
     negation_detected = any(
         _NEGATED_DEGREE_REQUIREMENT_RE.search(text)
         for text in normalized_evidence
@@ -216,23 +277,25 @@ def assess_student_eligibility(row: Mapping[str, object]) -> StudentEligibilityD
         for text in normalized_evidence
     )
     structured_allowances: set[str] = set()
-    for item in evidence:
-        if not item.text.strip():
-            continue
-        normalized = _normalize_text(item.text)
+    for item, normalized in prepared_evidence:
         if item.kind == "structured":
             if _mixed_degree_eligibility(normalized):
                 structured_allowances.update({PHD_ONLY, GRADUATE_ONLY})
             if _mixed_class_year_eligibility(normalized):
                 structured_allowances.add(FRESHMAN_ONLY)
-        restriction = _restriction(item, company=company)
+        restriction = _restriction(
+            item,
+            company=company,
+            normalized_text=normalized,
+            normalized_company=normalized_company,
+        )
         if restriction is None:
             continue
         reason, degree_level = restriction
         if reason in structured_allowances:
             continue
         snippet = _bounded_evidence(item.text)
-        return StudentEligibilityDecision(
+        decision = StudentEligibilityDecision(
             eligible=False,
             exclusion_reason=reason,
             degree_level=degree_level,
@@ -246,11 +309,30 @@ def assess_student_eligibility(row: Mapping[str, object]) -> StudentEligibilityD
             negation_detected=negation_detected,
             mixed_eligibility_detected=mixed_eligibility_detected,
         )
+        return StudentEligibilityAnalysis(
+            decision=decision,
+            normalized_evidence=normalized_evidence,
+            requirements_segments=requirements_segments,
+            description_segments=description_segments,
+            restriction={
+                "exclusion_reason": reason,
+                "degree_level": degree_level,
+                "evidence_source": item.source,
+            },
+        )
 
-    return StudentEligibilityDecision(
+    decision = StudentEligibilityDecision(
         eligible=True,
         exclusion_reason=None,
-        degree_level=_allowed_degree_level(row),
+        degree_level=_allowed_degree_level(
+            row,
+            normalized_text=_normalize_text(
+                " ".join(
+                    str(row.get(field) or "")
+                    for field in ("title", "requirements", "description")
+                )
+            ),
+        ),
         evidence_source=None,
         evidence=None,
         explanation=(
@@ -261,10 +343,43 @@ def assess_student_eligibility(row: Mapping[str, object]) -> StudentEligibilityD
         negation_detected=negation_detected,
         mixed_eligibility_detected=mixed_eligibility_detected,
     )
+    return StudentEligibilityAnalysis(
+        decision=decision,
+        normalized_evidence=normalized_evidence,
+        requirements_segments=requirements_segments,
+        description_segments=description_segments,
+        restriction=None,
+    )
 
 
-def _restriction(item: _Evidence, *, company: str) -> tuple[str, str] | None:
-    text = _normalize_text(item.text)
+def student_eligibility_fingerprint_inputs(
+    row: Mapping[str, object],
+) -> list[dict[str, str]]:
+    """Return raw structured inputs consumed by student eligibility.
+
+    Canonical title/description/requirements/company fields are fingerprinted
+    separately. This intentionally excludes unrelated and volatile `extra`
+    metadata without duplicating the structured-key selection policy.
+    """
+
+    return [
+        {"source": item.source, "text": item.text, "kind": item.kind}
+        for item in _structured_evidence(row)
+    ]
+
+
+def _restriction(
+    item: _Evidence,
+    *,
+    company: str,
+    normalized_text: str | None = None,
+    normalized_company: str | None = None,
+) -> tuple[str, str] | None:
+    text = (
+        normalized_text
+        if normalized_text is not None
+        else _normalize_text(item.text)
+    )
     if not text or _PREFERENCE_RE.search(text):
         return None
     text = _NEGATED_DEGREE_REQUIREMENT_RE.sub(" ", text)
@@ -294,7 +409,12 @@ def _restriction(item: _Evidence, *, company: str) -> tuple[str, str] | None:
         direct_structured=direct_structured,
     ):
         return FRESHMAN_ONLY, "undergraduate"
-    if _returning_intern_only(text, kind=item.kind, company=company):
+    if _returning_intern_only(
+        text,
+        kind=item.kind,
+        company=company,
+        normalized_company=normalized_company,
+    ):
         return RETURNING_INTERN_ONLY, "unspecified"
     return None
 
@@ -378,7 +498,13 @@ def _freshman_only(text: str, *, kind: str, direct_structured: bool) -> bool:
     )
 
 
-def _returning_intern_only(text: str, *, kind: str, company: str) -> bool:
+def _returning_intern_only(
+    text: str,
+    *,
+    kind: str,
+    company: str,
+    normalized_company: str | None = None,
+) -> bool:
     returning_title = bool(
         re.search(r"\breturning intern(?:s|ship|ships)?\b", text)
         or re.search(r"\breturn internship\b", text)
@@ -415,7 +541,11 @@ def _returning_intern_only(text: str, *, kind: str, company: str) -> bool:
         text,
     ):
         return True
-    if not _same_employer_reference(text, company=company):
+    if not _same_employer_reference(
+        text,
+        company=company,
+        normalized_company=normalized_company,
+    ):
         return False
     return bool(
         re.search(
@@ -483,18 +613,27 @@ def _mixed_class_year_eligibility(text: str) -> bool:
     )
 
 
-def _same_employer_reference(text: str, *, company: str) -> bool:
+def _same_employer_reference(
+    text: str,
+    *,
+    company: str,
+    normalized_company: str | None = None,
+) -> bool:
     if re.search(
         r"\b(?:with|at) (?:us|our company|this company|the same company|this employer)\b"
         r"|\bhere\b",
         text,
     ):
         return True
-    normalized_company = _normalize_text(company)
-    return bool(
+    company_text = (
         normalized_company
+        if normalized_company is not None
+        else _normalize_text(company)
+    )
+    return bool(
+        company_text
         and re.search(
-            rf"\b(?:with|at) {re.escape(normalized_company)}\b",
+            rf"\b(?:with|at) {re.escape(company_text)}\b",
             text,
         )
     )
@@ -510,11 +649,19 @@ def _graduate_level(text: str) -> str:
     return "graduate"
 
 
-def _allowed_degree_level(row: Mapping[str, object]) -> str:
-    text = _normalize_text(
-        " ".join(
-            str(row.get(field) or "")
-            for field in ("title", "requirements", "description")
+def _allowed_degree_level(
+    row: Mapping[str, object],
+    *,
+    normalized_text: str | None = None,
+) -> str:
+    text = (
+        normalized_text
+        if normalized_text is not None
+        else _normalize_text(
+            " ".join(
+                str(row.get(field) or "")
+                for field in ("title", "requirements", "description")
+            )
         )
     )
     undergraduate_evidence = bool(
@@ -589,16 +736,14 @@ def _qualification_segments(value: object) -> list[tuple[str, bool]]:
     if not isinstance(value, str) or not value.strip():
         return []
     text = _canonicalize_terms(value)
-    text = re.sub(
-        r"(?i)(?<!^)(?=\b(?:preferred|desired|minimum|required|basic|mandatory)"
-        r"(?:\s+(?:qualifications?|requirements?|skills?|education))?\s*:)",
+    text = _QUALIFICATION_HEADING_BOUNDARY_RE.sub(
         "\n",
         text,
     )
     preferred = False
     segments: list[tuple[str, bool]] = []
-    for line in re.split(r"[\r\n]+", text):
-        line = re.sub(r"<[^>]+>", " ", line).strip(" \t-*•")
+    for line in _QUALIFICATION_LINE_SPLIT_RE.split(text):
+        line = _HTML_TAG_RE.sub(" ", line).strip(" \t-*•")
         if not line:
             continue
         preferred_heading = _PREFERRED_HEADING_RE.match(line)
@@ -610,7 +755,7 @@ def _qualification_segments(value: object) -> list[tuple[str, bool]]:
             if required_heading:
                 preferred = False
                 line = required_heading.group(1).strip()
-        for segment in re.split(r"[.!?;•]+", line):
+        for segment in _QUALIFICATION_SEGMENT_SPLIT_RE.split(line):
             segment = segment.strip()
             if segment:
                 segments.append((segment, preferred or bool(_PREFERENCE_RE.search(segment))))
@@ -622,23 +767,23 @@ def _preferred_key(token: str) -> bool:
 
 
 def _key_token(value: object) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+    return _KEY_TOKEN_RE.sub("", str(value or "").casefold())
 
 
 def _canonicalize_terms(value: object) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
     text = text.replace("\u2018", "'").replace("\u2019", "'")
     text = text.replace("\u2013", "-").replace("\u2014", "-")
-    text = re.sub(r"(?i)\bph\s*\.\s*d\s*\.?", "PhD", text)
-    text = re.sub(r"(?i)\bm\s*\.\s*s\s*\.?", "MS", text)
+    text = _CANONICAL_PHD_RE.sub("PhD", text)
+    text = _CANONICAL_MS_RE.sub("MS", text)
     return text
 
 
 def _normalize_text(value: object) -> str:
     text = _canonicalize_terms(value).casefold()
-    return re.sub(r"\s+", " ", text).strip()
+    return _WHITESPACE_RE.sub(" ", text).strip()
 
 
 def _bounded_evidence(value: object, limit: int = 240) -> str:
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = _WHITESPACE_RE.sub(" ", str(value or "")).strip()
     return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."

@@ -664,3 +664,87 @@ from source_health_attempts
 order by attempt_id desc
 limit 100;
 ```
+
+---
+
+## 15. Persistent static-analysis cache
+
+Watcher runs may cache date-independent backend analysis artifacts in an
+`analysis_cache` table inside the existing persistent `seen.sqlite`. Backend
+ingestion remains SQLite- and watcher-independent and exposes pure functions
+for existing deduplication, one-row static analysis, current scoring/final job
+assembly, and existing score ordering.
+
+The watcher pipeline is:
+
+`collect → deduplicate → fingerprint → batch cache lookup → analyze misses → score every row → assemble current jobs → sort → filter`
+
+Artifacts contain parsed compensation, role/company classifications, red
+flags, positive signals, profile matches, technology matches, the categorical
+student-eligibility decision and reusable qualification parsing, plus the
+seven date-independent score-category results. Deadline urgency is excluded.
+Every run rebuilds the final category mapping and weighted total, reapplies
+caps and actions, recomputes deadline/expiration values, generates final
+reasons and concerns, creates the current job ID, and assembles current row
+fields and provenance. Complete jobs and final scores are never cached.
+
+Fingerprints are SHA-256 over deterministic sorted JSON containing static row
+inputs (including canonical location/remote fields and only structured
+eligibility data selected by the backend policy), the complete loaded profile,
+the complete loaded known-company configuration, and
+`STATIC_ANALYSIS_CACHE_VERSION`. Volatile fetch, retry, health, and observation
+metadata and current source provenance are excluded unless a static analyzer
+begins consuming them. Watcher target roles remain part of dynamic filtering
+and therefore are not artifact inputs. Increment the version whenever static
+analysis behavior, inputs, technology/profile matching, compensation parsing,
+student eligibility, static scoring, or artifact schema changes.
+
+`WATCHER_ANALYSIS_CACHE_ENABLED` defaults to true. Reads are batched, new
+artifacts use one transaction, and one cleanup per run removes entries not
+accessed for 30 days. Invalid JSON, schema mismatches, and SQLite errors warn
+and fall back to fresh analysis without changing watcher completion or
+notification behavior. One `ANALYSIS-CACHE` INFO summary reports only aggregate
+counts and timings; it never logs keys, job text, URLs, or configuration
+contents.
+
+---
+
+## 16. Versioned collection snapshot and replay
+
+Live collection produces one immutable `CollectionBatch` containing its schema
+version, UTC capture timestamp, collection-configuration fingerprint, ordered
+canonical rows, sanitized errors, source attempts, GitHub feed counters, and
+Workday tenant outcomes, request/retry counts, and bounded failure diagnostics.
+Both live and replayed batches enter the same post-collection pipeline; replay
+does not copy or fork analysis, filtering, alumni, notification selection, or
+source-comparison logic.
+
+Snapshots are UTF-8 gzip JSON with a `.json.gz` suffix. Writes use a temporary
+file in the destination directory followed by atomic replacement. Serialization
+uses sorted compact JSON and a filename-free, zero-mtime gzip header so the
+same batch produces identical bytes. Loading validates the complete structure,
+rejects unknown fields, and rejects malformed, truncated, or unsupported
+versions before processing. Increment the schema version whenever the persisted
+structure changes.
+
+The collection fingerprint is deterministic SHA-256 over only ordered company
+names/aliases, ATS types and identifiers, company/global collection terms, and
+the effective ordered typed GitHub sources. Scoring, profile, known-company,
+filtering, alumni, email, seen-store, and static-analysis-cache configuration
+is intentionally absent. Replay fails on a mismatch unless
+`--allow-collection-config-mismatch` is explicitly supplied.
+
+`--capture-collection-snapshot PATH` performs normal live collection, saves the
+batch, and continues normally. `--replay-collection-snapshot PATH` skips every
+network source and is permanently operationally read-only: no internship
+email, priming/seen update, source-health observation, health alert, persisted
+health report, or persisted source comparison. In-memory health and comparison
+diagnostics remain available, and the static-analysis cache continues to work.
+Capture and replay are mutually exclusive.
+
+Replay's effective date defaults to the captured UTC date so an old collection
+is not represented as current. `--today YYYY-MM-DD` is the explicit
+date-sensitive test override. Capture/replay logs one bounded
+`COLLECTION-SNAPSHOT` summary containing mode, sanitized path, row count,
+capture time, and replay fingerprint-match status, never descriptions, feed
+URLs, or snapshot contents.

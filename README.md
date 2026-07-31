@@ -274,6 +274,170 @@ GitHub-hosted runners remain blocked, keep the GitHub backstop active and
 investigate legitimate Workday access with the provider; this project does not
 harvest cookies, rotate proxies, automate browsers, or bypass challenges.
 
+### Watcher timing logs
+
+Normal watcher runs emit stable INFO records measured with
+`time.perf_counter()`. Each attempted direct ATS or GitHub backstop fetch emits
+one `SOURCE-TIMING` line with a sanitized company/adapter identifier, success,
+three-decimal elapsed seconds, and returned-row count. GitHub feed records use
+`company=all` plus the configured source name. Adapters that expose request and
+retry diagnostics, currently Workday, add `requests` and `retries`.
+
+The run also emits `STAGE-TIMING` records for configuration/startup, direct and
+GitHub collection, total collection, health persistence, analysis,
+filtering/eligibility, alumni work, seen partitioning, digest/email handling,
+source-comparison work, health-alert evaluation, and total runtime. Timing
+records are emitted from `finally` blocks, including failed fetches, and never
+contain feed URLs, response content, secrets, alumni details, or recipients.
+They remain log-only so the existing heartbeat and health-report schemas stay
+unchanged.
+
+### Analysis performance benchmark
+
+`scripts/benchmark_analysis_context.py` exercises the normal offline
+`analyze_rows()` path at 500, 1,000, and 2,000 rows. It first compares the
+context-enabled and context-free paths as deterministic JSON and fails
+if they differ. By default it reads the ignored U.S. role-fit row export; pass
+`--input` to use another representative canonical-row JSONL file.
+
+```bash
+PYTHONPATH=.:backend python3 scripts/benchmark_analysis_context.py
+```
+
+Against the recorded Windows baseline, the shared posting-analysis context
+measured 6.555s versus 7.400s at 500 rows (11.4% faster), 13.004s versus
+14.658s at 1,000 rows (11.3% faster), and 26.244s versus 29.307s at 2,000 rows
+(10.5% faster). The fixed 74-row equivalence corpus produced identical
+serialized jobs and dedupe reports.
+
+### Persistent analysis cache
+
+The watcher caches only date-independent backend analysis artifacts in the
+`analysis_cache` table of its existing `seen.sqlite` database. The backend
+CSV/API path remains cache-independent. Every watcher run still deduplicates
+current rows first and fingerprints their static inputs. Artifacts include the
+categorical student-eligibility decision, reusable qualification parsing, and
+the seven non-deadline scoring category results. Every run still recomputes
+deadline urgency and expiration, reconstructs the category mapping and final
+weighted score, reapplies caps/actions, generates reasons and concerns,
+assembles current job IDs and row fields, and sorts every job. Current `extra`
+provenance and other final row fields therefore never come from the cache.
+
+`WATCHER_ANALYSIS_CACHE_ENABLED` defaults to `true` and accepts
+`true`/`false`, `yes`/`no`, `on`/`off`, or `1`/`0`. Cache reads are batched,
+new artifacts are written in one transaction, and entries not accessed for 30
+days are removed at most once per run. Invalid JSON, schema mismatches, or
+SQLite failures produce a warning and fall back to fresh analysis.
+
+`watcher.analysis_cache.STATIC_ANALYSIS_CACHE_VERSION` is part of every
+SHA-256 fingerprint. Increment it whenever static classification,
+compensation parsing, signal detection, profile matching, technology
+detection, student eligibility, static category scoring, fingerprint inputs,
+or the cached-artifact schema changes. The fingerprint includes canonical
+location/remote fields and only structured `extra` values actually consumed by
+student eligibility. Source provenance, observations, request/retry counts,
+fetch timestamps, health metadata, deadline dates, and dynamic watcher target
+roles are deliberately excluded.
+
+Each run emits one safe summary without cache keys or posting contents:
+
+```text
+ANALYSIS-CACHE enabled=true rows=11897 hits=11000 misses=897 invalid=0 writes=897 hit_rate=0.924 lookup_seconds=0.100 static_analysis_seconds=18.000 scoring_seconds=4.000
+```
+
+The offline row benchmark uses identical canonical rows and a temporary SQLite
+file:
+
+```bash
+PYTHONPATH=.:backend python3 scripts/benchmark_analysis_cache.py --rows 2000
+```
+
+The production-sized replay benchmark also measures the complete downstream
+pipeline without collection:
+
+```bash
+PYTHONPATH=.:backend python3 scripts/benchmark_static_scoring_cache.py
+```
+
+On the fixed 11,855-job snapshot, disabled caching took 204.310s total and an
+empty cache took 209.714s. The warm cache took 28.224s with 11,855 hits and no
+misses. Dynamic scoring/final assembly fell from the previous 42.883s baseline
+to 0.909s (97.9%); total replay fell from 63.464s to 28.224s (55.5%).
+Source-comparison code was intentionally unchanged and took 20.308s in that
+isolated run. The expanded artifact database was 123,641,856 bytes, 33,984,512
+bytes larger than the prior artifact database. Disabled, cold, and warm jobs,
+dedupe reports, matches, and in-memory comparison output had the same
+deterministic SHA-256, and replay left operational state unchanged.
+
+### Collection snapshot and replay
+
+Internal watcher runs can capture live collection once, then replay the exact
+canonical rows and collection diagnostics without requesting ATS or GitHub
+endpoints again:
+
+```bash
+PYTHONPATH=.:backend python3 -m watcher.run \
+  --capture-collection-snapshot watcher/collection-snapshots/latest.json.gz \
+  --seen-db .watcher-state/seen.sqlite
+
+PYTHONPATH=.:backend python3 -m watcher.run \
+  --replay-collection-snapshot watcher/collection-snapshots/latest.json.gz \
+  --seen-db .watcher-state/seen.sqlite
+```
+
+Snapshots are versioned, strictly validated gzip JSON written through atomic
+temporary-file replacement. Sorted compact JSON and a zero-mtime,
+filename-free gzip stream make identical batches byte deterministic. Schema v2
+includes aggregate Workday request/retry and tenant outcome diagnostics. They
+contain complete posting text and collection diagnostics, so `*.json.gz` and
+the default `watcher/collection-snapshots/` directory are ignored by Git. Do
+not publish them as routine CI artifacts.
+
+Capture mode performs ordinary live collection and then continues normally.
+Replay replaces only collection input: it uses the same deduplication,
+analysis/cache, scoring, filtering, alumni, seen partition, and in-memory
+source-comparison code. Replay is permanently dry-run and never calls network
+sources, sends either email type, marks or primes postings, records source
+health, writes a health report, or persists source comparison. The
+static-analysis cache remains enabled normally because it accelerates current
+analysis rather than recording a replayed collection observation.
+
+The snapshot fingerprint covers company order/names/aliases, ATS types and
+identifiers, collection terms, and ordered typed GitHub sources. Scoring,
+profile, known-company, filtering, alumni, email, seen-store, and cache
+settings are deliberately excluded. A mismatch fails before analysis unless
+`--allow-collection-config-mismatch` is explicitly passed.
+
+Replay uses the snapshot's captured UTC date for date-relative scoring.
+`--today YYYY-MM-DD` provides an explicit deterministic override for tests.
+Capture and replay options are mutually exclusive. Each operation emits one
+safe `COLLECTION-SNAPSHOT` summary without posting content or feed URLs.
+
+The isolated live/disabled-replay/warm-replay benchmark writes operational
+state only to temporary databases:
+
+```bash
+PYTHONPATH=.:backend python3 scripts/benchmark_collection_replay.py
+```
+
+The isolated July 30, 2026 schema-v2 run captured 11,858 rows in a
+5,689,148-byte compressed snapshot. Live dry capture spent 208.299s collecting
+and 158.718s in static analysis plus scoring, with 388.333s total runtime.
+Replay with caching disabled took 179.099s total and 159.124s analysis.
+Warm-cache replay took 77.151s total and 52.365s analysis with 11,855 hits,
+zero misses, and a 100% hit rate—a 56.9% total-time improvement over
+disabled-cache replay. Deterministic jobs, dedupe reports, matches, and
+normalized in-memory source comparison were identical. Both replay legs
+skipped collection, left operational SQLite state unchanged, and sent no
+notifications or health alerts.
+
+Network availability was partial during that isolated run: six of 26 Workday
+tenants succeeded and 20 exhausted normal retries with `network_failure`; the
+snapshot retained 155 request attempts and 40 retries.
+Treat the live total as a degraded-environment measurement, not a healthy
+production collection baseline. Replay measurements are unaffected because
+they made no network requests.
+
 ---
 
 ## U.S. watcher location eligibility

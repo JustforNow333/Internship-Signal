@@ -50,6 +50,18 @@ This file tracks completed watcher steps and the next handoff target.
 - A separate frozen U.S. role-fit benchmark now preserves the historical
   location-gate benchmark while measuring role relevance only on production
   location statuses `us` and `ambiguous`.
+- Watcher source and stage timing now uses monotonic high-resolution
+  `perf_counter` measurements and sanitized machine-readable INFO logs without
+  changing heartbeat, collection, scoring, notification, or persistence data.
+- Backend analysis now shares one posting text/match context across
+  classification, signals, profile matching, and scoring, while preserving
+  context-free callers and serialized job output.
+- Watcher runs now persist versioned static-analysis artifacts in the existing
+  SQLite state and always rebuild current scores/final jobs from current rows;
+  backend CSV/API analysis remains cache-independent.
+- Live collection now produces one immutable, versioned `CollectionBatch`.
+  Atomic gzip JSON snapshots can replay that batch through the unchanged
+  post-collection pipeline without network or operational state side effects.
 
 ## Done
 
@@ -551,6 +563,175 @@ This file tracks completed watcher steps and the next handoff target.
    - All persisted notification rows and timestamps were unchanged. Bosch
      `Autonomous Driving – Internship in Machine Learning` remained pending
      with null `emailed_at` and `primed_at`.
+28. Watcher timing instrumentation:
+   - Every attempted direct ATS and configured GitHub backstop fetch emits one
+     `SOURCE-TIMING` INFO record from a `finally` block with sanitized
+     company/adapter/source identifiers, success, three-decimal seconds, and
+     row count. Workday records also expose request and retry counts.
+   - `STAGE-TIMING` records cover configuration/startup, direct collection,
+     GitHub collection, total collection, health persistence, analysis,
+     filtering/eligibility, alumni work, seen partitioning, digest/email
+     handling, source-comparison generation/persistence, health-alert
+     evaluation, and total runtime.
+   - Timing remains log-only; heartbeat and health-report shapes are unchanged.
+     Offline backend/watcher validation: `709 passed, 1 warning`.
+   - An isolated email/prime/health-email-disabled dry run used a fresh
+     temporary database and empty injected alumni map. It completed in 459.503
+     seconds with 11,897 fetched rows, 11,894 scored jobs, 14 dry-run matches,
+     both GitHub feeds successful, and zero `seen` rows.
+   - The slowest measured stages were analysis (237.501s), direct collection
+     (197.301s), and source-comparison generation/persistence (19.648s). The
+     slowest sources were Capital One Workday (36.913s, 1,744 rows, 88
+     requests) and Bosch SmartRecruiters (28.869s, 4,739 rows).
+29. Posting-analysis context optimization:
+   - One per-posting context now owns the title/description/requirements/
+     compensation joins and lowercase variants, requirements-only and full
+     technology matches, and profile-skill matches.
+   - Technology detection runs twice rather than three times per posting;
+     profile skills run once rather than twice. Profile regexes and technology
+     patterns are compiled once, and signal evidence reuses stored match
+     objects instead of repeating successful searches.
+   - Context-aware classification, red/positive signals, profile matching, and
+     scoring remain optional internally so regression tests can compare the
+     context-free path. A 74-row representative corpus produced identical
+     serialized jobs and dedupe reports.
+   - Offline Windows benchmark results: 500 rows 6.555s versus 7.400s (11.4%
+     faster), 1,000 rows 13.004s versus 14.658s (11.3%), and 2,000 rows
+     26.244s versus 29.307s (10.5%).
+   - Full validation: backend/watcher `713 passed, 1 warning`; frontend
+     `23 passed`; frontend production build and Python compileall succeeded.
+30. Persistent watcher static-analysis cache:
+   - Backend ingestion now exposes pure deduplication, one-row static analysis,
+     current scoring/final assembly, and stable score-sort functions. The
+     regular `analyze_rows()` and CSV/API paths compose those functions without
+     importing watcher configuration or SQLite.
+   - `watcher/analysis_cache.py` fingerprints only static analyzer inputs with
+     deterministic sorted JSON and SHA-256, including the complete loaded
+     profile and known-company configuration plus
+     `STATIC_ANALYSIS_CACHE_VERSION`.
+   - Batched reads, one transactional artifact write, and one 30-day
+     last-access cleanup use `analysis_cache` inside the existing
+     `seen.sqlite`. Invalid JSON/schema entries and SQLite failures warn and
+     fall back to fresh analysis.
+   - Every deduplicated row is scored and assembled from its current row and
+     effective date, including current merged provenance. Cache hits therefore
+     preserve scores, deadlines, eligibility, IDs, ordering, filtering,
+     comparisons, notifications, and dedupe reports.
+   - One safe `ANALYSIS-CACHE` INFO record reports rows, hits, misses, invalid
+     entries, writes, hit rate, lookup time, static-analysis time, and scoring
+     time without keys, URLs, descriptions, or configuration contents.
+   - The 2,000-row offline benchmark measured disabled 24.877s analysis /
+     25.149s total, empty 24.904s / 25.313s, and warm 5.401s / 5.780s. Warm
+     cache had 2,000 hits, no misses, a 100% hit rate, and a 77.0% total-time
+     improvement; the SQLite increase was 13,950,976 bytes and all serialized
+     jobs/dedupe reports were identical.
+   - Full validation: backend/watcher `739 passed, 1 warning`; frontend
+     `23 passed`; frontend production build and Python compileall succeeded.
+31. Versioned collection snapshot/replay:
+   - `watcher/collection_snapshot.py` owns the immutable batch schema,
+     collection-only SHA-256 fingerprint, full load validation, and atomic
+     UTF-8 gzip JSON persistence.
+   - `collect_batch()` is the normal live collector; legacy `collect_rows()`
+     remains a compatible wrapper. Live and replay runs then share one
+     analysis/filtering/alumni/selection/comparison pipeline.
+   - Replay is permanently dry and network-free. It computes source health and
+     comparison diagnostics in memory, never records health attempts, alerts,
+     seen/prime markers, or comparison runs, and uses the captured UTC date
+     unless `--today` overrides it.
+   - Snapshot loading is independent of scoring, profile, filtering, alumni,
+     email, and cache settings. Static-analysis caching remains available on
+     replay and updates its own current access time.
+   - Offline regression coverage includes lossless/order-preserving round
+     trips, deterministic pipeline equivalence, no-network/no-side-effect
+     replay, live capture continuation, config mismatches, profile/scoring
+     independence, date override, corruption/version validation, and atomic
+     replacement.
+   - The isolated 11,880-row benchmark measured live dry capture at 419.823s
+     total / 192.984s analysis, disabled-cache replay at 215.480s / 191.733s,
+     and warm replay at 74.877s / 50.880s with 11,877 hits and no misses.
+     The compressed snapshot was 5,695,926 bytes and deterministic outputs were
+     identical. Network was degraded for the live leg: six of 26 Workday
+     tenants succeeded and 20 reported `network_failure`.
+   - Full validation: backend/watcher `756 passed, 1 warning`; frontend
+     `23 passed`; frontend production build and Python compileall succeeded.
+32. Evidence-first correctness and redundancy audit:
+   - A failing regression proved that an explicit dry `run_once()` still
+     invoked the digest sender before discarding its return value. Dry mode now
+     skips email transport entirely while preserving pending-match reporting
+     and notification state.
+   - A malformed bracketed GitHub feed URL reproduced a raw
+     `urllib.parse.ValueError`; configuration now consistently raises the
+     documented `ConfigError` for that invalid input.
+   - The duplicated quote-aware comment scanners for dotenv and watchlist
+     parsing now share one covered helper. Analysis-cache timestamp handling
+     reuses the existing watcher UTC normalization helpers.
+   - AST-based dead-function, unused-import, and exact-duplicate scans found no
+     additional safe deletions. Intentional package re-exports, context-manager
+     protocol methods, and layer-specific helpers were retained.
+   - Full validation: backend/watcher `758 passed, 1 warning`; frontend
+     `23 passed`; frontend production build and Python compileall succeeded.
+33. Collection snapshot schema-v2 hardening:
+   - Snapshot batches now preserve aggregate Workday request attempts alongside
+     tenant outcomes, retries, and failure codes. The schema version increased
+     because the persisted structure changed.
+   - Snapshot writes use sorted compact JSON in a filename-free, zero-mtime
+     gzip stream. A regression proves identical batches produce identical
+     compressed bytes, while atomic replacement behavior remains covered.
+   - Strict loading rejects unknown fields as well as corrupt, truncated,
+     malformed, structurally invalid, and unsupported-version files.
+   - A fresh isolated production-sized capture retained 11,858 rows in
+     5,689,148 bytes. Live collection took 208.299s and total runtime was
+     388.333s with 158.718s analysis. Disabled-cache replay took 179.099s total
+     / 159.124s analysis; warm replay took 77.151s / 52.365s with 11,855 hits,
+     no misses, and a 100% hit rate.
+   - Deterministic jobs, dedupe reports, matches, and in-memory comparison were
+     identical. Replay skipped collection, left operational SQLite state
+     unchanged, sent no email or health alerts, marked no seen rows, and
+     persisted no comparison run. The permitted analysis cache remained active.
+   - Full validation: backend/watcher `762 passed, 1 warning`; frontend
+     `23 passed`; frontend production build and Python compileall succeeded.
+34. Fully warm collection-replay performance audit:
+   - A benchmark-only profiler replayed the 5,689,148-byte production snapshot
+     at the fixed `2026-07-30` date. It used a prewarmed disposable cache, one
+     unmeasured warm-up, three measured full runs, three source-comparison
+     omission runs, three isolated assembly passes, and one cProfile run.
+   - The 11,858 collected rows deduplicated to 11,855 jobs. Measured totals were
+     63.464s, 63.546s, and 63.253s (63.464s median); every run had 11,855 cache
+     hits, no misses, no socket/DNS or collection calls, the same deterministic
+     output hash, and unchanged non-cache SQLite state.
+   - Median current-date scoring/final assembly was 42.883s. Full
+     source-comparison construction measured 16.297s directly and 16.359s by
+     omission. Fingerprinting, batched SQLite lookup, and cached JSON
+     decode/validation took 0.231s, 0.675s, and 0.208s; unexplained runtime was
+     0.263s.
+   - cProfile attributed 35.883s cumulative profiler time to backend student
+     eligibility inside 54.287s of assembly, with repeated regex search and
+     normalization dominating call volume. The next candidate is a versioned
+     static scoring/eligibility artifact that leaves deadline scoring and final
+     date-relative composition dynamic; no production optimization was made.
+35. Versioned static scoring and eligibility artifact:
+   - The pure backend artifact and watcher cache version are now `2`. The
+     existing artifact stores one student-eligibility decision, normalized
+     evidence and parsed qualification segments, seven date-independent score
+     category results, role-ineligibility input, and red-flag cap inputs.
+   - Dynamic assembly still recomputes deadline/expiration, category weights
+     and totals, caps, final eligibility, bucket/actions, reasons/concerns,
+     current IDs and row/provenance fields, and final sorting. Backend CSV/API
+     analysis composes the same pure builder and never imports SQLite.
+   - Fingerprints now include canonical location/remote values and only the
+     structured eligibility inputs selected by backend policy. Volatile source
+     diagnostics, current provenance, deadline/date values, and dynamically
+     applied watcher target roles remain excluded.
+   - The fixed 11,855-job replay measured 204.310s cache-disabled, 209.714s
+     cold, and 28.224s warm. Warm dynamic scoring/assembly was 0.909s versus
+     the 42.883s baseline (97.9% faster); total replay improved 55.5%.
+     Fingerprinting took 1.005s and lookup/JSON validation took 2.071s.
+   - Source comparison was unchanged and measured 20.308s in the isolated
+     benchmark. The artifact database grew from 89,657,344 to 123,641,856
+     bytes. Disabled, cold, and warm output hashes were identical; all replay
+     cases made no network calls and left operational SQLite state unchanged.
+   - Full validation: backend/watcher `770 passed, 1 warning`; frontend
+     `23 passed`; frontend production build and Python compileall succeeded.
 
 ## Next
 
@@ -580,8 +761,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after the master-data eligibility correction:
+Latest local validation after collection snapshot schema-v2 hardening:
 
 ```text
-680 passed, 1 warning in 16.04s
+762 passed, 1 warning in 14.57s
 ```

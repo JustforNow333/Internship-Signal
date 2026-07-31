@@ -65,11 +65,27 @@ def _count_matches(patterns, text):
     return hits
 
 
-def classify_company(row: dict, known: dict | None = None, role_is_technical: bool = False) -> dict:
+def classify_company(
+    row: dict,
+    known: dict | None = None,
+    role_is_technical: bool = False,
+    *,
+    analysis_context=None,
+) -> dict:
     known = known or load_known_companies()
     name = row.get("company", "")
     name_norm = norm_company(name)
-    context = " ".join([row.get("description", ""), row.get("requirements", ""), row.get("title", "")])
+    context = (
+        analysis_context.description_requirements_title
+        if analysis_context is not None
+        else " ".join(
+            [
+                row.get("description", ""),
+                row.get("requirements", ""),
+                row.get("title", ""),
+            ]
+        )
+    )
 
     evidence = []
     startup_hits = _count_matches(STARTUP_TERMS, context)
@@ -300,8 +316,16 @@ def _hits(patterns, text: str) -> list[tuple[str, str]]:
     return found
 
 
-def _software_context_evidence(title: str, description: str, requirements: str) -> list[str]:
-    full = " ".join([title, description, requirements])
+def _software_context_evidence(
+    title: str,
+    description: str,
+    requirements: str,
+    *,
+    full: str | None = None,
+) -> list[str]:
+    full = full if full is not None else " ".join(
+        [title, description, requirements]
+    )
     evidence = []
     for match in SOFTWARE_CONTEXT_RE.finditer(full):
         evidence.append(match.group(0).strip())
@@ -318,10 +342,18 @@ def _software_context_evidence(title: str, description: str, requirements: str) 
     return list(dict.fromkeys(evidence))
 
 
-def has_strong_software_context(title: str, description: str = "", requirements: str = "") -> bool:
+def has_strong_software_context(
+    title: str,
+    description: str = "",
+    requirements: str = "",
+    *,
+    full: str | None = None,
+) -> bool:
     """Return true only for explicit software context, not generic tools alone."""
 
-    full = " ".join([title, description, requirements])
+    full = full if full is not None else " ".join(
+        [title, description, requirements]
+    )
     if SOFTWARE_CONTEXT_RE.search(full):
         return True
     if re.search(r"\b(java|python|sql)\b", full, re.I) and BACKEND_CONTEXT_RE.search(full):
@@ -345,20 +377,37 @@ def _finish_role(track: str, confidence: float, evidence: list[str], software_ev
     }
 
 
-def classify_role(row: dict) -> dict:
-    title = row.get("title", "")
-    description = row.get("description", "")
-    requirements = row.get("requirements", "")
-    body = " ".join([description, requirements])
-    full = " ".join([title, body])
+def classify_role(row: dict, *, analysis_context=None) -> dict:
+    if analysis_context is None:
+        title = row.get("title", "")
+        description = row.get("description", "")
+        requirements = row.get("requirements", "")
+        body = " ".join([description, requirements])
+        full = " ".join([title, body])
+    else:
+        title = analysis_context.title
+        description = analysis_context.description
+        requirements = analysis_context.requirements
+        body = analysis_context.description_requirements
+        full = analysis_context.title_description_requirements
 
     title_software_hits = _hits(SOFTWARE_TITLE_PATTERNS, title)
     body_software_hits = _hits(SOFTWARE_TITLE_PATTERNS, body)
     title_non_swe_hits = _hits(NON_SWE_TITLE_PATTERNS, title)
     body_non_swe_hits = _hits(NON_SWE_TITLE_PATTERNS, body)
-    software_evidence = _software_context_evidence(title, description, requirements)
+    software_evidence = _software_context_evidence(
+        title,
+        description,
+        requirements,
+        full=full,
+    )
     non_swe_evidence = [f"{track}: {hit}" for track, hit in [*title_non_swe_hits, *body_non_swe_hits]]
-    strong_software = has_strong_software_context(title, description, requirements)
+    strong_software = has_strong_software_context(
+        title,
+        description,
+        requirements,
+        full=full,
+    )
 
     # Clerical "data entry" must not be diluted by incidental data words.
     if re.search(r"data entry", title, re.I):
@@ -370,12 +419,20 @@ def classify_role(row: dict) -> dict:
             non_swe_evidence or ["data entry"],
         )
 
-    if UMBRELLA_PROGRAM_TITLE_RE.search(title) and TECHNICAL_PROGRAM_TRACK_RE.search(body):
-        match = TECHNICAL_PROGRAM_TRACK_RE.search(body)
+    umbrella_program_match = UMBRELLA_PROGRAM_TITLE_RE.search(title)
+    technical_program_match = (
+        TECHNICAL_PROGRAM_TRACK_RE.search(body)
+        if umbrella_program_match
+        else None
+    )
+    if umbrella_program_match and technical_program_match:
         return _finish_role(
             "general_swe",
             0.64,
-            [f'explicit technical program track: "{match.group(0).strip()}"'],
+            [
+                "explicit technical program track: "
+                f'"{technical_program_match.group(0).strip()}"'
+            ],
             software_evidence or ["explicit technology/analytics/engineering program track"],
             non_swe_evidence,
         )

@@ -34,6 +34,26 @@
 - Row provenance keys off `extra.source_adapter`, which `make_row` always sets.
   CSV `extra` is user data and never drives dedupe ordering or provenance.
 - Track each GitHub source independently; valid feeds with zero matches succeed.
+- Watcher timing uses `time.perf_counter()` and stable INFO
+  `SOURCE-TIMING`/`STAGE-TIMING` logs emitted from `finally`; keep identifiers
+  URL/secret-free, show three decimals, and do not alter heartbeat schemas or
+  watcher behavior.
+- Performance audits distinguish offline pytest time from live watcher time;
+  use timing logs, test durations, and isolated profiles before proposing an
+  optimization, and keep diagnosis read-only unless a fix is requested.
+- Analysis optimizations reuse a per-posting text/match context and one
+  compiled profile-skill matcher per loaded profile; context-free callers and
+  serialized scoring output must remain exactly compatible.
+- Benchmark analysis changes offline at 500, 1,000, and 2,000 representative
+  rows without adding prefilters, collection concurrency, pagination changes,
+  or source-comparison redesign.
+- Persistent analysis caching is watcher-owned in the existing SQLite state;
+  backend analysis primitives stay pure and cache-independent, static
+  fingerprints are deterministic/versioned, and current-date scoring always
+  runs for every deduplicated row.
+- Cache corruption, schema mismatch, or SQLite failure is nonfatal and falls
+  back to fresh analysis; batch reads, transactional writes, and one bounded
+  30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
 - Dry runs never change notification state. Live sends populate `emailed_at`
   only after success; explicit priming has its own marker, and unmarked legacy
   rows remain pending.
@@ -80,6 +100,31 @@
   regression test before fixing behavior; do not change code for style alone.
 - Repository-wide cleanup must preserve public shapes and side effects; remove
   duplication only after tests cover every consolidated caller.
+- Cleanup audits require an executable failure or a clearly demonstrated
+  invariant violation before behavior changes. Remove code only after caller
+  searches and regression tests prove it is redundant or unreachable.
 - Holdout construction is two-stage: commit reusable tooling first, then
   collect from that exact clean SHA. Exclude both prior benchmarks by stable
   ID, normalized URL, and fallback key without reading their human labels.
+- Collection snapshots are immutable, versioned gzip JSON batches produced by
+  live collection and consumed by the same post-collection pipeline as live
+  runs; writes are atomic and loaded structures are validated before analysis.
+- Snapshot fingerprints include only collection-affecting watchlist/source
+  configuration. Scoring, profile, filtering, alumni, email, and analysis-cache
+  changes remain replay-compatible.
+- Replay is network-free and operationally side-effect-free: never email,
+  prime or mark seen, persist source health/comparison, or send health alerts.
+  It may read/write the static-analysis cache and build diagnostics in memory.
+- Replay uses the captured UTC date unless an explicit test date overrides it,
+  and collection-configuration mismatches require an explicit CLI override.
+- Snapshot benchmarks compare deterministic pipeline outputs and persistent
+  state before/after replay; analysis-cache maintenance is replay's only
+  permitted write.
+- Warm-replay audits use benchmark-only instrumentation, a fixed snapshot/date,
+  one warm-up, and at least three measured runs; never add production bypass
+  flags while isolating cache, scoring, or source-comparison costs.
+- Static scoring-cache artifacts may hold only date-independent eligibility
+  evidence and category components; deadline scoring, final decisions, IDs,
+  current row/provenance assembly, and sorting always remain dynamic.
+- Keep profiler data, snapshots, and generated benchmark reports ignored while
+  leaving reusable benchmark scripts, tests, and fixtures trackable.
