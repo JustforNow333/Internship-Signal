@@ -22,6 +22,8 @@
   old SHA, then recheck refs and every active worktree without altering them.
 - Publish hosted UI from the clean UI repository with an explicit `main` ref;
   never stage the separate watcher worktree or use a blanket add for a push.
+- Windows Git cannot open a linked worktree whose `.git` file uses a WSL path;
+  push the explicit shared `main` ref through the primary repo or use WSL Git.
 - Run only frontend tests/build for this task. Never run watcher collection,
   email, priming, seen-state changes, or production/canary configuration.
 

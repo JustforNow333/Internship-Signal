@@ -19,6 +19,8 @@
   recheck refs and all active worktrees without altering them.
 - Push hosted UI from its clean repository using the explicit `main` ref; never
   stage the separate watcher worktree or use a blanket add merely to push.
+- For a WSL-created linked worktree, use WSL Git or push the explicit shared
+  `main` ref through the primary repo; do not repair metadata during handoff.
 - For this branch run frontend tests/build only; never collect live postings,
   send email, prime/mark seen, or alter watcher/canary/production settings.
 
