@@ -18,6 +18,8 @@
   worktree; never move a checked-out branch behind unrelated uncommitted work.
 - A dirty `main` owner must move only its owned changes to a separate branch,
   commit them there, leave `main` unmodified, and report the branch and SHA.
+- Once `main` is free, promote with an atomic fast-forward from the verified
+  old SHA, then recheck refs and every active worktree without altering them.
 - Run only frontend tests/build for this task. Never run watcher collection,
   email, priming, seen-state changes, or production/canary configuration.
 

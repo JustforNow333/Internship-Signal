@@ -15,6 +15,8 @@
   never move a checked-out branch behind unrelated uncommitted work.
 - If `main` is dirty, its owner moves only owned changes to a separate branch,
   commits there, leaves `main` unmodified, and reports the branch and SHA.
+- Once `main` is free, use an atomic fast-forward from its verified old SHA and
+  recheck refs and all active worktrees without altering them.
 - For this branch run frontend tests/build only; never collect live postings,
   send email, prime/mark seen, or alter watcher/canary/production settings.
 
