@@ -11,6 +11,9 @@
   the hosted backend exists, label and document mock behavior honestly.
 - Preserve the existing paper/spruce visual language, responsive layouts,
   keyboard access, visible focus, semantic labels, and explicit async states.
+- Hosted UI cleanup is evidence-first: reproduce defects before fixing them,
+  add regression coverage, and remove duplication only after caller searches
+  and tests prove the shared path preserves behavior.
 - Run only frontend tests/build for this task. Never run watcher collection,
   email, priming, seen-state changes, or production/canary configuration.
 

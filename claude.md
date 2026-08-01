@@ -8,6 +8,9 @@
 - Use a replaceable API adapter with clearly documented mocks until hosted
   endpoints exist. Preserve the paper/spruce design system, responsive and
   semantic UI, keyboard access, focus visibility, and async/empty/error states.
+- For hosted frontend audits, reproduce defects before behavior fixes and add
+  regression tests; deduplicate only after searches and caller coverage prove
+  the common implementation is behavior-preserving.
 - For this branch run frontend tests/build only; never collect live postings,
   send email, prime/mark seen, or alter watcher/canary/production settings.
 

@@ -2,42 +2,50 @@ export const ROLE_OPTIONS = [
   {
     id: "software-engineering",
     name: "Software Engineering",
-    description: "Backend, frontend, mobile, platform, and full-stack internships.",
+    description:
+      "Backend, frontend, mobile, platform, and full-stack internships.",
   },
   {
     id: "machine-learning-ai",
     name: "Machine Learning / AI",
-    description: "Applied AI, ML engineering, research engineering, and model infrastructure.",
+    description:
+      "Applied AI, ML engineering, research engineering, and model infrastructure.",
   },
   {
     id: "data-science",
     name: "Data Science",
-    description: "Analytics, experimentation, modeling, and decision science roles.",
+    description:
+      "Analytics, experimentation, modeling, and decision science roles.",
   },
   {
     id: "data-engineering",
     name: "Data Engineering",
-    description: "Data platforms, pipelines, infrastructure, and analytics engineering.",
+    description:
+      "Data platforms, pipelines, infrastructure, and analytics engineering.",
   },
   {
     id: "quantitative-development",
     name: "Quantitative Development",
-    description: "Quant engineering, trading systems, and financial modeling roles.",
+    description:
+      "Quant engineering, trading systems, and financial modeling roles.",
   },
   {
     id: "product-management",
     name: "Product Management",
-    description: "Technical product, product strategy, and program internships.",
+    description:
+      "Technical product, product strategy, and program internships.",
   },
   {
     id: "hardware-embedded",
     name: "Hardware / Embedded",
-    description: "Firmware, embedded systems, silicon, robotics, and computer hardware.",
+    description:
+      "Firmware, embedded systems, silicon, robotics, and computer hardware.",
   },
   {
     id: "other-engineering",
     name: "Other Engineering",
-    description: "Security, cloud, developer tools, and other technical engineering roles.",
+    description:
+      "Security, cloud, developer tools, and other technical engineering roles.",
   },
 ];
 
@@ -78,4 +86,9 @@ export const LOCATION_OPTIONS = [
   "Boston, MA",
 ];
 
-export const SEASON_OPTIONS = ["Summer 2027", "Fall 2026", "Spring 2027", "Any season"];
+export const SEASON_OPTIONS = [
+  "Summer 2027",
+  "Fall 2026",
+  "Spring 2027",
+  "Any season",
+];
