@@ -7,22 +7,91 @@ import json
 from json import JSONDecodeError
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from . import config, store
 from .ask import ask
+from .hosted.router import router as hosted_router
+from .hosted.services import HostedServices
 from .ingest import process_csv
 from .profile import load_profile
 
 app = FastAPI(title="Internship Signal API", version="1.0.0")
 MAX_CSV_BYTES = 10 * 1024 * 1024
+MAX_HOSTED_JSON_BYTES = 64 * 1024
+HOSTED_MUTATION_PREFIXES = (
+    "/api/auth/",
+    "/api/preferences",
+    "/api/watchlist",
+    "/api/company-requests",
+)
+
+app.state.hosted_services = HostedServices.build()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.CORS_ORIGINS,
+    allow_origins=list(app.state.hosted_services.settings.allowed_frontend_origins),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def limit_hosted_request_size(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH"} and request.url.path.startswith(
+        HOSTED_MUTATION_PREFIXES
+    ):
+        raw_length = request.headers.get("content-length")
+        if raw_length:
+            try:
+                content_length = int(raw_length)
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": "Content-Length must be an integer."},
+                )
+            if content_length > MAX_HOSTED_JSON_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request body is too large."},
+                )
+        body = await request.body()
+        if len(body) > MAX_HOSTED_JSON_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "Request body is too large."},
+            )
+    return await call_next(request)
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_validation_error(_request: Request, exc: RequestValidationError):
+    errors = []
+    for error in exc.errors():
+        location = [str(part) for part in error.get("loc", ()) if part != "body"]
+        errors.append(
+            {
+                "field": ".".join(location) or "request",
+                "message": error.get("msg", "Invalid value."),
+                "type": error.get("type", "value_error"),
+            }
+        )
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
+@app.exception_handler(SQLAlchemyError)
+async def safe_database_error(_request: Request, _exc: SQLAlchemyError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Hosted account storage is temporarily unavailable."},
+    )
+
+
+app.include_router(hosted_router)
 
 
 def _ingest_text(csv_text: str) -> dict:

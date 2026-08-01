@@ -3,6 +3,7 @@ import { hostedApi } from "./hosted/api.js";
 import AppShell from "./hosted/AppShell.jsx";
 import {
   ForgotPasswordPage,
+  ResetPasswordPage,
   SigninPage,
   SignupPage,
   VerificationPendingPage,
@@ -26,19 +27,30 @@ const PUBLIC_ROUTES = new Set([
   "/signup",
   "/signin",
   "/forgot-password",
+  "/reset-password",
   "/verify-email",
 ]);
 const KNOWN_ROUTES = new Set([...PUBLIC_ROUTES, ...APP_ROUTES, "/onboarding"]);
 
 function currentPath(initialPath) {
-  const path = initialPath || window.location.pathname;
+  const path = (initialPath || window.location.pathname).split("?")[0];
   if (path === "/app" || path === "/app/") return "/app/dashboard";
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
+}
+
+function locationToken(initialPath) {
+  const query = initialPath?.includes("?")
+    ? initialPath.slice(initialPath.indexOf("?"))
+    : window.location.search;
+  return new URLSearchParams(query).get("token") || "";
 }
 
 export default function App({ client = hostedApi, initialPath }) {
   const [path, setPath] = useState(() => currentPath(initialPath));
   const [signupEmail, setSignupEmail] = useState("");
+  const [verificationDeliveryAccepted, setVerificationDeliveryAccepted] =
+    useState(null);
+  const [sessionError, setSessionError] = useState("");
   const [resource, setResource] = useState({
     status: "idle",
     data: null,
@@ -67,6 +79,17 @@ export default function App({ client = hostedApi, initialPath }) {
     return () => window.removeEventListener("popstate", onPopState);
   }, [initialPath]);
 
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setSessionError("");
+      setResource({ status: "idle", data: null, error: "" });
+      navigate("/signin");
+    };
+    window.addEventListener("hosted-api-unauthorized", onUnauthorized);
+    return () =>
+      window.removeEventListener("hosted-api-unauthorized", onUnauthorized);
+  }, [navigate]);
+
   const loadWorkspace = useCallback(async () => {
     setResource((current) => ({ ...current, status: "loading", error: "" }));
     try {
@@ -84,13 +107,18 @@ export default function App({ client = hostedApi, initialPath }) {
         data: { companies, me, preferences, watchlist, matches },
       });
     } catch (error) {
+      if (error.status === 401) {
+        setResource({ status: "idle", data: null, error: "" });
+        navigate("/signin");
+        return;
+      }
       setResource({
         status: "error",
         data: null,
         error: error.message || "The account data request failed.",
       });
     }
-  }, [client]);
+  }, [client, navigate]);
 
   const loadOnboardingCompanies = useCallback(async () => {
     setOnboardingResource((current) => ({
@@ -99,16 +127,35 @@ export default function App({ client = hostedApi, initialPath }) {
       error: "",
     }));
     try {
-      const companies = await client.listCompanies();
+      const [companies] = await Promise.all([
+        client.listCompanies(),
+        client.getMe(),
+      ]);
       setOnboardingResource({ status: "ready", companies, error: "" });
     } catch (error) {
+      if (error.status === 401) {
+        navigate("/signin");
+        return;
+      }
       setOnboardingResource({
         status: "error",
         companies: [],
         error: error.message || "The company catalog request failed.",
       });
     }
-  }, [client]);
+  }, [client, navigate]);
+
+  const logout = useCallback(async () => {
+    setSessionError("");
+    try {
+      await client.logout();
+    } catch (error) {
+      setSessionError(error.message || "We couldn’t sign you out. Try again.");
+      return;
+    }
+    setResource({ status: "idle", data: null, error: "" });
+    navigate("/signin");
+  }, [client, navigate]);
 
   useEffect(() => {
     if (APP_ROUTES.has(path) && resource.status === "idle") loadWorkspace();
@@ -170,15 +217,45 @@ export default function App({ client = hostedApi, initialPath }) {
       <SignupPage
         navigate={navigate}
         client={client}
-        onEmailChange={setSignupEmail}
+        onSignup={(email, result) => {
+          setSignupEmail(email);
+          setVerificationDeliveryAccepted(
+            result.verification_email_sent ?? null,
+          );
+        }}
       />
     );
   if (path === "/signin")
-    return <SigninPage navigate={navigate} client={client} />;
+    return (
+      <SigninPage
+        navigate={navigate}
+        client={client}
+        onSignedIn={() => {
+          setSessionError("");
+          setResource({ status: "idle", data: null, error: "" });
+        }}
+      />
+    );
   if (path === "/forgot-password")
     return <ForgotPasswordPage navigate={navigate} client={client} />;
+  if (path === "/reset-password")
+    return (
+      <ResetPasswordPage
+        navigate={navigate}
+        client={client}
+        token={locationToken(initialPath)}
+      />
+    );
   if (path === "/verify-email")
-    return <VerificationPendingPage navigate={navigate} email={signupEmail} />;
+    return (
+      <VerificationPendingPage
+        navigate={navigate}
+        client={client}
+        email={signupEmail}
+        token={locationToken(initialPath)}
+        deliveryAccepted={verificationDeliveryAccepted}
+      />
+    );
   if (!KNOWN_ROUTES.has(path)) return <LandingPage navigate={navigate} />;
 
   if (path === "/onboarding") {
@@ -216,6 +293,8 @@ export default function App({ client = hostedApi, initialPath }) {
       navigate={navigate}
       email={data?.me.email}
       matchCount={newMatchCount}
+      onLogout={logout}
+      sessionError={sessionError}
     >
       {resource.status !== "ready" ? (
         <AsyncPanel
@@ -242,7 +321,6 @@ export default function App({ client = hostedApi, initialPath }) {
               me={data.me}
               preferences={data.preferences}
               savePreferences={savePreferences}
-              navigate={navigate}
             />
           )}
         </>

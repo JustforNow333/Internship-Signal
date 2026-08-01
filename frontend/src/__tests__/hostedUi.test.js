@@ -33,14 +33,14 @@ describe("hosted relative-time labels", () => {
 
 describe("hosted collection utilities", () => {
   it("adds and removes a selection without mutating the input", () => {
-    const original = ["software-engineering"];
+    const original = ["software_engineering"];
 
-    expect(toggleSelection(original, "data-science")).toEqual([
-      "software-engineering",
-      "data-science",
+    expect(toggleSelection(original, "data_science")).toEqual([
+      "software_engineering",
+      "data_science",
     ]);
-    expect(toggleSelection(original, "software-engineering")).toEqual([]);
-    expect(original).toEqual(["software-engineering"]);
+    expect(toggleSelection(original, "software_engineering")).toEqual([]);
+    expect(original).toEqual(["software_engineering"]);
   });
 
   it("sorts matches newest first without mutating the API response", () => {

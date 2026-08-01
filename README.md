@@ -38,6 +38,9 @@ own CSV). The Vite dev server proxies `/api/*` to `localhost:8000`, so there is 
 CORS or URL configuration in normal use. `.env.example` documents the few
 overridable settings.
 
+For persistent multi-user accounts, HTTP-only sessions, preferences, and
+per-user watchlists, follow [backend/HOSTED_BACKEND.md](backend/HOSTED_BACKEND.md).
+
 **Run the tests**
 
 ```bash

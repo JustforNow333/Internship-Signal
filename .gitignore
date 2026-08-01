@@ -57,6 +57,9 @@ yarn-error.log*
 pnpm-debug.log*
 # Developer-only hosted UI fixture overrides; committed mocks stay reviewable.
 frontend/src/mocks/*.local.*
+# Hosted PostgreSQL bind mounts and captured test mail are local state.
+hosted-postgres-data/
+.hosted-mail-outbox/
 
 # Local env / OS
 .env

@@ -1,28 +1,15 @@
 # Claude Repository Guide
 
-- Hosted UI MVP work belongs only in `C:\\Users\\burst\\internship-signal-ui`
-  on `agent/hosted-ui-mvp`; leave the original and canary worktrees untouched.
-- Build the public React/Vite product around account auth, per-user company and
-  role watchlists, scheduled-scan alerts, recent matches, and settings. Keep
-  CSV, alumni, watcher internals, and admin controls out of public navigation.
-- Use a replaceable API adapter with clearly documented mocks until hosted
-  endpoints exist. Preserve the paper/spruce design system, responsive and
-  semantic UI, keyboard access, focus visibility, and async/empty/error states.
-- For hosted frontend audits, reproduce defects before behavior fixes and add
-  regression tests; deduplicate only after searches and caller coverage prove
-  the common implementation is behavior-preserving.
-- Promote only through a verified fast-forward from a clean `main` worktree;
-  never move a checked-out branch behind unrelated uncommitted work.
-- If `main` is dirty, its owner moves only owned changes to a separate branch,
-  commits there, leaves `main` unmodified, and reports the branch and SHA.
-- Once `main` is free, use an atomic fast-forward from its verified old SHA and
-  recheck refs and all active worktrees without altering them.
-- Push hosted UI from its clean repository using the explicit `main` ref; never
-  stage the separate watcher worktree or use a blanket add merely to push.
-- For a WSL-created linked worktree, use WSL Git or push the explicit shared
-  `main` ref through the primary repo; do not repair metadata during handoff.
-- For this branch run frontend tests/build only; never collect live postings,
-  send email, prime/mark seen, or alter watcher/canary/production settings.
+- Hosted backend Phase 1 belongs only in
+  `C:\\Users\\burst\\internship-signal-hosted-backend` on
+  `agent/hosted-backend-mvp`; leave original, canary, and UI worktrees alone.
+- Use FastAPI/Pydantic, SQLAlchemy 2.x, Alembic, PostgreSQL, Argon2, and hashed
+  database sessions in HTTP-only cookies while preserving existing CSV APIs.
+- Keep hosted data isolated from watcher SQLite and derive only a sanitized
+  public company catalog from watcher configuration. Do not change collection,
+  matching, workflows, notification delivery, or production/canary state.
+- Keep the live React API behind its adapter and retain mocks for unit tests.
+  Test with isolated PostgreSQL and injected mail; never send real messages.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.

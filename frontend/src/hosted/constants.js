@@ -1,48 +1,48 @@
 export const ROLE_OPTIONS = [
   {
-    id: "software-engineering",
+    id: "software_engineering",
     name: "Software Engineering",
     description:
       "Backend, frontend, mobile, platform, and full-stack internships.",
   },
   {
-    id: "machine-learning-ai",
+    id: "machine_learning_ai",
     name: "Machine Learning / AI",
     description:
       "Applied AI, ML engineering, research engineering, and model infrastructure.",
   },
   {
-    id: "data-science",
+    id: "data_science",
     name: "Data Science",
     description:
       "Analytics, experimentation, modeling, and decision science roles.",
   },
   {
-    id: "data-engineering",
+    id: "data_engineering",
     name: "Data Engineering",
     description:
       "Data platforms, pipelines, infrastructure, and analytics engineering.",
   },
   {
-    id: "quantitative-development",
+    id: "quantitative_development",
     name: "Quantitative Development",
     description:
       "Quant engineering, trading systems, and financial modeling roles.",
   },
   {
-    id: "product-management",
+    id: "product_management",
     name: "Product Management",
     description:
       "Technical product, product strategy, and program internships.",
   },
   {
-    id: "hardware-embedded",
+    id: "hardware_embedded",
     name: "Hardware / Embedded",
     description:
       "Firmware, embedded systems, silicon, robotics, and computer hardware.",
   },
   {
-    id: "other-engineering",
+    id: "other_engineering",
     name: "Other Engineering",
     description:
       "Security, cloud, developer tools, and other technical engineering roles.",
@@ -51,12 +51,12 @@ export const ROLE_OPTIONS = [
 
 export const ALERT_FREQUENCIES = [
   {
-    id: "asap",
+    id: "as_detected",
     label: "As soon as detected",
     description: "Send an alert after the scheduled scan that finds a match.",
   },
   {
-    id: "three_hours",
+    id: "three_hour",
     label: "Every 3 hours",
     description: "Bundle recent matches into a short update every three hours.",
   },

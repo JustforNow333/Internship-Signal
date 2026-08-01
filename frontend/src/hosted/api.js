@@ -1,60 +1,112 @@
 import { makeHostedFixtures } from "./fixtures.js";
 
+export class HostedApiError extends Error {
+  constructor(message, status, details = null) {
+    super(message);
+    this.name = "HostedApiError";
+    this.status = status;
+    this.details = details;
+  }
+}
+
+function errorMessage(body, fallback) {
+  if (typeof body?.detail === "string") return body.detail;
+  if (Array.isArray(body?.detail)) {
+    return (
+      body.detail
+        .map((item) => item.message || item.msg)
+        .filter(Boolean)
+        .join(" ") || fallback
+    );
+  }
+  return body?.message || fallback;
+}
+
 async function parseResponse(response) {
   if (!response.ok) {
-    let message = `Request failed (${response.status})`;
+    const fallback = `Request failed (${response.status})`;
+    let body = null;
     try {
-      const body = await response.json();
-      message = body.detail || body.message || message;
+      body = await response.json();
     } catch {
       // Keep the status-based fallback for non-JSON failures.
     }
-    throw new Error(message);
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("hosted-api-unauthorized"));
+    }
+    throw new HostedApiError(
+      errorMessage(body, fallback),
+      response.status,
+      body?.detail || null,
+    );
   }
   if (response.status === 204) return null;
   return response.json();
 }
 
-function request(path, options = {}) {
+function request(baseUrl, path, options = {}) {
   const headers = options.body
     ? { "Content-Type": "application/json", ...options.headers }
     : options.headers;
-  return fetch(path, { credentials: "include", ...options, headers }).then(
-    parseResponse,
-  );
+  return fetch(`${baseUrl}${path}`, {
+    credentials: "include",
+    ...options,
+    headers,
+  }).then(parseResponse);
 }
 
-export function createHttpHostedApi() {
+export function createHttpHostedApi({
+  baseUrl = import.meta.env.VITE_HOSTED_API_BASE_URL || "",
+} = {}) {
+  const call = (path, options) =>
+    request(baseUrl.replace(/\/$/, ""), path, options);
   return {
-    listCompanies: () => request("/api/companies"),
-    getMe: () => request("/api/me"),
+    listCompanies: () => call("/api/companies"),
+    getMe: () => call("/api/me"),
     signup: (input) =>
-      request("/api/auth/signup", {
+      call("/api/auth/signup", {
         method: "POST",
         body: JSON.stringify(input),
       }),
     login: (input) =>
-      request("/api/auth/login", {
+      call("/api/auth/login", {
         method: "POST",
         body: JSON.stringify(input),
       }),
+    logout: () => call("/api/auth/logout", { method: "POST" }),
     forgotPassword: (input) =>
-      request("/api/auth/forgot-password", {
+      call("/api/auth/forgot-password", {
         method: "POST",
         body: JSON.stringify(input),
       }),
-    getPreferences: () => request("/api/preferences"),
+    resetPassword: (input) =>
+      call("/api/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    resendVerification: (input) =>
+      call("/api/auth/resend-verification", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    verifyEmail: (input) =>
+      call("/api/auth/verify-email", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    getPreferences: () => call("/api/preferences"),
     updatePreferences: (input) =>
-      request("/api/preferences", {
+      call("/api/preferences", {
         method: "PUT",
         body: JSON.stringify(input),
       }),
-    getWatchlist: () => request("/api/watchlist"),
+    getWatchlist: () => call("/api/watchlist"),
     updateWatchlist: (input) =>
-      request("/api/watchlist", { method: "PUT", body: JSON.stringify(input) }),
-    getMatches: () => request("/api/matches"),
+      call("/api/watchlist", { method: "PUT", body: JSON.stringify(input) }),
+    // Phase 1 has no matching backend; keep the authenticated shell usable.
+    getMatches: async () => [],
     requestCompany: (input) =>
-      request("/api/company-requests", {
+      call("/api/company-requests", {
         method: "POST",
         body: JSON.stringify(input),
       }),
@@ -90,9 +142,14 @@ export function createMockHostedApi({
     signup: (input) =>
       respond("signup", {
         user: { ...state.me, email: input.email, email_verified: false },
+        verification_email_sent: true,
       }),
     login: () => respond("login", { user: state.me }),
+    logout: () => respond("logout", null),
     forgotPassword: () => respond("forgotPassword", { accepted: true }),
+    resetPassword: () => respond("resetPassword", { accepted: true }),
+    resendVerification: () => respond("resendVerification", { accepted: true }),
+    verifyEmail: () => respond("verifyEmail", { accepted: true }),
     getPreferences: () => respond("preferences", state.preferences),
     updatePreferences: (input) => {
       state.preferences = { ...state.preferences, ...clone(input) };

@@ -157,10 +157,12 @@ export default function WatchlistPage({
                     ) : (
                       <button
                         className="add-button"
-                        disabled={saving}
+                        disabled={saving || company.selectable === false}
                         onClick={() => persist(company, "add")}
                       >
-                        + Add to watchlist
+                        {company.selectable === false
+                          ? "Unavailable"
+                          : "+ Add to watchlist"}
                       </button>
                     )}
                   </div>

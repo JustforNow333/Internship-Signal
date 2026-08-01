@@ -42,7 +42,7 @@ function FieldError({ id, children }) {
   ) : null;
 }
 
-export function SignupPage({ navigate, client, onEmailChange }) {
+export function SignupPage({ navigate, client, onSignup }) {
   const [values, setValues] = useState({
     email: "",
     password: "",
@@ -66,8 +66,11 @@ export function SignupPage({ navigate, client, onEmailChange }) {
     setStatus("saving");
     setServerError("");
     try {
-      await client.signup({ email: values.email, password: values.password });
-      onEmailChange(values.email);
+      const result = await client.signup({
+        email: values.email,
+        password: values.password,
+      });
+      onSignup(values.email, result);
       navigate("/verify-email");
     } catch (error) {
       setStatus("error");
@@ -155,7 +158,7 @@ export function SignupPage({ navigate, client, onEmailChange }) {
   );
 }
 
-export function SigninPage({ navigate, client }) {
+export function SigninPage({ navigate, client, onSignedIn }) {
   const [values, setValues] = useState({ email: "", password: "" });
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState("idle");
@@ -173,6 +176,7 @@ export function SigninPage({ navigate, client }) {
     setServerError("");
     try {
       await client.login(values);
+      onSignedIn?.();
       navigate("/app/dashboard");
     } catch (error) {
       setStatus("error");
@@ -285,8 +289,8 @@ export function ForgotPasswordPage({ navigate, client }) {
           <span aria-hidden="true">✓</span>
           <h2>Check your inbox</h2>
           <p>
-            If an account exists for <strong>{email}</strong>, reset
-            instructions are on the way.
+            If an account exists for <strong>{email}</strong> and delivery is
+            available, you’ll receive reset instructions shortly.
           </p>
         </div>
       ) : (
@@ -312,8 +316,52 @@ export function ForgotPasswordPage({ navigate, client }) {
   );
 }
 
-export function VerificationPendingPage({ navigate, email }) {
-  const [resent, setResent] = useState(false);
+export function VerificationPendingPage({
+  navigate,
+  client,
+  email,
+  token,
+  deliveryAccepted,
+}) {
+  const [status, setStatus] = useState("idle");
+  const [message, setMessage] = useState("");
+
+  const verify = async () => {
+    setStatus("saving");
+    setMessage("");
+    try {
+      if (token) {
+        await client.verifyEmail({ token });
+      } else {
+        const me = await client.getMe();
+        if (!me.email_verified) {
+          throw new Error("Your email has not been verified yet.");
+        }
+      }
+      navigate("/onboarding");
+    } catch (error) {
+      setStatus("error");
+      setMessage(error.message || "We couldn’t verify this email link.");
+    }
+  };
+
+  const resend = async () => {
+    setStatus("resending");
+    setMessage("");
+    try {
+      await client.resendVerification({ email });
+      setStatus("resent");
+      setMessage(
+        "Request accepted. If delivery is available, a new verification email will arrive shortly.",
+      );
+    } catch (error) {
+      setStatus("error");
+      setMessage(
+        error.message || "We couldn’t request another verification email.",
+      );
+    }
+  };
+
   return (
     <AuthLayout
       navigate={navigate}
@@ -325,27 +373,129 @@ export function VerificationPendingPage({ navigate, email }) {
         <span className="mail-mark" aria-hidden="true">
           ✉
         </span>
-        <p>We sent a verification link to</p>
+        <p>Use the verification link for</p>
         <strong>{email || "your email address"}</strong>
         <p>
-          Open the link in that email to continue. The link may take a minute to
-          arrive.
+          {deliveryAccepted === false
+            ? "We couldn’t confirm email delivery. Try again later or contact support before requesting another link."
+            : "Open the one-time link to continue. Verification links expire for account security."}
         </p>
         <button
           className="primary full large"
-          onClick={() => navigate("/onboarding")}
+          onClick={verify}
+          disabled={status === "saving"}
         >
-          I’ve verified my email
+          {status === "saving"
+            ? "Verifying…"
+            : token
+              ? "Verify email"
+              : "Continue after verifying"}
         </button>
-        <button className="ghost full" onClick={() => setResent(true)}>
-          {resent ? "Verification email resent" : "Resend verification email"}
-        </button>
-        {resent && (
-          <p className="success-text" role="status">
-            A new verification email is on the way.
+        {email && (
+          <button
+            className="ghost full"
+            onClick={resend}
+            disabled={status === "resending"}
+          >
+            {status === "resending"
+              ? "Requesting another email…"
+              : "Resend verification email"}
+          </button>
+        )}
+        {message && (
+          <p
+            className={status === "error" ? "field-error" : "success-text"}
+            role={status === "error" ? "alert" : "status"}
+          >
+            {message}
           </p>
         )}
       </div>
+    </AuthLayout>
+  );
+}
+
+export function ResetPasswordPage({ navigate, client, token }) {
+  const [values, setValues] = useState({ password: "", confirm: "" });
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("idle");
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!token) {
+      setError("This reset link is missing its token.");
+      return;
+    }
+    if (values.password.length < 8) {
+      setError("Use at least 8 characters.");
+      return;
+    }
+    if (values.password !== values.confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setStatus("saving");
+    setError("");
+    try {
+      await client.resetPassword({ token, password: values.password });
+      setStatus("success");
+    } catch (requestError) {
+      setStatus("error");
+      setError(requestError.message || "We couldn’t reset this password.");
+    }
+  };
+
+  return (
+    <AuthLayout
+      navigate={navigate}
+      eyebrow="Account recovery"
+      title="Choose a new password"
+      description="Reset links expire and can be used only once."
+    >
+      {status === "success" ? (
+        <div className="auth-success" role="status">
+          <span aria-hidden="true">✓</span>
+          <h2>Password updated</h2>
+          <p>Your previous sessions have been signed out.</p>
+          <button className="primary full" onClick={() => navigate("/signin")}>
+            Sign in with your new password
+          </button>
+        </div>
+      ) : (
+        <form className="auth-form" onSubmit={submit} noValidate>
+          {error && (
+            <div className="error-banner" role="alert">
+              {error}
+            </div>
+          )}
+          <label className="field">
+            <span>New password</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={values.password}
+              onChange={(event) =>
+                setValues({ ...values, password: event.target.value })
+              }
+            />
+            <small>At least 8 characters</small>
+          </label>
+          <label className="field">
+            <span>Confirm new password</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={values.confirm}
+              onChange={(event) =>
+                setValues({ ...values, confirm: event.target.value })
+              }
+            />
+          </label>
+          <button className="primary full large" disabled={status === "saving"}>
+            {status === "saving" ? "Updating password…" : "Update password"}
+          </button>
+        </form>
+      )}
     </AuthLayout>
   );
 }

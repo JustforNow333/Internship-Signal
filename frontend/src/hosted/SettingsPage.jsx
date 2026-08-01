@@ -8,23 +8,21 @@ import {
 import { ConfirmationDialog, SuccessNotice, Toggle } from "./ui.jsx";
 import { toggleSelection } from "./utils.js";
 
-export default function SettingsPage({
-  me,
-  preferences,
-  savePreferences,
-  navigate,
-}) {
+export default function SettingsPage({ me, preferences, savePreferences }) {
   const [form, setForm] = useState(preferences);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [dialog, setDialog] = useState(null);
+  const [unsubscribeOpen, setUnsubscribeOpen] = useState(false);
   useEffect(() => setForm(preferences), [preferences]);
 
   const toggleRole = (id) =>
     setForm({ ...form, role_ids: toggleSelection(form.role_ids, id) });
   const toggleLocation = (location) =>
-    setForm({ ...form, locations: toggleSelection(form.locations, location) });
+    setForm({
+      ...form,
+      preferred_locations: toggleSelection(form.preferred_locations, location),
+    });
   const save = async (event) => {
     event.preventDefault();
     setSaving(true);
@@ -39,32 +37,25 @@ export default function SettingsPage({
       setSaving(false);
     }
   };
-  const confirmAction = async () => {
-    if (dialog === "unsubscribe") {
-      const next = {
-        ...form,
-        alert_frequency: "paused",
-        globally_paused: true,
-      };
-      setForm(next);
-      setSaving(true);
-      setError("");
-      try {
-        await savePreferences(next);
-        setNotice(
-          "Email alerts are now unsubscribed. Your watchlist remains available.",
-        );
-        setDialog(null);
-      } catch (saveError) {
-        setError(
-          saveError.message || "Email alerts could not be unsubscribed.",
-        );
-      } finally {
-        setSaving(false);
-      }
-    } else if (dialog === "delete") {
-      setDialog(null);
-      navigate("/");
+  const confirmUnsubscribe = async () => {
+    const next = {
+      ...form,
+      alert_frequency: "paused",
+      globally_paused: true,
+    };
+    setForm(next);
+    setSaving(true);
+    setError("");
+    try {
+      await savePreferences(next);
+      setNotice(
+        "Email alerts are now unsubscribed. Your watchlist remains available.",
+      );
+      setUnsubscribeOpen(false);
+    } catch (saveError) {
+      setError(saveError.message || "Email alerts could not be unsubscribed.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -139,12 +130,14 @@ export default function SettingsPage({
                 <label
                   key={location}
                   className={
-                    form.locations.includes(location) ? "selected" : ""
+                    form.preferred_locations.includes(location)
+                      ? "selected"
+                      : ""
                   }
                 >
                   <input
                     type="checkbox"
-                    checked={form.locations.includes(location)}
+                    checked={form.preferred_locations.includes(location)}
                     onChange={() => toggleLocation(location)}
                   />
                   {location}
@@ -162,9 +155,9 @@ export default function SettingsPage({
             <label className="field season-field">
               <span>Internship season</span>
               <select
-                value={form.season}
+                value={form.internship_season}
                 onChange={(event) =>
-                  setForm({ ...form, season: event.target.value })
+                  setForm({ ...form, internship_season: event.target.value })
                 }
               >
                 {SEASON_OPTIONS.map((season) => (
@@ -229,47 +222,33 @@ export default function SettingsPage({
         <aside className="settings-sidebar">
           <section className="settings-card danger-zone">
             <h2>Account controls</h2>
-            <button type="button" onClick={() => setDialog("unsubscribe")}>
+            <button type="button" onClick={() => setUnsubscribeOpen(true)}>
               <span>
                 <strong>Unsubscribe from alerts</strong>
                 <small>Stop email delivery and keep the account.</small>
               </span>
               <span aria-hidden="true">→</span>
             </button>
-            <button type="button" onClick={() => setDialog("delete")}>
+            <button type="button" disabled>
               <span>
                 <strong>Delete account</strong>
-                <small>Permanently remove the account and watchlist.</small>
+                <small>Account deletion is not available yet.</small>
               </span>
-              <span aria-hidden="true">→</span>
             </button>
           </section>
         </aside>
       </form>
       <ConfirmationDialog
-        open={dialog === "unsubscribe"}
+        open={unsubscribeOpen}
         title="Unsubscribe from all alerts?"
         confirmLabel="Unsubscribe"
         tone="danger"
-        onClose={() => setDialog(null)}
-        onConfirm={confirmAction}
+        onClose={() => setUnsubscribeOpen(false)}
+        onConfirm={confirmUnsubscribe}
       >
         <p>
           You will stop receiving match emails. Your account and watchlist will
           remain available if you return.
-        </p>
-      </ConfirmationDialog>
-      <ConfirmationDialog
-        open={dialog === "delete"}
-        title="Delete your account permanently?"
-        confirmLabel="Delete account"
-        tone="danger"
-        onClose={() => setDialog(null)}
-        onConfirm={confirmAction}
-      >
-        <p>
-          This permanently deletes your preferences and watchlist. The hosted
-          backend must enforce this action when connected; it cannot be undone.
         </p>
       </ConfirmationDialog>
     </>

@@ -12,6 +12,8 @@ export default function AppShell({
   navigate,
   email,
   matchCount,
+  onLogout,
+  sessionError,
   children,
 }) {
   return (
@@ -49,9 +51,19 @@ export default function AppShell({
               <small>My account</small>
             </span>
           </button>
+          <button className="text-button" onClick={onLogout}>
+            Sign out
+          </button>
         </div>
       </header>
-      <main className="app-main">{children}</main>
+      <main className="app-main">
+        {sessionError && (
+          <div className="error-banner" role="alert">
+            {sessionError}
+          </div>
+        )}
+        {children}
+      </main>
       <nav className="mobile-nav" aria-label="Mobile application navigation">
         {NAV_ITEMS.map((item) => (
           <RouteLink

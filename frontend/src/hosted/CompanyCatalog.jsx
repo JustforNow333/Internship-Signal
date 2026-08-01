@@ -56,6 +56,7 @@ export default function CompanyCatalog({
         <div className="company-list">
           {visible.map((company) => {
             const selected = selectedIds.includes(company.id);
+            const selectable = company.selectable !== false;
             return (
               <article
                 className={`company-row ${selected ? "selected" : ""}`}
@@ -70,10 +71,17 @@ export default function CompanyCatalog({
                   type="button"
                   className={selected ? "selected-button" : "add-button"}
                   aria-pressed={selected}
-                  aria-label={`${selected ? "Remove" : "Add"} ${company.name}`}
+                  aria-label={
+                    selectable
+                      ? `${selected ? "Remove" : "Add"} ${company.name}`
+                      : `${company.name} unavailable`
+                  }
+                  disabled={!selectable}
                   onClick={() => onToggle(company.id)}
                 >
-                  {selected ? (
+                  {!selectable ? (
+                    "Unavailable"
+                  ) : selected ? (
                     <>
                       <span aria-hidden="true">✓</span> Selected
                     </>

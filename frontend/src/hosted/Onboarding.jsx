@@ -149,7 +149,10 @@ function AlertsStep({
   const toggleLocation = (location) =>
     setPreferences({
       ...preferences,
-      locations: toggleSelection(preferences.locations, location),
+      preferred_locations: toggleSelection(
+        preferences.preferred_locations,
+        location,
+      ),
     });
   return (
     <section className="onboarding-card" aria-labelledby="onboarding-title">
@@ -174,12 +177,14 @@ function AlertsStep({
             <label
               key={location}
               className={
-                preferences.locations.includes(location) ? "selected" : ""
+                preferences.preferred_locations.includes(location)
+                  ? "selected"
+                  : ""
               }
             >
               <input
                 type="checkbox"
-                checked={preferences.locations.includes(location)}
+                checked={preferences.preferred_locations.includes(location)}
                 onChange={() => toggleLocation(location)}
               />
               {location}
@@ -200,9 +205,12 @@ function AlertsStep({
       <label className="field preference-section">
         <span className="field-legend">Internship season</span>
         <select
-          value={preferences.season}
+          value={preferences.internship_season}
           onChange={(event) =>
-            setPreferences({ ...preferences, season: event.target.value })
+            setPreferences({
+              ...preferences,
+              internship_season: event.target.value,
+            })
           }
         >
           {SEASON_OPTIONS.map((season) => (
@@ -252,7 +260,8 @@ function AlertsStep({
           className="primary large"
           disabled={
             saving ||
-            (!preferences.locations.length && !preferences.include_remote)
+            (!preferences.preferred_locations.length &&
+              !preferences.include_remote)
           }
           onClick={onFinish}
         >
@@ -312,10 +321,10 @@ export default function Onboarding({
   const [roleIds, setRoleIds] = useState([]);
   const [companyIds, setCompanyIds] = useState([]);
   const [preferences, setPreferences] = useState({
-    locations: ["United States"],
+    preferred_locations: ["United States"],
     include_remote: true,
-    season: "Summer 2027",
-    alert_frequency: "asap",
+    internship_season: "Summer 2027",
+    alert_frequency: "as_detected",
     globally_paused: false,
   });
   const [saving, setSaving] = useState(false);

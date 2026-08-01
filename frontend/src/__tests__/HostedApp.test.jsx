@@ -8,7 +8,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import App from "../App.jsx";
-import { createMockHostedApi } from "../hosted/api.js";
+import { HostedApiError, createMockHostedApi } from "../hosted/api.js";
 import { makeHostedFixtures } from "../hosted/fixtures.js";
 
 function renderApp(path, options = {}) {
@@ -100,6 +100,64 @@ describe("hosted Internship Signal MVP", () => {
     expect(screen.getByText("Enter your password.")).toBeInTheDocument();
   });
 
+  it("submits signup and supports verification resend", async () => {
+    const client = createMockHostedApi();
+    const resend = vi.spyOn(client, "resendVerification");
+    renderApp("/signup", { client });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "student@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/^Password/), {
+      target: { value: "password123" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
+      target: { value: "password123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Verify your email" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Resend verification email" }),
+    );
+    await waitFor(() =>
+      expect(resend).toHaveBeenCalledWith({
+        email: "student@example.com",
+      }),
+    );
+  });
+
+  it("submits verification and password-reset tokens", async () => {
+    const client = createMockHostedApi();
+    const verify = vi.spyOn(client, "verifyEmail");
+    const reset = vi.spyOn(client, "resetPassword");
+    const { unmount } = renderApp("/verify-email?token=verification-token", {
+      client,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Verify email" }));
+    await waitFor(() =>
+      expect(verify).toHaveBeenCalledWith({ token: "verification-token" }),
+    );
+    unmount();
+
+    renderApp("/reset-password?token=reset-token", { client });
+    fireEvent.change(screen.getByLabelText(/^New password/), {
+      target: { value: "new-password" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), {
+      target: { value: "new-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Update password" }));
+    await waitFor(() =>
+      expect(reset).toHaveBeenCalledWith({
+        token: "reset-token",
+        password: "new-password",
+      }),
+    );
+    expect(await screen.findByText("Password updated")).toBeInTheDocument();
+  });
+
   it("requires and preserves multi-select role choices", async () => {
     renderApp("/onboarding");
     const continueButton = await screen.findByRole("button", {
@@ -129,6 +187,22 @@ describe("hosted Internship Signal MVP", () => {
     expect(
       screen.getByRole("button", { name: "Remove Stripe" }),
     ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("does not allow an unavailable catalog company to be selected", async () => {
+    const fixtures = makeHostedFixtures();
+    fixtures.companies = [{ ...fixtures.companies[0], selectable: false }];
+    renderApp("/onboarding", { fixtures });
+    fireEvent.click(
+      (await screen.findByText("Software Engineering")).closest("label"),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Continue to companies/i }),
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Stripe unavailable" }),
+    ).toBeDisabled();
   });
 
   it("shows the company empty-search state", async () => {
@@ -264,7 +338,9 @@ describe("hosted Internship Signal MVP", () => {
   });
 
   it("updates role and location selections in settings", async () => {
-    renderApp("/app/settings");
+    const client = createMockHostedApi();
+    const updatePreferences = vi.spyOn(client, "updatePreferences");
+    renderApp("/app/settings", { client });
     await screen.findByRole("heading", { name: "Settings" });
     const software = screen.getByRole("checkbox", {
       name: "Software Engineering",
@@ -280,8 +356,26 @@ describe("hosted Internship Signal MVP", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Your alert preferences have been saved.",
     );
+    expect(updatePreferences).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferred_locations: ["United States", "New York, NY", "Boston, MA"],
+        internship_season: "Summer 2027",
+      }),
+    );
     expect(software).not.toBeChecked();
     expect(boston).toBeChecked();
+  });
+
+  it("does not claim account deletion without a backend endpoint", async () => {
+    renderApp("/app/settings");
+    await screen.findByRole("heading", { name: "Settings" });
+
+    expect(
+      screen.getByRole("button", { name: /Delete account/ }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("Account deletion is not available yet."),
+    ).toBeInTheDocument();
   });
 
   it("renders a loading state while hosted data is pending", () => {
@@ -291,6 +385,52 @@ describe("hosted Internship Signal MVP", () => {
     );
     expect(
       screen.getByRole("button", { name: "Account settings" }),
+    ).toBeInTheDocument();
+  });
+
+  it("signs out through the hosted adapter", async () => {
+    const client = createMockHostedApi();
+    const logout = vi.spyOn(client, "logout");
+    renderApp("/app/dashboard", { client });
+    await screen.findByRole("heading", { name: "Good morning." });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(logout).toHaveBeenCalledOnce());
+    expect(
+      screen.getByRole("heading", { name: "Sign in to Internship Signal" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not claim sign-out when session revocation fails", async () => {
+    const client = createMockHostedApi();
+    client.logout = vi
+      .fn()
+      .mockRejectedValue(new Error("Sign-out unavailable."));
+    renderApp("/app/dashboard", { client });
+    await screen.findByRole("heading", { name: "Good morning." });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Sign-out unavailable.",
+    );
+    expect(
+      screen.getByRole("heading", { name: "Good morning." }),
+    ).toBeInTheDocument();
+  });
+
+  it("redirects a protected route to sign in after HTTP 401", async () => {
+    const client = createMockHostedApi();
+    client.getMe = vi
+      .fn()
+      .mockRejectedValue(new HostedApiError("Authentication required.", 401));
+    renderApp("/app/dashboard", { client });
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Sign in to Internship Signal",
+      }),
     ).toBeInTheDocument();
   });
 

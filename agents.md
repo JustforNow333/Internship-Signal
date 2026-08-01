@@ -1,31 +1,19 @@
 # Agents Guide
 
-## Hosted UI MVP branch
+## Hosted backend Phase 1 branch
 
-- Work only in `C:\\Users\\burst\\internship-signal-ui` on
-  `agent/hosted-ui-mvp`; do not touch the original or canary worktrees.
-- The public React/Vite experience is watchlist-first: landing, email auth,
-  three-step onboarding, dashboard, matches, watchlist, and settings. Do not
-  expose CSV uploads, alumni data, watcher internals, or administrator controls.
-- Keep hosted API access behind a replaceable client/adapter boundary. Until
-  the hosted backend exists, label and document mock behavior honestly.
-- Preserve the existing paper/spruce visual language, responsive layouts,
-  keyboard access, visible focus, semantic labels, and explicit async states.
-- Hosted UI cleanup is evidence-first: reproduce defects before fixing them,
-  add regression coverage, and remove duplication only after caller searches
-  and tests prove the shared path preserves behavior.
-- Promote this branch only through a verified fast-forward from a clean `main`
-  worktree; never move a checked-out branch behind unrelated uncommitted work.
-- A dirty `main` owner must move only its owned changes to a separate branch,
-  commit them there, leave `main` unmodified, and report the branch and SHA.
-- Once `main` is free, promote with an atomic fast-forward from the verified
-  old SHA, then recheck refs and every active worktree without altering them.
-- Publish hosted UI from the clean UI repository with an explicit `main` ref;
-  never stage the separate watcher worktree or use a blanket add for a push.
-- Windows Git cannot open a linked worktree whose `.git` file uses a WSL path;
-  push the explicit shared `main` ref through the primary repo or use WSL Git.
-- Run only frontend tests/build for this task. Never run watcher collection,
-  email, priming, seen-state changes, or production/canary configuration.
+- Work only in `C:\\Users\\burst\\internship-signal-hosted-backend` on
+  `agent/hosted-backend-mvp`; leave original, canary, and UI worktrees alone.
+- Add FastAPI/Pydantic APIs backed by SQLAlchemy 2.x, Alembic, and PostgreSQL;
+  preserve the existing CSV API and keep watcher storage and behavior separate.
+- Authentication uses Argon2 and database sessions whose raw tokens exist only
+  in secure HTTP-only cookies; recovery tokens are expiring, one-time hashes.
+- Derive the sanitized public company catalog from watcher configuration; never
+  expose ATS settings, source URLs, health internals, alumni, or secrets.
+- Keep live frontend access behind the hosted adapter and retain mock adapters
+  for isolated tests. This phase excludes matching, collection, and alerts.
+- Use isolated PostgreSQL and an injected test mailer for integration tests;
+  never use production state, send real email, or run live watcher collection.
 
 ## Required every prompt
 
