@@ -52,7 +52,10 @@ if str(REPO_ROOT) not in sys.path:
 if str(REPO_ROOT / "backend") not in sys.path:
     sys.path.insert(1, str(REPO_ROOT / "backend"))
 
-_CANARY_TEMP_DIR = Path(tempfile.mkdtemp(prefix="watcher-collection-canary-"))
+_CANARY_TEMP_DIRECTORY = tempfile.TemporaryDirectory(
+    prefix="watcher-collection-canary-"
+)
+_CANARY_TEMP_DIR = Path(_CANARY_TEMP_DIRECTORY.name)
 # Set before importing watcher configuration so no default resolves to
 # production state, and so no code path can enable email or priming.
 os.environ["WATCHER_SEND_EMAIL"] = "0"

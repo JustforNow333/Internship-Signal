@@ -65,13 +65,23 @@ def _parse_env_value(value: str) -> str:
 def _strip_comment(line: str) -> str:
     in_single = False
     in_double = False
+    escaped = False
     for index, char in enumerate(line):
-        if char == "'" and not in_double:
+        if char == "\\" and (in_single or in_double):
+            escaped = not escaped
+            continue
+        if char == "'" and not in_double and not escaped:
             in_single = not in_single
-        elif char == '"' and not in_single:
+        elif char == '"' and not in_single and not escaped:
             in_double = not in_double
-        elif char == "#" and not in_single and not in_double:
+        elif (
+            char == "#"
+            and not in_single
+            and not in_double
+            and (index == 0 or line[index - 1].isspace())
+        ):
             return line[:index]
+        escaped = False
     return line
 
 

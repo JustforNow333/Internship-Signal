@@ -96,6 +96,17 @@ def test_parse_env_assignment_accepts_standard_and_powershell_forms():
     assert _parse_env_assignment("# comment only") is None
 
 
+def test_parse_env_assignment_preserves_hashes_inside_values():
+    assert _parse_env_assignment("SMTP_APP_PASSWORD=abc#def") == (
+        "SMTP_APP_PASSWORD",
+        "abc#def",
+    )
+    assert _parse_env_assignment(r'QUOTED_VALUE="abc\"#def" # comment') == (
+        "QUOTED_VALUE",
+        'abc"#def',
+    )
+
+
 def test_load_dotenv_sets_missing_values_without_overriding_existing(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     env_path.write_text(

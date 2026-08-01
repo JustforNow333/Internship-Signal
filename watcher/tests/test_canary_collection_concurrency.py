@@ -1,7 +1,10 @@
 """Offline coverage for the staged collection-concurrency canary harness."""
 
 import os
+import subprocess
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -311,3 +314,27 @@ def test_production_state_fingerprints_are_size_and_digest_only():
     for path, value in fingerprints.items():
         assert path.endswith(".sqlite")
         assert value == "absent" or ":" in value
+
+
+def test_canary_import_cleans_its_temporary_directory_at_process_exit(tmp_path):
+    environment = os.environ.copy()
+    environment["TEMP"] = str(tmp_path)
+    environment["TMP"] = str(tmp_path)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from scripts.canary_collection_concurrency "
+                "import _CANARY_TEMP_DIR; print(_CANARY_TEMP_DIR)"
+            ),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    created_path = Path(result.stdout.strip())
+    assert not created_path.exists()

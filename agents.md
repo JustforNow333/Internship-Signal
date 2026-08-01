@@ -272,11 +272,15 @@ git status --short --ignored
 
 - Bug audits require a reproducible failure or clear violated invariant. Add a
   regression test before fixing behavior; do not change code for style alone.
-- Repository-wide cleanup must preserve public shapes and side effects; remove
-  duplication only after tests cover every consolidated caller.
+- Repository-wide readability cleanup must preserve public shapes, ordering,
+  logs, and side effects; consolidate duplication only after tests cover every
+  caller.
 - Cleanup audits require an executable failure or a clearly demonstrated
   invariant violation before behavior changes. Remove code only after caller
   searches and regression tests prove it is redundant or unreachable.
+- Parallel handoffs preserve dirty work on a unique branch without stashing,
+  resetting, cleaning, or touching another worktree; stage only owned paths or
+  hunks.
 - Holdout construction is two-stage: commit reusable tooling first, then
   collect from that exact clean SHA. Exclude both prior benchmarks by stable
   ID, normalized URL, and fallback key without reading their human labels.

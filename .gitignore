@@ -226,12 +226,12 @@ canary-full*.json
 concurrent-canary*.json
 collection-canary-state*.json
 watcher/collection-canary-state*.json
-# Repository-cleanup audit logs are local diagnostics, not source artifacts.
+# Repository-cleanup/readability audit logs are local diagnostics, not source artifacts.
 cleanup-audit*.log
 cleanup-audit*.json
 watcher/cleanup-audit*.log
 watcher/cleanup-audit*.json
-# Prompt-maintained guidance and bug-audit scratch copies stay local.
+# Prompt-maintained guidance, bug-audit, and branch-handoff scratch stay local.
 agents.local.md
 agents.*.md
 agents (*).md
