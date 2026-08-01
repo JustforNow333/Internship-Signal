@@ -13,6 +13,8 @@
   the common implementation is behavior-preserving.
 - Promote only through a verified fast-forward from a clean `main` worktree;
   never move a checked-out branch behind unrelated uncommitted work.
+- If `main` is dirty, its owner moves only owned changes to a separate branch,
+  commits there, leaves `main` unmodified, and reports the branch and SHA.
 - For this branch run frontend tests/build only; never collect live postings,
   send email, prime/mark seen, or alter watcher/canary/production settings.
 

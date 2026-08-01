@@ -16,6 +16,8 @@
   and tests prove the shared path preserves behavior.
 - Promote this branch only through a verified fast-forward from a clean `main`
   worktree; never move a checked-out branch behind unrelated uncommitted work.
+- A dirty `main` owner must move only its owned changes to a separate branch,
+  commit them there, leave `main` unmodified, and report the branch and SHA.
 - Run only frontend tests/build for this task. Never run watcher collection,
   email, priming, seen-state changes, or production/canary configuration.
 
