@@ -292,6 +292,107 @@ contain feed URLs, response content, secrets, alumni details, or recipients.
 They remain log-only so the existing heartbeat and health-report schemas stay
 unchanged.
 
+### Opt-in bounded collection concurrency
+
+**Production default remains serial; concurrent mode is available for
+controlled canaries.** Serial mode stays permanently available as the rollback
+and diagnostic path.
+
+| Setting | Default | Accepted range |
+| --- | --- | --- |
+| `WATCHER_COLLECTION_MODE` | `serial` | `serial`, `concurrent` |
+| `WATCHER_COLLECTION_MAX_WORKERS` | `4` | 1–16 |
+| `WATCHER_WORKDAY_MAX_CONCURRENCY` | `1` | 1–5 |
+| `WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY` | `2` | 1–4 |
+
+Workday and per-origin concurrency may never exceed the global worker pool, and
+invalid values fail configuration loudly. A task starts only when *every*
+applicable limit allows it: the global pool, its origin, its provider, and — for
+Workday — the Workday limit. The tightest bound wins. Origin and provider keys
+are derived from scheme, host, and port only, so no credential, path, or query
+value can enter a key, and two different companies on the same ATS host share
+one origin limit. Each Workday tenant is its own host but still shares the
+single Workday provider limit.
+
+Concurrency changes only *when* the existing fetch callables run. Adapter
+timeouts, tenant pacing, retries, backoff, and source-specific safety rules are
+unchanged; the Workday tenant pacer is shared across worker threads so pacing
+cannot be weakened. There is no proxy rotation, cookie handling, header or
+identity rotation, browser automation, challenge or CAPTCHA handling, retrying
+through alternate infrastructure, or use of undocumented endpoints. Challenge,
+forbidden, unauthorized, and rate-limited responses remain ordinary source
+failures. Results are reassembled in configuration order, so rows, errors,
+attempts, counters, dedupe precedence, and downstream output are identical to
+serial collection.
+
+Runs log one `COLLECTION-CONCURRENCY` record and add
+`collection_mode`, `collection_max_workers`,
+`collection_max_observed_concurrency`,
+`collection_max_observed_origin_concurrency`,
+`collection_max_observed_workday_concurrency`, and
+`collection_unexpected_task_exceptions` to the heartbeat. Snapshot replay
+reports `collection_mode=none`.
+
+Full canary reports also include Workday tenant-start telemetry measured with a
+monotonic clock at the boundary between pacing completion and adapter fetch.
+The private report records the configured interval, start count,
+minimum/median/maximum spacing, pacing-violation count, and sanitized company/
+task identifiers with offsets from the first start. The pacer sleeps without
+holding its coordination lock. These fields are in-memory canary evidence only:
+they never enter snapshots, SQLite, durable health data, heartbeats, or email.
+
+Staged validation:
+
+```bash
+# Stage 1 — deterministic offline benchmark (no network, no state)
+PYTHONPATH=.:backend python3 scripts/benchmark_collection_concurrency.py \
+    --companies 40 --delay 0.05 --output evaluation/private/stage1.json
+
+# Stage 2 — limited live canary (small allowlist, at most one or two Workday tenants)
+PYTHONPATH=.:backend python3 scripts/canary_collection_concurrency.py \
+    --stage limited --max-sources 6 --max-workday 1 \
+    --output evaluation/private/canary-limited.json
+
+# Stage 3 — full live canary, only after the limited canary passes
+PYTHONPATH=.:backend python3 scripts/canary_collection_concurrency.py \
+    --stage full --output evaluation/private/canary-full.json
+```
+
+Before a full canary, record `git status --short --branch`, local `HEAD`, the
+upstream ref, a fresh remote branch tip, and the watchlist SHA-256. The
+concurrency implementation and canary tooling should already be committed and
+pushed on the intended branch. If they are uncommitted or unpushed, report the
+exact state and do not call the evidence repository-complete; do not commit or
+push without separate authorization.
+
+Canaries are collection-only and operationally isolated: temporary seen and
+analysis-cache databases, email disabled, priming disabled, no seen marking, no
+health-alert delivery, no durable health persistence, and no source-comparison
+persistence. Production SQLite state is fingerprinted before and after and the
+result is reported. A source answering 401, 403, 429, a challenge response, or
+repeated transport failures is recorded and dropped from the rest of the canary
+rather than retried. Full runs are guarded so at least one normal collection
+interval separates them, and a full serial collection is never run back-to-back
+with a concurrent canary — use a recent normal serial production run, existing
+serial timing logs, or a serial run from a separate normal collection window as
+the baseline.
+
+Use fixed limits of four global workers, one Workday tenant, and two tasks per
+origin for every promotion canary. Store detailed reports and any snapshots
+only in `evaluation/private/`. A promotion report must distinguish historical
+evidence from canaries attributable to a committed and pushed implementation,
+and must record complete run identity, timing, concurrency, per-source,
+Workday, downstream, and production-state safety fields.
+
+Promotion to a concurrent production default is a separate, small, reversible
+change and requires the evidence listed in `WATCHER_PROGRESS.md`: at least three
+successful full concurrent canaries in separate normal collection windows, no
+material source-failure or Workday-retry increase, no new rate-limit or
+challenge behavior, comparable per-source row coverage, complete source-attempt
+diagnostics, identical deterministic fixture outputs, stable ordering and
+deduplication precedence, clean executor shutdown, and no operational-state side
+effects.
+
 ### Analysis performance benchmark
 
 `scripts/benchmark_analysis_context.py` exercises the normal offline

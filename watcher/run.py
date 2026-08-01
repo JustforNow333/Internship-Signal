@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from collections import Counter
 from contextlib import contextmanager
@@ -21,11 +22,25 @@ from watcher.analysis_cache import (
     AnalysisCacheStats,
     analyze_rows_with_cache,
 )
+from watcher.collection_concurrency import (
+    PROVIDER_GITHUB_FEED,
+    CollectionConcurrencyMetrics,
+    CollectionScheduler,
+    CollectionTask,
+    TaskResult,
+    direct_origin_key,
+    log_collection_concurrency,
+    origin_key_for_url,
+)
 from watcher.config import (
+    COLLECTION_MODE_SERIAL,
     DEFAULT_WATCHLIST_PATH,
+    CollectionConcurrencyCfg,
+    CompanyCfg,
     GitHubListingSourceCfg,
     WatcherConfig,
     load_watchlist,
+    workday_min_interval_seconds,
 )
 from watcher.collection_snapshot import (
     CollectionBatch,
@@ -102,6 +117,7 @@ from watcher.sources import (
     WorkableSource,
     WorkdaySource,
 )
+from watcher.sources.workday import WorkdayPacer, WorkdayStartTelemetry
 
 LOGGER = logging.getLogger(__name__)
 
@@ -156,6 +172,8 @@ class RunResult:
     jobs: list[dict] = field(default_factory=list)
     duplicate_report: list[dict] = field(default_factory=list)
     collection_replayed: bool = False
+    collection_mode: str = COLLECTION_MODE_SERIAL
+    collection_concurrency: CollectionConcurrencyMetrics | None = None
 
 
 @dataclass
@@ -169,6 +187,14 @@ class CollectionStats:
     workday_request_attempts: int = 0
     workday_retry_attempts: int = 0
     workday_failure_codes: Counter[str] = field(default_factory=Counter)
+    # Collection-mode diagnostics stay in memory: they are canary evidence, not
+    # part of the persisted collection snapshot schema.
+    collection_mode: str = COLLECTION_MODE_SERIAL
+    collection_concurrency: CollectionConcurrencyMetrics | None = None
+    workday_start_telemetry: WorkdayStartTelemetry | None = None
+    http_status_counts: Counter[int] = field(default_factory=Counter)
+    challenge_responses: int = 0
+    unexpected_task_exceptions: int = 0
 
 
 @dataclass(frozen=True)
@@ -228,6 +254,8 @@ def _log_source_timing(
     source: object,
     source_name: str | None = None,
     error: Exception | None = None,
+    request_count: int | None = None,
+    retry_count: int | None = None,
 ) -> None:
     fields = [
         "SOURCE-TIMING",
@@ -243,7 +271,8 @@ def _log_source_timing(
             f"rows={max(0, int(rows_returned))}",
         )
     )
-    request_count, retry_count = _source_request_counts(source, error=error)
+    if request_count is None and retry_count is None:
+        request_count, retry_count = _source_request_counts(source, error=error)
     if request_count is not None:
         fields.append(f"requests={request_count}")
     if retry_count is not None:
@@ -402,10 +431,12 @@ def run_once(
         )
     else:
         LOGGER.info("Collecting watcher rows...")
+        live_collection_stats = CollectionStats()
         collection_batch = collect_batch(
             config,
             direct_sources=direct_sources,
             github_source=github_source,
+            stats=live_collection_stats,
             run_id=active_run_id,
             observed_at=observed_at,
         )
@@ -422,6 +453,11 @@ def run_once(
             )
     assert collection_batch is not None
     collection_stats = _collection_stats_from_batch(collection_batch)
+    # Snapshot replay has no live collection, so it reports no collection mode.
+    collection_mode = "none" if replay_mode else live_collection_stats.collection_mode
+    collection_concurrency = (
+        None if replay_mode else live_collection_stats.collection_concurrency
+    )
     rows = collection_batch.mutable_rows()
     errors = list(collection_batch.errors)
     workday_transport = summarize_workday_transport(collection_stats)
@@ -698,6 +734,8 @@ def run_once(
         jobs=jobs,
         duplicate_report=duplicate_report,
         collection_replayed=replay_mode,
+        collection_mode=collection_mode,
+        collection_concurrency=collection_concurrency,
     )
 
 
@@ -791,6 +829,85 @@ def _ephemeral_health_state(
     return states, tuple(transitions)
 
 
+@dataclass
+class _DirectFetchOutcome:
+    """Everything one direct fetch produced, captured inside its worker."""
+
+    rows: list[dict] = field(default_factory=list)
+    succeeded: bool = False
+    error: Exception | None = None
+    error_kind: str = ""
+    workday_failure_code: str = ""
+    request_count: int = 1
+    retry_count: int = 0
+    status_code: int | None = None
+    challenge_response: bool = False
+
+
+@dataclass
+class _GithubFetchOutcome:
+    rows: list[dict] = field(default_factory=list)
+    succeeded: bool = False
+    error: Exception | None = None
+    error_kind: str = ""
+    status_code: int | None = None
+    challenge_response: bool = False
+
+
+class _DirectSourceProvider:
+    """Resolve direct adapters safely for serial and concurrent collection.
+
+    Injected registries are reused as-is so existing callers keep their exact
+    behavior. Production collection (no injection) builds one adapter set per
+    worker thread, because adapters such as Workday keep per-fetch diagnostics
+    on the instance. The Workday tenant pacer is deliberately shared across
+    those per-thread adapters so concurrency cannot weaken tenant pacing.
+    """
+
+    def __init__(
+        self,
+        direct_sources: dict[str, object] | None,
+        *,
+        concurrent: bool,
+    ) -> None:
+        self._injected = direct_sources
+        self._local = threading.local()
+        self._shared: dict[str, object] | None = None
+        self._workday_pacer: WorkdayPacer | None = None
+        if direct_sources is None:
+            if concurrent:
+                self._workday_pacer = WorkdayPacer(workday_min_interval_seconds())
+                self._supported = frozenset(_DEFAULT_DIRECT_ADAPTERS)
+            else:
+                self._shared = _default_direct_sources()
+                self._supported = frozenset(self._shared)
+        else:
+            self._supported = frozenset(direct_sources)
+
+    def supports(self, ats: str) -> bool:
+        return ats in self._supported
+
+    def get(self, ats: str) -> object | None:
+        if self._injected is not None:
+            return self._injected.get(ats)
+        if self._shared is not None:
+            return self._shared.get(ats)
+        mapping = getattr(self._local, "mapping", None)
+        if mapping is None:
+            mapping = _default_direct_sources(workday_pacer=self._workday_pacer)
+            self._local.mapping = mapping
+        return mapping.get(ats)
+
+    def workday_start_telemetry(self) -> WorkdayStartTelemetry | None:
+        pacer = self._workday_pacer
+        if pacer is None:
+            registry = self._injected if self._injected is not None else self._shared
+            source = registry.get("workday") if registry is not None else None
+            candidate = getattr(source, "_pacer", None)
+            pacer = candidate if isinstance(candidate, WorkdayPacer) else None
+        return pacer.start_telemetry() if pacer is not None else None
+
+
 def _collect_rows(
     config: WatcherConfig,
     *,
@@ -804,8 +921,15 @@ def _collect_rows(
     active_observed_at = utc_datetime(observed_at or datetime.now(timezone.utc))
     if stats is None:
         stats = CollectionStats()
-    if direct_sources is None:
-        direct_sources = _default_direct_sources()
+    concurrency = (
+        getattr(config, "collection_concurrency", None) or CollectionConcurrencyCfg()
+    )
+    scheduler = CollectionScheduler(concurrency)
+    stats.collection_mode = concurrency.mode
+    source_provider = _DirectSourceProvider(
+        direct_sources,
+        concurrent=concurrency.concurrent,
+    )
     configured_sources = config.effective_github_listing_sources()
     configured_count = len(configured_sources)
     if github_source is None:
@@ -829,9 +953,26 @@ def _collect_rows(
     errors: list[str] = []
 
     with _timed_stage("direct_source_collection"):
+        # Plan in configuration order, execute under the active mode, then apply
+        # every outcome in that same order. Serial and concurrent collection
+        # therefore produce identical rows, errors, attempts, and counters.
+        planned: list[tuple[str, CompanyCfg, int | None]] = []
+        direct_tasks: list[CollectionTask] = []
         for company in config.companies:
             if company.ats in {"bespoke", "github_only"}:
-                LOGGER.info("Skipping direct fetch for %s (%s).", company.name, company.ats)
+                planned.append(("unsupported", company, None))
+                continue
+            if not source_provider.supports(company.ats):
+                planned.append(("missing_adapter", company, None))
+                continue
+            planned.append(("fetch", company, len(direct_tasks)))
+            direct_tasks.append(_direct_collection_task(company, source_provider))
+        direct_results = scheduler.run(direct_tasks)
+        for kind, company, index in planned:
+            if kind == "unsupported":
+                LOGGER.info(
+                    "Skipping direct fetch for %s (%s).", company.name, company.ats
+                )
                 stats.source_attempts.append(
                     SourceAttempt(
                         health_key=direct_health_key(company.name, company.ats),
@@ -847,8 +988,7 @@ def _collect_rows(
                     )
                 )
                 continue
-            source = direct_sources.get(company.ats)
-            if source is None:
+            if kind == "missing_adapter":
                 _record_error(
                     errors,
                     f"{company.name}: no source registered for ats '{company.ats}'",
@@ -868,257 +1008,417 @@ def _collect_rows(
                     )
                 )
                 continue
-            is_workday = company.ats == "workday"
-            if is_workday:
-                stats.workday_attempted += 1
-            fetch_started = time.perf_counter()
-            fetch_succeeded = False
-            fetch_rows = 0
-            fetch_error: Exception | None = None
-            try:
-                LOGGER.info("Fetching %s via %s...", company.name, company.ats)
-                rows = source.fetch(company)
-                direct_rows.extend(rows)
-                fetch_rows = len(rows)
-                fetch_succeeded = True
-                LOGGER.info("Fetched %d direct row(s) for %s.", len(rows), company.name)
-                stats.source_attempts.append(
-                    _successful_attempt(
-                        health_key=direct_health_key(company.name, company.ats),
-                        run_id=active_run_id,
-                        observed_at=active_observed_at,
-                        source_kind=SOURCE_KIND_DIRECT,
-                        company=company.name,
-                        adapter=company.ats,
-                        rows_returned=len(rows),
-                    )
-                )
-                if is_workday:
-                    stats.workday_succeeded += 1
-                    stats.workday_request_attempts += _workday_request_count(
-                        source
-                    )
-                    stats.workday_retry_attempts += _workday_retry_count(source)
-            except SourceSchemaError as exc:
-                fetch_error = exc
-                if is_workday:
-                    _record_workday_failure(stats, source, "schema_failure")
-                _record_error(errors, f"{company.name}: {exc}")
-                stats.source_attempts.append(
-                    _failed_direct_attempt(
-                        company,
-                        active_run_id,
-                        active_observed_at,
-                        ERROR_SCHEMA,
-                        exc,
-                    )
-                )
-            except SourceFetchError as exc:
-                fetch_error = exc
-                if is_workday:
-                    _record_workday_failure(stats, source, exc.error_code, error=exc)
-                _record_error(errors, f"{company.name}: {exc}")
-                stats.source_attempts.append(
-                    _failed_direct_attempt(
-                        company,
-                        active_run_id,
-                        active_observed_at,
-                        _fetch_error_kind(exc),
-                        exc,
-                    )
-                )
-            except SourceError as exc:
-                fetch_error = exc
-                if is_workday:
-                    _record_workday_failure(stats, source, "source_failure")
-                _record_error(errors, f"{company.name}: {exc}")
-                stats.source_attempts.append(
-                    _failed_direct_attempt(
-                        company,
-                        active_run_id,
-                        active_observed_at,
-                        ERROR_SOURCE,
-                        exc,
-                    )
-                )
-            except Exception as exc:  # defensive run-loop boundary
-                fetch_error = exc
-                if is_workday:
-                    _record_workday_failure(stats, source, "unexpected_exception")
-                _record_error(
-                    errors,
-                    f"{company.name}: unexpected {type(exc).__name__}: {exc}",
-                )
-                stats.source_attempts.append(
-                    _failed_direct_attempt(
-                        company,
-                        active_run_id,
-                        active_observed_at,
-                        ERROR_UNEXPECTED,
-                        exc,
-                    )
-                )
-            finally:
-                _log_source_timing(
-                    company=company.name,
-                    adapter=company.ats,
-                    success=fetch_succeeded,
-                    elapsed_seconds=time.perf_counter() - fetch_started,
-                    rows_returned=fetch_rows,
-                    source=source,
-                    error=fetch_error,
-                )
+            assert index is not None
+            _apply_direct_outcome(
+                company,
+                _direct_outcome_from_result(company, direct_results[index], stats),
+                stats=stats,
+                errors=errors,
+                direct_rows=direct_rows,
+                run_id=active_run_id,
+                observed_at=active_observed_at,
+            )
+        stats.workday_start_telemetry = source_provider.workday_start_telemetry()
 
     with _timed_stage("github_backstop_collection"):
-        for source_config, source in github_sources:
-            configured_url = (
-                source_config.url if source_config else _github_source_url(source)
+        github_plan = [
+            _github_feed_plan(source_config, source)
+            for source_config, source in github_sources
+        ]
+        github_results = scheduler.run(
+            [
+                _github_collection_task(plan, config)
+                for plan in github_plan
+            ]
+        )
+        for plan, result in zip(github_plan, github_results):
+            _apply_github_outcome(
+                plan,
+                _github_outcome_from_result(plan, result, stats),
+                stats=stats,
+                errors=errors,
+                github_rows=github_rows,
+                run_id=active_run_id,
+                observed_at=active_observed_at,
             )
-            source_name = (
-                source_config.name if source_config else _github_source_name(source)
-            )
-            adapter = (
-                source_config.format
-                if source_config
-                else _github_source_adapter(source)
-            )
-            safe_url = sanitize_feed_label(
-                configured_url or _github_source_label(source)
-            )
-            label = (
-                safe_url
-                if source_config
-                and source_config.name.startswith("legacy_simplify_")
-                else sanitize_feed_label(f"{source_name} [{safe_url}]")
-            )
-            health_key = github_feed_health_key(configured_url or safe_url)
-            before = len(github_rows)
-            fetch_started = time.perf_counter()
-            fetch_succeeded = False
-            fetch_rows = 0
-            fetch_error: Exception | None = None
-            try:
-                LOGGER.info(
-                    "Fetching GitHub listings backstop source %s...",
-                    label,
-                )
-                if hasattr(source, "fetch_many"):
-                    github_rows.extend(source.fetch_many(config.companies))
-                else:
-                    for company in config.companies:
-                        github_rows.extend(source.fetch(company))
-                fetch_rows = len(github_rows) - before
-                fetch_succeeded = True
-                stats.github_feeds_succeeded += 1
-                LOGGER.info(
-                    "Fetched %d GitHub backstop row(s) from %s.",
-                    len(github_rows) - before,
-                    label,
-                )
-                stats.source_attempts.append(
-                    _successful_attempt(
-                        health_key=health_key,
-                        run_id=active_run_id,
-                        observed_at=active_observed_at,
-                        source_kind=SOURCE_KIND_GITHUB_FEED,
-                        company=None,
-                        adapter=adapter,
-                        rows_returned=len(github_rows) - before,
-                        feed_label=label,
-                    )
-                )
-            except SourceSchemaError as exc:
-                fetch_error = exc
-                _record_error(
-                    errors,
-                    f"github listings ({label}): {_sanitize_error(exc)}",
-                )
-                stats.source_attempts.append(
-                    _failed_attempt(
-                        health_key=health_key,
-                        run_id=active_run_id,
-                        observed_at=active_observed_at,
-                        source_kind=SOURCE_KIND_GITHUB_FEED,
-                        company=None,
-                        adapter=adapter,
-                        error_kind=ERROR_SCHEMA,
-                        error=exc,
-                        feed_label=label,
-                    )
-                )
-            except SourceFetchError as exc:
-                fetch_error = exc
-                _record_error(
-                    errors,
-                    f"github listings ({label}): {_sanitize_error(exc)}",
-                )
-                stats.source_attempts.append(
-                    _failed_attempt(
-                        health_key=health_key,
-                        run_id=active_run_id,
-                        observed_at=active_observed_at,
-                        source_kind=SOURCE_KIND_GITHUB_FEED,
-                        company=None,
-                        adapter=adapter,
-                        error_kind=ERROR_FETCH,
-                        error=exc,
-                        feed_label=label,
-                    )
-                )
-            except SourceError as exc:
-                fetch_error = exc
-                _record_error(
-                    errors,
-                    f"github listings ({label}): {_sanitize_error(exc)}",
-                )
-                stats.source_attempts.append(
-                    _failed_attempt(
-                        health_key=health_key,
-                        run_id=active_run_id,
-                        observed_at=active_observed_at,
-                        source_kind=SOURCE_KIND_GITHUB_FEED,
-                        company=None,
-                        adapter=adapter,
-                        error_kind=ERROR_SOURCE,
-                        error=exc,
-                        feed_label=label,
-                    )
-                )
-            except Exception as exc:  # defensive run-loop boundary
-                fetch_error = exc
-                _record_error(
-                    errors,
-                    f"github listings ({label}): unexpected "
-                    f"{type(exc).__name__}: {_sanitize_error(exc)}",
-                )
-                stats.source_attempts.append(
-                    _failed_attempt(
-                        health_key=health_key,
-                        run_id=active_run_id,
-                        observed_at=active_observed_at,
-                        source_kind=SOURCE_KIND_GITHUB_FEED,
-                        company=None,
-                        adapter=adapter,
-                        error_kind=ERROR_UNEXPECTED,
-                        error=exc,
-                        feed_label=label,
-                    )
-                )
-            finally:
-                _log_source_timing(
-                    company="all",
-                    adapter=adapter,
-                    source_name=source_name,
-                    success=fetch_succeeded,
-                    elapsed_seconds=time.perf_counter() - fetch_started,
-                    rows_returned=fetch_rows,
-                    source=source,
-                    error=fetch_error,
-                )
+
+    stats.collection_concurrency = scheduler.metrics()
+    log_collection_concurrency(stats.collection_concurrency)
 
     # Direct rows first: backend dedupe keeps the first row's extra metadata,
     # so this implements the direct-over-GitHub source-priority rule.
     return [*direct_rows, *github_rows], errors
+
+
+@dataclass(frozen=True)
+class _GithubFeedPlan:
+    """Stable identity for one configured GitHub backstop feed."""
+
+    source_config: GitHubListingSourceCfg | None
+    source: object
+    source_name: str
+    adapter: str
+    label: str
+    health_key: str
+    url: str
+
+
+def _direct_collection_task(
+    company: CompanyCfg,
+    source_provider: "_DirectSourceProvider",
+) -> CollectionTask:
+    """Describe one direct fetch and the scopes that bound it."""
+
+    def run() -> _DirectFetchOutcome:
+        # Resolved inside the worker so concurrent mode uses that thread's
+        # adapter instance rather than sharing per-fetch adapter state.
+        source = source_provider.get(company.ats)
+        return _fetch_direct_source(company, source)
+
+    return CollectionTask(
+        key=f"direct:{company.ats}:{company.name}",
+        origin=direct_origin_key(
+            company.ats,
+            token=company.token,
+            workday_shard=company.workday_shard,
+        ),
+        provider=company.ats,
+        run=run,
+        workday=company.ats == "workday",
+    )
+
+
+def _fetch_direct_source(
+    company: CompanyCfg,
+    source: object,
+) -> _DirectFetchOutcome:
+    """Fetch one direct source, classifying every failure exactly as before."""
+
+    rows: list[dict] = []
+    succeeded = False
+    error: Exception | None = None
+    error_kind = ""
+    workday_failure_code = ""
+    fetch_started = time.perf_counter()
+    try:
+        LOGGER.info("Fetching %s via %s...", company.name, company.ats)
+        rows = list(source.fetch(company))
+        succeeded = True
+        LOGGER.info("Fetched %d direct row(s) for %s.", len(rows), company.name)
+    except SourceSchemaError as exc:
+        error, error_kind, workday_failure_code = exc, ERROR_SCHEMA, "schema_failure"
+    except SourceFetchError as exc:
+        error, error_kind, workday_failure_code = exc, _fetch_error_kind(exc), exc.error_code
+    except SourceError as exc:
+        error, error_kind, workday_failure_code = exc, ERROR_SOURCE, "source_failure"
+    except Exception as exc:  # defensive run-loop boundary
+        error, error_kind, workday_failure_code = exc, ERROR_UNEXPECTED, "unexpected_exception"
+    finally:
+        request_count, retry_count = _source_request_counts(source, error=error)
+        _log_source_timing(
+            company=company.name,
+            adapter=company.ats,
+            success=succeeded,
+            elapsed_seconds=time.perf_counter() - fetch_started,
+            rows_returned=len(rows) if succeeded else 0,
+            source=source,
+            error=error,
+            request_count=request_count,
+            retry_count=retry_count,
+        )
+    return _DirectFetchOutcome(
+        rows=rows if succeeded else [],
+        succeeded=succeeded,
+        error=error,
+        error_kind=error_kind,
+        workday_failure_code=workday_failure_code,
+        request_count=request_count if request_count is not None else 1,
+        retry_count=retry_count or 0,
+        status_code=_http_status_from_error(error),
+        challenge_response=_challenge_response(error),
+    )
+
+
+def _direct_outcome_from_result(
+    company: CompanyCfg,
+    result: TaskResult,
+    stats: CollectionStats,
+) -> _DirectFetchOutcome:
+    """Convert an escaped worker error into an ordinary failed outcome."""
+
+    if isinstance(result.value, _DirectFetchOutcome) and result.error is None:
+        return result.value
+    error = result.error or RuntimeError(
+        f"collection task returned no outcome for {company.name}"
+    )
+    stats.unexpected_task_exceptions += 1
+    LOGGER.error(
+        "Collection task for %s failed unexpectedly: %s",
+        company.name,
+        sanitize_error(f"{type(error).__name__}: {error}"),
+    )
+    return _DirectFetchOutcome(
+        succeeded=False,
+        error=error if isinstance(error, Exception) else RuntimeError(str(error)),
+        error_kind=ERROR_UNEXPECTED,
+        workday_failure_code="unexpected_exception",
+    )
+
+
+def _apply_direct_outcome(
+    company: CompanyCfg,
+    outcome: _DirectFetchOutcome,
+    *,
+    stats: CollectionStats,
+    errors: list[str],
+    direct_rows: list[dict],
+    run_id: str,
+    observed_at: datetime,
+) -> None:
+    is_workday = company.ats == "workday"
+    if is_workday:
+        stats.workday_attempted += 1
+    if outcome.status_code is not None:
+        stats.http_status_counts[outcome.status_code] += 1
+    if outcome.challenge_response:
+        stats.challenge_responses += 1
+    if outcome.succeeded:
+        direct_rows.extend(outcome.rows)
+        stats.source_attempts.append(
+            _successful_attempt(
+                health_key=direct_health_key(company.name, company.ats),
+                run_id=run_id,
+                observed_at=observed_at,
+                source_kind=SOURCE_KIND_DIRECT,
+                company=company.name,
+                adapter=company.ats,
+                rows_returned=len(outcome.rows),
+            )
+        )
+        if is_workday:
+            stats.workday_succeeded += 1
+            stats.workday_request_attempts += outcome.request_count
+            stats.workday_retry_attempts += outcome.retry_count
+        return
+    error = outcome.error or RuntimeError("unknown direct source failure")
+    if is_workday:
+        _record_workday_failure(
+            stats,
+            outcome.workday_failure_code,
+            request_count=outcome.request_count,
+            retry_count=outcome.retry_count,
+        )
+    if outcome.error_kind == ERROR_UNEXPECTED:
+        _record_error(
+            errors,
+            f"{company.name}: unexpected {type(error).__name__}: {error}",
+        )
+    else:
+        _record_error(errors, f"{company.name}: {error}")
+    stats.source_attempts.append(
+        _failed_direct_attempt(
+            company,
+            run_id,
+            observed_at,
+            outcome.error_kind or ERROR_SOURCE,
+            error,
+        )
+    )
+
+
+def _github_feed_plan(
+    source_config: GitHubListingSourceCfg | None,
+    source: object,
+) -> _GithubFeedPlan:
+    configured_url = source_config.url if source_config else _github_source_url(source)
+    source_name = source_config.name if source_config else _github_source_name(source)
+    adapter = (
+        source_config.format if source_config else _github_source_adapter(source)
+    )
+    safe_url = sanitize_feed_label(configured_url or _github_source_label(source))
+    label = (
+        safe_url
+        if source_config and source_config.name.startswith("legacy_simplify_")
+        else sanitize_feed_label(f"{source_name} [{safe_url}]")
+    )
+    return _GithubFeedPlan(
+        source_config=source_config,
+        source=source,
+        source_name=source_name,
+        adapter=adapter,
+        label=label,
+        health_key=github_feed_health_key(configured_url or safe_url),
+        url=configured_url or "",
+    )
+
+
+def _github_collection_task(
+    plan: _GithubFeedPlan,
+    config: WatcherConfig,
+) -> CollectionTask:
+    return CollectionTask(
+        key=f"github:{plan.source_name}",
+        origin=origin_key_for_url(plan.url),
+        provider=PROVIDER_GITHUB_FEED,
+        run=lambda: _fetch_github_source(plan, config),
+    )
+
+
+def _fetch_github_source(
+    plan: _GithubFeedPlan,
+    config: WatcherConfig,
+) -> _GithubFetchOutcome:
+    rows: list[dict] = []
+    succeeded = False
+    error: Exception | None = None
+    error_kind = ""
+    fetch_started = time.perf_counter()
+    source = plan.source
+    try:
+        LOGGER.info("Fetching GitHub listings backstop source %s...", plan.label)
+        if hasattr(source, "fetch_many"):
+            rows.extend(source.fetch_many(config.companies))
+        else:
+            for company in config.companies:
+                rows.extend(source.fetch(company))
+        succeeded = True
+        LOGGER.info(
+            "Fetched %d GitHub backstop row(s) from %s.", len(rows), plan.label
+        )
+    except SourceSchemaError as exc:
+        error, error_kind = exc, ERROR_SCHEMA
+    except SourceFetchError as exc:
+        error, error_kind = exc, ERROR_FETCH
+    except SourceError as exc:
+        error, error_kind = exc, ERROR_SOURCE
+    except Exception as exc:  # defensive run-loop boundary
+        error, error_kind = exc, ERROR_UNEXPECTED
+    finally:
+        _log_source_timing(
+            company="all",
+            adapter=plan.adapter,
+            source_name=plan.source_name,
+            success=succeeded,
+            elapsed_seconds=time.perf_counter() - fetch_started,
+            rows_returned=len(rows) if succeeded else 0,
+            source=source,
+            error=error,
+        )
+    return _GithubFetchOutcome(
+        rows=rows if succeeded else [],
+        succeeded=succeeded,
+        error=error,
+        error_kind=error_kind,
+        status_code=_http_status_from_error(error),
+        challenge_response=_challenge_response(error),
+    )
+
+
+def _github_outcome_from_result(
+    plan: _GithubFeedPlan,
+    result: TaskResult,
+    stats: CollectionStats,
+) -> _GithubFetchOutcome:
+    if isinstance(result.value, _GithubFetchOutcome) and result.error is None:
+        return result.value
+    error = result.error or RuntimeError(
+        f"collection task returned no outcome for {plan.source_name}"
+    )
+    stats.unexpected_task_exceptions += 1
+    LOGGER.error(
+        "GitHub backstop task %s failed unexpectedly: %s",
+        plan.source_name,
+        sanitize_error(f"{type(error).__name__}: {error}"),
+    )
+    return _GithubFetchOutcome(
+        succeeded=False,
+        error=error if isinstance(error, Exception) else RuntimeError(str(error)),
+        error_kind=ERROR_UNEXPECTED,
+    )
+
+
+def _apply_github_outcome(
+    plan: _GithubFeedPlan,
+    outcome: _GithubFetchOutcome,
+    *,
+    stats: CollectionStats,
+    errors: list[str],
+    github_rows: list[dict],
+    run_id: str,
+    observed_at: datetime,
+) -> None:
+    if outcome.status_code is not None:
+        stats.http_status_counts[outcome.status_code] += 1
+    if outcome.challenge_response:
+        stats.challenge_responses += 1
+    if outcome.succeeded:
+        github_rows.extend(outcome.rows)
+        stats.github_feeds_succeeded += 1
+        stats.source_attempts.append(
+            _successful_attempt(
+                health_key=plan.health_key,
+                run_id=run_id,
+                observed_at=observed_at,
+                source_kind=SOURCE_KIND_GITHUB_FEED,
+                company=None,
+                adapter=plan.adapter,
+                rows_returned=len(outcome.rows),
+                feed_label=plan.label,
+            )
+        )
+        return
+    error = outcome.error or RuntimeError("unknown GitHub backstop failure")
+    if outcome.error_kind == ERROR_UNEXPECTED:
+        _record_error(
+            errors,
+            f"github listings ({plan.label}): unexpected "
+            f"{type(error).__name__}: {_sanitize_error(error)}",
+        )
+    else:
+        _record_error(
+            errors,
+            f"github listings ({plan.label}): {_sanitize_error(error)}",
+        )
+    stats.source_attempts.append(
+        _failed_attempt(
+            health_key=plan.health_key,
+            run_id=run_id,
+            observed_at=observed_at,
+            source_kind=SOURCE_KIND_GITHUB_FEED,
+            company=None,
+            adapter=plan.adapter,
+            error_kind=outcome.error_kind or ERROR_SOURCE,
+            error=error,
+            feed_label=plan.label,
+        )
+    )
+
+
+def _http_status_from_error(error: Exception | None) -> int | None:
+    """Return the observed HTTP status without reading raw response bodies."""
+
+    if error is None:
+        return None
+    status = getattr(error, "status_code", None)
+    if isinstance(status, int) and 100 <= status <= 599:
+        return status
+    match = re.search(r"\bHTTP (\d{3})\b", str(error))
+    if match:
+        value = int(match.group(1))
+        if 100 <= value <= 599:
+            return value
+    return None
+
+
+def _challenge_response(error: Exception | None) -> bool:
+    if error is None:
+        return False
+    if str(getattr(error, "error_code", "")) == "html_challenge":
+        return True
+    metadata = getattr(error, "response_metadata", None)
+    if isinstance(metadata, dict):
+        return str(metadata.get("body_kind") or "") == "html_challenge"
+    return False
 
 
 def _categorical_exclusion_audit(
@@ -1178,6 +1478,7 @@ def print_report(result: RunResult, *, output: TextIO | None = None) -> None:
         f"{getattr(result, 'github_feeds_succeeded', 0)} succeeded",
         file=output,
     )
+    _print_collection_mode(result, output=output)
     _print_workday_transport(getattr(result, "workday_transport", WorkdayTransportSummary()), output)
     _print_source_health(result, output=output)
     comparison = getattr(result, "source_comparison", None)
@@ -1324,6 +1625,12 @@ def print_heartbeat(result: RunResult, *, output: TextIO | None = None) -> None:
         f"workday_failed={getattr(getattr(result, 'workday_transport', None), 'failed_tenants', 0)}, "
         f"workday_retry_attempts={getattr(getattr(result, 'workday_transport', None), 'retry_attempts', 0)}, "
         f"workday_shared_incident={int(bool(getattr(getattr(result, 'workday_transport', None), 'likely_shared_incident', False)))}, "
+        f"collection_mode={getattr(result, 'collection_mode', COLLECTION_MODE_SERIAL)}, "
+        f"collection_max_workers={_concurrency_value(result, 'max_workers')}, "
+        f"collection_max_observed_concurrency={_concurrency_value(result, 'max_observed_global')}, "
+        f"collection_max_observed_origin_concurrency={_concurrency_value(result, 'max_observed_per_origin')}, "
+        f"collection_max_observed_workday_concurrency={_concurrency_value(result, 'max_observed_workday')}, "
+        f"collection_unexpected_task_exceptions={_concurrency_value(result, 'unexpected_exceptions')}, "
         f"alumni_csv_status={getattr(result, 'alumni_csv_status', 'unknown')}, "
         f"alumni_records_loaded={getattr(result, 'alumni_records_loaded', 0)}, "
         f"alumni_employers_indexed={getattr(result, 'alumni_employers_indexed', 0)}, "
@@ -1487,14 +1794,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
 
-def _default_direct_sources() -> dict[str, object]:
+_DEFAULT_DIRECT_ADAPTERS = frozenset(
+    {"ashby", "greenhouse", "lever", "smartrecruiters", "workable", "workday"}
+)
+
+
+def _default_direct_sources(
+    *,
+    workday_pacer: WorkdayPacer | None = None,
+) -> dict[str, object]:
     return {
         "ashby": AshbySource(),
         "greenhouse": GreenhouseSource(),
         "lever": LeverSource(),
         "smartrecruiters": SmartRecruitersSource(),
         "workable": WorkableSource(),
-        "workday": WorkdaySource(),
+        "workday": WorkdaySource(pacer=workday_pacer),
     }
 
 
@@ -1634,30 +1949,17 @@ def _fetch_error_kind(error: SourceFetchError) -> str:
     return ERROR_FETCH if not code or code == ERROR_FETCH else f"{ERROR_FETCH}/{code}"
 
 
-def _workday_retry_count(source: object, error: SourceFetchError | None = None) -> int:
-    _requests, retries = _source_request_counts(source, error=error)
-    return retries or 0
-
-
-def _workday_request_count(
-    source: object,
-    error: SourceFetchError | None = None,
-) -> int:
-    requests, _retries = _source_request_counts(source, error=error)
-    return requests if requests is not None else 1
-
-
 def _record_workday_failure(
     stats: CollectionStats,
-    source: object,
     code: str,
     *,
-    error: SourceFetchError | None = None,
+    request_count: int,
+    retry_count: int,
 ) -> None:
     stable_code = re.sub(r"[^a-z0-9_.-]+", "_", str(code or "unknown").casefold()).strip("_")
     stats.workday_failed += 1
-    stats.workday_request_attempts += _workday_request_count(source, error)
-    stats.workday_retry_attempts += _workday_retry_count(source, error)
+    stats.workday_request_attempts += max(1, int(request_count))
+    stats.workday_retry_attempts += max(0, int(retry_count))
     stats.workday_failure_codes[stable_code or "unknown"] += 1
 
 
@@ -1697,6 +1999,41 @@ def _log_workday_transport(summary: WorkdayTransportSummary) -> None:
         summary.dominant_error,
         summary.dominant_error_count,
         "yes" if summary.likely_shared_incident else "no",
+    )
+
+
+def _print_collection_mode(result: RunResult, *, output: TextIO) -> None:
+    metrics = getattr(result, "collection_concurrency", None)
+    print("Collection:", file=output)
+    print(
+        f"  Mode: {getattr(result, 'collection_mode', COLLECTION_MODE_SERIAL)}",
+        file=output,
+    )
+    if metrics is None:
+        return
+    print(
+        "  Configured limits: "
+        f"workers={metrics.max_workers} "
+        f"per_origin={metrics.per_origin_limit} "
+        f"workday={metrics.workday_limit}",
+        file=output,
+    )
+    print(
+        "  Maximum observed concurrency: "
+        f"global={metrics.max_observed_global} "
+        f"per_origin={metrics.max_observed_per_origin} "
+        f"provider={metrics.max_observed_provider} "
+        f"workday={metrics.max_observed_workday}",
+        file=output,
+    )
+    print(
+        f"  Unexpected task exceptions: {metrics.unexpected_exceptions}",
+        file=output,
+    )
+    print(
+        "  Executor shutdown clean: "
+        f"{'yes' if metrics.executor_shutdown_clean else 'no'}",
+        file=output,
     )
 
 
@@ -1896,6 +2233,11 @@ def _write_result_health_report(result: RunResult, path: str | Path) -> None:
             },
         },
     )
+
+
+def _concurrency_value(result: RunResult, field_name: str) -> int:
+    metrics = getattr(result, "collection_concurrency", None)
+    return int(getattr(metrics, field_name, 0) or 0)
 
 
 def _health_value(summary: HealthSummary | None, field_name: str) -> int:

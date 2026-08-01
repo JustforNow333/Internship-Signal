@@ -733,6 +733,155 @@ This file tracks completed watcher steps and the next handoff target.
    - Full validation: backend/watcher `770 passed, 1 warning`; frontend
      `23 passed`; frontend production build and Python compileall succeeded.
 
+36. Opt-in bounded collection concurrency:
+   - **Production default remains serial; concurrent mode is available for
+     controlled canaries.** `WATCHER_COLLECTION_MODE` defaults to `serial`,
+     serial stays the permanent rollback/diagnostic path, and promotion is a
+     separate reviewed change.
+   - Validated limits are `WATCHER_COLLECTION_MAX_WORKERS` (1-16, default 4),
+     `WATCHER_WORKDAY_MAX_CONCURRENCY` (1-5, default 1), and
+     `WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY` (1-4, default 2). Neither
+     scope limit may exceed the worker pool, and a task starts only when the
+     global pool, its origin, its provider, and the Workday limit all allow it.
+   - Origin/provider keys carry only scheme, host, and port. Companies sharing
+     an ATS host share one origin limit; each Workday tenant is its own origin
+     under the shared Workday limit. Collection plans in configuration order,
+     executes under the active mode, and applies outcomes in that order, so
+     rows, errors, attempts, counters, and downstream output are unchanged.
+   - Production collection builds one adapter set per worker thread and shares
+     one thread-safe Workday tenant pacer. Timeouts, retries, backoff, and
+     pacing are unchanged, and there is no proxy, cookie, header-rotation,
+     browser-automation, or challenge-bypass behavior. Escaped worker errors
+     become failed task results with sanitized exception types.
+   - Stage 1 (deterministic offline, 42 fake delayed sources, 0.05s each,
+     limits 4/1/2) passed every check: identical batch digests, byte-identical
+     snapshots, identical downstream pipeline fixtures, preserved row/attempt/
+     error order, observed maxima 4 global / 2 per origin / 2 provider / 1
+     Workday, serial peak 1, failure isolation, isolated worker programming
+     errors, clean shutdown, no seen rows, no email. Wall clock was 2.131s
+     serial versus 0.715s concurrent (2.98x).
+   - Stage 2 (limited live canary, 2026-07-31, limits 4/1/2) used one company
+     per adapter type with one Workday tenant: Capital One, Anduril Industries,
+     Bosch, Canary Technologies, Chainalysis, ICEYE. Result: 6 attempted,
+     5 successful, 1 valid empty, 0 failed, 0 HTTP 401/403/429, 0 challenges,
+     87 Workday requests with 0 retries, 8,684 rows in 37.087s, observed maxima
+     4 global / 1 per origin / 1 Workday, clean shutdown, 0 unexpected
+     exceptions, production state unchanged.
+   - Stage 3 (full live canary, 2026-07-31, limits 4/1/2) collected the full
+     configured source set plus both GitHub feeds: 61 attempted, 40 successful,
+     1 valid empty, 20 failed, 11,872 rows in 159.861s, observed maxima 4
+     global / 2 per origin / 2 provider / 1 Workday, 0 HTTP 401/403/429, 0
+     challenges, 0 unexpected exceptions, clean shutdown, production state
+     unchanged (`watcher/seen.sqlite`, `watcher/analysis-cache.sqlite`, and
+     `.watcher-state/seen.sqlite` fingerprints identical before and after).
+   - All 20 full-canary failures were Workday `network_failure` with 0
+     non-Workday failures. Six of 26 tenants succeeded (Capital One,
+     Salesforce, Cornerstone Research, FTI Delta, Thornton Tomasetti, Eli
+     Lilly), exactly matching the serial baseline recorded in item 31 (six of
+     26 tenants succeeded, 20 `network_failure`). Retries were 40 for 20 failed
+     tenants, which is exactly two per failure under the unchanged three-attempt
+     policy, so Workday retries did not materially increase. This is
+     pre-existing environmental Workday behavior on this host, not a
+     concurrency regression, and no source-level blocking signature exists.
+   - Historical serial baseline, not a fresh back-to-back serial run: item 33
+     measured 208.299s live collection for 11,858 rows and item 28 measured
+     197.301s direct collection. In-run summed fetch time was 206.26s versus
+     159.861s wall clock (22.6% faster). Workday alone accounted for 156.18s of
+     serialized fetch time at Workday concurrency 1, so the Workday chain is the
+     critical path and bounds the achievable speedup on this source set. No
+     limit increase is recommended without further canary evidence.
+   - Promotion evidence still required before a separate, small, reversible
+     default change: at least three successful full concurrent canaries in
+     separate normal collection windows, no material source-failure increase, no
+     material Workday retry increase, no new rate-limit or challenge behavior,
+     comparable per-source row coverage, complete source-attempt diagnostics,
+     identical deterministic fixture outputs, stable ordering and deduplication
+     precedence, clean executor shutdown, and no operational-state side effects.
+     One full canary exists as of 2026-07-31; two more are outstanding.
+   - Full validation: backend/watcher `835 passed, 1 warning`; Python
+     compileall and `git diff --check` completed successfully.
+
+37. Additional full-canary validation:
+   - At `2026-07-31T07:16:55Z` (`2026-07-31T03:16:55-04:00`), local branch
+     `main`, local `HEAD`, cached `origin/main`, and a fresh read-only GitHub
+     remote-tip query all resolved to
+     `10d4f89e49e168d44b6b52054ce6aed749a143a9`.
+   - The concurrency implementation is present in the working tree:
+     `watcher/collection_concurrency.py`, configuration parsing/validation,
+     deterministic collection planning/reduction in `watcher/run.py`, the
+     offline benchmark, staged canary harness, and their tests and
+     documentation. Focused offline verification passed `96` tests.
+   - Both full canaries described here ran before the implementation was
+     committed or pushed. At that time, the working tree had 24 modified
+     tracked files and seven untracked files, including the concurrency module,
+     benchmark/canary scripts, and both concurrency test modules. Their results
+     remain operational evidence with explicitly uncommitted provenance.
+   - The prior full canary ended at 06:17 UTC. Scheduled serial Actions run
+     `30610654239` then ran in the intervening normal window from 06:46 to 06:56
+     UTC; its watcher step succeeded, while the overall job failed only while
+     saving the data branch. No fresh serial run was started around this
+     canary.
+   - The first requested additional full canary started at
+     `2026-07-31T08:13:32.529171Z` (`04:13:32-04:00`), run ID
+     `20260731T081332Z-9d878f94901e`, with fixed limits 4 global / 1 Workday /
+     2 per origin and collection fingerprint
+     `71002a66c3de7aa084fb84c6b270e94ef73cca95490d4ff4a6dba583c27967c1`.
+     It passed: 61 attempted, 40 successful, one valid empty, 20 failed,
+     11,872 rows, 0 HTTP 401/403/429, 0 challenges, 0 unexpected exceptions,
+     observed maxima 4/2/2/1, and clean executor shutdown. Collection took
+     163.553s; the 61 logged source timings summed to 208.159s, saving 44.606s
+     (21.4%).
+   - All failures were the same 20 Workday `network_failure`s as the earlier
+     local canary. The successful set remained Capital One, Salesforce,
+     Cornerstone Research, FTI Delta, Thornton Tomasetti, and Eli Lilly.
+     Workday made 155 requests and 40 retries: two retries for each failed
+     tenant and none for successes. No non-Workday source failed. The harness
+     did not retain per-tenant start timestamps, so the configured 0.5s pacing
+     interval and Workday peak of one are verified, but an observed minimum
+     spacing and explicit violation count are unavailable.
+   - Workday start telemetry is now implemented in memory: the shared pacer
+     records each monotonic tenant start after pacing and directly before the
+     adapter fetch, then reports the configured interval, count, minimum/
+     median/maximum spacing, numeric violations, and deterministic sanitized
+     company/task offsets. It sleeps without holding the coordination lock and
+     does not extend snapshots, SQLite, health, heartbeat, or email schemas.
+     Focused concurrency, canary, and Workday transport tests pass (`103`).
+   - Versus the earlier concurrent canary, every source outcome was identical;
+     Capital One changed by +1 row and LinkedIn by -1, leaving the total
+     unchanged. Versus intervening serial run `30610654239`, the 20 Workday
+     tenants had succeeded and contributed 5,587 rows; the repeated local
+     failure split is classified as the previously observed Workday
+     environmental pattern. The only other differences were Bosch -2,
+     LinkedIn -1, and the Markdown feed -4, classified as expected posting
+     changes.
+   - The immutable snapshot SHA-256 is
+     `1b3c47ebb979df659f0c1b37505c391ba85169f32434ca8fdfa1a87e40ef7bd8`.
+     Offline isolated processing deduplicated 11,872 rows to 11,869 jobs,
+     recorded three duplicates/cross-source merges with direct ATS precedence,
+     and found 10 eligible matches. Three warm replays had 11,869 hits, zero
+     misses/network calls, identical output hash
+     `169500fca6f4272d3525e295e28ea3fe38a7e9a31295cd3ad0515769e9d7029d`,
+     median total 9.316s, and median source comparison 2.842s. Isolated
+     comparison persistence took 0.017s.
+   - All three script-tracked production paths remained absent, and every
+     additional local SQLite artifact retained its exact pre-run SHA-256. The
+     canary and replay invoked no email, seen marking, priming, durable health
+     write, production comparison/cache write, or other production mutation.
+   - Detailed evidence is gitignored at
+     `evaluation/private/canary-full-concurrent-20260731-window2.json`,
+     its adjacent snapshot/downstream report, and
+     `evaluation/private/concurrent-canary-window2-assessment-20260731.json`.
+     Two full operational canaries have passed in separate windows; one remains
+     outstanding. This bounded change publishes the reviewed implementation;
+     no promotion action is included and production remains serial.
+   - Final staged-tree validation passed: backend/watcher `823 passed, 1
+     warning`; frontend `23 passed` plus the production build; Python
+     compileall; workflow YAML parsing; and `git diff --check`. The 42-source
+     offline benchmark preserved byte-identical batches/snapshots, downstream
+     output hashes, row/error/attempt order, limits 4/2/2/1, zero Workday pacing
+     violations, zero operational-state writes, and clean shutdown.
+
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only
@@ -746,6 +895,12 @@ This file tracks completed watcher steps and the next handoff target.
   leave `WATCHER_PRIME_SEEN` unset/false for normal operation.
 - Keep source-health mode and internship-match send mode independently
   configured; use manual `health_email_mode=off` for transport probes.
+
+- Leave `WATCHER_COLLECTION_MODE` unset (serial) in production. After this
+  reviewed implementation is pushed, run the one remaining full concurrent
+  canary in a later normal collection window at fixed 4/1/2 limits. Treat both
+  current full results as operational but not repository-complete evidence
+  unless promotion review explicitly accepts their uncommitted provenance.
 
 ## Validation Command
 

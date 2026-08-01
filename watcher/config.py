@@ -82,6 +82,21 @@ DEFAULT_SEEN_DB_PATH = Path(os.getenv("WATCHER_SEEN_DB", WATCHER_DIR / "seen.sql
 DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS = 0.5
 MAX_WORKDAY_MIN_INTERVAL_SECONDS = 10.0
 DEFAULT_ANALYSIS_CACHE_ENABLED = True
+COLLECTION_MODE_SERIAL = "serial"
+COLLECTION_MODE_CONCURRENT = "concurrent"
+SUPPORTED_COLLECTION_MODES = (COLLECTION_MODE_SERIAL, COLLECTION_MODE_CONCURRENT)
+# Production stays serial. Concurrent mode is opt-in for controlled canaries and
+# is promoted only by a separate change after reviewed canary evidence.
+DEFAULT_COLLECTION_MODE = COLLECTION_MODE_SERIAL
+DEFAULT_COLLECTION_MAX_WORKERS = 4
+MIN_COLLECTION_MAX_WORKERS = 1
+MAX_COLLECTION_MAX_WORKERS = 16
+DEFAULT_WORKDAY_MAX_CONCURRENCY = 1
+MIN_WORKDAY_MAX_CONCURRENCY = 1
+MAX_WORKDAY_MAX_CONCURRENCY = 5
+DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY = 2
+MIN_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY = 1
+MAX_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY = 4
 SUPPORTED_ATS = {
     "greenhouse",
     "lever",
@@ -146,6 +161,149 @@ def workday_min_interval_seconds(value: str | float | int | None = None) -> floa
 
 
 @dataclass(frozen=True)
+class CollectionConcurrencyCfg:
+    """Validated opt-in collection concurrency limits.
+
+    Every limit is an upper bound: a task may run only when the global worker
+    pool, its origin limit, its provider limit, and (for Workday) the Workday
+    limit all allow it. Serial mode ignores the limits and remains the
+    permanent rollback and diagnostic path.
+    """
+
+    mode: str = DEFAULT_COLLECTION_MODE
+    max_workers: int = DEFAULT_COLLECTION_MAX_WORKERS
+    workday_max_concurrency: int = DEFAULT_WORKDAY_MAX_CONCURRENCY
+    per_origin_max_concurrency: int = DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mode", _collection_mode_value(self.mode))
+        object.__setattr__(
+            self,
+            "max_workers",
+            _bounded_int(
+                self.max_workers,
+                "WATCHER_COLLECTION_MAX_WORKERS",
+                MIN_COLLECTION_MAX_WORKERS,
+                MAX_COLLECTION_MAX_WORKERS,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "workday_max_concurrency",
+            _bounded_int(
+                self.workday_max_concurrency,
+                "WATCHER_WORKDAY_MAX_CONCURRENCY",
+                MIN_WORKDAY_MAX_CONCURRENCY,
+                MAX_WORKDAY_MAX_CONCURRENCY,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "per_origin_max_concurrency",
+            _bounded_int(
+                self.per_origin_max_concurrency,
+                "WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY",
+                MIN_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY,
+                MAX_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY,
+            ),
+        )
+        if self.workday_max_concurrency > self.max_workers:
+            raise ConfigError(
+                "WATCHER_WORKDAY_MAX_CONCURRENCY cannot exceed "
+                "WATCHER_COLLECTION_MAX_WORKERS"
+            )
+        if self.per_origin_max_concurrency > self.max_workers:
+            raise ConfigError(
+                "WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY cannot exceed "
+                "WATCHER_COLLECTION_MAX_WORKERS"
+            )
+
+    @property
+    def concurrent(self) -> bool:
+        return self.mode == COLLECTION_MODE_CONCURRENT
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "mode": self.mode,
+            "max_workers": self.max_workers,
+            "workday_max_concurrency": self.workday_max_concurrency,
+            "per_origin_max_concurrency": self.per_origin_max_concurrency,
+        }
+
+
+def _collection_mode_value(value: object) -> str:
+    if value is None:
+        return DEFAULT_COLLECTION_MODE
+    normalized = str(value).strip().casefold()
+    if not normalized:
+        return DEFAULT_COLLECTION_MODE
+    if normalized not in SUPPORTED_COLLECTION_MODES:
+        raise ConfigError(
+            "WATCHER_COLLECTION_MODE must be one of: "
+            + ", ".join(SUPPORTED_COLLECTION_MODES)
+        )
+    return normalized
+
+
+def _bounded_int(value: object, label: str, minimum: int, maximum: int) -> int:
+    if isinstance(value, bool):
+        raise ConfigError(f"{label} must be an integer between {minimum} and {maximum}")
+    if isinstance(value, float) and not float(value).is_integer():
+        raise ConfigError(f"{label} must be an integer between {minimum} and {maximum}")
+    try:
+        parsed = int(str(value).strip() if isinstance(value, str) else value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(
+            f"{label} must be an integer between {minimum} and {maximum}"
+        ) from exc
+    if parsed < minimum or parsed > maximum:
+        raise ConfigError(
+            f"{label} must be an integer between {minimum} and {maximum}"
+        )
+    return parsed
+
+
+def load_collection_concurrency(
+    *,
+    mode: str | None = None,
+    max_workers: str | int | None = None,
+    workday_max_concurrency: str | int | None = None,
+    per_origin_max_concurrency: str | int | None = None,
+) -> CollectionConcurrencyCfg:
+    """Return validated collection concurrency settings from the environment."""
+
+    return CollectionConcurrencyCfg(
+        mode=_env_or_default(
+            "WATCHER_COLLECTION_MODE", mode, DEFAULT_COLLECTION_MODE
+        ),
+        max_workers=_env_or_default(
+            "WATCHER_COLLECTION_MAX_WORKERS",
+            max_workers,
+            DEFAULT_COLLECTION_MAX_WORKERS,
+        ),
+        workday_max_concurrency=_env_or_default(
+            "WATCHER_WORKDAY_MAX_CONCURRENCY",
+            workday_max_concurrency,
+            DEFAULT_WORKDAY_MAX_CONCURRENCY,
+        ),
+        per_origin_max_concurrency=_env_or_default(
+            "WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY",
+            per_origin_max_concurrency,
+            DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY,
+        ),
+    )
+
+
+def _env_or_default(name: str, value: object, default: object) -> object:
+    if value is not None:
+        return value
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    return raw
+
+
+@dataclass(frozen=True)
 class CompanyCfg:
     """Per-company source configuration used by adapters."""
 
@@ -190,6 +348,9 @@ class WatcherConfig:
     min_score: int | None = None
     seen_db_path: Path = DEFAULT_SEEN_DB_PATH
     analysis_cache_enabled: bool = DEFAULT_ANALYSIS_CACHE_ENABLED
+    collection_concurrency: CollectionConcurrencyCfg = field(
+        default_factory=CollectionConcurrencyCfg
+    )
 
     def effective_github_listing_sources(self) -> tuple[GitHubListingSourceCfg, ...]:
         """Return typed sources plus deterministic adapters for legacy URLs."""
@@ -245,6 +406,7 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
         min_score=min_score,
         seen_db_path=DEFAULT_SEEN_DB_PATH,
         analysis_cache_enabled=analysis_cache_enabled(),
+        collection_concurrency=load_collection_concurrency(),
     )
 
 

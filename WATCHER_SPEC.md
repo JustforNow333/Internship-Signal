@@ -748,3 +748,126 @@ date-sensitive test override. Capture/replay logs one bounded
 `COLLECTION-SNAPSHOT` summary containing mode, sanitized path, row count,
 capture time, and replay fingerprint-match status, never descriptions, feed
 URLs, or snapshot contents.
+
+---
+
+## 17. Opt-in bounded collection concurrency
+
+Production default remains serial; concurrent mode is available for controlled
+canaries. `WATCHER_COLLECTION_MODE` accepts `serial` or `concurrent` and
+defaults to `serial`. Serial mode is permanently available as the rollback and
+diagnostic path. Promoting the production default is a separate, small,
+reversible change made only after reviewed canary evidence; one benchmark never
+justifies promotion.
+
+Limits are validated at configuration load:
+`WATCHER_COLLECTION_MAX_WORKERS` (1–16, default 4),
+`WATCHER_WORKDAY_MAX_CONCURRENCY` (1–5, default 1), and
+`WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY` (1–4, default 2). Neither the
+Workday nor the per-origin limit may exceed the global worker pool. Invalid
+values fail loudly. The recommended initial canary configuration is 4 workers,
+Workday 1, per origin 2; raising any value requires canary evidence that source
+reliability, retries, and response behavior remained stable.
+
+A task runs only when every applicable limit allows it: the global worker pool,
+its origin limit, its provider limit (the per-origin bound, so a provider spread
+across many hosts cannot exceed it), and the Workday limit for Workday tasks.
+The tightest applicable bound wins. Origin and provider keys are built from
+scheme, host, and port alone and never include credentials, paths, query
+parameters, or other sensitive URL components. Companies sharing an ATS host
+share one origin limit; each Workday tenant is its own host but shares the
+single Workday provider limit. Semaphores are acquired in one fixed order, so
+deadlock is impossible, and dispatch round-robins across scopes so bounded
+origins cannot starve the pool.
+
+Collection plans tasks in configuration order, executes them under the active
+mode, and applies every outcome in that same order. Rows keep direct-before-
+GitHub priority, and errors, source attempts, health keys, GitHub counters, and
+Workday request/retry counters are byte-identical to serial collection. Worker
+programming errors never propagate from `future.result()`: they become failed
+task results with the sanitized exception type preserved, the remaining tasks
+still finish, and they are counted separately from ordinary network variability.
+
+Concurrency changes only when existing fetch callables run. Production
+collection builds one adapter set per worker thread so per-fetch adapter
+diagnostics stay isolated, and shares one thread-safe Workday tenant pacer so
+pacing is never weakened. Timeouts, retries, backoff, and source-specific safety
+rules are unchanged. Proxy rotation, cookie harvesting, browser automation for
+challenges, CAPTCHA or anti-bot circumvention, authentication bypasses, header
+or identity rotation, retrying blocked requests through alternate
+infrastructure, and undocumented endpoints are all prohibited. Challenge,
+forbidden, unauthorized, and rate-limited responses remain normal source
+failures.
+
+Runs emit one bounded `COLLECTION-CONCURRENCY` record and add `collection_mode`,
+`collection_max_workers`, `collection_max_observed_concurrency`,
+`collection_max_observed_origin_concurrency`,
+`collection_max_observed_workday_concurrency`, and
+`collection_unexpected_task_exceptions` to the application heartbeat. Snapshot
+replay performs no collection and reports `collection_mode=none`. Concurrency
+metrics are in-memory canary evidence and are deliberately absent from the
+persisted collection-snapshot schema.
+
+The shared Workday pacer records each actual tenant start with a monotonic clock
+after pacing completes and immediately before adapter fetching begins. It never
+holds its lock while sleeping; a waking waiter rechecks the latest actual start
+before proceeding. Canary-only telemetry reports the configured start interval,
+start count, minimum/median/maximum spacing, numeric violation count, and
+deterministically ordered sanitized company/task identifiers with offsets from
+the first start. It contains no URLs, credentials, request paths, or posting
+content and is absent from snapshots, heartbeats, email, health schemas, and all
+SQLite state.
+
+Validation is staged. Stage 1 is a deterministic offline benchmark over
+controlled fake delayed sources that confirms exact serial/concurrent batch
+equivalence, exact downstream fixture equivalence, ordering invariants,
+concurrency limits, failure isolation, and clean executor shutdown. Stage 2 is a
+limited live canary over a small representative allowlist across adapter types
+with at most one or two Workday tenants. Stage 3 is a full live concurrent dry
+collection, run only after the limited canary passes. Every canary uses a
+temporary seen database and temporary analysis-cache database, disables
+internship email, priming, and seen marking, disables health-alert delivery and
+durable health persistence, and performs no source-comparison persistence.
+Production SQLite state is fingerprinted before and after and reported.
+
+Before any full live canary, record the branch, commit SHA, working-tree status,
+watchlist fingerprint, upstream branch, and fresh remote tip. The concurrency
+implementation and canary tooling should be present in that local commit and
+pushed to the intended branch. A canary from an uncommitted or unpushed
+implementation may be retained as operational evidence but is not
+repository-complete evidence; report that state exactly and do not commit or
+push without separate authorization. Store detailed reports only under
+`evaluation/private/`, and keep the production default serial.
+
+A canary source that returns HTTP 401, HTTP 403, HTTP 429, a challenge response,
+or repeated transport failures is recorded and dropped from the remainder of the
+canary instead of being retried. Full live runs are separated by at least one
+normal collection interval, and a fresh full serial collection is never run
+immediately before or after a full concurrent canary; the serial baseline comes
+from a recent normal production run, existing serial timing logs, or a serial
+run performed in a separate normal collection window.
+
+A canary fails when a recently healthy source becomes blocked or challenged,
+429 responses increase, 401/403 responses newly appear, Workday retries
+materially increase, successful-source count materially decreases, per-source
+row coverage materially decreases without an explained posting change, an
+adapter reports an unexpected exception, required attempts or diagnostics are
+missing, ordering or deduplication precedence differs, an executor fails to shut
+down cleanly, production SQLite state changes, or any email, priming, or
+seen-marking path is invoked. Changing live posting counts are never called a
+concurrency regression without source-level evidence.
+
+Reports separate deterministic equivalence results, limited live-canary results,
+full live-canary results, and the historical serial baseline, and record for
+every canary the exact configured limits, maximum observed global, per-origin,
+and Workday concurrency, source successes/empties/failures, HTTP 401/403/429
+counts, challenge counts, Workday request and retry totals, rows per source,
+unexpected exception count, and whether any production state changed.
+
+Promotion review requires three successful full concurrent canaries at the same
+4-global / 1-Workday / 2-per-origin candidate limits in separate normal
+collection windows, complete source and downstream diagnostics, clean executor
+shutdown, stable ordering/precedence, comparable source coverage, no new
+blocking behavior, and zero production side effects. Satisfying those criteria
+still does not authorize changing code, workflow, or repository-variable
+defaults; promotion is a separate small reversible change.

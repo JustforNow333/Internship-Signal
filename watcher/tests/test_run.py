@@ -1678,6 +1678,11 @@ def test_print_heartbeat(capsys):
         "source_comparison_both=0, source_comparison_persisted=no, "
         "workday_attempted=3, workday_succeeded=2, workday_failed=1, "
         "workday_retry_attempts=2, workday_shared_incident=0, "
+        "collection_mode=serial, collection_max_workers=0, "
+        "collection_max_observed_concurrency=0, "
+        "collection_max_observed_origin_concurrency=0, "
+        "collection_max_observed_workday_concurrency=0, "
+        "collection_unexpected_task_exceptions=0, "
         "alumni_csv_status=loaded, alumni_records_loaded=124, "
         "alumni_employers_indexed=80, sent=no, seen_marked=1\n"
     )

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
 import re
+import statistics
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from watcher.config import CompanyCfg, workday_min_interval_seconds
 from watcher.sources.base import JsonHttpResponse, SourceError, SourceFetchError, SourceSchemaError, ensure_list, html_to_text, make_row, page_fingerprint, post_json, require_token
@@ -29,25 +32,183 @@ class WorkdayParseDiagnostics:
     last_transport_error: str = ""
 
 
+@dataclass(frozen=True)
+class WorkdayStartRecord:
+    """One in-memory monotonic tenant start with a safe company identifier."""
+
+    company_identifier: str
+    started_at: float
+
+
+@dataclass(frozen=True)
+class WorkdayStartOffset:
+    task_identifier: str
+    company_identifier: str
+    offset_seconds: float
+
+
+@dataclass(frozen=True)
+class WorkdayStartTelemetry:
+    """Private canary telemetry derived only from monotonic start records."""
+
+    configured_start_interval_seconds: float
+    start_count: int
+    minimum_spacing_seconds: float | None
+    median_spacing_seconds: float | None
+    maximum_spacing_seconds: float | None
+    pacing_violation_count: int
+    start_offsets: tuple[WorkdayStartOffset, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        def rounded(value: float | None) -> float | None:
+            return None if value is None else round(float(value), 6)
+
+        return {
+            "configured_start_interval_seconds": round(
+                float(self.configured_start_interval_seconds), 6
+            ),
+            "start_count": int(self.start_count),
+            "minimum_spacing_seconds": rounded(self.minimum_spacing_seconds),
+            "median_spacing_seconds": rounded(self.median_spacing_seconds),
+            "maximum_spacing_seconds": rounded(self.maximum_spacing_seconds),
+            "pacing_violation_count": int(self.pacing_violation_count),
+            "start_offsets": [
+                {
+                    "task_identifier": item.task_identifier,
+                    "company_identifier": item.company_identifier,
+                    "offset_seconds": rounded(item.offset_seconds),
+                }
+                for item in self.start_offsets
+            ],
+        }
+
+
+def _safe_workday_company_identifier(value: object) -> str:
+    """Return a bounded identifier that can never expose a URL or credential."""
+
+    raw = str(value or "").strip()
+    if not raw:
+        return "unknown-company"
+    if any(marker in raw for marker in ("://", "@", "/", "\\", "?", "#", "=")):
+        digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:12]
+        return f"company-{digest}"
+    safe = re.sub(r"[^A-Za-z0-9 .&'()+_-]+", "_", raw)
+    safe = re.sub(r"\s+", " ", safe).strip(" ._-")[:80]
+    return safe or "unknown-company"
+
+
+def summarize_workday_starts(
+    configured_interval_seconds: float,
+    records: Iterable[WorkdayStartRecord],
+) -> WorkdayStartTelemetry:
+    """Calculate deterministic spacing and sanitized relative start offsets."""
+
+    interval = max(0.0, float(configured_interval_seconds))
+    ordered = sorted(
+        (
+            WorkdayStartRecord(
+                company_identifier=_safe_workday_company_identifier(
+                    record.company_identifier
+                ),
+                started_at=float(record.started_at),
+            )
+            for record in records
+        ),
+        key=lambda record: (record.started_at, record.company_identifier),
+    )
+    if not ordered:
+        return WorkdayStartTelemetry(
+            configured_start_interval_seconds=interval,
+            start_count=0,
+            minimum_spacing_seconds=None,
+            median_spacing_seconds=None,
+            maximum_spacing_seconds=None,
+            pacing_violation_count=0,
+        )
+
+    first_started_at = ordered[0].started_at
+    spacings = [
+        current.started_at - previous.started_at
+        for previous, current in zip(ordered, ordered[1:])
+    ]
+    offsets = tuple(
+        WorkdayStartOffset(
+            task_identifier=f"workday-start-{index:03d}",
+            company_identifier=record.company_identifier,
+            offset_seconds=max(0.0, record.started_at - first_started_at),
+        )
+        for index, record in enumerate(ordered, start=1)
+    )
+    return WorkdayStartTelemetry(
+        configured_start_interval_seconds=interval,
+        start_count=len(ordered),
+        minimum_spacing_seconds=min(spacings) if spacings else None,
+        median_spacing_seconds=(float(statistics.median(spacings)) if spacings else None),
+        maximum_spacing_seconds=max(spacings) if spacings else None,
+        pacing_violation_count=sum(1 for spacing in spacings if spacing < interval),
+        start_offsets=offsets,
+    )
+
+
 @dataclass
 class WorkdayPacer:
-    """Instance-local pacing between tenant fetch starts, never between pages."""
+    """Pacing between tenant fetch starts, never between pages.
+
+    One pacer instance paces the tenants that share it. Serial collection keeps
+    the existing one-instance-per-adapter behavior; bounded concurrent
+    collection shares a single pacer across worker threads so tenant pacing is
+    never weakened. Threads sleep outside the lock, then recheck under the lock
+    so delayed wakeups cannot bunch actual starts together.
+    """
 
     min_interval_seconds: float
     sleeper: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     last_started_at: float | None = None
 
-    def wait_for_tenant(self) -> float:
-        now = self.clock()
-        delay = 0.0
-        if self.last_started_at is not None:
-            delay = max(0.0, self.min_interval_seconds - (now - self.last_started_at))
-            if delay > 0:
-                self.sleeper(delay)
-                now = self.clock()
-        self.last_started_at = now
-        return delay
+    def __post_init__(self) -> None:
+        self._lock = threading.Lock()
+        self._start_records: list[WorkdayStartRecord] = []
+
+    def wait_for_tenant(self, company_identifier: object = "") -> float:
+        total_delay = 0.0
+        while True:
+            with self._lock:
+                now = float(self.clock())
+                delay = 0.0
+                if self.last_started_at is not None:
+                    delay = max(
+                        0.0,
+                        self.min_interval_seconds - (now - self.last_started_at),
+                    )
+                if delay <= 0:
+                    # This timestamp is the actual tenant start: pacing is done,
+                    # and returning transfers control directly to adapter fetch.
+                    self.last_started_at = now
+                    self._start_records.append(
+                        WorkdayStartRecord(
+                            company_identifier=_safe_workday_company_identifier(
+                                company_identifier
+                            ),
+                            started_at=now,
+                        )
+                    )
+                    return total_delay
+            # Never hold the scheduling/telemetry lock while sleeping. On wake,
+            # recheck the latest actual start because another waiter may have
+            # started first.
+            self.sleeper(delay)
+            total_delay += delay
+
+    def start_records(self) -> tuple[WorkdayStartRecord, ...]:
+        with self._lock:
+            return tuple(self._start_records)
+
+    def start_telemetry(self) -> WorkdayStartTelemetry:
+        return summarize_workday_starts(
+            self.min_interval_seconds,
+            self.start_records(),
+        )
 
 
 class WorkdaySource:
@@ -63,6 +224,7 @@ class WorkdaySource:
         jitter: Callable[[float, float], float] = random.uniform,
         request_json: Callable[[str, dict, str], Any] | None = None,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        pacer: WorkdayPacer | None = None,
     ) -> None:
         interval = workday_min_interval_seconds(min_interval_seconds)
         if max_attempts < 1 or max_attempts > DEFAULT_MAX_ATTEMPTS:
@@ -76,7 +238,9 @@ class WorkdaySource:
         self._jitter = jitter
         self._request_json = request_json
         self._max_attempts = max_attempts
-        self._pacer = WorkdayPacer(interval, sleeper=sleeper, clock=clock)
+        # An injected pacer lets bounded concurrent collection share one tenant
+        # pacer across worker threads without changing serial behavior.
+        self._pacer = pacer or WorkdayPacer(interval, sleeper=sleeper, clock=clock)
 
     @staticmethod
     def endpoint(token: str, shard: str, site: str) -> str:
@@ -91,7 +255,7 @@ class WorkdaySource:
         token = require_token(company, self.name)
         shard = _required(company.workday_shard, "workday_shard", company)
         site = _required(company.workday_site, "workday_site", company)
-        self._pacer.wait_for_tenant()
+        self._pacer.wait_for_tenant(company.name)
         rows: list[dict] = []
         raw_postings_seen = 0
         skip_reasons: Counter[str] = Counter()
@@ -135,7 +299,7 @@ class WorkdaySource:
         token = require_token(company, self.name)
         shard = _required(company.workday_shard, "workday_shard", company)
         site = _required(company.workday_site, "workday_site", company)
-        self._pacer.wait_for_tenant()
+        self._pacer.wait_for_tenant(company.name)
         payload = self._fetch_page(
             self.endpoint(token, shard, site),
             {"appliedFacets": {}, "limit": self.page_size, "offset": 0, "searchText": ""},

@@ -54,6 +54,19 @@
 - Cache corruption, schema mismatch, or SQLite failure is nonfatal and falls
   back to fresh analysis; batch reads, transactional writes, and one bounded
   30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
+- Collection concurrency is opt-in; production defaults to `serial`. Validate
+  global workers (1-16), Workday concurrency (1-5), and per-origin concurrency
+  (1-4), with neither scoped limit exceeding the worker pool.
+- Plan in configuration order, isolate adapters and mutable diagnostics per
+  worker, share only the Workday pacer, and reduce outcomes in plan order.
+  Replay creates no executor or network work; executors must shut down cleanly.
+- Record actual Workday starts with a monotonic clock after pacing and directly
+  before fetch. Sleep without holding the pacer lock. Keep interval, count,
+  spacing statistics, numeric violations, and sanitized relative offsets only
+  in private canary reports—not snapshots, SQLite, health, heartbeat, or email.
+- Validate serial/concurrent batch and snapshot equivalence, ordering, limits,
+  isolation, pacing, and zero state writes before limited and separate full
+  canaries. Keep promotion a separate reviewed change and production serial.
 - Dry runs never change notification state. Live sends populate `emailed_at`
   only after success; explicit priming has its own marker, and unmarked legacy
   rows remain pending.

@@ -90,6 +90,19 @@
   30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
 - `watcher/run.py` fetches direct sources before GitHub so backend dedupe keeps
   direct provenance. `bespoke` and `github_only` skip direct fetching.
+- Collection concurrency is opt-in; production defaults to `serial`. Validate
+  global workers (1-16), Workday concurrency (1-5), and per-origin concurrency
+  (1-4), with neither scoped limit exceeding the worker pool.
+- Plan in configuration order, isolate adapters and mutable diagnostics per
+  worker, share only the Workday pacer, and reduce outcomes in plan order.
+  Replay creates no executor or network work; executors must shut down cleanly.
+- Record actual Workday starts with a monotonic clock after pacing and directly
+  before fetch. Sleep without holding the pacer lock. Keep interval, count,
+  spacing statistics, numeric violations, and sanitized relative offsets only
+  in private canary reports—not snapshots, SQLite, health, heartbeat, or email.
+- Validate serial/concurrent batch and snapshot equivalence, ordering, limits,
+  isolation, pacing, and zero state writes before limited and separate full
+  canaries. Keep promotion a separate reviewed change and production serial.
 - In `collect_rows`, only `None` means “construct defaults.” Preserve explicit
   empty injected sources.
 - Watcher code must not compute scores or IDs. Backend scoring owns
