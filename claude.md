@@ -1,5 +1,16 @@
 # Claude Repository Guide
 
+- Hosted UI MVP work belongs only in `C:\\Users\\burst\\internship-signal-ui`
+  on `agent/hosted-ui-mvp`; leave the original and canary worktrees untouched.
+- Build the public React/Vite product around account auth, per-user company and
+  role watchlists, scheduled-scan alerts, recent matches, and settings. Keep
+  CSV, alumni, watcher internals, and admin controls out of public navigation.
+- Use a replaceable API adapter with clearly documented mocks until hosted
+  endpoints exist. Preserve the paper/spruce design system, responsive and
+  semantic UI, keyboard access, focus visibility, and async/empty/error states.
+- For this branch run frontend tests/build only; never collect live postings,
+  send email, prime/mark seen, or alter watcher/canary/production settings.
+
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.
 - Read `agents.md` before repository work. Before watcher work, also read

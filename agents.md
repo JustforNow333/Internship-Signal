@@ -1,5 +1,19 @@
 # Agents Guide
 
+## Hosted UI MVP branch
+
+- Work only in `C:\\Users\\burst\\internship-signal-ui` on
+  `agent/hosted-ui-mvp`; do not touch the original or canary worktrees.
+- The public React/Vite experience is watchlist-first: landing, email auth,
+  three-step onboarding, dashboard, matches, watchlist, and settings. Do not
+  expose CSV uploads, alumni data, watcher internals, or administrator controls.
+- Keep hosted API access behind a replaceable client/adapter boundary. Until
+  the hosted backend exists, label and document mock behavior honestly.
+- Preserve the existing paper/spruce visual language, responsive layouts,
+  keyboard access, visible focus, semantic labels, and explicit async states.
+- Run only frontend tests/build for this task. Never run watcher collection,
+  email, priming, seen-state changes, or production/canary configuration.
+
 ## Required every prompt
 
 - After every user prompt, update the root `agents.md`, `claude.md`, and
