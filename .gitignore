@@ -228,7 +228,7 @@ canary-full*.json
 concurrent-canary*.json
 collection-canary-state*.json
 watcher/collection-canary-state*.json
-# Repository cleanup and branch handoff/promotion verification logs are local
+# Repository cleanup and branch handoff/push verification logs are local
 # diagnostics, not source artifacts.
 cleanup-audit*.log
 cleanup-audit*.json

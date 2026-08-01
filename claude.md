@@ -17,6 +17,8 @@
   commits there, leaves `main` unmodified, and reports the branch and SHA.
 - Once `main` is free, use an atomic fast-forward from its verified old SHA and
   recheck refs and all active worktrees without altering them.
+- Push hosted UI from its clean repository using the explicit `main` ref; never
+  stage the separate watcher worktree or use a blanket add merely to push.
 - For this branch run frontend tests/build only; never collect live postings,
   send email, prime/mark seen, or alter watcher/canary/production settings.
 

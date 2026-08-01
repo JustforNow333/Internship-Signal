@@ -20,6 +20,8 @@
   commit them there, leave `main` unmodified, and report the branch and SHA.
 - Once `main` is free, promote with an atomic fast-forward from the verified
   old SHA, then recheck refs and every active worktree without altering them.
+- Publish hosted UI from the clean UI repository with an explicit `main` ref;
+  never stage the separate watcher worktree or use a blanket add for a push.
 - Run only frontend tests/build for this task. Never run watcher collection,
   email, priming, seen-state changes, or production/canary configuration.
 
