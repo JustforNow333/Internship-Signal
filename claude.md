@@ -11,6 +11,8 @@
 - For hosted frontend audits, reproduce defects before behavior fixes and add
   regression tests; deduplicate only after searches and caller coverage prove
   the common implementation is behavior-preserving.
+- Promote only through a verified fast-forward from a clean `main` worktree;
+  never move a checked-out branch behind unrelated uncommitted work.
 - For this branch run frontend tests/build only; never collect live postings,
   send email, prime/mark seen, or alter watcher/canary/production settings.
 

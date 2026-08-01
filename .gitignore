@@ -228,8 +228,8 @@ canary-full*.json
 concurrent-canary*.json
 collection-canary-state*.json
 watcher/collection-canary-state*.json
-# Repository and hosted-frontend cleanup audit logs are local diagnostics, not
-# source artifacts.
+# Repository cleanup and branch-promotion audit logs are local diagnostics,
+# not source artifacts.
 cleanup-audit*.log
 cleanup-audit*.json
 watcher/cleanup-audit*.log

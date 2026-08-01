@@ -14,6 +14,8 @@
 - Hosted UI cleanup is evidence-first: reproduce defects before fixing them,
   add regression coverage, and remove duplication only after caller searches
   and tests prove the shared path preserves behavior.
+- Promote this branch only through a verified fast-forward from a clean `main`
+  worktree; never move a checked-out branch behind unrelated uncommitted work.
 - Run only frontend tests/build for this task. Never run watcher collection,
   email, priming, seen-state changes, or production/canary configuration.
 
