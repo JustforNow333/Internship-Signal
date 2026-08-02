@@ -9,7 +9,9 @@
   fetching and proving the update is a fast-forward. Never force or create an
   unnecessary merge commit.
 - Update the `main` ref without checking it out in another worktree. Do not push
-  unless the user explicitly requests a remote update.
+  unless the user explicitly requests a remote update. Before pushing, fetch
+  `origin/main`, verify it is an ancestor of local `main`, and use a normal
+  explicit refspec without force.
 
 ## Required every prompt
 

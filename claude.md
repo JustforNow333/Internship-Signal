@@ -6,7 +6,8 @@
   worktrees untouched.
 - Fetch and prove a clean fast-forward before atomically updating local `main`.
   Never force, create an unnecessary merge commit, or check out `main` in
-  another worktree. Do not push without an explicit remote-update request.
+  another worktree. For an authorized push, re-fetch, verify `origin/main` is
+  an ancestor of local `main`, then push the explicit `main` refspec normally.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.

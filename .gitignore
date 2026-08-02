@@ -239,6 +239,7 @@ watcher/cleanup-audit*.log
 watcher/cleanup-audit*.json
 # Local hosted-backend promotion verification output.
 hosted-backend-promotion*.log
+hosted-backend-push*.log
 # Prompt-maintained guidance and bug-audit scratch copies stay local.
 agents.local.md
 agents.*.md
