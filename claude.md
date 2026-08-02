@@ -1,15 +1,12 @@
 # Claude Repository Guide
 
-- Hosted backend Phase 1 belongs only in
+- Promote the hosted-backend work only from
   `C:\\Users\\burst\\internship-signal-hosted-backend` on
-  `agent/hosted-backend-mvp`; leave original, canary, and UI worktrees alone.
-- Use FastAPI/Pydantic, SQLAlchemy 2.x, Alembic, PostgreSQL, Argon2, and hashed
-  database sessions in HTTP-only cookies while preserving existing CSV APIs.
-- Keep hosted data isolated from watcher SQLite and derive only a sanitized
-  public company catalog from watcher configuration. Do not change collection,
-  matching, workflows, notification delivery, or production/canary state.
-- Keep the live React API behind its adapter and retain mocks for unit tests.
-  Test with isolated PostgreSQL and injected mail; never send real messages.
+  `agent/hosted-backend-mvp`; leave original, canary, UI, and diagnostic
+  worktrees untouched.
+- Fetch and prove a clean fast-forward before atomically updating local `main`.
+  Never force, create an unnecessary merge commit, or check out `main` in
+  another worktree. Do not push without an explicit remote-update request.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.

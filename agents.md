@@ -1,19 +1,15 @@
 # Agents Guide
 
-## Hosted backend Phase 1 branch
+## Hosted backend promotion
 
 - Work only in `C:\\Users\\burst\\internship-signal-hosted-backend` on
-  `agent/hosted-backend-mvp`; leave original, canary, and UI worktrees alone.
-- Add FastAPI/Pydantic APIs backed by SQLAlchemy 2.x, Alembic, and PostgreSQL;
-  preserve the existing CSV API and keep watcher storage and behavior separate.
-- Authentication uses Argon2 and database sessions whose raw tokens exist only
-  in secure HTTP-only cookies; recovery tokens are expiring, one-time hashes.
-- Derive the sanitized public company catalog from watcher configuration; never
-  expose ATS settings, source URLs, health internals, alumni, or secrets.
-- Keep live frontend access behind the hosted adapter and retain mock adapters
-  for isolated tests. This phase excludes matching, collection, and alerts.
-- Use isolated PostgreSQL and an injected test mailer for integration tests;
-  never use production state, send real email, or run live watcher collection.
+  `agent/hosted-backend-mvp`; leave original, canary, UI, and diagnostic
+  worktrees untouched.
+- Promote the clean, tested hosted-backend commit to local `main` only after
+  fetching and proving the update is a fast-forward. Never force or create an
+  unnecessary merge commit.
+- Update the `main` ref without checking it out in another worktree. Do not push
+  unless the user explicitly requests a remote update.
 
 ## Required every prompt
 
