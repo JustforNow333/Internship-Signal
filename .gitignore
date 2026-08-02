@@ -263,6 +263,7 @@ hosted-job-fix*.log
 hosted-job-fix*.json
 hosted-job-fix*.prof
 hosted-job-local-commit*.log
+hosted-matching-push*.log
 !/.gitignore
 !/agents.md
 !/claude.md

@@ -7,8 +7,8 @@
   observation-order, and IT-role defects with regression tests first.
 - Preserve watcher authority and public shapes; validate PostgreSQL, the full
   backend/watcher suite, frontend tests, and the production build.
-- Keep the completed changes locally committed on this branch; do not push,
-  merge, rebase, or touch another worktree without explicit authorization.
+- Push only `agent/hosted-matching-phase-2` when requested; do not push to
+  `main`, merge, rebase, or touch another worktree without authorization.
 - Preserve collection concurrency, workflows, production state, and alerts.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and

@@ -8,8 +8,8 @@
   Workday relative dates, company normalization, observation order, and IT roles.
 - Add regression tests before behavior changes, preserve public shapes and
   watcher authority, then run PostgreSQL and complete repository validation.
-- Keep the completed fixes locally committed on this branch; do not push,
-  merge, rebase, or modify another worktree without separate authorization.
+- Push only `agent/hosted-matching-phase-2` when requested; do not push to
+  `main`, merge, rebase, or modify another worktree without authorization.
 - Preserve scheduled collection and its `serial` application default; do not
   change concurrency, workflows, production state, or notification behavior.
 
