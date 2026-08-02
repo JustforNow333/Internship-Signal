@@ -27,6 +27,7 @@ export default function WatchlistPage({
       : companies;
   }, [companies, query]);
   const entryFor = (id) => watchlist.find((entry) => entry.company_id === id);
+  const saving = Boolean(savingId);
 
   const persist = async (company, action) => {
     setSavingId(company.id);
@@ -115,7 +116,6 @@ export default function WatchlistPage({
           <div className="watchlist-grid">
             {visible.map((company) => {
               const entry = entryFor(company.id);
-              const saving = savingId === company.id;
               return (
                 <article
                   className={`watch-company-card ${entry ? "watched" : ""}`}

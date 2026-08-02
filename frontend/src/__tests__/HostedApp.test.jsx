@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import App from "../App.jsx";
 import { HostedApiError, createMockHostedApi } from "../hosted/api.js";
 import { makeHostedFixtures } from "../hosted/fixtures.js";
+import WatchlistPage from "../hosted/WatchlistPage.jsx";
 
 function renderApp(path, options = {}) {
   const client = options.client || createMockHostedApi(options);
@@ -335,6 +336,44 @@ describe("hosted Internship Signal MVP", () => {
     expect(
       await screen.findByText(/Duolingo removed from your watchlist/),
     ).toBeInTheDocument();
+  });
+
+  it("blocks every watchlist mutation while a replacement save is pending", () => {
+    const saveWatchlist = vi.fn(() => new Promise(() => {}));
+    render(
+      <WatchlistPage
+        companies={[
+          {
+            id: "alpha",
+            name: "Alpha",
+            aliases: [],
+            coverage: "direct",
+            selectable: true,
+          },
+          {
+            id: "beta",
+            name: "Beta",
+            aliases: [],
+            coverage: "direct",
+            selectable: true,
+          },
+        ]}
+        watchlist={[]}
+        saveWatchlist={saveWatchlist}
+        requestCompany={vi.fn()}
+      />,
+    );
+
+    const addButtons = screen.getAllByRole("button", {
+      name: "+ Add to watchlist",
+    });
+    fireEvent.click(addButtons[0]);
+
+    expect(saveWatchlist).toHaveBeenCalledTimes(1);
+    expect(addButtons[0]).toBeDisabled();
+    expect(addButtons[1]).toBeDisabled();
+    fireEvent.click(addButtons[1]);
+    expect(saveWatchlist).toHaveBeenCalledTimes(1);
   });
 
   it("updates role and location selections in settings", async () => {

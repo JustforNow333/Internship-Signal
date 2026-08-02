@@ -1,11 +1,27 @@
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from app.hosted.catalog import CompanyCatalog, company_slug
-from app.hosted.database import HostedDatabase
-from app.hosted.schemas import CompanyRequestInput, PreferencesUpdate, WatchlistUpdate
+from app.hosted.database import Base, HostedDatabase
+from app.hosted.mailer import InMemoryMailer
+from app.hosted.models import PasswordResetToken, User
+from app.hosted.router import forgot_password, reset_password
+from app.hosted.schemas import (
+    CompanyRequestInput,
+    EmailRequest,
+    PreferencesUpdate,
+    ResetPasswordRequest,
+    WatchlistUpdate,
+)
 from app.hosted.security import (
     hash_password,
     normalized_email,
@@ -160,3 +176,117 @@ def test_catalog_is_derived_and_sanitized() -> None:
         "source_url",
     ):
         assert internal_key not in serialized
+
+
+def test_successful_password_reset_invalidates_every_outstanding_token() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 8, 2, 12, 0)
+    user_id = uuid.uuid4()
+    with Session(engine, expire_on_commit=False) as db:
+        user = User(
+            id=user_id,
+            email="student@example.com",
+            normalized_email="student@example.com",
+            password_hash=hash_password("old password"),
+            created_at=now,
+            updated_at=now,
+        )
+        first_token = PasswordResetToken(
+            user_id=user_id,
+            token_hash=token_hash(
+                "first-reset-token-value-that-is-long-enough"
+            ),
+            created_at=now,
+            expires_at=now + timedelta(hours=1),
+        )
+        second_token = PasswordResetToken(
+            user_id=user_id,
+            token_hash=token_hash(
+                "second-reset-token-value-that-is-long-enough"
+            ),
+            created_at=now,
+            expires_at=now + timedelta(hours=1),
+        )
+        db.add_all((user, first_token, second_token))
+        db.commit()
+        services = SimpleNamespace(clock=lambda: now)
+
+        reset_password(
+            ResetPasswordRequest(
+                token="second-reset-token-value-that-is-long-enough",
+                password="new secure password",
+            ),
+            db=db,
+            services=services,
+        )
+
+        with pytest.raises(HTTPException, match="invalid or expired"):
+            reset_password(
+                ResetPasswordRequest(
+                    token="first-reset-token-value-that-is-long-enough",
+                    password="another secure password",
+                ),
+                db=db,
+                services=services,
+            )
+    engine.dispose()
+
+
+def test_forgot_password_defers_mail_delivery_until_after_response_work() -> None:
+    now = datetime(2026, 8, 2, 12, 0)
+    user = SimpleNamespace(
+        id=uuid.uuid4(),
+        email="student@example.com",
+        is_active=True,
+    )
+
+    class Database:
+        def __init__(self):
+            self.added = []
+
+        def scalar(self, _statement):
+            return user
+
+        def add(self, value):
+            self.added.append(value)
+
+        def commit(self):
+            return None
+
+    class DeferredTasks:
+        def __init__(self):
+            self.tasks = []
+
+        def add_task(self, function, *args):
+            self.tasks.append((function, args))
+
+        def run(self):
+            for function, args in self.tasks:
+                function(*args)
+
+    database = Database()
+    mailer = InMemoryMailer()
+    services = SimpleNamespace(
+        clock=lambda: now,
+        mailer=mailer,
+        settings=SimpleNamespace(
+            password_reset_token_lifetime_seconds=3600,
+            public_frontend_url="https://app.example.com",
+        ),
+    )
+    tasks = DeferredTasks()
+
+    response = forgot_password(
+        EmailRequest(email="student@example.com"),
+        background_tasks=tasks,
+        db=database,
+        services=services,
+    )
+
+    assert response.accepted is True
+    assert len(database.added) == 1
+    assert mailer.messages == []
+    assert len(tasks.tasks) == 1
+    tasks.run()
+    assert len(mailer.messages) == 1
