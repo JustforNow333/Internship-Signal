@@ -179,7 +179,9 @@ a database containing data that must be retained.
 
 When SMTP is absent or rejects a message, the API does not claim delivery.
 Forgot-password and resend-verification responses remain identical for known
-and unknown accounts.
+and unknown accounts. Password-reset mail is delivered after the generic
+forgot-password response, and a successful reset invalidates every outstanding
+reset token plus every active session for that user.
 
 Only `HOSTED_DATABASE_URL` is required by the snapshot-import command. SMTP,
 session-cookie, watcher email, and watcher SQLite settings are neither required

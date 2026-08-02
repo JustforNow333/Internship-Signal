@@ -406,12 +406,22 @@ def test_password_reset_privacy_expiration_and_one_time_use(client, hosted) -> N
     assert known_resend.json() == unknown_resend.json() == {"accepted": True}
     assert len(mailer.messages) == resend_count
 
+    client.post("/api/auth/forgot-password", json={"email": "student@example.com"})
+    newer_token = message_token(mailer.messages[-1].text)
+
     reset = client.post(
         "/api/auth/reset-password",
-        json={"token": token, "password": "new secure password"},
+        json={"token": newer_token, "password": "new secure password"},
     )
     assert reset.status_code == 200
     assert client.get("/api/me").status_code == 401
+    assert (
+        client.post(
+            "/api/auth/reset-password",
+            json={"token": newer_token, "password": "another secure password"},
+        ).status_code
+        == 400
+    )
     assert (
         client.post(
             "/api/auth/reset-password",

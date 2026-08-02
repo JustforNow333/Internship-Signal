@@ -6,7 +6,14 @@ import logging
 from datetime import timedelta
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Response,
+    status,
+)
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -272,6 +279,7 @@ def logout(
 @router.post("/auth/forgot-password", response_model=AcceptedResponse)
 def forgot_password(
     payload: EmailRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     services: HostedServices = Depends(get_services),
 ) -> AcceptedResponse:
@@ -281,7 +289,7 @@ def forgot_password(
     if user is not None and user.is_active:
         raw_token = _create_reset_token(db, user, services)
         db.commit()
-        _deliver_reset(user, raw_token, services)
+        background_tasks.add_task(_deliver_reset, user, raw_token, services)
     return AcceptedResponse()
 
 
@@ -291,28 +299,48 @@ def reset_password(
     db: Session = Depends(get_db),
     services: HostedServices = Depends(get_services),
 ) -> AcceptedResponse:
-    now = services.clock()
-    reset_token = db.scalar(
+    reset_candidate = db.scalar(
         select(PasswordResetToken)
         .where(PasswordResetToken.token_hash == token_hash(payload.token))
+    )
+    if reset_candidate is None:
+        raise HTTPException(
+            status_code=400, detail="This reset link is invalid or expired."
+        )
+    user = db.scalar(
+        select(User)
+        .where(User.id == reset_candidate.user_id)
         .with_for_update()
     )
+    reset_token = db.scalar(
+        select(PasswordResetToken)
+        .where(PasswordResetToken.id == reset_candidate.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    now = services.clock()
     if (
         reset_token is None
         or reset_token.used_at is not None
         or reset_token.expires_at <= now
+        or user is None
+        or not user.is_active
     ):
-        raise HTTPException(
-            status_code=400, detail="This reset link is invalid or expired."
-        )
-    user = db.get(User, reset_token.user_id)
-    if user is None or not user.is_active:
+        db.rollback()
         raise HTTPException(
             status_code=400, detail="This reset link is invalid or expired."
         )
     user.password_hash = hash_password(payload.password)
     user.updated_at = now
     reset_token.used_at = now
+    db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
     db.execute(
         update(AuthenticationSession)
         .where(
