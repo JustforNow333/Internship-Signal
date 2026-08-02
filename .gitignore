@@ -228,7 +228,7 @@ canary-full*.json
 concurrent-canary*.json
 collection-canary-state*.json
 watcher/collection-canary-state*.json
-# Regression, cleanup, and local commit-preparation logs are not source artifacts.
+# Regression, cleanup, integration, push, worktree, and verification logs are not source artifacts.
 cleanup-audit*.log
 cleanup-audit*.json
 watcher/cleanup-audit*.log

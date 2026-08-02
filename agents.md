@@ -312,6 +312,14 @@ git status --short --ignored
   preserve every pre-existing dirty hunk in both worktrees.
 - Local commits stay on their dedicated watcher and hosted branches; never
   push them without a separate explicit request.
+- Push dedicated branches by explicit name with normal upstream tracking;
+  never force-push or substitute another branch.
+- When Windows Git cannot resolve a WSL-created worktree pointer, push the
+  named shared branch through the valid original checkout without repairing it.
+- A branch push is complete only when `ls-remote` reports the intended full
+  commit SHA; failed read-only worktree attempts do not alter repository state.
+- Main integrations start from a freshly fetched `origin/main`, merge the
+  named feature branch, and exclude unrelated local-main-only commits.
 - Repository-wide readability cleanup must preserve public shapes, ordering,
   logs, and side effects; consolidate duplication only after tests cover every
   caller.
