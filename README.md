@@ -295,11 +295,13 @@ contain feed URLs, response content, secrets, alumni details, or recipients.
 They remain log-only so the existing heartbeat and health-report schemas stay
 unchanged.
 
-### Opt-in bounded collection concurrency
+### Bounded collection concurrency
 
-**Production default remains serial; concurrent mode is available for
-controlled canaries.** Serial mode stays permanently available as the rollback
-and diagnostic path.
+After three successful full canaries, the scheduled production workflow uses
+concurrent collection with four global workers, one Workday task, and two tasks
+per origin (`4/1/2`). The application default remains `serial` for local runs
+and as the rollback path. Rollback requires changing only
+`WATCHER_COLLECTION_MODE` in the workflow to `serial`.
 
 | Setting | Default | Accepted range |
 | --- | --- | --- |
@@ -387,7 +389,7 @@ evidence from canaries attributable to a committed and pushed implementation,
 and must record complete run identity, timing, concurrency, per-source,
 Workday, downstream, and production-state safety fields.
 
-Promotion to a concurrent production default is a separate, small, reversible
+Promotion to concurrent scheduled collection is a separate, small, reversible
 change and requires the evidence listed in `WATCHER_PROGRESS.md`: at least three
 successful full concurrent canaries in separate normal collection windows, no
 material source-failure or Workday-retry increase, no new rate-limit or

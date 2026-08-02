@@ -1,17 +1,11 @@
 # Agents Guide
 
-## Hosted backend promotion
+## Scheduled collection promotion
 
-- Work only in `C:\\Users\\burst\\internship-signal-hosted-backend` on
-  `agent/hosted-backend-mvp`; leave original, canary, UI, and diagnostic
-  worktrees untouched.
-- Promote the clean, tested hosted-backend commit to local `main` only after
-  fetching and proving the update is a fast-forward. Never force or create an
-  unnecessary merge commit.
-- Update the `main` ref without checking it out in another worktree. Do not push
-  unless the user explicitly requests a remote update. Before pushing, fetch
-  `origin/main`, verify it is an ancestor of local `main`, and use a normal
-  explicit refspec without force.
+- Keep the application default `serial`; the scheduled workflow explicitly
+  selects bounded concurrent collection at `4/1/2` after three passed canaries.
+- Roll back by changing only `WATCHER_COLLECTION_MODE` to `serial`. Do not alter
+  worker limits, pacing, retries, adapters, scoring, state, or notifications.
 
 ## Required every prompt
 
@@ -103,7 +97,8 @@
   30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
 - `watcher/run.py` fetches direct sources before GitHub so backend dedupe keeps
   direct provenance. `bespoke` and `github_only` skip direct fetching.
-- Collection concurrency is opt-in; production defaults to `serial`. Validate
+- Collection concurrency is opt-in in the application, whose default is
+  `serial`; scheduled production explicitly selects `concurrent`. Validate
   global workers (1-16), Workday concurrency (1-5), and per-origin concurrency
   (1-4), with neither scoped limit exceeding the worker pool.
 - Plan in configuration order, isolate adapters and mutable diagnostics per
@@ -114,8 +109,7 @@
   spacing statistics, numeric violations, and sanitized relative offsets only
   in private canary reports—not snapshots, SQLite, health, heartbeat, or email.
 - Validate serial/concurrent batch and snapshot equivalence, ordering, limits,
-  isolation, pacing, and zero state writes before limited and separate full
-  canaries. Keep promotion a separate reviewed change and production serial.
+  isolation, pacing, and zero state writes before promotion.
 - In `collect_rows`, only `None` means “construct defaults.” Preserve explicit
   empty injected sources.
 - Watcher code must not compute scores or IDs. Backend scoring owns

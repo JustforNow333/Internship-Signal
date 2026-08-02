@@ -1,13 +1,9 @@
 # Claude Repository Guide
 
-- Promote the hosted-backend work only from
-  `C:\\Users\\burst\\internship-signal-hosted-backend` on
-  `agent/hosted-backend-mvp`; leave original, canary, UI, and diagnostic
-  worktrees untouched.
-- Fetch and prove a clean fast-forward before atomically updating local `main`.
-  Never force, create an unnecessary merge commit, or check out `main` in
-  another worktree. For an authorized push, re-fetch, verify `origin/main` is
-  an ancestor of local `main`, then push the explicit `main` refspec normally.
+- Keep the application collection default `serial`; the scheduled workflow
+  explicitly selects bounded concurrent collection at `4/1/2` after three
+  passed canaries. Roll back by changing only `WATCHER_COLLECTION_MODE` to
+  `serial`; do not alter limits or watcher behavior.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.
@@ -63,7 +59,8 @@
 - Cache corruption, schema mismatch, or SQLite failure is nonfatal and falls
   back to fresh analysis; batch reads, transactional writes, and one bounded
   30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
-- Collection concurrency is opt-in; production defaults to `serial`. Validate
+- Collection concurrency is opt-in in the application, whose default is
+  `serial`; scheduled production explicitly selects `concurrent`. Validate
   global workers (1-16), Workday concurrency (1-5), and per-origin concurrency
   (1-4), with neither scoped limit exceeding the worker pool.
 - Plan in configuration order, isolate adapters and mutable diagnostics per
@@ -74,8 +71,7 @@
   spacing statistics, numeric violations, and sanitized relative offsets only
   in private canary reports—not snapshots, SQLite, health, heartbeat, or email.
 - Validate serial/concurrent batch and snapshot equivalence, ordering, limits,
-  isolation, pacing, and zero state writes before limited and separate full
-  canaries. Keep promotion a separate reviewed change and production serial.
+  isolation, pacing, and zero state writes before promotion.
 - Dry runs never change notification state. Live sends populate `emailed_at`
   only after success; explicit priming has its own marker, and unmarked legacy
   rows remain pending.

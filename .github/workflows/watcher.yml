@@ -86,6 +86,10 @@ jobs:
       SEEN_DB_PATH: ${{ github.workspace }}/.watcher-state/seen.sqlite
       HEALTH_REPORT_PATH: ${{ github.workspace }}/.watcher-state/watcher-source-health.json
       COMPARISON_REPORT_PATH: ${{ github.workspace }}/.watcher-state/watcher-source-comparison.json
+      WATCHER_COLLECTION_MODE: "concurrent"
+      WATCHER_COLLECTION_MAX_WORKERS: "4"
+      WATCHER_WORKDAY_MAX_CONCURRENCY: "1"
+      WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY: "2"
       ACTIONS_WATCHER_SEND_EMAIL: ${{ vars.WATCHER_SEND_EMAIL }}
       ACTIONS_WATCHER_PRIME_SEEN: ${{ vars.WATCHER_PRIME_SEEN }}
       ACTIONS_WATCHER_HEALTH_EMAIL_MODE: ${{ vars.WATCHER_HEALTH_EMAIL_MODE }}

@@ -881,6 +881,17 @@ This file tracks completed watcher steps and the next handoff target.
      output hashes, row/error/attempt order, limits 4/2/2/1, zero Workday pacing
      violations, zero operational-state writes, and clean shutdown.
 
+38. Scheduled bounded-concurrency promotion:
+   - Three full concurrent canaries passed in separate collection windows at
+     fixed limits of four global workers, one Workday task, and two tasks per
+     origin (`4/1/2`). The third canary ran from the clean, pushed
+     `d255c9b1623b7192ad83a48cd28d3ce5b90b7c3f` implementation and retained
+     Workday start-spacing telemetry with zero pacing violations.
+   - The scheduled watcher workflow now explicitly selects `concurrent` mode
+     at `4/1/2`. The application's built-in default remains `serial`, and
+     rollback requires changing only `WATCHER_COLLECTION_MODE` in the workflow
+     to `serial`.
+
 
 ## Next
 
@@ -896,11 +907,9 @@ This file tracks completed watcher steps and the next handoff target.
 - Keep source-health mode and internship-match send mode independently
   configured; use manual `health_email_mode=off` for transport probes.
 
-- Leave `WATCHER_COLLECTION_MODE` unset (serial) in production. After this
-  reviewed implementation is pushed, run the one remaining full concurrent
-  canary in a later normal collection window at fixed 4/1/2 limits. Treat both
-  current full results as operational but not repository-complete evidence
-  unless promotion review explicitly accepts their uncommitted provenance.
+- Inspect the first scheduled production run at fixed `4/1/2`; return only
+  `WATCHER_COLLECTION_MODE` to `serial` if concurrency introduces new blocking,
+  reliability, ordering, pacing, shutdown, or diagnostic regressions.
 
 ## Validation Command
 
