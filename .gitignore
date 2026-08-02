@@ -267,6 +267,7 @@ hosted-matching-push*.log
 hosted-matching-push-verification*.log
 hosted-main-integration*.log
 hosted-main-push-verification*.log
+hosted-main-final-push*.log
 !/.gitignore
 !/agents.md
 !/claude.md

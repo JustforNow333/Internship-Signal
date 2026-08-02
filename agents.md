@@ -17,6 +17,8 @@
   validate the combined tree, and update `main` only without force.
 - Remote `main` and Phase 2A were verified at integrated commit `9281ca3`;
   refetch and require `origin/main` to be an ancestor before any later push.
+- The user explicitly authorized the final remote `main` push; commit required
+  guidance first, refetch, and publish only by non-force fast-forward.
 - Preserve scheduled collection and its `serial` application default; do not
   change concurrency, workflows, production state, or notification behavior.
 

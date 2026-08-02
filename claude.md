@@ -16,6 +16,8 @@
   never force-push `main`.
 - Remote `main` and Phase 2A were verified at `9281ca3`; every subsequent
   push must refetch and pass a non-force ancestry check.
+- The final remote `main` push is explicitly authorized; include required
+  guidance in the commit and verify the exact remote SHA afterward.
 - Preserve collection concurrency, workflows, production state, and alerts.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
