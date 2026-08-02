@@ -9,6 +9,11 @@
   backend/watcher suite, frontend tests, and the production build.
 - Push only `agent/hosted-matching-phase-2` when requested; do not push to
   `main`, merge, rebase, or touch another worktree without authorization.
+- Remote `agent/hosted-matching-phase-2` was verified at `c22e335`; do not
+  conflate it with separately pushed hosted-regression branches.
+- The user authorized integrating latest `origin/main`, Phase 2A, and
+  `agent/hosted-regression-fixes-20260802`; inspect first, validate fully, and
+  never force-push `main`.
 - Preserve collection concurrency, workflows, production state, and alerts.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and

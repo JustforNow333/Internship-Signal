@@ -10,6 +10,11 @@
   watcher authority, then run PostgreSQL and complete repository validation.
 - Push only `agent/hosted-matching-phase-2` when requested; do not push to
   `main`, merge, rebase, or modify another worktree without authorization.
+- The remote Phase 2A branch was verified at `c22e335`; treat other hosted
+  regression branches as separate until their ancestry and contents are reviewed.
+- Integration is authorized for latest `origin/main`, Phase 2A, and
+  `agent/hosted-regression-fixes-20260802`; inspect ancestry before merging,
+  validate the combined tree, and update `main` only without force.
 - Preserve scheduled collection and its `serial` application default; do not
   change concurrency, workflows, production state, or notification behavior.
 
