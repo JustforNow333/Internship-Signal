@@ -1,11 +1,12 @@
 # Claude Repository Guide
 
-- Implement hosted matching Phase 2A only in
+- Implement hosted matching Phase 2A bug fixes only in
   `C:\\Users\\burst\\internship-signal-hosted-matching` on
   `agent/hosted-matching-phase-2`; leave all other worktrees untouched.
-- PostgreSQL imports accept only final watcher-analyzed jobs and use the watcher
-  job ID as their sole identity. Keep snapshot replay offline, transactional,
-  idempotent, and free of watcher-state, email, or matching side effects.
+- Fix the five reproduced posting-text, Workday-date, company-normalization,
+  observation-order, and IT-role defects with regression tests first.
+- Preserve watcher authority and public shapes; validate PostgreSQL, the full
+  backend/watcher suite, frontend tests, and the production build.
 - Preserve collection concurrency, workflows, production state, and alerts.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and

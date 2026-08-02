@@ -363,8 +363,8 @@ class JobImportService:
         )
         if existing is None:
             raise JobUpsertFailed()
-        if observed_at < existing.first_seen_at:
-            raise InvalidImportSource("observation_before_first_seen")
+        if observed_at < existing.last_seen_at:
+            raise InvalidImportSource("observation_before_last_seen")
 
         changed = any(getattr(existing, field) != value for field, value in values.items())
         was_open = existing.is_open

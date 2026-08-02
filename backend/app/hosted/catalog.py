@@ -14,7 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from watcher.config import CompanyCfg, WatcherConfig, load_watchlist  # noqa: E402
+from backend.app.dedupe import norm_company
+from watcher.config import CompanyCfg, WatcherConfig, load_watchlist
 
 DIRECT_ATS = {
     "greenhouse",
@@ -58,16 +59,14 @@ class CompanyCatalog:
         name_index: dict[str, PublicCompany | None] = {}
         for company in self.companies:
             for value in (company.id, company.name, *company.aliases):
-                key = company_slug(value)
-                if not key:
-                    continue
-                existing = name_index.get(key)
-                if existing is None and key in name_index:
-                    continue
-                if existing is not None and existing.id != company.id:
-                    name_index[key] = None
-                else:
-                    name_index[key] = company
+                for key in _company_lookup_keys(value):
+                    existing = name_index.get(key)
+                    if existing is None and key in name_index:
+                        continue
+                    if existing is not None and existing.id != company.id:
+                        name_index[key] = None
+                    else:
+                        name_index[key] = company
         self._by_name = name_index
 
     @classmethod
@@ -92,7 +91,23 @@ class CompanyCatalog:
         direct = self.by_id.get(value)
         if direct is not None:
             return direct
-        return self._by_name.get(company_slug(value))
+        matches: dict[str, PublicCompany] = {}
+        for key in _company_lookup_keys(value):
+            if key not in self._by_name:
+                continue
+            company = self._by_name[key]
+            if company is None:
+                return None
+            matches[company.id] = company
+        return next(iter(matches.values())) if len(matches) == 1 else None
+
+
+def _company_lookup_keys(value: str) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            key for key in (company_slug(value), norm_company(value)) if key
+        )
+    )
 
 
 def _public_company(company: CompanyCfg, has_backstop: bool) -> PublicCompany:

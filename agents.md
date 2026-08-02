@@ -1,13 +1,13 @@
 # Agents Guide
 
-## Hosted matching Phase 2A
+## Hosted matching Phase 2A bug fixes
 
 - Work only in `C:\\Users\\burst\\internship-signal-hosted-matching` on
   `agent/hosted-matching-phase-2`; leave every other worktree untouched.
-- Persist only final watcher-analyzed jobs in PostgreSQL. The watcher owns job
-  IDs, normalization, source precedence, dedupe, classification, and scoring.
-- Snapshot imports must be offline, transactional, idempotent by immutable
-  fingerprint, and side-effect-free for watcher state, email, and matches.
+- Fix the five reproduced defects at commit `3733568`: multiline posting text,
+  Workday relative dates, company normalization, observation order, and IT roles.
+- Add regression tests before behavior changes, preserve public shapes and
+  watcher authority, then run PostgreSQL and complete repository validation.
 - Preserve scheduled collection and its `serial` application default; do not
   change concurrency, workflows, production state, or notification behavior.
 

@@ -46,13 +46,18 @@ copied into provenance.
 `last_seen_at` and `updated_at` advance on every later observation, including an
 otherwise unchanged job. `closed_at` records the first observed open-to-closed
 transition, remains stable across repeated closed observations, clears on
-reopen, and is set again if the reopened posting later closes.
+reopen, and is set again if the reopened posting later closes. An observation
+older than the stored `last_seen_at` is rejected transactionally rather than
+rewinding lifecycle state.
 
 Company names resolve through the same watcher-derived canonical names and
-aliases used by `GET /api/companies`; unsupported or unselectable companies are
-skipped. Watcher role classifications are converted in one hosted mapper.
-Malformed isolated jobs are skipped with bounded reason codes, while a malformed
-final-job collection fails the import.
+aliases used by `GET /api/companies`, including the watcher's corporate-suffix
+normalization; unsupported or unselectable companies are skipped. Watcher role
+classifications are converted in one hosted mapper. Recognized relative Workday
+posting labels such as `Posted Yesterday` are retained as an unknown
+`posting_date` rather than guessed or treated as malformed. Malformed isolated
+jobs are skipped with bounded reason codes, while a malformed final-job
+collection fails the import.
 
 ## Offline snapshot import
 

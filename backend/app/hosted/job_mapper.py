@@ -56,6 +56,7 @@ WATCHER_ROLE_TRACK_TO_HOSTED_ROLE = {
 _OTHER_ENGINEERING_TRACKS = frozenset(
     {
         "customer_experience",
+        "it_support",
         "solutions_engineering",
         "mechanical_manufacturing",
         "civil_structural",
@@ -72,8 +73,13 @@ _WATCHER_ROLE_FALLBACKS = {
     "product": "product_management",
 }
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_MULTILINE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _PUBLIC_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 _NO_DATE_RE = re.compile(r"rolling|open until filled|ongoing", re.IGNORECASE)
+_RELATIVE_POSTING_DATE_RE = re.compile(
+    r"(?:posted\s+)?(?:today|yesterday|\d+\+?\s+days?\s+ago)",
+    re.IGNORECASE,
+)
 
 
 class FinalJobsStructureError(ValueError):
@@ -200,14 +206,20 @@ def _map_final_job(
         job.get("description"),
         maximum=MAX_POSTING_TEXT_LENGTH,
         reason="invalid_description",
+        allow_multiline=True,
     )
     requirements = _bounded_text(
         job.get("requirements"),
         maximum=MAX_POSTING_TEXT_LENGTH,
         reason="invalid_requirements",
+        allow_multiline=True,
     )
     application_url = _application_url(job.get("source_url"))
-    posting_date = _optional_date(job.get("date_posted"), "invalid_posting_date")
+    posting_date = _optional_date(
+        job.get("date_posted"),
+        "invalid_posting_date",
+        allow_relative=True,
+    )
     deadline = _optional_date(job.get("deadline"), "invalid_deadline")
     role_id = _hosted_role_id(job)
     open_status = _open_status(job)
@@ -236,6 +248,7 @@ def _bounded_text(
     maximum: int,
     reason: str,
     required: bool = False,
+    allow_multiline: bool = False,
 ) -> str:
     if value is None:
         result = ""
@@ -243,7 +256,12 @@ def _bounded_text(
         result = value.strip()
     else:
         raise _SkipJob(reason)
-    if (required and not result) or len(result) > maximum or _CONTROL_RE.search(result):
+    control_pattern = _MULTILINE_CONTROL_RE if allow_multiline else _CONTROL_RE
+    if (
+        (required and not result)
+        or len(result) > maximum
+        or control_pattern.search(result)
+    ):
         raise _SkipJob(reason)
     return result
 
@@ -271,9 +289,18 @@ def _application_url(value: object) -> str | None:
     return url
 
 
-def _optional_date(value: object, reason: str) -> date | None:
+def _optional_date(
+    value: object,
+    reason: str,
+    *,
+    allow_relative: bool = False,
+) -> date | None:
     text = _bounded_text(value, maximum=80, reason=reason)
-    if not text or _NO_DATE_RE.search(text):
+    if (
+        not text
+        or _NO_DATE_RE.search(text)
+        or (allow_relative and _RELATIVE_POSTING_DATE_RE.fullmatch(text))
+    ):
         return None
     parsed = parse_date(text)
     if parsed is None:

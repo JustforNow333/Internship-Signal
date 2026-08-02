@@ -18,6 +18,7 @@ from app.hosted.job_import import (
     FailedImportRetryRequired,
     ImportAlreadyRunning,
     InvalidFinalJobs,
+    InvalidImportSource,
     JobImportService,
     JobUpsertFailed,
 )
@@ -256,6 +257,57 @@ def test_insert_maps_alias_role_and_sanitized_provenance(import_service) -> None
     assert run.matches_created == 0
 
 
+def test_mapper_preserves_multiline_posting_text(catalog: CompanyCatalog) -> None:
+    mapped = map_final_jobs(
+        [
+            final_job(
+                description="Build APIs.\nShip reliable services.",
+                requirements="Python\r\nSQL\tPostgreSQL",
+            )
+        ],
+        catalog,
+    )
+
+    assert mapped.skipped_reasons == {}
+    assert mapped.jobs[0].description == "Build APIs.\nShip reliable services."
+    assert mapped.jobs[0].requirements == "Python\r\nSQL\tPostgreSQL"
+
+
+def test_mapper_still_rejects_unsafe_posting_text_controls(
+    catalog: CompanyCatalog,
+) -> None:
+    mapped = map_final_jobs(
+        [final_job(description="Build APIs.\x00hidden payload")],
+        catalog,
+    )
+
+    assert mapped.jobs == ()
+    assert mapped.skipped_reasons == {"invalid_description": 1}
+
+
+@pytest.mark.parametrize(
+    "relative_date",
+    ["Posted Today", "Posted Yesterday", "Posted 2 Days Ago", "Posted 30+ Days Ago"],
+)
+def test_mapper_keeps_workday_relative_posting_dates_as_unknown(
+    catalog: CompanyCatalog,
+    relative_date: str,
+) -> None:
+    mapped = map_final_jobs([final_job(date_posted=relative_date)], catalog)
+
+    assert mapped.skipped_reasons == {}
+    assert mapped.jobs[0].posting_date is None
+
+
+def test_catalog_resolution_matches_watcher_company_normalization(
+    catalog: CompanyCatalog,
+) -> None:
+    resolved = catalog.resolve("Capital One, Inc.")
+
+    assert resolved is not None
+    assert resolved.id == "capital-one"
+
+
 def test_unchanged_updates_and_open_closed_lifecycle(import_service) -> None:
     service, database, clock = import_service
     import_jobs(service, [final_job()], "a")
@@ -299,6 +351,31 @@ def test_unchanged_updates_and_open_closed_lifecycle(import_service) -> None:
         stored = db.scalar(select(HostedJob))
         assert stored.is_open is True
         assert stored.closed_at is None
+
+
+def test_out_of_order_observation_is_rejected_without_rewinding_last_seen(
+    import_service,
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job()], "a")
+    clock.advance(hours=2)
+    import_jobs(service, [final_job()], "b")
+    latest_observation = clock()
+
+    clock.value -= timedelta(hours=1)
+    with pytest.raises(InvalidImportSource):
+        import_jobs(service, [final_job()], "c")
+
+    with database.session_factory() as db:
+        stored = db.scalar(select(HostedJob))
+        failed_run = db.scalar(
+            select(HostedJobImportRun).where(
+                HostedJobImportRun.source_fingerprint == "c" * 64
+            )
+        )
+    assert stored.last_seen_at == latest_observation
+    assert failed_run.status == "failed"
+    assert failed_run.failure_summary == "invalid_import_source"
 
 
 def test_existing_job_updates_every_mutable_business_field(import_service) -> None:
@@ -386,6 +463,7 @@ def test_invalid_and_unsupported_jobs_are_skipped_with_exact_counters(
         ("quant_dev", "quant", "quantitative_development"),
         ("technical_product", "product", "product_management"),
         ("firmware", "swe", "hardware_embedded"),
+        ("it_support", "it", "other_engineering"),
         ("mechanical_manufacturing", "unknown", "other_engineering"),
     ],
 )
