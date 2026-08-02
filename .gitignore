@@ -262,6 +262,7 @@ hosted-job-bug-audit*.json
 hosted-job-fix*.log
 hosted-job-fix*.json
 hosted-job-fix*.prof
+hosted-job-local-commit*.log
 !/.gitignore
 !/agents.md
 !/claude.md
