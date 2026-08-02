@@ -2,12 +2,12 @@
 
 ## Current integration
 
-- Integrate `agent/watcher-in-progress-20260801` into freshly fetched
-  `origin/main` with a normal merge and non-force push.
-- Preserve the hosted matching and hosted-regression work already on main;
-  do not merge either feature branch a second time.
-- Scheduled production remains concurrent at `4/1/2`; the application default
-  remains serial and no additional production behavior is authorized.
+- Fix and verify the Phase 2A duplicate final watcher-ID defect on
+  `agent/phase2a-invalid-final-jobs-fix`; do not begin Phase 2B.
+- Keep identity, source precedence, merging, and final-output deduplication in
+  the watcher. Hosted mapping must continue rejecting duplicate final IDs.
+- Preserve unaffected watcher IDs, remain offline and watcher-state safe, and
+  do not push or merge without a separate explicit request.
 
 ## Required every prompt
 

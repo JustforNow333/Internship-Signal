@@ -27,6 +27,8 @@ __pypackages__/
 *.log
 *.tmp
 tmp/
+# Disposable Phase 2A verification state must never become repository input.
+.phase2a-*-guard/
 # Durable watcher state and the rebuildable analysis cache remain local.
 *.sqlite
 *.sqlite-*

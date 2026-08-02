@@ -6,6 +6,7 @@ import threading
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import psycopg
 import pytest
@@ -22,7 +23,7 @@ from app.hosted.job_import import (
     JobImportService,
     JobUpsertFailed,
 )
-from app.hosted.job_mapper import map_final_jobs
+from app.hosted.job_mapper import FinalJobsStructureError, map_final_jobs
 from app.hosted.models import (
     HostedJob,
     HostedJobImportAttempt,
@@ -484,14 +485,87 @@ def test_structurally_invalid_final_jobs_fail_and_record_no_partial_jobs(
     import_service,
 ) -> None:
     service, database, _clock = import_service
-    duplicate = [final_job(), final_job(title="Different title, same watcher ID")]
+    duplicate = [
+        final_job(),
+        final_job(
+            title="private-title-must-not-leak",
+            description="private-description-must-not-leak",
+            source_url="https://private.example/?token=must-not-leak",
+            extra={"raw_private_provenance": "must-not-leak"},
+        ),
+    ]
+    with pytest.raises(
+        FinalJobsStructureError,
+        match="^duplicate_watcher_job_id$",
+    ):
+        map_final_jobs(duplicate, service.catalog)
     with pytest.raises(InvalidFinalJobs):
         import_jobs(service, duplicate, "a")
     with database.session_factory() as db:
         assert db.scalars(select(HostedJob)).all() == []
         run = db.scalar(select(HostedJobImportRun))
+        attempt = db.scalar(select(HostedJobImportAttempt))
     assert run.status == "failed"
-    assert run.failure_summary == "invalid_final_jobs"
+    assert run.failure_summary == attempt.failure_summary == (
+        "invalid_final_jobs:duplicate_watcher_job_id"
+    )
+    for forbidden in (
+        "private-title",
+        "private-description",
+        "private.example",
+        "must-not-leak",
+    ):
+        assert forbidden not in run.failure_summary
+
+
+def test_unknown_structural_reason_is_not_exposed() -> None:
+    error = FinalJobsStructureError(
+        "private-title https://private.example/?token=must-not-leak"
+    )
+
+    assert error.reason == str(error) == "invalid_structure"
+
+
+def test_snapshot_cli_keeps_structural_failure_output_public_and_bounded(
+    job_postgres_url: str,
+    monkeypatch,
+    capsys,
+) -> None:
+    duplicate = (
+        final_job(),
+        final_job(
+            description="private-description-must-not-leak",
+            source_url="https://private.example/?token=must-not-leak",
+        ),
+    )
+    replayed = SimpleNamespace(
+        jobs=duplicate,
+        config=load_watchlist(),
+        source_fingerprint="e" * 64,
+        source_identifier="bounded.json.gz",
+    )
+    monkeypatch.setenv("HOSTED_DATABASE_URL", job_postgres_url)
+    monkeypatch.setattr(
+        "app.hosted.import_snapshot.replay_snapshot_jobs",
+        lambda *_args, **_kwargs: replayed,
+    )
+
+    assert import_snapshot_main(["--snapshot", "bounded.json.gz"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Snapshot import failed: invalid_final_jobs\n"
+
+    database = HostedDatabase(job_postgres_url)
+    with database.session_factory() as db:
+        run = db.scalar(select(HostedJobImportRun))
+        attempt = db.scalar(select(HostedJobImportAttempt))
+    database.dispose()
+    assert run.failure_summary == attempt.failure_summary == (
+        "invalid_final_jobs:duplicate_watcher_job_id"
+    )
+    assert len(run.failure_summary) < 100
+    assert "private" not in run.failure_summary
+    assert "token" not in run.failure_summary
 
 
 def test_jobs_persist_across_database_and_service_recreation(

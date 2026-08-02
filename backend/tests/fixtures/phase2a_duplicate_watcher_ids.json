@@ -1,0 +1,86 @@
+[
+  {
+    "company": "Capital One",
+    "title": "Backend Software Engineer Intern",
+    "location": "New York, NY",
+    "compensation": "$45/hour",
+    "description": "Build reliable backend services.",
+    "requirements": "Python and SQL",
+    "source_url": "https://example.test/jobs/backend-intern-a",
+    "date_posted": "2026-08-01",
+    "deadline": "2026-09-01",
+    "remote_status": "Hybrid",
+    "internship_type": "Summer 2027 Internship",
+    "extra": {
+      "source": "direct",
+      "source_adapter": "workday",
+      "source_system": "workday",
+      "source_scope": "fixture-tenant:careers",
+      "source_requisition_id": "REQ-1001",
+      "active": true
+    }
+  },
+  {
+    "company": "Capital One",
+    "title": "Backend Software Engineer Intern",
+    "location": "New York, NY",
+    "compensation": "$45/hour",
+    "description": "Build a separate backend platform.",
+    "requirements": "Python and distributed systems",
+    "source_url": "https://example.test/jobs/backend-intern-b",
+    "date_posted": "2026-08-01",
+    "deadline": "2026-09-01",
+    "remote_status": "Hybrid",
+    "internship_type": "Summer 2027 Internship",
+    "extra": {
+      "source": "direct",
+      "source_adapter": "workday",
+      "source_system": "workday",
+      "source_scope": "fixture-tenant:careers",
+      "source_requisition_id": "REQ-1002",
+      "active": true
+    }
+  },
+  {
+    "company": "Capital One Financial",
+    "title": "Backend SWE Intern",
+    "location": "New York",
+    "compensation": "",
+    "description": "",
+    "requirements": "",
+    "source_url": "https://example.test/jobs/backend-intern-a?utm_source=fixture",
+    "date_posted": "2026-08-01",
+    "deadline": "",
+    "remote_status": "",
+    "internship_type": "Summer 2027 Internship",
+    "extra": {
+      "source": "github",
+      "source_adapter": "github_listings",
+      "source_name": "fixture_backstop",
+      "source_format": "simplify_json",
+      "source_priority": 10,
+      "active": true
+    }
+  },
+  {
+    "company": "Capital One",
+    "title": "Data Analyst Intern",
+    "location": "Richmond, VA",
+    "compensation": "$40/hour",
+    "description": "Analyze product data.",
+    "requirements": "SQL",
+    "source_url": "https://example.test/jobs/data-intern",
+    "date_posted": "2026-08-01",
+    "deadline": "2026-09-01",
+    "remote_status": "On-site",
+    "internship_type": "Summer 2027 Internship",
+    "extra": {
+      "source": "direct",
+      "source_adapter": "workday",
+      "source_system": "workday",
+      "source_scope": "fixture-tenant:careers",
+      "source_requisition_id": "REQ-2001",
+      "active": true
+    }
+  }
+]

@@ -80,10 +80,26 @@ _RELATIVE_POSTING_DATE_RE = re.compile(
     r"(?:posted\s+)?(?:today|yesterday|\d+\+?\s+days?\s+ago)",
     re.IGNORECASE,
 )
+FINAL_JOBS_STRUCTURE_REASONS = frozenset(
+    {
+        "final_jobs_not_sequence",
+        "final_job_not_object",
+        "duplicate_watcher_job_id",
+    }
+)
 
 
 class FinalJobsStructureError(ValueError):
     """The analyzed collection is not a valid final-job sequence."""
+
+    def __init__(self, reason: str) -> None:
+        safe_reason = (
+            reason
+            if reason in FINAL_JOBS_STRUCTURE_REASONS
+            else "invalid_structure"
+        )
+        super().__init__(safe_reason)
+        self.reason = safe_reason
 
 
 class _SkipJob(ValueError):

@@ -682,6 +682,7 @@ def _measure_isolated_assembly(
     runs: int,
 ) -> dict[str, object]:
     times = []
+    resolved_job_ids = backend_ingest.analyzed_job_ids(rows)
     for _ in range(runs):
         started = perf_counter()
         jobs = [
@@ -690,8 +691,13 @@ def _measure_isolated_assembly(
                 artifact,
                 profile=profile,
                 today=effective_date,
+                analyzed_job_id=resolved_job_id,
             )
-            for row, artifact in zip(rows, artifacts)
+            for row, artifact, resolved_job_id in zip(
+                rows,
+                artifacts,
+                resolved_job_ids,
+            )
         ]
         times.append(perf_counter() - started)
         if len(jobs) != len(rows):

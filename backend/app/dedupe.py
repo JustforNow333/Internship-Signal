@@ -13,7 +13,7 @@ fed before GitHub backstop rows, preserving the direct source tag.
 
 import hashlib
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 from .normalize import CANONICAL_COLUMNS
@@ -154,6 +154,49 @@ def canonical_key(row: dict) -> str:
 def job_id(row: dict) -> str:
     """Stable id derived from content, so shortlists survive re-ingestion."""
     return hashlib.sha1(canonical_key(row).encode("utf-8")).hexdigest()[:10]
+
+
+def analyzed_job_ids(rows) -> list[str]:
+    """Return deterministic unique IDs for canonical-identity collisions.
+
+    The historical 10-character ID remains unchanged unless multiple retained
+    postings share it. Distinct watcher postings can legitimately have the same
+    normalized company, title, and location, so colliding rows with unique
+    posting identities receive a deterministic suffix derived from that
+    stronger requisition-or-URL identity.
+
+    If a collision group lacks unique strong identities, its legacy IDs are
+    left intact so downstream structural validation continues to reject the
+    ambiguous collection instead of inventing identity.
+    """
+
+    ordered_rows = list(rows)
+    legacy_ids = [job_id(row) for row in ordered_rows]
+    counts = Counter(legacy_ids)
+    if not any(count > 1 for count in counts.values()):
+        return legacy_ids
+
+    non_specific_urls = non_specific_posting_urls(ordered_rows)
+    grouped_indexes: dict[str, list[int]] = defaultdict(list)
+    for index, legacy_id in enumerate(legacy_ids):
+        if counts[legacy_id] > 1:
+            grouped_indexes[legacy_id].append(index)
+
+    resolved = list(legacy_ids)
+    for legacy_id, indexes in grouped_indexes.items():
+        identities = [
+            posting_identity_key(
+                ordered_rows[index],
+                non_specific_urls=non_specific_urls,
+            )
+            for index in indexes
+        ]
+        if not all(identities) or len(set(identities)) != len(identities):
+            continue
+        for index, identity in zip(indexes, identities):
+            digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+            resolved[index] = f"{legacy_id}-{digest}"
+    return resolved
 
 
 def stable_requisition_key(row: dict) -> str:

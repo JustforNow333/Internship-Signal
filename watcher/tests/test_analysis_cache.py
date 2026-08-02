@@ -573,6 +573,29 @@ def test_mixed_hit_miss_run_preserves_final_ordering(tmp_path):
     assert _serialized(mixed.jobs) == _serialized(expected)
 
 
+def test_cached_analysis_preserves_distinct_ids_for_canonical_collision(tmp_path):
+    first = _row(
+        "Capital One",
+        "Backend Software Engineer Intern",
+        source_id="collision-1",
+    )
+    second = _row(
+        "Capital One",
+        "Backend Software Engineer Intern",
+        source_id="collision-2",
+    )
+    rows = [first, second]
+    db_path = tmp_path / "collision-cache.sqlite"
+
+    cold = _run(rows, db_path)
+    warm = _run(list(reversed(rows)), db_path)
+    expected = analyze_rows(copy.deepcopy(rows), today=AS_OF)
+
+    assert len({job["id"] for job in cold.jobs}) == 2
+    assert _serialized(cold.jobs) == _serialized(warm.jobs)
+    assert _serialized(cold.jobs) == _serialized(expected)
+
+
 def test_corrupt_json_and_schema_entries_fall_back_to_fresh_analysis(
     tmp_path,
     caplog,

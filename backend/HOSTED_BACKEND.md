@@ -59,6 +59,10 @@ posting labels such as `Posted Yesterday` are retained as an unknown
 jobs are skipped with bounded reason codes, while a malformed final-job
 collection fails the import.
 
+Structural final-job failures remain a broad `invalid_final_jobs` CLI error.
+Operator failure records append only an allowlisted structural subreason and
+never posting data or source identifiers.
+
 ## Offline snapshot import
 
 From the repository root, after applying migrations:

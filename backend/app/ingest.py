@@ -12,7 +12,7 @@ from typing import Mapping
 
 from . import config
 from .classify import TECHNICAL_ROLES, classify_company, classify_role
-from .dedupe import dedupe, job_id
+from .dedupe import analyzed_job_ids, dedupe, job_id
 from .eligibility import analyze_student_eligibility
 from .normalize import build_row, infer_fields, map_headers
 from .profile import load_profile
@@ -322,6 +322,7 @@ def assemble_scored_job(
     profile: Mapping[str, object],
     today: date | None = None,
     use_analysis_context: bool = True,
+    analyzed_job_id: str | None = None,
 ) -> dict:
     """Recompute current scoring and assemble one final job from an artifact."""
 
@@ -349,7 +350,7 @@ def assemble_scored_job(
     )
 
     return {
-        "id": job_id(row),
+        "id": analyzed_job_id or job_id(row),
         "company": row.get("company", ""),
         "title": row.get("title", ""),
         "location": row.get("location", ""),
@@ -411,7 +412,8 @@ def _analyze_rows_with_report(
     )
 
     jobs = []
-    for row in unique_rows:
+    resolved_job_ids = analyzed_job_ids(unique_rows)
+    for row, resolved_job_id in zip(unique_rows, resolved_job_ids):
         artifact = analyze_static_row(
             row,
             profile=profile,
@@ -426,6 +428,7 @@ def _analyze_rows_with_report(
                 profile=profile,
                 today=today,
                 use_analysis_context=use_analysis_context,
+                analyzed_job_id=resolved_job_id,
             )
         )
 

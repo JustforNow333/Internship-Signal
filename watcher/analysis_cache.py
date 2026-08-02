@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.app import config as backend_config
+from backend.app.dedupe import analyzed_job_ids
 from backend.app.ingest import (
     analyze_static_row,
     assemble_scored_job,
@@ -467,14 +468,20 @@ def analyze_rows_with_cache(
                 _warn_cache_failure("close", exc)
 
     scoring_started = time.perf_counter()
+    resolved_job_ids = analyzed_job_ids(unique_rows)
     jobs = [
         assemble_scored_job(
             row,
             artifact,
             profile=effective_profile,
             today=today,
+            analyzed_job_id=resolved_job_id,
         )
-        for row, artifact in zip(unique_rows, row_artifacts)
+        for row, artifact, resolved_job_id in zip(
+            unique_rows,
+            row_artifacts,
+            resolved_job_ids,
+        )
     ]
     sort_scored_jobs(jobs)
     scoring_seconds = time.perf_counter() - scoring_started

@@ -988,6 +988,21 @@ This file tracks completed watcher steps and the next handoff target.
    - Added regression coverage for the bounded multi-result path. The complete
      backend/watcher suite passes (`842 passed, 1 warning`).
 
+43. Phase 2A final-job identity collision fix (2026-08-02):
+   - The real 11,855-job replay exposed 460 groups where 1,393 distinct
+     retained postings shared the legacy company/title/city-derived watcher ID.
+     Final analysis now preserves every unaffected legacy ID and gives only
+     proven collision groups deterministic strong-identity suffixes; ambiguous
+     groups remain duplicates for structural rejection.
+   - Hosted mapping still rejects duplicate final IDs. Failed import records
+     now retain only an allowlisted structural subreason while the CLI keeps
+     the broad public `invalid_final_jobs` error.
+   - Validation passed: backend/watcher `904 passed, 1 warning`; frontend `63
+     passed` plus the production build; Python compileall; and the real Phase
+     2A smoke import (`4,822` inserted, `7,033` bounded `invalid_role` skips,
+     zero matches). The second import was a byte-stable idempotent no-op and all
+     watcher SQLite fingerprints were unchanged.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only

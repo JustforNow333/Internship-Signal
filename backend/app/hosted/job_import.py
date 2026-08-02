@@ -478,7 +478,7 @@ def _safe_length(value: object) -> int:
 
 def _failure_code(exc: Exception) -> str:
     if isinstance(exc, FinalJobsStructureError):
-        return "invalid_final_jobs"
+        return f"invalid_final_jobs:{exc.reason}"
     if isinstance(exc, JobImportError):
         return exc.code
     return "job_upsert_failed"
