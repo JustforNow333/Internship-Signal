@@ -122,7 +122,7 @@ def _run(
 
 
 def test_first_run_misses_and_writes_then_second_run_hits(tmp_path):
-    db_path = tmp_path / "seen.sqlite"
+    db_path = tmp_path / "analysis-cache.sqlite"
     rows = _representative_rows()
 
     first = _run(rows, db_path)
@@ -136,6 +136,85 @@ def test_first_run_misses_and_writes_then_second_run_hits(tmp_path):
     assert second.stats.misses == 0
     assert second.stats.writes == 0
     assert second.stats.hit_rate == 1.0
+
+
+def test_cache_table_is_created_only_in_dedicated_database(tmp_path):
+    seen_db_path = tmp_path / "seen.sqlite"
+    cache_db_path = tmp_path / "analysis-cache.sqlite"
+    rows = [_row("Stripe", "Backend Intern", source_id="separate-1")]
+
+    with SeenStore(seen_db_path):
+        pass
+    result = _run(rows, cache_db_path)
+
+    assert result.stats.writes == 1
+    with sqlite3.connect(seen_db_path) as connection:
+        durable_tables = {
+            row[0]
+            for row in connection.execute(
+                "select name from sqlite_master where type = 'table'"
+            )
+        }
+    with sqlite3.connect(cache_db_path) as connection:
+        cache_tables = {
+            row[0]
+            for row in connection.execute(
+                "select name from sqlite_master where type = 'table'"
+            )
+        }
+    assert "seen" in durable_tables
+    assert "analysis_cache" not in durable_tables
+    assert cache_tables == {"analysis_cache"}
+
+
+def test_deleted_or_corrupt_cache_does_not_affect_durable_state(
+    tmp_path,
+    caplog,
+):
+    seen_db_path = tmp_path / "seen.sqlite"
+    cache_db_path = tmp_path / "analysis-cache.sqlite"
+    rows = [_row("Stripe", "Backend Intern", source_id="cache-loss-1")]
+    job = _run(rows, cache_db_path, enabled=False).jobs[0]
+    with SeenStore(seen_db_path) as store:
+        store.mark_many_primed(
+            [job],
+            primed_at=datetime(2026, 7, 30, 12, tzinfo=timezone.utc),
+        )
+        expected_records = store.records()
+
+    _run(rows, cache_db_path)
+    cache_db_path.unlink()
+    rebuilt = _run(rows, cache_db_path)
+    cache_db_path.write_bytes(b"not a sqlite database")
+    with caplog.at_level(logging.WARNING):
+        fallback = _run(rows, cache_db_path)
+
+    assert rebuilt.stats.misses == 1
+    assert fallback.stats.misses == 1
+    assert fallback.stats.writes == 0
+    assert "cache" in caplog.text.lower()
+    with SeenStore(seen_db_path) as store:
+        assert store.records() == expected_records
+
+
+def test_cache_failure_does_not_modify_or_roll_back_durable_database(
+    tmp_path,
+):
+    seen_db_path = tmp_path / "seen.sqlite"
+    cache_db_path = tmp_path / "unavailable"
+    cache_db_path.mkdir()
+    rows = [_row("Stripe", "Backend Intern", source_id="cache-failure-1")]
+    with SeenStore(seen_db_path):
+        pass
+    before = seen_db_path.read_bytes()
+
+    result = _run(rows, cache_db_path)
+
+    assert result.stats.misses == 1
+    assert result.stats.writes == 0
+    assert seen_db_path.read_bytes() == before
+    with SeenStore(seen_db_path) as store:
+        assert store.records() == []
 
 
 def test_cached_uncached_jobs_and_dedupe_reports_are_serialized_identically(

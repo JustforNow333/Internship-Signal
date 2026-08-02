@@ -1,5 +1,9 @@
 # Claude Repository Guide
 
+- Audit recent committed and uncommitted work separately, preserving unrelated
+  changes. Change behavior only for a reproduced failure or proven invariant
+  violation; otherwise report the risk without editing code.
+
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.
 - Read `agents.md` before repository work. Before watcher work, also read
@@ -47,26 +51,43 @@
 - Benchmark analysis changes offline at 500, 1,000, and 2,000 representative
   rows without adding prefilters, collection concurrency, pagination changes,
   or source-comparison redesign.
-- Persistent analysis caching is watcher-owned in the existing SQLite state;
-  backend analysis primitives stay pure and cache-independent, static
-  fingerprints are deterministic/versioned, and current-date scoring always
-  runs for every deduplicated row.
+- Collection concurrency is opt-in and bounded. `WATCHER_COLLECTION_MODE`
+  defaults to `serial`, serial stays the permanent rollback/diagnostic path, and
+  only a separate reviewed change may promote `concurrent`. Validated limits are
+  `WATCHER_COLLECTION_MAX_WORKERS` (1-16, default 4),
+  `WATCHER_WORKDAY_MAX_CONCURRENCY` (1-5, default 1), and
+  `WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY` (1-4, default 2); neither
+  scope limit may exceed the worker pool and every applicable limit binds.
+- Origin/provider keys use scheme, host, and port only; companies sharing an ATS
+  host share one origin limit and Workday tenants share the Workday limit.
+  Concurrency reorders nothing, never weakens pacing, timeouts, retries, or
+  backoff, and adds no proxy, cookie, header-rotation, browser-automation, or
+  challenge-bypass behavior. Blocked, unauthorized, and rate-limited responses
+  stay ordinary source failures, and escaped worker errors become failed task
+  results with sanitized exception types.
+- Validate concurrency in stages: deterministic offline equivalence, a limited
+  live canary across adapter types with at most one or two Workday tenants, then
+  a full live canary. Canaries use temporary databases, disable email, priming,
+  seen marking, health alerts, durable health persistence, and comparison
+  persistence, stop testing blocked sources instead of retrying them, and never
+  run full serial and concurrent collections back-to-back.
+- Full live canaries record the local/remote SHA and worktree status, use fixed
+  4/1/2 limits in separate normal collection windows, keep detailed reports
+  private, and require identical production-SQLite fingerprints. Uncommitted
+  or unpushed evidence is not repository-complete; missing normal GitHub
+  authentication stops validation before canary, and production stays serial.
+- Workday canary telemetry records monotonic tenant starts after pacing and
+  immediately before fetch; only private reports receive sanitized identifiers,
+  relative offsets, spacing statistics, and numeric violation counts.
+- Canary summaries quote retained report fields exactly and label unavailable
+  historical telemetry instead of reconstructing or estimating it.
+- Persistent analysis caching is watcher-owned in a dedicated rebuildable
+  SQLite database beside durable state; backend analysis stays pure and
+  cache-independent, fingerprints are deterministic/versioned, and
+  current-date scoring always runs for every deduplicated row.
 - Cache corruption, schema mismatch, or SQLite failure is nonfatal and falls
   back to fresh analysis; batch reads, transactional writes, and one bounded
   30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
-- Collection concurrency is opt-in; production defaults to `serial`. Validate
-  global workers (1-16), Workday concurrency (1-5), and per-origin concurrency
-  (1-4), with neither scoped limit exceeding the worker pool.
-- Plan in configuration order, isolate adapters and mutable diagnostics per
-  worker, share only the Workday pacer, and reduce outcomes in plan order.
-  Replay creates no executor or network work; executors must shut down cleanly.
-- Record actual Workday starts with a monotonic clock after pacing and directly
-  before fetch. Sleep without holding the pacer lock. Keep interval, count,
-  spacing statistics, numeric violations, and sanitized relative offsets only
-  in private canary reports—not snapshots, SQLite, health, heartbeat, or email.
-- Validate serial/concurrent batch and snapshot equivalence, ordering, limits,
-  isolation, pacing, and zero state writes before limited and separate full
-  canaries. Keep promotion a separate reviewed change and production serial.
 - Dry runs never change notification state. Live sends populate `emailed_at`
   only after success; explicit priming has its own marker, and unmarked legacy
   rows remain pending.
@@ -76,9 +97,12 @@
 - Watcher audits are read-only and reuse production identity, dedupe,
   classification, eligibility, scoring, and seen lookup; state-only audits
   never fetch, and live audits never email, prime, or persist health attempts.
-- Source comparisons retain 30 aggregate runs, three detail runs, all bounded
-  eligible/anomaly detail, and deterministic routine-rejection samples per
-  reason; compact only after material cleanup. Health-alert
+- Source comparison computes lightweight outcomes/counts for every job, then
+  selects details before building and sanitizing rich traces. The report owns
+  deterministic eligible/anomaly/non-routine/routine-sample retention; the
+  store persists selected entries without a second policy pass. Decisive early
+  reasons defer rich-only location/notification expansion until selection.
+  Keep 30 aggregate runs and three detail runs. Health-alert
   cooldowns use dedicated tables and an independent email switch/renderer;
   they never update internship `emailed_at` or `primed_at`.
 - Rollout verification disables internship email, priming, Workday probes, and
@@ -111,6 +135,10 @@
 - Use the validation commands in `agents.md`; always run `git diff --check`.
 - Bug audits require a reproducible failure or clear violated invariant. Add a
   regression test before fixing behavior; do not change code for style alone.
+- Keep the current watcher-audit fix separate from hosted UI/auth fixes, and
+  preserve every pre-existing dirty hunk in both worktrees.
+- Local commits stay on their dedicated watcher and hosted branches; never
+  push them without a separate explicit request.
 - Repository-wide readability cleanup must preserve public shapes, ordering,
   logs, and side effects; consolidate duplication only after tests cover every
   caller.
@@ -145,3 +173,5 @@
   current row/provenance assembly, and sorting always remain dynamic.
 - Keep profiler data, snapshots, and generated benchmark reports ignored while
   leaving reusable benchmark scripts, tests, and fixtures trackable.
+- Keep rebuildable `analysis-cache.sqlite` transactionally independent from
+  durable `seen.sqlite`; only the durable database belongs on `watcher-data`.

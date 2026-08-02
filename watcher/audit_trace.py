@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from typing import Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
@@ -97,12 +97,72 @@ class PostingAuditContext:
         tuple[str, str],
         tuple[dict[str, str], ...],
     ]
+    duplicate_entries: tuple[dict[str, object], ...] = ()
+    duplicate_positions_by_identity: dict[str, tuple[int, ...]] = field(
+        default_factory=dict
+    )
+    duplicate_positions_by_role: dict[
+        tuple[str, str],
+        tuple[int, ...],
+    ] = field(default_factory=dict)
+    duplicate_positions_by_title: dict[str, tuple[int, ...]] = field(
+        default_factory=dict
+    )
+
+
+@dataclass(frozen=True)
+class PostingAuditOutcome:
+    """One immutable evaluation shared by summaries and rich traces."""
+
+    job_index: int | None
+    job: dict[str, object]
+    company_cfg: CompanyCfg | None
+    extra: dict[str, object]
+    non_specific_urls: frozenset[str]
+    identity_key: str
+    requisition_key: str
+    normalized_url: str
+    posting_url_key: str
+    fallback_key: str
+    generic_or_shared_url: bool
+    sources: tuple[str, ...]
+    source_details: dict[str, object]
+    direct_found: bool
+    github_found: bool
+    season: dict[str, object]
+    internship: bool
+    open_now: bool
+    eligibility: dict[str, object]
+    eligibility_evaluated: bool
+    location_status: str
+    role_classification: dict[str, object]
+    score: dict[str, object]
+    fit_score: int
+    watcher_eligible: bool
+    threshold_eligible: bool
+    matching_records: tuple[dict[str, object], ...]
+    notification_evaluated: bool
+    emailed: bool
+    primed: bool
+    pending: bool
+    final_reason: str
+    related_duplicates: tuple[dict[str, object], ...]
+    source_coverage: dict[str, object]
+
+    @property
+    def duplicate_sightings(self) -> int:
+        return len(self.related_duplicates)
+
+    @property
+    def has_merge_diagnostics(self) -> bool:
+        return bool(self.related_duplicates)
 
 
 def build_posting_audit_context(
     posting_universe: Sequence[dict],
     *,
     seen_store: SeenStore,
+    duplicate_entries: Sequence[Mapping[str, object]] = (),
 ) -> PostingAuditContext:
     """Precompute whole-run identity inputs in linear time."""
 
@@ -142,10 +202,305 @@ def build_posting_audit_context(
         )
         for role_key, requisitions in requisitions_by_role.items()
     }
+    normalized_duplicates = tuple(dict(entry) for entry in duplicate_entries)
+    duplicate_positions_by_identity: dict[str, list[int]] = {}
+    duplicate_positions_by_role: dict[
+        tuple[str, str],
+        list[int],
+    ] = {}
+    duplicate_positions_by_title: dict[str, list[int]] = {}
+    for index, entry in enumerate(normalized_duplicates):
+        kept_identity = str(entry.get("kept_identity_key") or "")
+        if kept_identity:
+            duplicate_positions_by_identity.setdefault(
+                kept_identity,
+                [],
+            ).append(index)
+        role_key = (
+            norm_company(str(entry.get("company") or "")),
+            norm_title(str(entry.get("title") or "")),
+        )
+        duplicate_positions_by_role.setdefault(role_key, []).append(index)
+        duplicate_positions_by_title.setdefault(role_key[1], []).append(index)
     return PostingAuditContext(
         non_specific_urls=non_specific_urls,
         notification_records=tuple(seen_store.records()),
         similar_requisitions=similar_requisitions,
+        duplicate_entries=normalized_duplicates,
+        duplicate_positions_by_identity={
+            key: tuple(value)
+            for key, value in duplicate_positions_by_identity.items()
+        },
+        duplicate_positions_by_role={
+            key: tuple(value)
+            for key, value in duplicate_positions_by_role.items()
+        },
+        duplicate_positions_by_title={
+            key: tuple(value)
+            for key, value in duplicate_positions_by_title.items()
+        },
+    )
+
+
+def evaluate_posting_outcome(
+    job: dict,
+    *,
+    config: WatcherConfig,
+    seen_store: SeenStore,
+    posting_universe: Sequence[dict] = (),
+    duplicate_entries: Sequence[Mapping[str, object]] = (),
+    source_coverage: Mapping[str, object] | None = None,
+    context: PostingAuditContext | None = None,
+    job_index: int | None = None,
+    defer_nonessential_decisions: bool = False,
+) -> PostingAuditOutcome:
+    """Evaluate one posting once for lightweight and rich audit consumers."""
+
+    if context is None:
+        non_specific_urls = non_specific_posting_urls([job, *posting_universe])
+    else:
+        non_specific_urls = context.non_specific_urls
+    identity_key = posting_identity_key(
+        job,
+        non_specific_urls=non_specific_urls,
+    )
+    requisition_key = stable_requisition_key(job)
+    normalized_url = norm_url(str(job.get("source_url") or ""))
+    posting_url_key = posting_specific_url_key(
+        job,
+        non_specific_urls=non_specific_urls,
+    )
+    company_cfg = match_watchlist_company(
+        str(job.get("company") or ""),
+        config.companies,
+    )
+    extra = job.get("extra") if isinstance(job.get("extra"), dict) else {}
+    source_list, source_details = source_sightings(extra)
+    sources = tuple(source_list)
+    direct_found = "direct_ats" in sources
+    github_found = any(source != "direct_ats" for source in sources)
+
+    season = posting_season(job, config, company_cfg)
+    internship = is_internship(job)
+    open_now = is_open(job)
+    role_value = job.get("role_classification")
+    role_classification = (
+        dict(role_value) if isinstance(role_value, Mapping) else {}
+    )
+    score_value = job.get("score")
+    score = dict(score_value) if isinstance(score_value, Mapping) else {}
+    fit_score = _integer(score.get("fit_score", score.get("total", 0)))
+    threshold_eligible = config.min_score is None or fit_score >= config.min_score
+
+    preliminary_reason = final_reason_for(
+        collected=True,
+        watchlist_matched=company_cfg is not None,
+        season_eligible=bool(season["eligible"]),
+        internship=internship,
+        open_now=open_now,
+        eligibility=None,
+        role=str(role_classification.get("role") or "unknown"),
+        fit_score=fit_score,
+        min_score=config.min_score,
+        emailed=False,
+        primed=False,
+    )
+    eligibility_evaluated = (
+        not defer_nonessential_decisions or preliminary_reason is None
+    )
+    if eligibility_evaluated:
+        eligibility = determine_watcher_eligibility(
+            job,
+            config.target_roles,
+            apply_student_restrictions=internship and open_now,
+        )
+        watcher_eligible = bool(eligibility.get("watcher_eligible"))
+        reason_without_notification = final_reason_for(
+            collected=True,
+            watchlist_matched=company_cfg is not None,
+            season_eligible=bool(season["eligible"]),
+            internship=internship,
+            open_now=open_now,
+            eligibility=eligibility,
+            role=str(role_classification.get("role") or "unknown"),
+            fit_score=fit_score,
+            min_score=config.min_score,
+            emailed=False,
+            primed=False,
+        )
+    else:
+        eligibility = {}
+        watcher_eligible = False
+        reason_without_notification = preliminary_reason
+    if reason_without_notification is None:
+        raise AssertionError("posting outcome did not resolve a final reason")
+
+    notification_evaluated = (
+        not defer_nonessential_decisions
+        or reason_without_notification == "pending"
+    )
+    matching_records = (
+        _matching_notification_records(
+            job,
+            seen_store=seen_store,
+            posting_universe=posting_universe,
+            non_specific_urls=non_specific_urls,
+            context=context,
+        )
+        if notification_evaluated
+        else ()
+    )
+    emailed = any(record.get("emailed_at") for record in matching_records)
+    primed = any(record.get("primed_at") for record in matching_records)
+    final_reason = (
+        final_reason_for(
+            collected=True,
+            watchlist_matched=company_cfg is not None,
+            season_eligible=bool(season["eligible"]),
+            internship=internship,
+            open_now=open_now,
+            eligibility=eligibility,
+            role=str(role_classification.get("role") or "unknown"),
+            fit_score=fit_score,
+            min_score=config.min_score,
+            emailed=emailed,
+            primed=primed,
+        )
+        if notification_evaluated
+        else reason_without_notification
+    )
+    if final_reason is None:
+        raise AssertionError("posting outcome did not resolve a final reason")
+    related_duplicates = _related_duplicate_entries(
+        job,
+        identity_key=identity_key,
+        sources=sources,
+        duplicate_entries=duplicate_entries,
+        context=context,
+    )
+    return PostingAuditOutcome(
+        job_index=job_index,
+        job=job,
+        company_cfg=company_cfg,
+        extra=extra,
+        non_specific_urls=non_specific_urls,
+        identity_key=identity_key,
+        requisition_key=requisition_key,
+        normalized_url=normalized_url,
+        posting_url_key=posting_url_key,
+        fallback_key=canonical_key(job),
+        generic_or_shared_url=bool(normalized_url and not posting_url_key),
+        sources=sources,
+        source_details=source_details,
+        direct_found=direct_found,
+        github_found=github_found,
+        season=season,
+        internship=internship,
+        open_now=open_now,
+        eligibility=eligibility,
+        eligibility_evaluated=eligibility_evaluated,
+        location_status=str(
+            eligibility.get("location_status") or "not_evaluated"
+        ),
+        role_classification=role_classification,
+        score=score,
+        fit_score=fit_score,
+        watcher_eligible=watcher_eligible,
+        threshold_eligible=threshold_eligible,
+        matching_records=matching_records,
+        notification_evaluated=notification_evaluated,
+        emailed=emailed,
+        primed=primed,
+        pending=final_reason == "pending",
+        final_reason=final_reason,
+        related_duplicates=related_duplicates,
+        source_coverage=dict(source_coverage or {}),
+    )
+
+
+def _matching_notification_records(
+    job: dict,
+    *,
+    seen_store: SeenStore,
+    posting_universe: Sequence[dict],
+    non_specific_urls: frozenset[str],
+    context: PostingAuditContext | None,
+) -> tuple[dict[str, object], ...]:
+    if context is None:
+        records = seen_store.matching_records(
+            job,
+            posting_universe=posting_universe,
+        )
+    else:
+        records = seen_store.matching_records(
+            job,
+            precomputed_non_specific_urls=non_specific_urls,
+            preloaded_records=context.notification_records,
+        )
+    return tuple(records)
+
+
+def complete_posting_outcome(
+    outcome: PostingAuditOutcome,
+    *,
+    config: WatcherConfig,
+    seen_store: SeenStore,
+    posting_universe: Sequence[dict] = (),
+    context: PostingAuditContext | None = None,
+) -> PostingAuditOutcome:
+    """Complete deferred rich-trace decisions without repeating base work."""
+
+    if outcome.eligibility_evaluated and outcome.notification_evaluated:
+        return outcome
+    eligibility = outcome.eligibility
+    if not outcome.eligibility_evaluated:
+        eligibility = determine_watcher_eligibility(
+            outcome.job,
+            config.target_roles,
+            apply_student_restrictions=(
+                outcome.internship and outcome.open_now
+            ),
+        )
+    matching_records = outcome.matching_records
+    if not outcome.notification_evaluated:
+        matching_records = _matching_notification_records(
+            outcome.job,
+            seen_store=seen_store,
+            posting_universe=posting_universe,
+            non_specific_urls=outcome.non_specific_urls,
+            context=context,
+        )
+    emailed = any(record.get("emailed_at") for record in matching_records)
+    primed = any(record.get("primed_at") for record in matching_records)
+    final_reason = final_reason_for(
+        collected=True,
+        watchlist_matched=outcome.company_cfg is not None,
+        season_eligible=bool(outcome.season["eligible"]),
+        internship=outcome.internship,
+        open_now=outcome.open_now,
+        eligibility=eligibility,
+        role=str(outcome.role_classification.get("role") or "unknown"),
+        fit_score=outcome.fit_score,
+        min_score=config.min_score,
+        emailed=emailed,
+        primed=primed,
+    )
+    if final_reason is None:
+        raise AssertionError("posting outcome did not resolve a final reason")
+    return replace(
+        outcome,
+        eligibility=eligibility,
+        eligibility_evaluated=True,
+        location_status=str(
+            eligibility.get("location_status") or "ambiguous"
+        ),
+        watcher_eligible=bool(eligibility.get("watcher_eligible")),
+        matching_records=matching_records,
+        notification_evaluated=True,
+        emailed=emailed,
+        primed=primed,
+        pending=final_reason == "pending",
+        final_reason=final_reason,
     )
 
 
@@ -159,108 +514,66 @@ def build_posting_trace(
     source_coverage: Mapping[str, object] | None = None,
     query_match: Mapping[str, object] | None = None,
     context: PostingAuditContext | None = None,
+    outcome: PostingAuditOutcome | None = None,
 ) -> PostingAuditTrace:
     """Build one structured trace from a production-analyzed job."""
 
-    if context is None:
-        universe = [job, *posting_universe]
-        non_specific_urls = non_specific_posting_urls(universe)
-    else:
-        universe = []
-        non_specific_urls = context.non_specific_urls
-    identity_key = posting_identity_key(
-        job,
-        non_specific_urls=non_specific_urls,
-    )
-    requisition_key = stable_requisition_key(job)
-    normalized_url = norm_url(str(job.get("source_url") or ""))
-    posting_url_key = posting_specific_url_key(
-        job,
-        non_specific_urls=non_specific_urls,
-    )
-    fallback_key = canonical_key(job)
-    company_cfg = match_watchlist_company(str(job.get("company") or ""), config.companies)
-    extra = job.get("extra") if isinstance(job.get("extra"), dict) else {}
-    sources, source_details = source_sightings(extra)
-    direct_found = "direct_ats" in sources
-    github_found = any(source != "direct_ats" for source in sources)
-
-    season = posting_season(job, config, company_cfg)
-    internship = is_internship(job)
-    open_now = is_open(job)
-    eligibility = determine_watcher_eligibility(
-        job,
-        config.target_roles,
-        apply_student_restrictions=internship and open_now,
-    )
-    location_status = str(eligibility.get("location_status") or "ambiguous")
-    role_cls = job.get("role_classification") or {}
-    score = job.get("score") or {}
-    fit_score = _integer(score.get("fit_score", score.get("total", 0)))
-    watcher_eligible = bool(eligibility.get("watcher_eligible"))
-    threshold_eligible = config.min_score is None or fit_score >= config.min_score
-
-    if context is None:
-        matching_records = seen_store.matching_records(
+    if outcome is None:
+        outcome = evaluate_posting_outcome(
             job,
+            config=config,
+            seen_store=seen_store,
             posting_universe=posting_universe,
+            duplicate_entries=duplicate_entries,
+            source_coverage=source_coverage,
+            context=context,
         )
-    else:
-        matching_records = seen_store.matching_records(
-            job,
-            precomputed_non_specific_urls=non_specific_urls,
-            preloaded_records=context.notification_records,
-        )
-    emailed = any(record.get("emailed_at") for record in matching_records)
-    primed = any(record.get("primed_at") for record in matching_records)
-    pending = bool(
-        company_cfg
-        and season["eligible"]
-        and internship
-        and open_now
-        and watcher_eligible
-        and threshold_eligible
-        and not emailed
-        and not primed
+    outcome = complete_posting_outcome(
+        outcome,
+        config=config,
+        seen_store=seen_store,
+        posting_universe=posting_universe,
+        context=context,
     )
-    final_reason = final_reason_for(
-        collected=True,
-        watchlist_matched=company_cfg is not None,
-        season_eligible=bool(season["eligible"]),
-        internship=internship,
-        open_now=open_now,
-        eligibility=eligibility,
-        role=str(role_cls.get("role") or "unknown"),
-        fit_score=fit_score,
-        min_score=config.min_score,
-        emailed=emailed,
-        primed=primed,
-    )
-    related_duplicates = [
-        dict(entry)
-        for entry in duplicate_entries
-        if (
-            entry.get("kept_identity_key")
-            and entry.get("kept_identity_key") == identity_key
-        )
-        or _duplicate_relates(entry, job)
-        or (
-            len(sources) > 1
-            and norm_title(str(entry.get("title") or ""))
-            == norm_title(str(job.get("title") or ""))
-        )
-    ]
+    job = outcome.job
+    company_cfg = outcome.company_cfg
+    extra = outcome.extra
+    sources = list(outcome.sources)
+    source_details = outcome.source_details
+    identity_key = outcome.identity_key
+    requisition_key = outcome.requisition_key
+    normalized_url = outcome.normalized_url
+    posting_url_key = outcome.posting_url_key
+    fallback_key = outcome.fallback_key
+    direct_found = outcome.direct_found
+    github_found = outcome.github_found
+    season = outcome.season
+    internship = outcome.internship
+    open_now = outcome.open_now
+    eligibility = outcome.eligibility
+    location_status = outcome.location_status
+    role_cls = outcome.role_classification
+    score = outcome.score
+    fit_score = outcome.fit_score
+    watcher_eligible = outcome.watcher_eligible
+    threshold_eligible = outcome.threshold_eligible
+    matching_records = outcome.matching_records
+    emailed = outcome.emailed
+    primed = outcome.primed
+    pending = outcome.pending
+    final_reason = outcome.final_reason
+    related_duplicates = [dict(entry) for entry in outcome.related_duplicates]
     similar_distinct = (
         _similar_distinct_requisitions(
             job,
             posting_universe,
-            non_specific_urls=non_specific_urls,
+            non_specific_urls=outcome.non_specific_urls,
         )
         if context is None
         else _context_similar_distinct_requisitions(context, job)
     )
 
-    coverage = dict(source_coverage or {})
+    coverage = outcome.source_coverage
     return PostingAuditTrace(
         schema_version=1,
         query_match=dict(query_match or {}),
@@ -506,13 +819,13 @@ def final_reason_for(
     season_eligible: bool,
     internship: bool,
     open_now: bool,
-    eligibility: Mapping[str, object],
+    eligibility: Mapping[str, object] | None,
     role: str,
     fit_score: int,
     min_score: int | None,
     emailed: bool,
     primed: bool,
-) -> str:
+) -> str | None:
     if not collected:
         return "not_collected"
     if not watchlist_matched:
@@ -523,6 +836,8 @@ def final_reason_for(
         return "not_internship"
     if not open_now:
         return "closed"
+    if eligibility is None:
+        return None
     categorical = eligibility.get("eligibility_exclusion_reason")
     if categorical in {
         "phd_only",
@@ -759,7 +1074,7 @@ def not_collected_trace(
         if query.company
         else None
     )
-    reason = "not_collected" if company_cfg or not query.company else "not_on_watchlist"
+    reason = not_collected_reason(query, config=config)
     empty = {}
     return PostingAuditTrace(
         schema_version=1,
@@ -801,6 +1116,21 @@ def not_collected_trace(
     )
 
 
+def not_collected_reason(
+    query: AuditQuery,
+    *,
+    config: WatcherConfig,
+) -> str:
+    """Return the shared final reason for a query absent from collection."""
+
+    company_cfg = (
+        match_watchlist_company(query.company, config.companies)
+        if query.company
+        else None
+    )
+    return "not_collected" if company_cfg or not query.company else "not_on_watchlist"
+
+
 def final_summary(reason: str) -> str:
     return {
         "already_emailed": "emailed previously",
@@ -838,6 +1168,48 @@ def _duplicate_relates(entry: Mapping[str, object], job: Mapping[str, object]) -
         == norm_company(str(job.get("company") or ""))
         and norm_title(str(entry.get("title") or ""))
         == norm_title(str(job.get("title") or ""))
+    )
+
+
+def _related_duplicate_entries(
+    job: Mapping[str, object],
+    *,
+    identity_key: str,
+    sources: Sequence[str],
+    duplicate_entries: Sequence[Mapping[str, object]],
+    context: PostingAuditContext | None,
+) -> tuple[dict[str, object], ...]:
+    if context is None or not context.duplicate_entries:
+        return tuple(
+            dict(entry)
+            for entry in duplicate_entries
+            if (
+                entry.get("kept_identity_key")
+                and entry.get("kept_identity_key") == identity_key
+            )
+            or _duplicate_relates(entry, job)
+            or (
+                len(sources) > 1
+                and norm_title(str(entry.get("title") or ""))
+                == norm_title(str(job.get("title") or ""))
+            )
+        )
+
+    role_key = (
+        norm_company(str(job.get("company") or "")),
+        norm_title(str(job.get("title") or "")),
+    )
+    positions = set(
+        context.duplicate_positions_by_identity.get(identity_key, ())
+    )
+    positions.update(context.duplicate_positions_by_role.get(role_key, ()))
+    if len(sources) > 1:
+        positions.update(
+            context.duplicate_positions_by_title.get(role_key[1], ())
+        )
+    return tuple(
+        dict(context.duplicate_entries[position])
+        for position in sorted(positions)
     )
 
 

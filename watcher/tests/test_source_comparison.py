@@ -4,11 +4,13 @@ import json
 import sqlite3
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
+from io import StringIO
 
 import pytest
 
 import watcher.audit_trace as audit_trace_module
 import watcher.seen_store as seen_store_module
+import watcher.source_comparison as source_comparison_module
 from backend.app.ingest import analyze_rows
 from watcher.config import CompanyCfg, WatcherConfig
 from watcher.seen_store import SeenStore
@@ -19,9 +21,14 @@ from watcher.source_comparison import (
     CATEGORY_NO_POSTINGS,
     CATEGORY_REJECTED,
     CATEGORIES,
+    PostingComparisonSummary,
+    SourceComparisonDetailPolicy,
     SourceComparisonStore,
+    _select_detail_entries,
     build_source_comparison,
+    render_console,
     render_markdown,
+    select_comparison_details,
     write_json,
 )
 from watcher.source_health import (
@@ -55,7 +62,15 @@ def _config(tmp_path):
     )
 
 
-def _row(company, source, adapter, req, *, title="Software Engineering Intern"):
+def _row(
+    company,
+    source,
+    adapter,
+    req,
+    *,
+    title="Software Engineering Intern",
+    internship_type="Summer 2027 Internship",
+):
     return make_row(
         source=source,
         source_adapter=adapter,
@@ -63,7 +78,7 @@ def _row(company, source, adapter, req, *, title="Software Engineering Intern"):
         title=title,
         location="United States",
         source_url=f"https://example.com/jobs/{req}",
-        internship_type="Summer 2027 Internship",
+        internship_type=internship_type,
         description="Build Python software APIs.",
         requirements="Pursuing a bachelor's degree.",
         extra={
@@ -144,6 +159,9 @@ def _report(tmp_path):
 
 def test_comparison_all_required_categories_and_single_merged_count(tmp_path):
     _config_value, report = _report(tmp_path)
+    assert report.schema_version == 2
+    assert report.postings_evaluated == 4
+    assert report.detail_entries_retained == len(report.entries)
     assert report.counts[CATEGORY_GITHUB_ONLY] == 1
     assert report.counts[CATEGORY_DIRECT_ONLY] == 1
     assert report.counts[CATEGORY_BOTH] == 1
@@ -152,6 +170,425 @@ def test_comparison_all_required_categories_and_single_merged_count(tmp_path):
     both = [entry for entry in report.entries if entry.category == CATEGORY_BOTH]
     assert len(both) == 1
     assert set(both[0].source_kinds) == {"direct_ats", "feed"}
+
+
+def test_lightweight_pipeline_traces_and_sanitizes_only_selected_entries(
+    tmp_path,
+    monkeypatch,
+):
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="Direct Co",
+                ats="greenhouse",
+                terms=("Summer 2027",),
+            ),
+        ),
+        terms=("Summer 2027",),
+        seen_db_path=tmp_path / "seen.sqlite",
+    )
+    jobs = analyze_rows(
+        [
+            _row(
+                "Direct Co",
+                "direct",
+                "greenhouse",
+                f"routine-{index}",
+                title="Senior Marketing Manager",
+                internship_type="",
+            )
+            for index in range(80)
+        ],
+        today=date(2026, 7, 28),
+    )
+    calls = {
+        "outcomes": 0,
+        "summaries": 0,
+        "traces": 0,
+        "as_dict": 0,
+        "sanitized": 0,
+        "deferred_outcomes": 0,
+        "deferred_trace_inputs": 0,
+    }
+    context_sizes = []
+    original_outcome = audit_trace_module.evaluate_posting_outcome
+    original_summary = (
+        source_comparison_module.build_posting_comparison_summary
+    )
+    original_trace = audit_trace_module.build_posting_trace
+    original_as_dict = audit_trace_module.PostingAuditTrace.as_dict
+    original_sanitizer = source_comparison_module._sanitize_trace
+
+    def count_outcome(*args, **kwargs):
+        calls["outcomes"] += 1
+        outcome = original_outcome(*args, **kwargs)
+        if not outcome.eligibility_evaluated:
+            calls["deferred_outcomes"] += 1
+        return outcome
+
+    def count_summary(outcome):
+        calls["summaries"] += 1
+        return original_summary(outcome)
+
+    def count_trace(*args, **kwargs):
+        calls["traces"] += 1
+        if not kwargs["outcome"].eligibility_evaluated:
+            calls["deferred_trace_inputs"] += 1
+        context = kwargs["context"]
+        context_sizes.append(
+            max(
+                (
+                    len(requisitions)
+                    for requisitions in context.similar_requisitions.values()
+                ),
+                default=0,
+            )
+        )
+        return original_trace(*args, **kwargs)
+
+    def count_as_dict(self):
+        calls["as_dict"] += 1
+        return original_as_dict(self)
+
+    def count_sanitizer(value):
+        calls["sanitized"] += 1
+        return original_sanitizer(value)
+
+    monkeypatch.setattr(
+        audit_trace_module.PostingAuditTrace,
+        "as_dict",
+        count_as_dict,
+    )
+    with SeenStore(config.seen_db_path) as seen:
+        report = build_source_comparison(
+            config=config,
+            jobs=jobs,
+            seen_store=seen,
+            run_id="lightweight-spies",
+            observed_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+            outcome_evaluator=count_outcome,
+            summary_builder=count_summary,
+            trace_builder=count_trace,
+            trace_sanitizer=count_sanitizer,
+        )
+
+    assert report.counts[CATEGORY_REJECTED] == 80
+    assert report.postings_evaluated == 80
+    assert report.detail_entries_retained == 25
+    assert calls == {
+        "outcomes": 80,
+        "summaries": 80,
+        "traces": 25,
+        "as_dict": 25,
+        "sanitized": 25,
+        "deferred_outcomes": 80,
+        "deferred_trace_inputs": 25,
+    }
+    assert context_sizes == [80] * 25
+
+
+def test_lightweight_report_matches_full_trace_reference_for_selected_details(
+    tmp_path,
+):
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="Direct Co",
+                ats="greenhouse",
+                terms=("Summer 2027",),
+            ),
+        ),
+        terms=("Summer 2027",),
+        seen_db_path=tmp_path / "seen.sqlite",
+    )
+    rows = [
+            _row(
+                "Direct Co",
+                "direct",
+                "greenhouse",
+                f"reference-{index}",
+                title=(
+                    "Software Engineering Intern"
+                    if index < 3
+                    else "Marketing Intern"
+                ),
+            )
+            for index in range(70)
+        ]
+    rows.append(
+        _row(
+            "Direct Co",
+            "github",
+            "feed",
+            "reference-0",
+            title="Software Engineering Intern",
+        )
+    )
+    for row_number, row in enumerate(rows, 1):
+        row["_row_number"] = row_number
+    jobs, duplicate_report = analyze_rows(
+        rows,
+        today=date(2026, 7, 28),
+        include_dedupe_report=True,
+        include_audit_diagnostics=True,
+    )
+    duplicate_report = audit_trace_module.enrich_duplicate_entries(
+        rows,
+        duplicate_report,
+    )
+    policy = SourceComparisonDetailPolicy()
+    with SeenStore(config.seen_db_path) as seen:
+        context = audit_trace_module.build_posting_audit_context(
+            jobs,
+            seen_store=seen,
+            duplicate_entries=duplicate_report,
+        )
+        full_entries = []
+        full_reasons = []
+        for index, job in enumerate(jobs):
+            outcome = audit_trace_module.evaluate_posting_outcome(
+                job,
+                config=config,
+                seen_store=seen,
+                posting_universe=jobs,
+                duplicate_entries=duplicate_report,
+                context=context,
+                job_index=index,
+            )
+            full_reasons.append(outcome.final_reason)
+            summary = (
+                source_comparison_module.build_posting_comparison_summary(
+                    outcome
+                )
+            )
+            trace = audit_trace_module.build_posting_trace(
+                job,
+                config=config,
+                seen_store=seen,
+                posting_universe=jobs,
+                duplicate_entries=duplicate_report,
+                context=context,
+                outcome=outcome,
+            )
+            assert trace.final_result["reason"] == outcome.final_reason
+            full_entries.append(
+                source_comparison_module._entry_from_summary(
+                    summary,
+                    source_comparison_module._sanitize_trace(
+                        trace.as_dict()
+                    ),
+                )
+            )
+        legacy_selected = _select_detail_entries(
+            full_entries,
+            routine_sample_limit=policy.routine_rejection_sample_limit,
+            limit=policy.maximum_retained_details,
+        )
+        lightweight_reasons = []
+
+        def capture_summary(outcome):
+            lightweight_reasons.append(outcome.final_reason)
+            return (
+                source_comparison_module.build_posting_comparison_summary(
+                    outcome
+                )
+            )
+
+        report = build_source_comparison(
+            config=config,
+            jobs=jobs,
+            seen_store=seen,
+            run_id="lightweight-reference",
+            observed_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+            duplicate_report=duplicate_report,
+            detail_policy=policy,
+            summary_builder=capture_summary,
+        )
+
+    assert lightweight_reasons == full_reasons
+    assert sum(report.counts.values()) == len(jobs)
+    legacy_counts = {
+        category: sum(
+            entry.category == category for entry in full_entries
+        )
+        for category in CATEGORIES
+    }
+    assert report.counts == legacy_counts
+    assert report.aggregates == source_comparison_module._aggregate_counts(
+        legacy_counts,
+        report.health,
+    )
+    assert [
+        (
+            entry.category,
+            entry.identity_key,
+            entry.analyzed_job_id,
+            entry.final_reason,
+        )
+        for entry in report.entries
+    ] == [
+        (
+            entry.category,
+            entry.identity_key,
+            entry.analyzed_job_id,
+            entry.final_reason,
+        )
+        for entry in legacy_selected
+    ]
+    assert [
+        json.dumps(
+            entry.trace,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        for entry in report.entries
+    ] == [
+        json.dumps(
+            entry.trace,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        for entry in legacy_selected
+    ]
+    legacy_report = replace(
+        report,
+        entries=legacy_selected,
+        detail_entries_retained=len(legacy_selected),
+    )
+    assert render_markdown(report) == render_markdown(legacy_report)
+    current_console = StringIO()
+    legacy_console = StringIO()
+    render_console(report, output=current_console)
+    render_console(legacy_report, output=legacy_console)
+    assert current_console.getvalue() == legacy_console.getvalue()
+    assert [
+        entry.final_reason for entry in full_entries
+    ] == full_reasons
+
+
+def test_detail_policy_always_retains_eligible_anomalous_and_nonroutine():
+    base = PostingComparisonSummary(
+        job_index=0,
+        company="Example",
+        title="Role",
+        identity_key="identity",
+        analyzed_job_id="job",
+        source_kinds=("direct_ats",),
+        final_reason="not_internship",
+        category=CATEGORY_REJECTED,
+        direct_status="healthy",
+        direct_coverage="covered",
+        github_backstop_available=True,
+        generic_or_shared_url=False,
+        duplicate_sightings=0,
+        deduplicated_into_another=False,
+        has_merge_diagnostics=False,
+    )
+    eligible = [
+        replace(
+            base,
+            job_index=index,
+            identity_key=f"eligible-{category}",
+            analyzed_job_id=f"eligible-{category}",
+            final_reason="pending",
+            category=category,
+        )
+        for index, category in enumerate(
+            (
+                CATEGORY_GITHUB_ONLY,
+                CATEGORY_DIRECT_ONLY,
+                CATEGORY_BOTH,
+            ),
+            1,
+        )
+    ]
+    anomalies = [
+        replace(
+            base,
+            job_index=10,
+            identity_key="anomaly-status",
+            analyzed_job_id="anomaly-status",
+            direct_status="failing",
+        ),
+        replace(
+            base,
+            job_index=11,
+            identity_key="anomaly-coverage",
+            analyzed_job_id="anomaly-coverage",
+            direct_coverage="uncovered_for_run",
+        ),
+        replace(
+            base,
+            job_index=12,
+            identity_key="anomaly-url",
+            analyzed_job_id="anomaly-url",
+            generic_or_shared_url=True,
+        ),
+        replace(
+            base,
+            job_index=13,
+            identity_key="anomaly-deduplicated",
+            analyzed_job_id="anomaly-deduplicated",
+            deduplicated_into_another=True,
+        ),
+        replace(
+            base,
+            job_index=14,
+            identity_key="anomaly-duplicates",
+            analyzed_job_id="anomaly-duplicates",
+            duplicate_sightings=1,
+        ),
+        replace(
+            base,
+            job_index=15,
+            identity_key="anomaly-merge",
+            analyzed_job_id="anomaly-merge",
+            has_merge_diagnostics=True,
+        ),
+    ]
+    nonroutine = replace(
+        base,
+        job_index=3,
+        identity_key="nonroutine",
+        analyzed_job_id="nonroutine",
+        final_reason="graduate_only",
+    )
+    no_postings = replace(
+        base,
+        job_index=None,
+        identity_key="",
+        analyzed_job_id="",
+        final_reason="not_collected",
+        category=CATEGORY_NO_POSTINGS,
+    )
+    routine = replace(
+        base,
+        job_index=4,
+        identity_key="routine",
+        analyzed_job_id="routine",
+    )
+
+    selected = select_comparison_details(
+        [routine, nonroutine, *anomalies, *eligible, no_postings],
+        policy=SourceComparisonDetailPolicy(
+            routine_rejection_sample_limit=0,
+            maximum_retained_details=100,
+        ),
+    )
+
+    assert {
+        summary.identity_key or summary.company
+        for summary in selected
+    } == {
+        "nonroutine",
+        "Example",
+    } | {
+        summary.identity_key for summary in eligible
+    } | {
+        summary.identity_key for summary in anomalies
+    }
 
 
 def test_comparison_distinguishes_unsupported_failed_and_healthy_empty(tmp_path):
@@ -253,7 +690,49 @@ def test_comparison_store_retention_is_bounded(tmp_path):
         assert store.latest_report().run_id == "run-5"
 
 
-def test_comparison_store_caps_and_compacts_legacy_oversized_details(tmp_path):
+def test_schema_version_one_persisted_report_remains_readable(tmp_path):
+    _config_value, report = _report(tmp_path)
+    path = tmp_path / "legacy-comparison.sqlite"
+    with SourceComparisonStore(path) as store:
+        store.save(report)
+        store._conn.execute(
+            """
+            update source_comparison_runs
+            set summary_json = ?
+            where run_id = ?
+            """,
+            (
+                json.dumps(
+                    {
+                        "counts": report.counts,
+                        "aggregates": report.aggregates,
+                        "health": report.health,
+                    }
+                ),
+                report.run_id,
+            ),
+        )
+        store._conn.commit()
+        loaded = store.latest_report()
+
+    assert loaded is not None
+    assert loaded.schema_version == 1
+    assert loaded.counts == report.counts
+    assert [
+        (entry.category, entry.identity_key, entry.final_reason, entry.trace)
+        for entry in loaded.entries
+    ] == [
+        (entry.category, entry.identity_key, entry.final_reason, entry.trace)
+        for entry in report.entries
+    ]
+    assert loaded.postings_evaluated == report.postings_evaluated
+    assert loaded.detail_entries_retained == len(report.entries)
+
+
+def test_comparison_store_applies_only_a_defensive_hard_cap(
+    tmp_path,
+    monkeypatch,
+):
     _config_value, report = _report(tmp_path)
     rejected = next(
         entry for entry in report.entries
@@ -277,49 +756,24 @@ def test_comparison_store_caps_and_compacts_legacy_oversized_details(tmp_path):
         },
         entries=entries,
     )
+    def fail_if_store_selects(*args, **kwargs):
+        raise AssertionError("the store must not apply detail-selection policy")
+
+    monkeypatch.setattr(
+        source_comparison_module,
+        "_select_detail_entries",
+        fail_if_store_selects,
+    )
     path = tmp_path / "bounded-comparison.sqlite"
-    with SourceComparisonStore(
-        path,
-        max_postings_per_run=len(entries),
-        routine_rejection_sample_limit=len(entries),
-    ) as store:
-        store.save(oversized)
-        assert len(store.latest_report().entries) == len(entries)
-
-    bounded = replace(
-        oversized,
-        run_id="bounded",
-        observed_at=(
-            datetime.fromisoformat(oversized.observed_at)
-            + timedelta(hours=1)
-        ).isoformat(),
-    )
-    statements = []
     with SourceComparisonStore(path) as store:
-        store._conn.set_trace_callback(statements.append)
-        store.save(bounded)
+        store.save(oversized)
         latest = store.latest_report()
-        assert len(latest.entries) == 25
-        assert {
-            entry.final_reason for entry in latest.entries
-        } == {"not_internship"}
-
-    with sqlite3.connect(path) as connection:
-        per_run = connection.execute(
-            """
-            select run_id, count(*)
-            from source_comparison_postings
-            group by run_id
-            """
-        ).fetchall()
-        page_count = connection.execute("pragma page_count").fetchone()[0]
-        free_pages = connection.execute("pragma freelist_count").fetchone()[0]
-    assert per_run == [("bounded", 25), ("oversized", 25)]
-    assert free_pages * 4 < page_count
-    assert any(
-        statement.strip().casefold() == "vacuum"
-        for statement in statements
-    )
+        assert len(latest.entries) == 2_000
+        assert [
+            entry.identity_key for entry in latest.entries
+        ] == [
+            entry.identity_key for entry in entries[:2_000]
+        ]
 
 
 def test_comparison_distinguishes_failed_feed_from_valid_zero_row_feed(tmp_path):
@@ -537,6 +991,12 @@ def _high_volume_report(tmp_path, *, routine_count=20_000):
             CATEGORY_NO_POSTINGS,
         }
     )
+    all_entries = (*routine, *unusual, *important)
+    selected_entries = _select_detail_entries(
+        all_entries,
+        routine_sample_limit=25,
+        limit=2_000,
+    )
     return replace(
         report,
         run_id="high-volume",
@@ -544,7 +1004,8 @@ def _high_volume_report(tmp_path, *, routine_count=20_000):
             **report.counts,
             CATEGORY_REJECTED: routine_count + len(unusual),
         },
-        entries=(*routine, *unusual, *important),
+        entries=selected_entries,
+        detail_entries_retained=len(selected_entries),
     )
 
 
@@ -578,28 +1039,33 @@ def test_high_volume_routine_rejections_are_sampled_but_aggregates_are_exact(
 
 
 def test_routine_rejection_sampling_is_deterministic(tmp_path):
-    report = _high_volume_report(tmp_path, routine_count=200)
-    reversed_report = replace(
-        report,
-        run_id="reversed",
-        entries=tuple(reversed(report.entries)),
+    _config_value, base_report = _report(tmp_path)
+    rejected = next(
+        entry for entry in base_report.entries
+        if entry.category == CATEGORY_REJECTED
+    )
+    entries = tuple(
+        replace(
+            rejected,
+            identity_key=f"routine-{index:05d}",
+            analyzed_job_id=f"routine-job-{index:05d}",
+            final_reason="not_internship",
+        )
+        for index in range(200)
+    )
+    first = _select_detail_entries(
+        entries,
+        routine_sample_limit=25,
+        limit=2_000,
+    )
+    second = _select_detail_entries(
+        tuple(reversed(entries)),
+        routine_sample_limit=25,
+        limit=2_000,
     )
 
-    selected = []
-    for name, value in (("first", report), ("second", reversed_report)):
-        path = tmp_path / f"{name}.sqlite"
-        with SourceComparisonStore(path) as store:
-            store.save(value)
-            selected.append(
-                {
-                    entry.identity_key
-                    for entry in store.latest_report().entries
-                    if entry.final_reason == "not_internship"
-                }
-            )
-
-    assert len(selected[0]) == 25
-    assert selected[0] == selected[1]
+    assert len(first) == 25
+    assert first == second
 
 
 def test_similar_distinct_requisitions_do_not_make_routine_rows_anomalies(
@@ -700,8 +1166,6 @@ def test_comparison_cleanup_preserves_notification_and_health_alert_state(
         routine_rejection_sample_limit=len(report.entries),
     ) as store:
         store.save(report)
-    before = path.stat().st_size
-
     next_report = replace(
         report,
         run_id="migration-cleanup",
@@ -711,8 +1175,6 @@ def test_comparison_cleanup_preserves_notification_and_health_alert_state(
     )
     with SourceComparisonStore(path) as store:
         store.save(next_report)
-    after = path.stat().st_size
-
     with sqlite3.connect(path) as connection:
         seen_rows = connection.execute(
             "select job_id, emailed_at, primed_at from seen order by job_id"
@@ -736,7 +1198,6 @@ def test_comparison_cleanup_preserves_notification_and_health_alert_state(
     ]
     assert details < 200
     assert check == "ok"
-    assert after < before
 
 
 def test_failed_comparison_cleanup_rolls_back_transactionally(

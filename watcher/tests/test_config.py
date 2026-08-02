@@ -15,6 +15,7 @@ from watcher.config import (
     analysis_cache_enabled,
     load_dotenv,
     load_watchlist,
+    resolve_analysis_cache_path,
 )
 
 
@@ -426,6 +427,35 @@ def test_dataclass_defaults_do_not_insert_a_season_or_feed():
     assert config.github_listing_sources == ()
     assert config.github_listing_urls == ()
     assert config.analysis_cache_enabled is True
+    assert config.analysis_cache_path == config.seen_db_path.parent / "analysis-cache.sqlite"
+
+
+def test_analysis_cache_path_defaults_to_seen_database_directory(tmp_path):
+    seen_db_path = tmp_path / "durable" / "seen.sqlite"
+
+    config = WatcherConfig(
+        companies=(CompanyCfg(name="Manual"),),
+        seen_db_path=seen_db_path,
+    )
+
+    assert config.analysis_cache_path == (
+        seen_db_path.parent / "analysis-cache.sqlite"
+    )
+    assert resolve_analysis_cache_path(seen_db_path, "") == (
+        seen_db_path.parent / "analysis-cache.sqlite"
+    )
+
+
+def test_load_watchlist_reads_explicit_analysis_cache_path(
+    tmp_path,
+    monkeypatch,
+):
+    cache_path = tmp_path / "rebuildable" / "custom-cache.sqlite"
+    monkeypatch.setenv("WATCHER_ANALYSIS_CACHE_PATH", str(cache_path))
+
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+
+    assert config.analysis_cache_path == cache_path
 
 
 @pytest.mark.parametrize(

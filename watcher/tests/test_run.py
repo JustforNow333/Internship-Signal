@@ -1738,6 +1738,31 @@ def test_workflow_preserves_health_fields_validates_db_and_renders_summary():
     assert "git branch -D watcher-data" not in workflow
 
 
+def test_workflow_caches_analysis_database_without_committing_it():
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "WATCHER_ANALYSIS_CACHE_PATH:" in workflow
+    assert "actions/cache@v4" in workflow
+    assert "STATIC_ANALYSIS_CACHE_VERSION" in workflow
+    assert "date -u +%Y-%m-%d" in workflow
+    assert "watcher-analysis-${{ runner.os }}-v" in workflow
+    assert "restore-keys:" in workflow
+    assert "Validate restored analysis cache" in workflow
+    assert "pragma quick_check" in workflow
+    assert "corrupt-analysis-cache.sqlite" in workflow
+    assert "scripts/migrate_analysis_cache.py" in workflow
+    assert "--remove-source-table" in workflow
+    assert '"analysis_cache" not in tables' in workflow
+    save_step = workflow.split(
+        "- name: Save seen-store to data branch",
+        1,
+    )[1].split("- name: Source-health summary", 1)[0]
+    assert 'cp "$SEEN_DB_PATH" "$data_worktree/$DATA_DB_FILE"' in save_step
+    assert "WATCHER_ANALYSIS_CACHE_PATH" not in save_step
+
+
 def test_workflow_workday_probe_is_isolated_from_email_seen_and_data_branch():
     workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "watcher.yml").read_text(
         encoding="utf-8"

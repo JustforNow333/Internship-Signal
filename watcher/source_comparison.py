@@ -14,8 +14,11 @@ from typing import Mapping, Sequence, TextIO
 from backend.app.dedupe import norm_company
 from watcher.audit_trace import (
     AuditQuery,
+    PostingAuditOutcome,
     build_posting_audit_context,
     build_posting_trace,
+    evaluate_posting_outcome,
+    not_collected_reason,
     not_collected_trace,
     safe_posting_url,
 )
@@ -82,6 +85,38 @@ class SourceComparisonEntry:
 
 
 @dataclass(frozen=True)
+class PostingComparisonSummary:
+    """Small per-posting outcome used for counts and detail selection."""
+
+    job_index: int | None
+    company: str
+    title: str
+    identity_key: str
+    analyzed_job_id: str
+    source_kinds: tuple[str, ...]
+    final_reason: str
+    category: str
+    direct_status: str | None
+    direct_coverage: str | None
+    github_backstop_available: bool | None
+    generic_or_shared_url: bool
+    duplicate_sightings: int
+    deduplicated_into_another: bool
+    has_merge_diagnostics: bool
+
+
+@dataclass(frozen=True)
+class SourceComparisonDetailPolicy:
+    """One owner for deterministic source-comparison detail retention."""
+
+    routine_rejection_sample_limit: int = (
+        DEFAULT_ROUTINE_REJECTION_SAMPLE_LIMIT
+    )
+    maximum_retained_details: int = DEFAULT_MAX_POSTINGS_PER_RUN
+    example_limit: int = DEFAULT_EXAMPLE_LIMIT
+
+
+@dataclass(frozen=True)
 class SourceComparisonReport:
     schema_version: int
     run_id: str
@@ -90,6 +125,26 @@ class SourceComparisonReport:
     entries: tuple[SourceComparisonEntry, ...]
     health: dict[str, object] = field(default_factory=dict)
     aggregates: dict[str, int] = field(default_factory=dict)
+    postings_evaluated: int = 0
+    detail_entries_retained: int = 0
+
+    def __post_init__(self) -> None:
+        if self.postings_evaluated == 0:
+            object.__setattr__(
+                self,
+                "postings_evaluated",
+                sum(
+                    int(self.counts.get(category, 0))
+                    for category in CATEGORIES
+                    if category != CATEGORY_NO_POSTINGS
+                ),
+            )
+        if self.detail_entries_retained == 0 and self.entries:
+            object.__setattr__(
+                self,
+                "detail_entries_retained",
+                len(self.entries),
+            )
 
     def as_dict(self, *, example_limit: int | None = None) -> dict[str, object]:
         entries = self.entries
@@ -110,6 +165,8 @@ class SourceComparisonReport:
             "counts": dict(self.counts),
             "aggregates": _aggregate_counts(self.counts, self.health),
             "health": dict(self.health),
+            "postings_evaluated": self.postings_evaluated,
+            "detail_entries_retained": self.detail_entries_retained,
             "entries": [asdict(entry) for entry in entries],
         }
 
@@ -125,30 +182,32 @@ def build_source_comparison(
     coverage: Sequence[CompanyCoverage] = (),
     source_attempts: Sequence[SourceAttempt] = (),
     source_health_states: Mapping[str, SourceHealthState] | None = None,
+    detail_policy: SourceComparisonDetailPolicy | None = None,
+    outcome_evaluator=None,
+    summary_builder=None,
+    trace_builder=None,
+    trace_sanitizer=None,
 ) -> SourceComparisonReport:
-    """Classify each retained production posting exactly once."""
+    """Evaluate every posting lightly, then trace only retained details."""
 
-    coverage_by_company: dict[str, dict[str, object]] = {}
-    config_by_name = {
-        norm_company(company.name): company
-        for company in config.companies
-    }
-    for item in coverage:
-        data = asdict(item)
-        company = config_by_name.get(norm_company(item.company))
-        names = company.match_names() if company else (item.company,)
-        for name in names:
-            coverage_by_company[norm_company(name)] = data
+    detail_policy = detail_policy or SourceComparisonDetailPolicy()
+    outcome_evaluator = outcome_evaluator or evaluate_posting_outcome
+    summary_builder = summary_builder or build_posting_comparison_summary
+    trace_builder = trace_builder or build_posting_trace
+    trace_sanitizer = trace_sanitizer or _sanitize_trace
+    coverage_by_company = index_company_coverage(config, coverage)
     audit_context = build_posting_audit_context(
         jobs,
         seen_store=seen_store,
+        duplicate_entries=duplicate_report,
     )
-    entries: list[SourceComparisonEntry] = []
+    outcomes: list[PostingAuditOutcome] = []
+    summaries: list[PostingComparisonSummary] = []
     observed_companies: set[str] = set()
-    for job in jobs:
+    for job_index, job in enumerate(jobs):
         company_key = norm_company(str(job.get("company") or ""))
         observed_companies.add(company_key)
-        trace = build_posting_trace(
+        outcome = outcome_evaluator(
             job,
             config=config,
             seen_store=seen_store,
@@ -156,37 +215,11 @@ def build_source_comparison(
             duplicate_entries=duplicate_report,
             source_coverage=coverage_by_company.get(company_key),
             context=audit_context,
+            job_index=job_index,
+            defer_nonessential_decisions=True,
         )
-        trace_data = _sanitize_trace(trace.as_dict())
-        sources = tuple(str(value) for value in trace.collection.get("sources", ()))
-        reason = str(trace.final_result.get("reason") or "unknown")
-        category = comparison_category(sources, reason)
-        company_coverage = trace_data["watchlist_match"]
-        entries.append(
-            SourceComparisonEntry(
-                category=category,
-                company=str(trace_data["posting"].get("company") or ""),
-                title=str(trace_data["posting"].get("title") or ""),
-                identity_key=str(
-                    trace_data["identity"].get("canonical_identity_key") or ""
-                ),
-                analyzed_job_id=str(
-                    trace_data["posting"].get("analyzed_job_id") or ""
-                ),
-                source_kinds=tuple(sanitize_error(source) for source in sources),
-                final_reason=sanitize_error(reason),
-                direct_status=_optional_string(
-                    company_coverage.get("direct_status")
-                ),
-                direct_coverage=_optional_string(
-                    company_coverage.get("direct_coverage")
-                ),
-                github_backstop_available=_optional_bool(
-                    company_coverage.get("github_backstop_available")
-                ),
-                trace=trace_data,
-            )
-        )
+        outcomes.append(outcome)
+        summaries.append(summary_builder(outcome))
 
     for company in config.companies:
         if any(
@@ -195,28 +228,17 @@ def build_source_comparison(
         ):
             continue
         company_coverage = coverage_by_company.get(norm_company(company.name), {})
-        no_posting_trace = not_collected_trace(
-            AuditQuery(company=company.name),
-            config=config,
-        ).as_dict()
-        no_posting_trace["watchlist_match"].update(
-            {
-                "direct_coverage": company_coverage.get("state"),
-                "direct_status": company_coverage.get("direct_status"),
-                "github_backstop_available": company_coverage.get(
-                    "github_backstop_available"
-                ),
-            }
-        )
-        entries.append(
-            SourceComparisonEntry(
+        query = AuditQuery(company=company.name)
+        summaries.append(
+            PostingComparisonSummary(
+                job_index=None,
                 category=CATEGORY_NO_POSTINGS,
                 company=company.name,
                 title="",
                 identity_key="",
                 analyzed_job_id="",
                 source_kinds=(),
-                final_reason="not_collected",
+                final_reason=not_collected_reason(query, config=config),
                 direct_status=_optional_string(
                     company_coverage.get("direct_status")
                 ),
@@ -226,34 +248,126 @@ def build_source_comparison(
                 github_backstop_available=_optional_bool(
                     company_coverage.get("github_backstop_available")
                 ),
-                trace=no_posting_trace,
+                generic_or_shared_url=False,
+                duplicate_sightings=0,
+                deduplicated_into_another=False,
+                has_merge_diagnostics=False,
             )
         )
 
-    entries.sort(
-        key=lambda entry: (
-            CATEGORIES.index(entry.category),
-            entry.company.casefold(),
-            entry.title.casefold(),
-            entry.identity_key,
-        )
+    selected_summaries = select_comparison_details(
+        summaries,
+        policy=detail_policy,
     )
     counts = {
-        category: sum(entry.category == category for entry in entries)
+        category: sum(summary.category == category for summary in summaries)
         for category in CATEGORIES
     }
     health = _comparison_health(
         source_attempts,
         source_health_states or {},
     )
+    entries: list[SourceComparisonEntry] = []
+    for summary in selected_summaries:
+        if summary.job_index is None:
+            query = AuditQuery(company=summary.company)
+            trace = not_collected_trace(query, config=config)
+            trace_data = trace.as_dict()
+            trace_data["watchlist_match"].update(
+                {
+                    "direct_coverage": summary.direct_coverage,
+                    "direct_status": summary.direct_status,
+                    "github_backstop_available": (
+                        summary.github_backstop_available
+                    ),
+                }
+            )
+        else:
+            outcome = outcomes[summary.job_index]
+            trace = trace_builder(
+                outcome.job,
+                config=config,
+                seen_store=seen_store,
+                posting_universe=jobs,
+                duplicate_entries=duplicate_report,
+                source_coverage=outcome.source_coverage,
+                context=audit_context,
+                outcome=outcome,
+            )
+            trace_data = trace.as_dict()
+        entries.append(
+            _entry_from_summary(
+                summary,
+                trace_sanitizer(trace_data),
+            )
+        )
     return SourceComparisonReport(
-        schema_version=1,
+        schema_version=2,
         run_id=safe_run_id(run_id),
         observed_at=iso_utc(observed_at),
         counts=counts,
         entries=tuple(entries),
         health=health,
         aggregates=_aggregate_counts(counts, health),
+        postings_evaluated=len(jobs),
+        detail_entries_retained=len(entries),
+    )
+
+
+def build_posting_comparison_summary(
+    outcome: PostingAuditOutcome,
+) -> PostingComparisonSummary:
+    """Project the shared posting outcome into the retention model."""
+
+    coverage = outcome.source_coverage
+    return PostingComparisonSummary(
+        job_index=outcome.job_index,
+        company=sanitize_error(str(outcome.job.get("company") or "")),
+        title=sanitize_error(str(outcome.job.get("title") or "")),
+        identity_key=sanitize_error(outcome.identity_key),
+        analyzed_job_id=sanitize_error(
+            str(outcome.job.get("id") or "")
+        ),
+        source_kinds=tuple(
+            sanitize_error(source) for source in outcome.sources
+        ),
+        final_reason=sanitize_error(outcome.final_reason),
+        category=comparison_category(
+            outcome.sources,
+            outcome.final_reason,
+        ),
+        direct_status=_optional_sanitized_string(
+            coverage.get("direct_status")
+        ),
+        direct_coverage=_optional_sanitized_string(coverage.get("state")),
+        github_backstop_available=_optional_bool(
+            coverage.get("github_backstop_available")
+        ),
+        generic_or_shared_url=outcome.generic_or_shared_url,
+        duplicate_sightings=outcome.duplicate_sightings,
+        deduplicated_into_another=False,
+        has_merge_diagnostics=outcome.has_merge_diagnostics,
+    )
+
+
+def _entry_from_summary(
+    summary: PostingComparisonSummary,
+    trace: dict[str, object],
+) -> SourceComparisonEntry:
+    return SourceComparisonEntry(
+        category=summary.category,
+        company=sanitize_error(summary.company),
+        title=sanitize_error(summary.title),
+        identity_key=sanitize_error(summary.identity_key),
+        analyzed_job_id=sanitize_error(summary.analyzed_job_id),
+        source_kinds=tuple(
+            sanitize_error(source) for source in summary.source_kinds
+        ),
+        final_reason=sanitize_error(summary.final_reason),
+        direct_status=summary.direct_status,
+        direct_coverage=summary.direct_coverage,
+        github_backstop_available=summary.github_backstop_available,
+        trace=trace,
     )
 
 
@@ -267,6 +381,26 @@ def comparison_category(sources: Sequence[str], final_reason: str) -> str:
     if direct:
         return CATEGORY_DIRECT_ONLY
     return CATEGORY_GITHUB_ONLY
+
+
+def index_company_coverage(
+    config: WatcherConfig,
+    coverage: Sequence[CompanyCoverage],
+) -> dict[str, dict[str, object]]:
+    """Index coverage by configured company name and every alias."""
+
+    indexed: dict[str, dict[str, object]] = {}
+    config_by_name = {
+        norm_company(company.name): company
+        for company in config.companies
+    }
+    for item in coverage:
+        data = asdict(item)
+        company = config_by_name.get(norm_company(item.company))
+        names = company.match_names() if company else (item.company,)
+        for name in names:
+            indexed[norm_company(name)] = data
+    return indexed
 
 
 def render_console(
@@ -360,15 +494,6 @@ def write_json(
     report_path = Path(path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     payload = report.as_dict(example_limit=example_limit)
-    if example_limit is None:
-        payload["entries"] = [
-            asdict(entry)
-            for entry in _select_detail_entries(
-                report.entries,
-                routine_sample_limit=DEFAULT_ROUTINE_REJECTION_SAMPLE_LIMIT,
-                limit=DEFAULT_MAX_POSTINGS_PER_RUN,
-            )
-        ]
     report_path.write_text(
         json.dumps(
             payload,
@@ -400,10 +525,9 @@ class SourceComparisonStore:
         self.run_retention = max(1, int(run_retention))
         self.detail_run_retention = max(1, int(detail_run_retention))
         self.max_postings_per_run = max(1, int(max_postings_per_run))
-        self.routine_rejection_sample_limit = max(
-            0,
-            int(routine_rejection_sample_limit),
-        )
+        # Kept as a constructor argument for compatible callers. The report
+        # builder is now the only owner of routine-rejection sampling.
+        _ = routine_rejection_sample_limit
         if read_only and self.path.is_file():
             self._conn = sqlite3.connect(
                 f"{self.path.resolve().as_uri()}?mode=ro",
@@ -440,6 +564,12 @@ class SourceComparisonStore:
                     report.health,
                 ),
                 "health": _sanitize_trace(report.health),
+                "schema_version": report.schema_version,
+                "postings_evaluated": report.postings_evaluated,
+                "detail_entries_retained": min(
+                    len(report.entries),
+                    self.max_postings_per_run,
+                ),
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -466,11 +596,9 @@ class SourceComparisonStore:
                 (safe_run_id_value,),
             )
             deleted_rows += max(0, cursor.rowcount)
-            persisted_entries = _select_detail_entries(
-                report.entries,
-                routine_sample_limit=self.routine_rejection_sample_limit,
-                limit=self.max_postings_per_run,
-            )
+            # Selection belongs to the report builder. This slice is only a
+            # defensive persistence ceiling for malformed external reports.
+            persisted_entries = report.entries[: self.max_postings_per_run]
             self._insert_entries(safe_run_id_value, persisted_entries)
             deleted_rows += self._prune()
         self._compact_if_needed(deleted_rows=deleted_rows)
@@ -510,12 +638,33 @@ class SourceComparisonStore:
             counts = summary_payload["counts"]
             health = summary_payload.get("health", {})
             aggregates = summary_payload.get("aggregates", {})
+            schema_version = int(summary_payload.get("schema_version", 1))
+            postings_evaluated = int(
+                summary_payload.get(
+                    "postings_evaluated",
+                    sum(
+                        int(counts.get(category, 0))
+                        for category in CATEGORIES
+                        if category != CATEGORY_NO_POSTINGS
+                    ),
+                )
+            )
+            detail_entries_retained = int(
+                summary_payload.get("detail_entries_retained", len(entries))
+            )
         else:  # schema-version-one snapshots written before health metadata
             counts = summary_payload
             health = {}
             aggregates = {}
+            schema_version = 1
+            postings_evaluated = sum(
+                int(counts.get(category, 0))
+                for category in CATEGORIES
+                if category != CATEGORY_NO_POSTINGS
+            )
+            detail_entries_retained = len(entries)
         return SourceComparisonReport(
-            schema_version=1,
+            schema_version=schema_version,
             run_id=run["run_id"],
             observed_at=run["observed_at"],
             counts={str(key): int(value) for key, value in counts.items()},
@@ -525,6 +674,8 @@ class SourceComparisonStore:
                 str(key): int(value)
                 for key, value in aggregates.items()
             } or _aggregate_counts(counts, health),
+            postings_evaluated=postings_evaluated,
+            detail_entries_retained=detail_entries_retained,
         )
 
     def run_count(self) -> int:
@@ -570,30 +721,6 @@ class SourceComparisonStore:
                 detail_runs,
             )
             deleted_rows += max(0, cursor.rowcount)
-            for run_id in detail_runs:
-                rows = self._conn.execute(
-                    """
-                    select *
-                    from source_comparison_postings
-                    where run_id = ?
-                    order by sequence
-                    """,
-                    (run_id,),
-                ).fetchall()
-                current = tuple(_entry_from_row(row) for row in rows)
-                selected = _select_detail_entries(
-                    current,
-                    routine_sample_limit=self.routine_rejection_sample_limit,
-                    limit=self.max_postings_per_run,
-                )
-                if _entry_keys(current) == _entry_keys(selected):
-                    continue
-                cursor = self._conn.execute(
-                    "delete from source_comparison_postings where run_id = ?",
-                    (run_id,),
-                )
-                deleted_rows += max(0, cursor.rowcount)
-                self._insert_entries(run_id, selected)
         return deleted_rows
 
     def _compact_if_needed(self, *, deleted_rows: int) -> bool:
@@ -653,7 +780,7 @@ class SourceComparisonStore:
                         else int(entry.github_backstop_available)
                     ),
                     json.dumps(
-                        _sanitize_trace(entry.trace),
+                        entry.trace,
                         sort_keys=True,
                         separators=(",", ":"),
                         ensure_ascii=False,
@@ -696,16 +823,41 @@ class SourceComparisonStore:
         self._conn.commit()
 
 
+def select_comparison_details(
+    summaries: Sequence[PostingComparisonSummary],
+    *,
+    policy: SourceComparisonDetailPolicy,
+) -> tuple[PostingComparisonSummary, ...]:
+    """Apply the report-owned retention policy to lightweight summaries."""
+
+    return _select_details(
+        summaries,
+        routine_sample_limit=max(
+            0,
+            int(policy.routine_rejection_sample_limit),
+        ),
+        limit=max(1, int(policy.maximum_retained_details)),
+    )
+
+
 def _select_detail_entries(
     entries: Sequence[SourceComparisonEntry],
     *,
     routine_sample_limit: int,
     limit: int,
 ) -> tuple[SourceComparisonEntry, ...]:
-    """Retain useful details and deterministically sample routine rejections."""
+    """Compatibility helper for validating selection against legacy entries."""
 
-    important: list[SourceComparisonEntry] = []
-    routine: dict[str, list[SourceComparisonEntry]] = {}
+    return _select_details(
+        entries,
+        routine_sample_limit=routine_sample_limit,
+        limit=limit,
+    )
+
+
+def _select_details(entries, *, routine_sample_limit: int, limit: int):
+    important = []
+    routine = {}
     for entry in entries:
         if _is_routine_rejection(entry):
             routine.setdefault(entry.final_reason, []).append(entry)
@@ -730,7 +882,9 @@ def _select_detail_entries(
     return tuple(sorted(candidates, key=_detail_display_key))
 
 
-def _is_routine_rejection(entry: SourceComparisonEntry) -> bool:
+def _is_routine_rejection(
+    entry: SourceComparisonEntry | PostingComparisonSummary,
+) -> bool:
     return bool(
         entry.category == CATEGORY_REJECTED
         and entry.final_reason in ROUTINE_REJECTION_REASONS
@@ -738,7 +892,9 @@ def _is_routine_rejection(entry: SourceComparisonEntry) -> bool:
     )
 
 
-def _has_operational_anomaly(entry: SourceComparisonEntry) -> bool:
+def _has_operational_anomaly(
+    entry: SourceComparisonEntry | PostingComparisonSummary,
+) -> bool:
     if entry.direct_status in {"degraded", "failing"}:
         return True
     if entry.direct_coverage and any(
@@ -746,6 +902,13 @@ def _has_operational_anomaly(entry: SourceComparisonEntry) -> bool:
         for marker in ("degraded", "failing", "uncovered")
     ):
         return True
+    if isinstance(entry, PostingComparisonSummary):
+        return bool(
+            entry.generic_or_shared_url
+            or entry.deduplicated_into_another
+            or entry.duplicate_sightings
+            or entry.has_merge_diagnostics
+        )
     identity = entry.trace.get("identity")
     if isinstance(identity, Mapping) and identity.get("generic_or_shared_url"):
         return True
@@ -759,7 +922,9 @@ def _has_operational_anomaly(entry: SourceComparisonEntry) -> bool:
     )
 
 
-def _detail_priority(entry: SourceComparisonEntry) -> int:
+def _detail_priority(
+    entry: SourceComparisonEntry | PostingComparisonSummary,
+) -> int:
     if entry.category in {
         CATEGORY_GITHUB_ONLY,
         CATEGORY_DIRECT_ONLY,
@@ -775,7 +940,9 @@ def _detail_priority(entry: SourceComparisonEntry) -> int:
     return 4
 
 
-def _stable_sample_key(entry: SourceComparisonEntry) -> tuple[str, ...]:
+def _stable_sample_key(
+    entry: SourceComparisonEntry | PostingComparisonSummary,
+) -> tuple[str, ...]:
     seed = "\x1f".join(
         (
             entry.identity_key,
@@ -794,7 +961,9 @@ def _stable_sample_key(entry: SourceComparisonEntry) -> tuple[str, ...]:
     )
 
 
-def _detail_display_key(entry: SourceComparisonEntry) -> tuple[object, ...]:
+def _detail_display_key(
+    entry: SourceComparisonEntry | PostingComparisonSummary,
+) -> tuple[object, ...]:
     category_index = (
         CATEGORIES.index(entry.category)
         if entry.category in CATEGORIES
@@ -806,20 +975,6 @@ def _detail_display_key(entry: SourceComparisonEntry) -> tuple[object, ...]:
         entry.title.casefold(),
         entry.identity_key,
         entry.final_reason,
-    )
-
-
-def _entry_keys(
-    entries: Sequence[SourceComparisonEntry],
-) -> tuple[tuple[object, ...], ...]:
-    return tuple(
-        (
-            entry.category,
-            entry.identity_key,
-            entry.analyzed_job_id,
-            entry.final_reason,
-        )
-        for entry in entries
     )
 
 
@@ -845,6 +1000,11 @@ def _entry_from_row(row: sqlite3.Row) -> SourceComparisonEntry:
 
 def _optional_string(value: object) -> str | None:
     return None if value in (None, "") else str(value)
+
+
+def _optional_sanitized_string(value: object) -> str | None:
+    text = _optional_string(value)
+    return None if text is None else sanitize_error(text)
 
 
 def _optional_bool(value: object) -> bool | None:

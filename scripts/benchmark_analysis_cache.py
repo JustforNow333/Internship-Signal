@@ -23,9 +23,6 @@ from scripts.benchmark_analysis_context import (  # noqa: E402
     representative_rows,
 )
 from watcher.analysis_cache import analyze_rows_with_cache  # noqa: E402
-from watcher.seen_store import SeenStore  # noqa: E402
-
-
 DEFAULT_ROWS = 2_000
 DEFAULT_AS_OF = date(2026, 7, 30)
 ACCESSED_AT = datetime(2026, 7, 30, 12, tzinfo=timezone.utc)
@@ -67,7 +64,7 @@ def run_case(
         result.stats.static_analysis_seconds
         + result.stats.scoring_seconds
     )
-    db_size = db_path.stat().st_size
+    db_size = db_path.stat().st_size if db_path.is_file() else 0
     print(
         "ANALYSIS-CACHE-BENCHMARK "
         f"mode={label} rows={result.stats.rows} "
@@ -101,10 +98,8 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory(
             prefix="internship-signal-analysis-cache-"
         ) as temp_dir:
-            db_path = Path(temp_dir) / "seen.sqlite"
-            with SeenStore(db_path):
-                pass
-            initial_db_size = db_path.stat().st_size
+            db_path = Path(temp_dir) / "analysis-cache.sqlite"
+            initial_db_size = 0
             disabled = run_case(
                 "disabled",
                 benchmark_rows,

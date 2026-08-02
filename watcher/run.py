@@ -34,12 +34,14 @@ from watcher.collection_concurrency import (
 )
 from watcher.config import (
     COLLECTION_MODE_SERIAL,
+    DEFAULT_ANALYSIS_CACHE_FILENAME,
     DEFAULT_WATCHLIST_PATH,
     CollectionConcurrencyCfg,
     CompanyCfg,
     GitHubListingSourceCfg,
     WatcherConfig,
     load_watchlist,
+    resolve_analysis_cache_path,
     workday_min_interval_seconds,
 )
 from watcher.collection_snapshot import (
@@ -496,10 +498,23 @@ def run_once(
         collection_stats.github_feeds_succeeded,
     )
     LOGGER.info("Analyzing %d fetched row(s)...", len(rows))
+    analysis_cache_path = Path(config.analysis_cache_path)
+    configured_default_cache_path = (
+        config.seen_db_path.parent / DEFAULT_ANALYSIS_CACHE_FILENAME
+    )
+    if (
+        analysis_cache_path == configured_default_cache_path
+        and seen_store.path != config.seen_db_path
+    ):
+        # Reusable callers commonly inject a temporary SeenStore while relying
+        # on default configuration. Keep the cache separate but colocated.
+        analysis_cache_path = (
+            seen_store.path.parent / DEFAULT_ANALYSIS_CACHE_FILENAME
+        )
     with _timed_stage("analysis"):
         cached_analysis = analyze_rows_with_cache(
             rows,
-            db_path=seen_store.path,
+            db_path=analysis_cache_path,
             enabled=config.analysis_cache_enabled,
             today=current_date,
             include_audit_diagnostics=True,
@@ -1713,7 +1728,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             config = load_watchlist(args.watchlist)
             if args.seen_db:
-                config = replace(config, seen_db_path=Path(args.seen_db))
+                seen_db_path = Path(args.seen_db)
+                config = replace(
+                    config,
+                    seen_db_path=seen_db_path,
+                    analysis_cache_path=resolve_analysis_cache_path(
+                        seen_db_path
+                    ),
+                )
             if (
                 args.allow_collection_config_mismatch
                 and not args.replay_collection_snapshot

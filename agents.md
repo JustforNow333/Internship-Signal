@@ -1,5 +1,12 @@
 # Agents Guide
 
+## Current audit
+
+- Review recent committed and uncommitted changes separately; preserve every
+  unrelated working-tree change.
+- Require a reproducible failure or clear invariant violation before changing
+  behavior. Report unproven risks without editing code.
+
 ## Required every prompt
 
 - After every user prompt, update the root `agents.md`, `claude.md`, and
@@ -81,28 +88,54 @@
 - Benchmark analysis changes offline at 500, 1,000, and 2,000 representative
   rows without adding prefilters, collection concurrency, pagination changes,
   or source-comparison redesign.
-- Persistent analysis caching is watcher-owned in the existing SQLite state;
-  backend analysis primitives stay pure and cache-independent, static
-  fingerprints are deterministic/versioned, and current-date scoring always
-  runs for every deduplicated row.
+- Persistent analysis caching is watcher-owned in a dedicated rebuildable
+  SQLite database beside durable state; backend analysis stays pure and
+  cache-independent, fingerprints are deterministic/versioned, and
+  current-date scoring always runs for every deduplicated row.
 - Cache corruption, schema mismatch, or SQLite failure is nonfatal and falls
   back to fresh analysis; batch reads, transactional writes, and one bounded
   30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
 - `watcher/run.py` fetches direct sources before GitHub so backend dedupe keeps
   direct provenance. `bespoke` and `github_only` skip direct fetching.
-- Collection concurrency is opt-in; production defaults to `serial`. Validate
-  global workers (1-16), Workday concurrency (1-5), and per-origin concurrency
-  (1-4), with neither scoped limit exceeding the worker pool.
-- Plan in configuration order, isolate adapters and mutable diagnostics per
-  worker, share only the Workday pacer, and reduce outcomes in plan order.
-  Replay creates no executor or network work; executors must shut down cleanly.
-- Record actual Workday starts with a monotonic clock after pacing and directly
-  before fetch. Sleep without holding the pacer lock. Keep interval, count,
-  spacing statistics, numeric violations, and sanitized relative offsets only
-  in private canary reports—not snapshots, SQLite, health, heartbeat, or email.
-- Validate serial/concurrent batch and snapshot equivalence, ordering, limits,
-  isolation, pacing, and zero state writes before limited and separate full
-  canaries. Keep promotion a separate reviewed change and production serial.
+- Collection concurrency is opt-in through `watcher/collection_concurrency.py`.
+  `WATCHER_COLLECTION_MODE` defaults to `serial`; serial remains the permanent
+  rollback and diagnostic path, and promoting `concurrent` is a separate
+  reviewed change, never an automatic consequence of one benchmark.
+  `WATCHER_COLLECTION_MAX_WORKERS` (1-16, default 4),
+  `WATCHER_WORKDAY_MAX_CONCURRENCY` (1-5, default 1), and
+  `WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY` (1-4, default 2) are validated
+  at load time and neither scope limit may exceed the worker pool.
+- Collection plans in configuration order, executes under the active mode, and
+  applies outcomes in that same order, so rows, errors, attempts, counters, and
+  downstream output stay identical to serial. Origin/provider keys carry only
+  scheme, host, and port; same-host companies share one origin limit; each
+  Workday tenant is its own origin under the shared Workday limit; and worker
+  programming errors become failed task results instead of aborting the run.
+- Production collection builds one adapter set per worker thread and shares one
+  Workday tenant pacer, so per-fetch adapter diagnostics stay isolated while
+  pacing, timeouts, retries, and backoff are never weakened. No proxy, cookie,
+  header-rotation, browser-automation, or challenge-bypass behavior is allowed;
+  401, 403, 429, and challenge responses remain ordinary source failures.
+- Record actual Workday tenant starts with a monotonic clock after pacing and
+  immediately before fetch. Keep spacing summaries and sanitized start offsets
+  in private canary reports only, never snapshots, SQLite, health, or email.
+- Validate with `scripts/benchmark_collection_concurrency.py` (offline
+  equivalence, ordering, limits, isolation, shutdown), then
+  `scripts/canary_collection_concurrency.py --stage limited`, then `--stage
+  full`. Canaries are collection-only with temporary databases, no email,
+  priming, seen marking, health alerts, durable health persistence, or
+  comparison persistence; they stop testing blocked sources rather than
+  retrying, keep one collection interval between full runs, and never pair a
+  fresh full serial run back-to-back with a concurrent canary.
+- Before full live canaries, record the local/remote SHA and worktree status.
+  Uncommitted or unpushed implementation evidence may be operationally useful
+  but is not repository-complete; do not commit or push without authorization.
+  Missing normal GitHub authentication stops rollout validation before canary.
+  Keep limits fixed at 4 global / 1 Workday / 2 per origin, fingerprint
+  production SQLite, store details only under `evaluation/private/`, and keep
+  production serial.
+- Canary summaries quote retained report fields exactly and label unavailable
+  historical telemetry instead of reconstructing or estimating it.
 - In `collect_rows`, only `None` means “construct defaults.” Preserve explicit
   empty injected sources.
 - Watcher code must not compute scores or IDs. Backend scoring owns
@@ -155,9 +188,12 @@
 - `watcher.audit` is read-only: state-only mode makes no requests, live mode
   reuses normal collection/analysis with email and priming disabled, and
   neither mode may mutate `seen` or health history.
-- Source-comparison snapshots keep 30 aggregate runs, three detail runs, all
-  bounded eligible/anomaly detail, and deterministic routine-rejection samples
-  per reason. Compact only after material cleanup, never every hourly run.
+- Source comparison computes lightweight outcomes/counts for every job, then
+  selects details before building and sanitizing rich traces. The report owns
+  deterministic eligible/anomaly/non-routine/routine-sample retention; the
+  store persists selected entries without a second policy pass. Decisive early
+  reasons defer rich-only location/notification expansion until selection.
+  Keep 30 aggregate runs and three detail runs.
   Health-alert
   fingerprints/cooldowns use dedicated tables, never `seen`; health SMTP is
   independently configured and cannot affect match-email delivery or marking.
@@ -272,6 +308,10 @@ git status --short --ignored
 
 - Bug audits require a reproducible failure or clear violated invariant. Add a
   regression test before fixing behavior; do not change code for style alone.
+- Keep the current watcher-audit fix separate from hosted UI/auth fixes, and
+  preserve every pre-existing dirty hunk in both worktrees.
+- Local commits stay on their dedicated watcher and hosted branches; never
+  push them without a separate explicit request.
 - Repository-wide readability cleanup must preserve public shapes, ordering,
   logs, and side effects; consolidate duplication only after tests cover every
   caller.
@@ -306,3 +346,5 @@ git status --short --ignored
   current row/provenance assembly, and sorting always remain dynamic.
 - Keep profiler data, snapshots, and generated benchmark reports ignored while
   leaving reusable benchmark scripts, tests, and fixtures trackable.
+- Keep rebuildable `analysis-cache.sqlite` transactionally independent from
+  durable `seen.sqlite`; only the durable database belongs on `watcher-data`.

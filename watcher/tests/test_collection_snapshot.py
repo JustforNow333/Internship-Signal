@@ -572,6 +572,54 @@ def test_scoring_filter_cache_and_profile_changes_do_not_block_loading(
     assert result.collection_replayed is True
 
 
+def test_snapshot_replay_uses_dedicated_analysis_cache(tmp_path):
+    seen_db_path = tmp_path / "seen.sqlite"
+    cache_db_path = tmp_path / "analysis-cache.sqlite"
+    config = replace(
+        _config(cache_enabled=True),
+        seen_db_path=seen_db_path,
+        analysis_cache_path=cache_db_path,
+    )
+    batch = _batch(config)
+    with SeenStore(seen_db_path):
+        pass
+    durable_before = seen_db_path.read_bytes()
+
+    with SeenStore(seen_db_path, read_only=True) as store:
+        cold = run_once(
+            config,
+            seen_store=store,
+            alumni_index={},
+            collection_batch=batch,
+        )
+    with SeenStore(seen_db_path, read_only=True) as store:
+        warm = run_once(
+            config,
+            seen_store=store,
+            alumni_index={},
+            collection_batch=batch,
+        )
+
+    assert cold.analysis_cache_stats.misses == cold.jobs_scored
+    assert warm.analysis_cache_stats.hits == warm.jobs_scored
+    assert warm.analysis_cache_stats.misses == 0
+    assert cold.jobs == warm.jobs
+    assert cold.duplicate_report == warm.duplicate_report
+    assert seen_db_path.read_bytes() == durable_before
+    with sqlite3.connect(seen_db_path) as connection:
+        assert connection.execute(
+            """
+            select count(*)
+            from sqlite_master
+            where type = 'table' and name = 'analysis_cache'
+            """
+        ).fetchone()[0] == 0
+    with sqlite3.connect(cache_db_path) as connection:
+        assert connection.execute(
+            "select count(*) from analysis_cache"
+        ).fetchone()[0] == warm.jobs_scored
+
+
 def test_collection_relevant_alias_and_source_changes_change_fingerprint():
     config = _config()
     alias_changed = replace(

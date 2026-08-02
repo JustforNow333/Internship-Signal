@@ -27,6 +27,7 @@ __pypackages__/
 *.log
 *.tmp
 tmp/
+# Durable watcher state and the rebuildable analysis cache remain local.
 *.sqlite
 *.sqlite-*
 *.sqlite3
@@ -153,6 +154,7 @@ eligibility-demo*.json
 watcher-audit*.json
 watcher-source-comparison*.json
 source-comparison*.json
+watcher/source-comparison-redesign*.json
 # Temporary bounded-persistence stress demonstrations are never production
 # state or fixtures.
 comparison-stress*.sqlite
@@ -216,7 +218,7 @@ watcher/warm-replay-profile*.log
 # Static-scoring cache benchmark reports are local performance diagnostics.
 static-scoring-cache-benchmark*.json
 watcher/static-scoring-cache-benchmark*.json
-# Collection-concurrency benchmarks, canaries, Workday start-spacing telemetry,
+# Collection-concurrency benchmarks, retained rollout canaries, Workday start telemetry,
 # and blocked-source state files are local operational evidence. Reusable
 # benchmark/canary scripts and offline regression tests stay tracked.
 collection-concurrency*.json
@@ -226,7 +228,7 @@ canary-full*.json
 concurrent-canary*.json
 collection-canary-state*.json
 watcher/collection-canary-state*.json
-# Repository-cleanup/readability audit logs are local diagnostics, not source artifacts.
+# Regression, cleanup, and local commit-preparation logs are not source artifacts.
 cleanup-audit*.log
 cleanup-audit*.json
 watcher/cleanup-audit*.log
