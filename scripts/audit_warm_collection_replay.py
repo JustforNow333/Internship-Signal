@@ -12,6 +12,7 @@ import json
 import logging
 import pstats
 import sys
+import tempfile
 from collections import defaultdict
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
@@ -33,6 +34,7 @@ from watcher.collection_snapshot import load_collection_snapshot  # noqa: E402
 from watcher.config import DEFAULT_WATCHLIST_PATH, load_watchlist  # noqa: E402
 from watcher.health_alerts import MODE_OFF, HealthAlertPolicy  # noqa: E402
 from watcher.seen_store import SeenStore  # noqa: E402
+from watcher.source_comparison import SourceComparisonStore  # noqa: E402
 
 from scripts.benchmark_collection_replay import (  # noqa: E402
     _operational_state_fingerprint,
@@ -62,7 +64,9 @@ STAGE_ORDER = (
     "alumni_loading_attachment",
     "seen_store_partitioning",
     "source_comparison_audit_context",
-    "source_comparison_per_job_trace",
+    "source_comparison_lightweight_outcomes",
+    "source_comparison_detail_selection",
+    "source_comparison_rich_trace_construction",
     "source_comparison_trace_sanitization",
     "source_comparison_aggregation_sorting",
     "all_remaining_runtime",
@@ -127,7 +131,9 @@ class Recorder:
 
         source_components = (
             self.seconds["source_comparison_audit_context"]
-            + self.seconds["source_comparison_per_job_trace"]
+            + self.seconds["source_comparison_lightweight_outcomes"]
+            + self.seconds["source_comparison_detail_selection"]
+            + self.seconds["source_comparison_rich_trace_construction"]
             + self.seconds["source_comparison_trace_sanitization"]
         )
         self.seconds["source_comparison_aggregation_sorting"] = max(
@@ -347,10 +353,45 @@ class ReplayInstrumentation(AbstractContextManager):
         )
         self._patch(
             comparison_module,
+            "evaluate_posting_outcome",
+            self._timed_function(
+                "source_comparison_lightweight_outcomes",
+                comparison_module.evaluate_posting_outcome,
+                count_calls=True,
+            ),
+        )
+        self._patch(
+            comparison_module,
+            "build_posting_comparison_summary",
+            self._timed_function(
+                "source_comparison_lightweight_outcomes",
+                comparison_module.build_posting_comparison_summary,
+            ),
+        )
+        self._patch(
+            comparison_module,
+            "select_comparison_details",
+            self._timed_function(
+                "source_comparison_detail_selection",
+                comparison_module.select_comparison_details,
+                count_first_arg=True,
+            ),
+        )
+        self._patch(
+            comparison_module,
             "build_posting_trace",
             self._timed_function(
-                "source_comparison_per_job_trace",
+                "source_comparison_rich_trace_construction",
                 comparison_module.build_posting_trace,
+                count_calls=True,
+            ),
+        )
+        self._patch(
+            comparison_module,
+            "not_collected_trace",
+            self._timed_function(
+                "source_comparison_rich_trace_construction",
+                comparison_module.not_collected_trace,
                 count_calls=True,
             ),
         )
@@ -508,6 +549,11 @@ def _run_core(
     omitted_comparison=None,
 ) -> tuple[ReplayMeasurement, object]:
     recorder = Recorder()
+    operational_db_path = _operational_db_path(db_path)
+    effective_config = replace(
+        config,
+        analysis_cache_path=db_path,
+    )
     with ReplayInstrumentation(
         recorder,
         omitted_comparison=omitted_comparison,
@@ -521,9 +567,9 @@ def _run_core(
         recorder.counts["snapshot_loading_decompression_validation"] = len(
             batch.rows
         )
-        with SeenStore(db_path, read_only=True) as seen_store:
+        with SeenStore(operational_db_path, read_only=True) as seen_store:
             result = run_module.run_once(
-                config,
+                effective_config,
                 seen_store=seen_store,
                 alumni_index=None,
                 notification_mode=run_module.RUN_MODE_DRY,
@@ -564,15 +610,22 @@ def _run_core(
 
 def _measure_replay(**kwargs) -> tuple[ReplayMeasurement, object]:
     db_path = kwargs["db_path"]
-    state_before = _operational_state_fingerprint(db_path)
+    operational_db_path = _operational_db_path(db_path)
+    state_before = _operational_state_fingerprint(operational_db_path)
     measurement, result = _run_core(**kwargs)
-    state_after = _operational_state_fingerprint(db_path)
+    state_after = _operational_state_fingerprint(operational_db_path)
     measurement = replace(
         measurement,
         output_hash=_deterministic_output_hash(result),
         operational_state_unchanged=state_before == state_after,
     )
     return measurement, result
+
+
+def _operational_db_path(cache_db_path: Path) -> Path:
+    return cache_db_path.with_name(
+        f".{cache_db_path.name}.operational.sqlite"
+    )
 
 
 def _deterministic_output_hash(result) -> str:
@@ -649,6 +702,30 @@ def _measure_isolated_assembly(
         "median_seconds": median(times),
         "rows": len(rows),
         "milliseconds_per_row": median(times) * 1000 / len(rows),
+    }
+
+
+def _measure_comparison_persistence(report, *, runs: int) -> dict[str, object]:
+    times = []
+    with tempfile.TemporaryDirectory(
+        prefix="internship-signal-comparison-persistence-"
+    ) as directory:
+        path = Path(directory) / "state.sqlite"
+        with SourceComparisonStore(path) as store:
+            for index in range(runs):
+                measured_report = replace(
+                    report,
+                    run_id=f"persistence-{index}",
+                )
+                started = perf_counter()
+                store.save(measured_report)
+                times.append(perf_counter() - started)
+        database_bytes = path.stat().st_size
+    return {
+        "runs_seconds": times,
+        "median_seconds": median(times),
+        "entries": len(report.entries),
+        "database_bytes": database_bytes,
     }
 
 
@@ -879,6 +956,10 @@ def main(argv: list[str] | None = None) -> int:
             effective_date=args.today,
             runs=args.runs,
         )
+        comparison_persistence = _measure_comparison_persistence(
+            prebuilt_comparison,
+            runs=args.runs,
+        )
 
         profiler = cProfile.Profile()
         profiled_measurement, profiled_result = profiler.runcall(
@@ -897,6 +978,20 @@ def main(argv: list[str] | None = None) -> int:
     median_stages, per_row = _median_stage_report(measured)
     normal_total = median(item.total_seconds for item in measured)
     omitted_total = median(item.total_seconds for item in omitted)
+    source_comparison_total = median(
+        sum(
+            item.stage_seconds[stage]
+            for stage in (
+                "source_comparison_audit_context",
+                "source_comparison_lightweight_outcomes",
+                "source_comparison_detail_selection",
+                "source_comparison_rich_trace_construction",
+                "source_comparison_trace_sanitization",
+                "source_comparison_aggregation_sorting",
+            )
+        )
+        for item in measured
+    )
     output_hashes = [item.output_hash for item in measured]
     all_measured_valid = all(
         item.safe
@@ -951,22 +1046,62 @@ def main(argv: list[str] | None = None) -> int:
             ],
             "comparison_omitted_median_seconds": omitted_total,
             "source_comparison_delta_seconds": normal_total - omitted_total,
-            "direct_source_comparison_median_seconds": median(
-                item.stage_seconds[
-                    "source_comparison_audit_context"
-                ]
-                + item.stage_seconds[
-                    "source_comparison_per_job_trace"
-                ]
-                + item.stage_seconds[
-                    "source_comparison_trace_sanitization"
-                ]
-                + item.stage_seconds[
-                    "source_comparison_aggregation_sorting"
-                ]
-                for item in measured
+            "direct_source_comparison_median_seconds": (
+                source_comparison_total
             ),
             "isolated_current_scoring_assembly": isolated_assembly,
+            "source_comparison_persistence": comparison_persistence,
+        },
+        "improvement_vs_approximate_baseline": {
+            "baseline_source_comparison_seconds": 20.0,
+            "baseline_total_warm_replay_seconds": 30.0,
+            "source_comparison_absolute_seconds": (
+                20.0 - source_comparison_total
+            ),
+            "source_comparison_percentage": (
+                (20.0 - source_comparison_total) / 20.0 * 100
+            ),
+            "total_absolute_seconds": 30.0 - normal_total,
+            "total_percentage": (30.0 - normal_total) / 30.0 * 100,
+        },
+        "source_comparison": {
+            "summaries_evaluated": (
+                prebuilt_comparison.postings_evaluated
+                if prebuilt_comparison is not None
+                else 0
+            ),
+            "details_retained": (
+                prebuilt_comparison.detail_entries_retained
+                if prebuilt_comparison is not None
+                else 0
+            ),
+            "retained_by_category": (
+                {
+                    category: sum(
+                        entry.category == category
+                        for entry in prebuilt_comparison.entries
+                    )
+                    for category in comparison_module.CATEGORIES
+                }
+                if prebuilt_comparison is not None
+                else {}
+            ),
+            "retained_by_reason": (
+                {
+                    reason: sum(
+                        entry.final_reason == reason
+                        for entry in prebuilt_comparison.entries
+                    )
+                    for reason in sorted(
+                        {
+                            entry.final_reason
+                            for entry in prebuilt_comparison.entries
+                        }
+                    )
+                }
+                if prebuilt_comparison is not None
+                else {}
+            ),
         },
         "profile": {
             "profiled_total_seconds": profiled_measurement.total_seconds,

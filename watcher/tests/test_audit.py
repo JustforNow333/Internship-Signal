@@ -606,6 +606,124 @@ def test_live_audit_sends_no_email_and_changes_no_seen_rows(tmp_path):
     assert before == after
 
 
+def test_live_audit_can_build_an_unretained_routine_trace_on_demand(tmp_path):
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="Direct Co",
+                ats="greenhouse",
+                terms=("Summer 2027",),
+            ),
+        ),
+        terms=("Summer 2027",),
+        seen_db_path=tmp_path / "seen.sqlite",
+    )
+    rows = [
+        _row(
+            company="Direct Co",
+            title="Senior Marketing Manager",
+            url=f"https://example.com/jobs/routine-{index}",
+            source="direct",
+            adapter="greenhouse",
+            requisition=f"routine-{index}",
+            internship_type="",
+        )
+        for index in range(80)
+    ]
+    jobs, duplicates = _analyze(*rows)
+
+    class DirectSource:
+        def fetch(self, _company):
+            return rows
+
+    class EmptyGithubSource:
+        def fetch(self, _companies):
+            return []
+
+    with SeenStore(config.seen_db_path) as seen:
+        report = build_source_comparison(
+            config=config,
+            jobs=jobs,
+            seen_store=seen,
+            run_id="find-unretained",
+            observed_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+            duplicate_report=duplicates,
+        )
+        retained_urls = {
+            entry.trace["posting"]["url"] for entry in report.entries
+        }
+        target = next(
+            job for job in jobs
+            if str(job["source_url"]) not in retained_urls
+        )
+        before = seen.records()
+        traces, live_report = audit_live(
+            config=config,
+            seen_store=seen,
+            query=AuditQuery(url=str(target["source_url"])),
+            direct_sources={"greenhouse": DirectSource()},
+            github_source=EmptyGithubSource(),
+            observed_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+        )
+        after = seen.records()
+
+    assert live_report.detail_entries_retained == 25
+    assert traces[0].posting["url"] == target["source_url"]
+    assert traces[0].query_match["mode"] == "live_read_only"
+    assert before == after
+
+
+def test_live_audit_fills_broad_query_to_limit_beyond_retained_details(tmp_path):
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="Direct Co",
+                ats="greenhouse",
+                terms=("Summer 2027",),
+            ),
+        ),
+        terms=("Summer 2027",),
+        seen_db_path=tmp_path / "seen.sqlite",
+    )
+    rows = [
+        _row(
+            company="Direct Co",
+            title="Senior Marketing Manager",
+            url=f"https://example.com/jobs/broad-{index}",
+            source="direct",
+            adapter="greenhouse",
+            requisition=f"broad-{index}",
+            internship_type="",
+        )
+        for index in range(80)
+    ]
+
+    class DirectSource:
+        def fetch(self, _company):
+            return rows
+
+    class EmptyGithubSource:
+        def fetch(self, _companies):
+            return []
+
+    with SeenStore(config.seen_db_path) as seen:
+        traces, report = audit_live(
+            config=config,
+            seen_store=seen,
+            query=AuditQuery(company="Direct Co"),
+            limit=50,
+            direct_sources={"greenhouse": DirectSource()},
+            github_source=EmptyGithubSource(),
+            observed_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+        )
+
+    assert report.detail_entries_retained == 25
+    assert len(traces) == 50
+    assert len(
+        {trace.identity["canonical_identity_key"] for trace in traces}
+    ) == 50
+
+
 def test_state_only_performs_no_collection(tmp_path, monkeypatch):
     config = _config(tmp_path)
 

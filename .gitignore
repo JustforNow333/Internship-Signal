@@ -27,6 +27,7 @@ __pypackages__/
 *.log
 *.tmp
 tmp/
+# Durable watcher state and the rebuildable analysis cache remain local.
 *.sqlite
 *.sqlite-*
 *.sqlite3
@@ -158,6 +159,7 @@ eligibility-demo*.json
 watcher-audit*.json
 watcher-source-comparison*.json
 source-comparison*.json
+watcher/source-comparison-redesign*.json
 # Temporary bounded-persistence stress demonstrations are never production
 # state or fixtures.
 comparison-stress*.sqlite
@@ -231,8 +233,8 @@ canary-full*.json
 concurrent-canary*.json
 collection-canary-state*.json
 watcher/collection-canary-state*.json
-# Repository cleanup and cross-shell branch/push verification logs are local
-# diagnostics, not source artifacts.
+# Regression, cleanup, integration, push, worktree, and verification logs are
+# local diagnostics, not source artifacts.
 cleanup-audit*.log
 cleanup-audit*.json
 watcher/cleanup-audit*.log
@@ -240,7 +242,7 @@ watcher/cleanup-audit*.json
 # Local hosted-backend promotion verification output.
 hosted-backend-promotion*.log
 hosted-backend-push*.log
-# Prompt-maintained guidance and bug-audit scratch copies stay local.
+# Prompt-maintained guidance, bug-audit, and branch-handoff scratch stay local.
 agents.local.md
 agents.*.md
 agents (*).md

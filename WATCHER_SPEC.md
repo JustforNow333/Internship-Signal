@@ -387,8 +387,9 @@ tagged so the email can say "(via GitHub — may be a few days old)".
 
 ## 6. Seen-store (`seen_store.py`)
 
-SQLite (stdlib `sqlite3`, no new dependency). This is the only persistent
-state and the thing that prevents duplicate emails.
+SQLite (stdlib `sqlite3`, no new dependency). This is the durable operational
+state and the thing that prevents duplicate emails. Rebuildable static-analysis
+artifacts live in a separate cache database described in §15.
 
 ```
 table seen(
@@ -498,7 +499,8 @@ choose one and document it:
 - upload/download it as a workflow artifact, or
 - point at external storage.
 Pick the committed-branch approach unless the user objects; it needs no extra
-infrastructure.
+infrastructure. Commit only durable `seen.sqlite`; keep the rebuildable
+`analysis-cache.sqlite` in an Actions cache, never on the data branch.
 
 **Failure visibility:** the workflow must surface partial failures. A single
 company's adapter raising should be caught, logged, and counted — the run
@@ -669,11 +671,14 @@ limit 100;
 
 ## 15. Persistent static-analysis cache
 
-Watcher runs may cache date-independent backend analysis artifacts in an
-`analysis_cache` table inside the existing persistent `seen.sqlite`. Backend
-ingestion remains SQLite- and watcher-independent and exposes pure functions
-for existing deduplication, one-row static analysis, current scoring/final job
-assembly, and existing score ordering.
+Watcher runs may cache date-independent backend analysis artifacts in the sole
+`analysis_cache` table of a dedicated `analysis-cache.sqlite` database.
+`seen.sqlite` contains only durable notification, source-health, health-alert,
+and source-comparison state. The two databases are never attached and never
+share a transaction. Backend ingestion remains SQLite- and
+watcher-independent and exposes pure functions for existing deduplication,
+one-row static analysis, current scoring/final job assembly, and existing score
+ordering.
 
 The watcher pipeline is:
 
@@ -699,13 +704,24 @@ and therefore are not artifact inputs. Increment the version whenever static
 analysis behavior, inputs, technology/profile matching, compensation parsing,
 student eligibility, static scoring, or artifact schema changes.
 
-`WATCHER_ANALYSIS_CACHE_ENABLED` defaults to true. Reads are batched, new
-artifacts use one transaction, and one cleanup per run removes entries not
-accessed for 30 days. Invalid JSON, schema mismatches, and SQLite errors warn
-and fall back to fresh analysis without changing watcher completion or
+`WATCHER_ANALYSIS_CACHE_ENABLED` defaults to true.
+`WATCHER_ANALYSIS_CACHE_PATH` defaults to `analysis-cache.sqlite` beside the
+configured seen database. Reads are batched, new artifacts use one cache-only
+transaction, and one cleanup per run removes entries not accessed for 30 days.
+Invalid JSON, schema mismatches, missing files, and SQLite errors warn and fall
+back to fresh analysis without changing watcher completion, durable state, or
 notification behavior. One `ANALYSIS-CACHE` INFO summary reports only aggregate
 counts and timings; it never logs keys, job text, URLs, or configuration
 contents.
+
+Legacy embedded cache tables are moved only by
+`scripts/migrate_analysis_cache.py`. Its default operation validates both
+databases, copies and verifies valid rows transactionally, and leaves the
+source unchanged. Explicit `--remove-source-table` first creates a validated
+backup, then drops only the cache table/indexes, vacuums, and revalidates the
+durable database. GitHub Actions restores/saves only the dedicated cache with a
+daily UTC key containing runner OS and `STATIC_ANALYSIS_CACHE_VERSION`; the
+`watcher-data` branch continues to receive only cache-free `seen.sqlite`.
 
 ---
 
@@ -751,7 +767,49 @@ URLs, or snapshot contents.
 
 ---
 
-## 17. Opt-in bounded collection concurrency
+## 17. Bounded source comparison
+
+Source comparison is observability-only and cannot affect matching, email,
+seen state, scoring, eligibility, collection, or deduplication. Its fixed
+pipeline is:
+
+`all jobs → lightweight outcomes → complete counts → deterministic detail selection → rich traces for selected entries → persistence/rendering`
+
+`audit_trace.py` owns one immutable evaluated posting outcome and is the sole
+implementation of source sightings, identity, watchlist, internship/open,
+season, location, role/watcher eligibility, notification state, final reason,
+and merge/anomaly diagnostics. Lightweight `PostingComparisonSummary` values
+contain only scalar count/selection data plus an original job index. Rich
+`PostingAuditTrace` values consume the same outcome; they do not reevaluate
+business rules.
+
+When watchlist, season, internship, or open-state precedence already determines
+the lightweight final reason, the shared outcome defers location/eligibility
+and seen-notification expansion. If that summary is selected, rich-trace
+construction completes those deferred fields through the same evaluator before
+serialization. Open candidates still evaluate eligibility and any relevant
+notification state while producing their lightweight final reason.
+
+The full job universe is indexed once for generic URLs, seen records, similar
+requisitions, duplicate sightings, and cross-source merge relationships.
+Category counts and aggregates use every lightweight summary. The report
+builder then retains all eligible entries, non-routine rejections, operational
+anomalies, and no-posting companies; it deterministically samples 25 routine
+rejections per reason with the established SHA-256 key and applies the existing
+2,000-entry hard cap and stable display ordering.
+
+Only selected summaries build and serialize rich traces, and recursive
+sanitization runs only on those payloads. Schema-version-2 reports keep the
+existing `entries` field for selected rich details and add
+`postings_evaluated` and `detail_entries_retained`. Counts remain full-universe
+counts. The store persists report-selected entries without resampling or
+reprioritizing; it may apply only a defensive hard maximum. Thirty aggregate
+runs and three detail runs remain retained, and schema-version-1 persisted
+reports remain readable.
+
+---
+
+## 18. Opt-in bounded collection concurrency
 
 Production default remains serial; concurrent mode is available for controlled
 canaries. `WATCHER_COLLECTION_MODE` accepts `serial` or `concurrent` and

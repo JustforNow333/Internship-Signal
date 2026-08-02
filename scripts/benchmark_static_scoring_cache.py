@@ -29,7 +29,9 @@ DEFAULT_EFFECTIVE_DATE = date(2026, 7, 30)
 PREVIOUS_CACHE_DATABASE_BYTES = 89_657_344
 SOURCE_COMPARISON_STAGES = (
     "source_comparison_audit_context",
-    "source_comparison_per_job_trace",
+    "source_comparison_lightweight_outcomes",
+    "source_comparison_detail_selection",
+    "source_comparison_rich_trace_construction",
     "source_comparison_trace_sanitization",
     "source_comparison_aggregation_sorting",
 )

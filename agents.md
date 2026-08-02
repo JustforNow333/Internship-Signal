@@ -1,26 +1,13 @@
 # Agents Guide
 
-## Hosted matching Phase 2A bug fixes
+## Current integration
 
-- Work only in `C:\\Users\\burst\\internship-signal-hosted-matching` on
-  `agent/hosted-matching-phase-2`; leave every other worktree untouched.
-- Fix the five reproduced defects at commit `3733568`: multiline posting text,
-  Workday relative dates, company normalization, observation order, and IT roles.
-- Add regression tests before behavior changes, preserve public shapes and
-  watcher authority, then run PostgreSQL and complete repository validation.
-- Push only `agent/hosted-matching-phase-2` when requested; do not push to
-  `main`, merge, rebase, or modify another worktree without authorization.
-- The remote Phase 2A branch was verified at `c22e335`; treat other hosted
-  regression branches as separate until their ancestry and contents are reviewed.
-- Integration is authorized for latest `origin/main`, Phase 2A, and
-  `agent/hosted-regression-fixes-20260802`; inspect ancestry before merging,
-  validate the combined tree, and update `main` only without force.
-- Remote `main` and Phase 2A were verified at integrated commit `9281ca3`;
-  refetch and require `origin/main` to be an ancestor before any later push.
-- The user explicitly authorized the final remote `main` push; commit required
-  guidance first, refetch, and publish only by non-force fast-forward.
-- Preserve scheduled collection and its `serial` application default; do not
-  change concurrency, workflows, production state, or notification behavior.
+- Integrate `agent/watcher-in-progress-20260801` into freshly fetched
+  `origin/main` with a normal merge and non-force push.
+- Preserve the hosted matching and hosted-regression work already on main;
+  do not merge either feature branch a second time.
+- Scheduled production remains concurrent at `4/1/2`; the application default
+  remains serial and no additional production behavior is authorized.
 
 ## Required every prompt
 
@@ -103,10 +90,10 @@
 - Benchmark analysis changes offline at 500, 1,000, and 2,000 representative
   rows without adding prefilters, collection concurrency, pagination changes,
   or source-comparison redesign.
-- Persistent analysis caching is watcher-owned in the existing SQLite state;
-  backend analysis primitives stay pure and cache-independent, static
-  fingerprints are deterministic/versioned, and current-date scoring always
-  runs for every deduplicated row.
+- Persistent analysis caching is watcher-owned in a dedicated rebuildable
+  SQLite database beside durable state; backend analysis stays pure and
+  cache-independent, fingerprints are deterministic/versioned, and
+  current-date scoring always runs for every deduplicated row.
 - Cache corruption, schema mismatch, or SQLite failure is nonfatal and falls
   back to fresh analysis; batch reads, transactional writes, and one bounded
   30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
@@ -177,9 +164,12 @@
 - `watcher.audit` is read-only: state-only mode makes no requests, live mode
   reuses normal collection/analysis with email and priming disabled, and
   neither mode may mutate `seen` or health history.
-- Source-comparison snapshots keep 30 aggregate runs, three detail runs, all
-  bounded eligible/anomaly detail, and deterministic routine-rejection samples
-  per reason. Compact only after material cleanup, never every hourly run.
+- Source comparison computes lightweight outcomes/counts for every job, then
+  selects details before building and sanitizing rich traces. The report owns
+  deterministic eligible/anomaly/non-routine/routine-sample retention; the
+  store persists selected entries without a second policy pass. Decisive early
+  reasons defer rich-only location/notification expansion until selection.
+  Keep 30 aggregate runs and three detail runs.
   Health-alert
   fingerprints/cooldowns use dedicated tables, never `seen`; health SMTP is
   independently configured and cannot affect match-email delivery or marking.
@@ -294,11 +284,27 @@ git status --short --ignored
 
 - Bug audits require a reproducible failure or clear violated invariant. Add a
   regression test before fixing behavior; do not change code for style alone.
-- Repository-wide cleanup must preserve public shapes and side effects; remove
-  duplication only after tests cover every consolidated caller.
+- Keep the current watcher-audit fix separate from hosted UI/auth fixes, and
+  preserve every pre-existing dirty hunk in both worktrees.
+- Local commits stay on their dedicated watcher and hosted branches; never
+  push them without a separate explicit request.
+- Push dedicated branches by explicit name with normal upstream tracking;
+  never force-push or substitute another branch.
+- When Windows Git cannot resolve a WSL-created worktree pointer, push the
+  named shared branch through the valid original checkout without repairing it.
+- A branch push is complete only when `ls-remote` reports the intended full
+  commit SHA; failed read-only worktree attempts do not alter repository state.
+- Main integrations start from a freshly fetched `origin/main`, merge the
+  named feature branch, and exclude unrelated local-main-only commits.
+- Repository-wide readability cleanup must preserve public shapes, ordering,
+  logs, and side effects; consolidate duplication only after tests cover every
+  caller.
 - Cleanup audits require an executable failure or a clearly demonstrated
   invariant violation before behavior changes. Remove code only after caller
   searches and regression tests prove it is redundant or unreachable.
+- Parallel handoffs preserve dirty work on a unique branch without stashing,
+  resetting, cleaning, or touching another worktree; stage only owned paths or
+  hunks.
 - Holdout construction is two-stage: commit reusable tooling first, then
   collect from that exact clean SHA. Exclude both prior benchmarks by stable
   ID, normalized URL, and fallback key without reading their human labels.
@@ -324,3 +330,5 @@ git status --short --ignored
   current row/provenance assembly, and sorting always remain dynamic.
 - Keep profiler data, snapshots, and generated benchmark reports ignored while
   leaving reusable benchmark scripts, tests, and fixtures trackable.
+- Keep rebuildable `analysis-cache.sqlite` transactionally independent from
+  durable `seen.sqlite`; only the durable database belongs on `watcher-data`.

@@ -65,13 +65,23 @@ def _parse_env_value(value: str) -> str:
 def _strip_comment(line: str) -> str:
     in_single = False
     in_double = False
+    escaped = False
     for index, char in enumerate(line):
-        if char == "'" and not in_double:
+        if char == "\\" and (in_single or in_double):
+            escaped = not escaped
+            continue
+        if char == "'" and not in_double and not escaped:
             in_single = not in_single
-        elif char == '"' and not in_single:
+        elif char == '"' and not in_single and not escaped:
             in_double = not in_double
-        elif char == "#" and not in_single and not in_double:
+        elif (
+            char == "#"
+            and not in_single
+            and not in_double
+            and (index == 0 or line[index - 1].isspace())
+        ):
             return line[:index]
+        escaped = False
     return line
 
 
@@ -79,6 +89,7 @@ load_dotenv()
 
 DEFAULT_WATCHLIST_PATH = WATCHER_DIR / "watchlist.yml"
 DEFAULT_SEEN_DB_PATH = Path(os.getenv("WATCHER_SEEN_DB", WATCHER_DIR / "seen.sqlite"))
+DEFAULT_ANALYSIS_CACHE_FILENAME = "analysis-cache.sqlite"
 DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS = 0.5
 MAX_WORKDAY_MIN_INTERVAL_SECONDS = 10.0
 DEFAULT_ANALYSIS_CACHE_ENABLED = True
@@ -115,6 +126,22 @@ SUPPORTED_GITHUB_LISTING_FORMATS = {
 
 class ConfigError(ValueError):
     """Raised when watcher config is missing or invalid."""
+
+
+def resolve_analysis_cache_path(
+    seen_db_path: str | Path,
+    value: str | Path | None = None,
+) -> Path:
+    """Return the dedicated cache path, defaulting beside the seen database."""
+
+    raw = (
+        os.getenv("WATCHER_ANALYSIS_CACHE_PATH")
+        if value is None
+        else value
+    )
+    if raw is None or not str(raw).strip():
+        return Path(seen_db_path).parent / DEFAULT_ANALYSIS_CACHE_FILENAME
+    return Path(str(raw).strip())
 
 
 def analysis_cache_enabled(value: str | bool | None = None) -> bool:
@@ -348,9 +375,20 @@ class WatcherConfig:
     min_score: int | None = None
     seen_db_path: Path = DEFAULT_SEEN_DB_PATH
     analysis_cache_enabled: bool = DEFAULT_ANALYSIS_CACHE_ENABLED
+    analysis_cache_path: Path | None = None
     collection_concurrency: CollectionConcurrencyCfg = field(
         default_factory=CollectionConcurrencyCfg
     )
+
+    def __post_init__(self) -> None:
+        seen_db_path = Path(self.seen_db_path)
+        cache_path = (
+            resolve_analysis_cache_path(seen_db_path, "")
+            if self.analysis_cache_path is None
+            else Path(self.analysis_cache_path)
+        )
+        object.__setattr__(self, "seen_db_path", seen_db_path)
+        object.__setattr__(self, "analysis_cache_path", cache_path)
 
     def effective_github_listing_sources(self) -> tuple[GitHubListingSourceCfg, ...]:
         """Return typed sources plus deterministic adapters for legacy URLs."""
@@ -406,6 +444,7 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
         min_score=min_score,
         seen_db_path=DEFAULT_SEEN_DB_PATH,
         analysis_cache_enabled=analysis_cache_enabled(),
+        analysis_cache_path=resolve_analysis_cache_path(DEFAULT_SEEN_DB_PATH),
         collection_concurrency=load_collection_concurrency(),
     )
 

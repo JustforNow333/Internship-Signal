@@ -419,21 +419,40 @@ serialized jobs and dedupe reports.
 ### Persistent analysis cache
 
 The watcher caches only date-independent backend analysis artifacts in the
-`analysis_cache` table of its existing `seen.sqlite` database. The backend
-CSV/API path remains cache-independent. Every watcher run still deduplicates
-current rows first and fingerprints their static inputs. Artifacts include the
-categorical student-eligibility decision, reusable qualification parsing, and
-the seven non-deadline scoring category results. Every run still recomputes
-deadline urgency and expiration, reconstructs the category mapping and final
-weighted score, reapplies caps/actions, generates reasons and concerns,
-assembles current job IDs and row fields, and sorts every job. Current `extra`
-provenance and other final row fields therefore never come from the cache.
+`analysis_cache` table of a dedicated, rebuildable `analysis-cache.sqlite`
+database. Durable `seen.sqlite` remains limited to notification, source-health,
+health-alert, and source-comparison state. The backend CSV/API path remains
+cache-independent. Every watcher run still deduplicates current rows first and
+fingerprints their static inputs. Artifacts include the categorical
+student-eligibility decision, reusable qualification parsing, and the seven
+non-deadline scoring category results. Every run still recomputes deadline
+urgency and expiration, reconstructs the category mapping and final weighted
+score, reapplies caps/actions, generates reasons and concerns, assembles
+current job IDs and row fields, and sorts every job. Current `extra` provenance
+and other final row fields therefore never come from the cache.
 
 `WATCHER_ANALYSIS_CACHE_ENABLED` defaults to `true` and accepts
-`true`/`false`, `yes`/`no`, `on`/`off`, or `1`/`0`. Cache reads are batched,
-new artifacts are written in one transaction, and entries not accessed for 30
-days are removed at most once per run. Invalid JSON, schema mismatches, or
-SQLite failures produce a warning and fall back to fresh analysis.
+`true`/`false`, `yes`/`no`, `on`/`off`, or `1`/`0`.
+`WATCHER_ANALYSIS_CACHE_PATH` overrides the cache path; otherwise it is
+`analysis-cache.sqlite` beside the configured seen database. Cache reads are
+batched, new artifacts are written in one transaction, and entries not
+accessed for 30 days are removed at most once per run. A missing, corrupt, or
+unavailable cache produces a warning and falls back to fresh analysis without
+opening a transaction against durable state.
+
+Legacy cache rows can be copied explicitly without changing the source:
+
+```bash
+PYTHONPATH=.:backend python3 scripts/migrate_analysis_cache.py \
+  --source seen.sqlite \
+  --destination analysis-cache.sqlite
+```
+
+Add `--remove-source-table` only for an intentional cleanup. That mode creates
+and validates a backup, drops only `analysis_cache` and its indexes, vacuums the
+source, and revalidates all non-cache tables. GitHub Actions uses a daily,
+versioned `actions/cache@v4` key for `analysis-cache.sqlite`; only
+`seen.sqlite` is committed to the `watcher-data` branch.
 
 `watcher.analysis_cache.STATIC_ANALYSIS_CACHE_VERSION` is part of every
 SHA-256 fingerprint. Increment it whenever static classification,
@@ -659,13 +678,22 @@ PYTHONPATH=.:backend python3 -m watcher.audit --comparison --live \
   --comparison-markdown source-comparison.md
 ```
 
-Snapshots contain only sanitized identity/company/title/URL/provenance and
-decision evidence—not descriptions or alumni. SQLite retains exact aggregate
-counts for 30 runs and posting details for the newest three runs. Each detailed
-run keeps all eligible comparisons, no-posting coverage, and operational
-anomalies; routine rejection reasons retain a deterministic sample of 25
-postings per reason. A hard ceiling of 2,000 details per run bounds unusual
-cases too. JSON artifacts use the same limits.
+Source comparison evaluates one immutable lightweight outcome for every job,
+so category counts always cover the complete posting universe. It then applies
+the deterministic detail policy before constructing or recursively sanitizing
+rich traces. Earlier decisive watchlist/season/internship/open reasons defer
+location and notification expansion until a detail is selected, through the
+same shared evaluator. Each detailed run keeps all eligible comparisons, no-posting
+coverage, non-routine rejections, and operational anomalies; routine rejection
+reasons retain a deterministic sample of 25 postings per reason. A hard
+ceiling of 2,000 details per run bounds unusual cases too.
+
+Reports use schema version 2 and expose `postings_evaluated` plus
+`detail_entries_retained`; the existing `entries` field contains only selected
+sanitized rich traces. SQLite retains exact aggregates for 30 runs and those
+selected details for the newest three runs. The report builder owns selection;
+the store persists the provided ordered entries and applies only a defensive
+hard ceiling. Schema-version-1 persisted reports remain readable.
 
 Retention cleanup runs transactionally with the comparison save and never
 touches notification or source-health tables. SQLite compaction is not an
@@ -673,6 +701,12 @@ hourly default: `VACUUM` runs only after cleanup deletes at least 500 detail
 rows and at least 25% of database pages are free. GitHub Actions uploads the
 sanitized health and source-comparison JSON reports for 14 days and appends the
 bounded Markdown comparison to the job summary.
+
+On the fixed 11,855-job warm replay, the lightweight-first implementation
+retained 180 rich details and reduced median source-comparison time from the
+approximate 20-second baseline to 4.246 seconds. Rich construction and
+sanitization together took 0.124 seconds; complete counts still cover all
+11,855 jobs.
 
 ## Watcher source health
 

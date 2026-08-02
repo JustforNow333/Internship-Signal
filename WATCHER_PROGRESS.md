@@ -732,8 +732,71 @@ This file tracks completed watcher steps and the next handoff target.
      cases made no network calls and left operational SQLite state unchanged.
    - Full validation: backend/watcher `770 passed, 1 warning`; frontend
      `23 passed`; frontend production build and Python compileall succeeded.
+36. Dedicated rebuildable analysis-cache database:
+   - `WatcherConfig.analysis_cache_path` defaults to `analysis-cache.sqlite`
+     beside the configured durable seen database and honors
+     `WATCHER_ANALYSIS_CACHE_PATH`; cache enablement remains independent.
+   - `run_once()` passes only the dedicated path to
+     `analyze_rows_with_cache()`. New `seen.sqlite` files contain no cache
+     table, and cache deletion, corruption, or unavailability falls back to
+     fresh analysis without a durable-state transaction.
+   - `scripts/migrate_analysis_cache.py` validates source/destination
+     databases, copies and verifies exact valid rows transactionally, and
+     leaves the source unchanged by default. Explicit removal first creates a
+     validated backup, then drops only the cache table/indexes, vacuums, and
+     revalidates all non-cache tables.
+   - Actions now caches only the dedicated database under a daily UTC,
+     runner-OS, cache-version key. The data branch still receives only
+     cache-free `seen.sqlite`; invalid restored caches are quarantined and
+     rebuilt without blocking watcher operation.
+   - The fixed 11,855-job warm replay took 29.976s with 11,855 hits and no
+     misses versus the prior 28.224s run (1.752s / 6.2% slower single-run
+     variance). The deterministic hash remained
+     `0989f8b9cfa700e3755c5f31843266c0817c4800bf42a5f62b465d75a68df599`;
+     network calls and operational side effects remained zero.
+   - The dedicated warm cache measured 123,654,144 bytes. The latest local
+     durable-state artifact measured 9,449,472 bytes, passed `quick_check`, and
+     contained no `analysis_cache` table.
+   - Full validation: backend/watcher `781 passed, 1 warning`; frontend
+     `23 passed`; frontend production build and Python compileall succeeded.
+37. Lightweight-first source comparison:
+   - `PostingAuditOutcome` is now the shared owner of source sightings,
+     canonical identity, watchlist/season/internship/open decisions, watcher
+     eligibility, notification state, final reasons, and merge diagnostics.
+     Full-universe URL, seen-record, similar-requisition, and duplicate-report
+     indexes are built once.
+   - Every analyzed job produces an immutable `PostingComparisonSummary`.
+     Full counts are calculated before deterministic detail selection; only 180
+     retained entries in the fixed 11,855-job replay built rich traces, called
+     `as_dict()`, and underwent recursive sanitization.
+   - Earlier decisive watchlist/season/internship/open outcomes defer rich-only
+     location and notification expansion. Selected traces complete the same
+     shared outcome before serialization, preserving trace evidence and final
+     reasons without scanning irrelevant full-time postings.
+   - Schema-version-2 reports add `postings_evaluated` and
+     `detail_entries_retained` while retaining selected rich details in
+     `entries`. The report builder now solely owns eligible/anomaly/non-routine
+     retention, stable routine sampling, the 2,000-entry cap, and ordering.
+     The store persists those entries without resampling, reprioritizing, or
+     sanitizing traces a second time; schema-version-1 reports remain readable.
+   - Live manual audit can still build an explicitly requested unretained trace
+     directly. State-only audit continues to use retained traces and its seen
+     fallback.
+   - The fixed warm replay evaluated 11,855 jobs and retained 180 details:
+     13 eligible, 82 rejected details, and 85 no-posting companies. Median
+     source-comparison time was 4.246s (4.371s by whole-stage omission), versus
+     the approximate 20s baseline: 15.754s / 78.8% faster. Median total warm
+     replay was 12.142s versus approximately 30s: 17.858s / 59.5% faster.
+   - Median component times were 0.746s full-universe context, 3.195s
+     lightweight outcomes, 0.042s selection, 0.080s rich traces, 0.044s
+     sanitization, 0.144s aggregation/sorting, and 0.027s isolated persistence.
+     All three measured runs had 11,855 cache hits, zero misses/network calls
+     or operational writes, and identical hash
+     `2b4384b046fb015448e4c99df73e1376d5253df896562bfa0433cf540d21eda3`.
+   - Full validation: backend/watcher `786 passed, 1 warning`; frontend
+     `23 passed`; frontend production build and Python compileall succeeded.
 
-36. Opt-in bounded collection concurrency:
+38. Opt-in bounded collection concurrency:
    - **Production default remains serial; concurrent mode is available for
      controlled canaries.** `WATCHER_COLLECTION_MODE` defaults to `serial`,
      serial stays the permanent rollback/diagnostic path, and promotion is a
@@ -801,7 +864,7 @@ This file tracks completed watcher steps and the next handoff target.
    - Full validation: backend/watcher `835 passed, 1 warning`; Python
      compileall and `git diff --check` completed successfully.
 
-37. Additional full-canary validation:
+39. Additional full-canary validation:
    - At `2026-07-31T07:16:55Z` (`2026-07-31T03:16:55-04:00`), local branch
      `main`, local `HEAD`, cached `origin/main`, and a fresh read-only GitHub
      remote-tip query all resolved to
@@ -880,8 +943,14 @@ This file tracks completed watcher steps and the next handoff target.
      offline benchmark preserved byte-identical batches/snapshots, downstream
      output hashes, row/error/attempt order, limits 4/2/2/1, zero Workday pacing
      violations, zero operational-state writes, and clean shutdown.
+   - The scoped implementation was committed locally as
+     `d255c9b1623b7192ad83a48cd28d3ce5b90b7c3f`, but the normal HTTPS push was
+     blocked because Git could not read a GitHub username in this environment.
+     The remote remains at `10d4f89e49e168d44b6b52054ce6aed749a143a9`.
+     Because committed-and-pushed provenance is mandatory, the third full
+     canary was not run; production remains serial.
 
-38. Scheduled bounded-concurrency promotion:
+40. Scheduled bounded-concurrency promotion:
    - Three full concurrent canaries passed in separate collection windows at
      fixed limits of four global workers, one Workday task, and two tasks per
      origin (`4/1/2`). The third canary ran from the clean, pushed
@@ -892,6 +961,32 @@ This file tracks completed watcher steps and the next handoff target.
      rollback requires changing only `WATCHER_COLLECTION_MODE` in the workflow
      to `serial`.
 
+41. Evidence-first repository cleanup (2026-08-01):
+   - Reproduced a configuration-parser defect where an unquoted `#` inside a
+     dotenv value was treated as a comment and truncated the value. The shared
+     comment scanner now starts comments only at a separated `#` and respects
+     escaped quotes; regression coverage includes both cases.
+   - Reproduced that importing the collection-canary harness left its
+     `watcher-collection-canary-*` directory behind. The harness now gives the
+     directory an explicit temporary-directory lifecycle, verified in an
+     isolated subprocess test.
+   - Removed the private `_send_enabled` forwarding wrapper after a repository
+     caller search and notification/run coverage confirmed the public
+     `email_sending_enabled` function is the single required API.
+   - Validation passed: backend/watcher `841 passed, 1 warning`; frontend `23
+     passed` plus the production build; Python compileall; and workflow YAML
+     parsing. The application default remains `serial`; this cleanup did not
+     alter scheduled collection.
+
+42. Live audit retained-detail regression fix (2026-08-02):
+   - Reproduced that a broad live query with 80 matches and `--limit 50`
+     returned only the 25 routine details retained by source comparison.
+   - Live audit now continues through the complete analyzed job universe until
+     the requested bound is filled, while suppressing identities already
+     returned from retained details. Collection, comparison counts, seen state,
+     and report retention are unchanged.
+   - Added regression coverage for the bounded multi-result path. The complete
+     backend/watcher suite passes (`842 passed, 1 warning`).
 
 ## Next
 
@@ -906,7 +1001,6 @@ This file tracks completed watcher steps and the next handoff target.
   leave `WATCHER_PRIME_SEEN` unset/false for normal operation.
 - Keep source-health mode and internship-match send mode independently
   configured; use manual `health_email_mode=off` for transport probes.
-
 - Inspect the first scheduled production run at fixed `4/1/2`; return only
   `WATCHER_COLLECTION_MODE` to `serial` if concurrency introduces new blocking,
   reliability, ordering, pacing, shutdown, or diagnostic regressions.
@@ -925,8 +1019,8 @@ WSL is:
 cmd.exe /C "cd /D C:\Users\burst\internship-signal && set PYTHONPATH=C:\Users\burst\internship-signal;C:\Users\burst\internship-signal\backend && backend\venv\Scripts\python.exe -m pytest backend\tests watcher\tests -q"
 ```
 
-Latest local validation after collection snapshot schema-v2 hardening:
+Latest local validation after lightweight-first source comparison:
 
 ```text
-762 passed, 1 warning in 14.57s
+786 passed, 1 warning in 14.02s
 ```

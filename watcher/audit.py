@@ -12,21 +12,32 @@ from pathlib import Path
 from typing import Mapping, Sequence, TextIO
 
 from backend.app.ingest import analyze_rows
+from backend.app.dedupe import norm_company, norm_title
 from watcher.audit_trace import (
     AuditQuery,
     PostingAuditTrace,
+    build_posting_audit_context,
+    build_posting_trace,
     enrich_duplicate_entries,
+    evaluate_posting_outcome,
     match_watchlist_company,
     not_collected_trace,
     query_matches_trace,
 )
-from watcher.config import DEFAULT_WATCHLIST_PATH, WatcherConfig, load_watchlist
+from watcher.config import (
+    DEFAULT_WATCHLIST_PATH,
+    WatcherConfig,
+    load_watchlist,
+    resolve_analysis_cache_path,
+)
 from watcher.run import CollectionStats, collect_rows
 from watcher.seen_store import SeenStore
 from watcher.source_comparison import (
     SourceComparisonReport,
     SourceComparisonStore,
+    _sanitize_trace,
     build_source_comparison,
+    index_company_coverage,
     render_console as render_comparison_console,
     render_markdown as render_comparison_markdown,
     write_json as write_comparison_json,
@@ -159,7 +170,86 @@ def audit_live(
         traces.append(_trace_from_mapping(data))
         if len(traces) >= limit:
             break
+    if len(traces) < limit:
+        returned_identity_keys = {
+            str(trace.identity.get("canonical_identity_key") or "")
+            for trace in traces
+        }
+        returned_identity_keys.discard("")
+        audit_context = build_posting_audit_context(
+            jobs,
+            seen_store=seen_store,
+            duplicate_entries=duplicate_report,
+        )
+        coverage_by_company = index_company_coverage(config, coverage)
+        for job_index, job in enumerate(jobs):
+            if not _job_may_match_live_query(job, effective_query, config):
+                continue
+            company_key = norm_company(str(job.get("company") or ""))
+            outcome = evaluate_posting_outcome(
+                job,
+                config=config,
+                seen_store=seen_store,
+                posting_universe=jobs,
+                duplicate_entries=duplicate_report,
+                source_coverage=coverage_by_company.get(company_key),
+                context=audit_context,
+                job_index=job_index,
+            )
+            if outcome.identity_key in returned_identity_keys:
+                continue
+            trace = build_posting_trace(
+                job,
+                config=config,
+                seen_store=seen_store,
+                posting_universe=jobs,
+                duplicate_entries=duplicate_report,
+                source_coverage=outcome.source_coverage,
+                context=audit_context,
+                outcome=outcome,
+            )
+            data = _sanitize_trace(trace.as_dict())
+            matched, fields = query_matches_trace(data, effective_query)
+            if not matched:
+                continue
+            data["query_match"] = {
+                "query": query.as_dict(),
+                "matched_fields": fields,
+                "mode": "live_read_only",
+            }
+            _apply_duplicate_query_result(data, fields)
+            traces.append(_trace_from_mapping(data))
+            returned_identity_keys.add(outcome.identity_key)
+            if len(traces) >= limit:
+                break
     return traces or [not_collected_trace(query, config=config)], report
+
+
+def _job_may_match_live_query(
+    job: Mapping[str, object],
+    query: AuditQuery,
+    config: WatcherConfig,
+) -> bool:
+    """Cheaply reject jobs that cannot satisfy the requested rich trace."""
+
+    if query.company:
+        configured = match_watchlist_company(
+            str(job.get("company") or ""),
+            config.companies,
+        )
+        company_names = {
+            norm_company(str(job.get("company") or "")),
+            norm_company(configured.name) if configured else "",
+        }
+        if norm_company(query.company) not in company_names:
+            return False
+    if query.title and norm_title(query.title) not in norm_title(
+        str(job.get("title") or "")
+    ):
+        return False
+    if query.job_id and str(job.get("id") or "") != str(query.job_id).strip():
+        return False
+    return True
 
 
 def render_audit_console(
@@ -289,7 +379,12 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_watchlist(args.watchlist)
     if args.seen_db:
-        config = replace(config, seen_db_path=Path(args.seen_db))
+        seen_db_path = Path(args.seen_db)
+        config = replace(
+            config,
+            seen_db_path=seen_db_path,
+            analysis_cache_path=resolve_analysis_cache_path(seen_db_path),
+        )
 
     report: SourceComparisonReport | None = None
     with SeenStore(config.seen_db_path, read_only=True) as seen_store:

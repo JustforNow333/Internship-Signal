@@ -67,6 +67,14 @@ def _run(
     collection_batch=None,
     capture_path: Path | None = None,
 ):
+    cache_db_path = db_path.with_name(
+        f"{db_path.stem}-analysis-cache.sqlite"
+    )
+    effective_config = replace(
+        config,
+        seen_db_path=db_path,
+        analysis_cache_path=cache_db_path,
+    )
     stage_capture = _StageTimingCapture()
     watcher_logger = logging.getLogger("watcher.run")
     previous_log_level = watcher_logger.level
@@ -85,7 +93,7 @@ def _run(
             read_only=collection_batch is not None,
         ) as seen_store:
             result = run_once(
-                config,
+                effective_config,
                 seen_store=seen_store,
                 alumni_index={},
                 digest_sender=lambda _matches: False,

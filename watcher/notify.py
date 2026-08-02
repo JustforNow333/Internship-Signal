@@ -116,7 +116,7 @@ def send_digest(
     if not subject:
         return False
 
-    if not _send_enabled():
+    if not email_sending_enabled():
         if _env_truthy(SUPPRESS_DRY_RUN_ENV):
             LOGGER.info("Dry-run digest output suppressed.")
             return False
@@ -250,14 +250,10 @@ def _format_alum(record: dict) -> str:
     return f"{name} - {occupation} - {linkedin}"
 
 
-def _send_enabled() -> bool:
-    return _env_truthy("WATCHER_SEND_EMAIL")
-
-
 def email_sending_enabled() -> bool:
     """Return whether live SMTP sending is explicitly enabled."""
 
-    return _send_enabled()
+    return _env_truthy("WATCHER_SEND_EMAIL")
 
 
 def _env_truthy(name: str) -> bool:

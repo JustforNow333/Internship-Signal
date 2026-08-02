@@ -1,24 +1,11 @@
 # Claude Repository Guide
 
-- Implement hosted matching Phase 2A bug fixes only in
-  `C:\\Users\\burst\\internship-signal-hosted-matching` on
-  `agent/hosted-matching-phase-2`; leave all other worktrees untouched.
-- Fix the five reproduced posting-text, Workday-date, company-normalization,
-  observation-order, and IT-role defects with regression tests first.
-- Preserve watcher authority and public shapes; validate PostgreSQL, the full
-  backend/watcher suite, frontend tests, and the production build.
-- Push only `agent/hosted-matching-phase-2` when requested; do not push to
-  `main`, merge, rebase, or touch another worktree without authorization.
-- Remote `agent/hosted-matching-phase-2` was verified at `c22e335`; do not
-  conflate it with separately pushed hosted-regression branches.
-- The user authorized integrating latest `origin/main`, Phase 2A, and
-  `agent/hosted-regression-fixes-20260802`; inspect first, validate fully, and
-  never force-push `main`.
-- Remote `main` and Phase 2A were verified at `9281ca3`; every subsequent
-  push must refetch and pass a non-force ancestry check.
-- The final remote `main` push is explicitly authorized; include required
-  guidance in the commit and verify the exact remote SHA afterward.
-- Preserve collection concurrency, workflows, production state, and alerts.
+- Integrate `agent/watcher-in-progress-20260801` into freshly fetched
+  `origin/main` with a normal merge and non-force push.
+- Preserve hosted matching and hosted-regression work already on main; do not
+  merge either feature branch again.
+- Scheduled production remains concurrent at `4/1/2`; the application default
+  remains serial and no additional production behavior is authorized.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.
@@ -67,10 +54,40 @@
 - Benchmark analysis changes offline at 500, 1,000, and 2,000 representative
   rows without adding prefilters, collection concurrency, pagination changes,
   or source-comparison redesign.
-- Persistent analysis caching is watcher-owned in the existing SQLite state;
-  backend analysis primitives stay pure and cache-independent, static
-  fingerprints are deterministic/versioned, and current-date scoring always
-  runs for every deduplicated row.
+- Collection concurrency is opt-in and bounded. `WATCHER_COLLECTION_MODE`
+  defaults to `serial`, serial stays the permanent rollback/diagnostic path, and
+  only a separate reviewed change may promote `concurrent`. Validated limits are
+  `WATCHER_COLLECTION_MAX_WORKERS` (1-16, default 4),
+  `WATCHER_WORKDAY_MAX_CONCURRENCY` (1-5, default 1), and
+  `WATCHER_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY` (1-4, default 2); neither
+  scope limit may exceed the worker pool and every applicable limit binds.
+- Origin/provider keys use scheme, host, and port only; companies sharing an ATS
+  host share one origin limit and Workday tenants share the Workday limit.
+  Concurrency reorders nothing, never weakens pacing, timeouts, retries, or
+  backoff, and adds no proxy, cookie, header-rotation, browser-automation, or
+  challenge-bypass behavior. Blocked, unauthorized, and rate-limited responses
+  stay ordinary source failures, and escaped worker errors become failed task
+  results with sanitized exception types.
+- Validate concurrency in stages: deterministic offline equivalence, a limited
+  live canary across adapter types with at most one or two Workday tenants, then
+  a full live canary. Canaries use temporary databases, disable email, priming,
+  seen marking, health alerts, durable health persistence, and comparison
+  persistence, stop testing blocked sources instead of retrying them, and never
+  run full serial and concurrent collections back-to-back.
+- Full live canaries record the local/remote SHA and worktree status, use fixed
+  4/1/2 limits in separate normal collection windows, keep detailed reports
+  private, and require identical production-SQLite fingerprints. Uncommitted
+  or unpushed evidence is not repository-complete; missing normal GitHub
+  authentication stops validation before canary, and production stays serial.
+- Workday canary telemetry records monotonic tenant starts after pacing and
+  immediately before fetch; only private reports receive sanitized identifiers,
+  relative offsets, spacing statistics, and numeric violation counts.
+- Canary summaries quote retained report fields exactly and label unavailable
+  historical telemetry instead of reconstructing or estimating it.
+- Persistent analysis caching is watcher-owned in a dedicated rebuildable
+  SQLite database beside durable state; backend analysis stays pure and
+  cache-independent, fingerprints are deterministic/versioned, and
+  current-date scoring always runs for every deduplicated row.
 - Cache corruption, schema mismatch, or SQLite failure is nonfatal and falls
   back to fresh analysis; batch reads, transactional writes, and one bounded
   30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
@@ -96,9 +113,12 @@
 - Watcher audits are read-only and reuse production identity, dedupe,
   classification, eligibility, scoring, and seen lookup; state-only audits
   never fetch, and live audits never email, prime, or persist health attempts.
-- Source comparisons retain 30 aggregate runs, three detail runs, all bounded
-  eligible/anomaly detail, and deterministic routine-rejection samples per
-  reason; compact only after material cleanup. Health-alert
+- Source comparison computes lightweight outcomes/counts for every job, then
+  selects details before building and sanitizing rich traces. The report owns
+  deterministic eligible/anomaly/non-routine/routine-sample retention; the
+  store persists selected entries without a second policy pass. Decisive early
+  reasons defer rich-only location/notification expansion until selection.
+  Keep 30 aggregate runs and three detail runs. Health-alert
   cooldowns use dedicated tables and an independent email switch/renderer;
   they never update internship `emailed_at` or `primed_at`.
 - Rollout verification disables internship email, priming, Workday probes, and
@@ -131,11 +151,27 @@
 - Use the validation commands in `agents.md`; always run `git diff --check`.
 - Bug audits require a reproducible failure or clear violated invariant. Add a
   regression test before fixing behavior; do not change code for style alone.
-- Repository-wide cleanup must preserve public shapes and side effects; remove
-  duplication only after tests cover every consolidated caller.
+- Keep the current watcher-audit fix separate from hosted UI/auth fixes, and
+  preserve every pre-existing dirty hunk in both worktrees.
+- Local commits stay on their dedicated watcher and hosted branches; never
+  push them without a separate explicit request.
+- Push dedicated branches by explicit name with normal upstream tracking;
+  never force-push or substitute another branch.
+- When Windows Git cannot resolve a WSL-created worktree pointer, push the
+  named shared branch through the valid original checkout without repairing it.
+- A branch push is complete only when `ls-remote` reports the intended full
+  commit SHA; failed read-only worktree attempts do not alter repository state.
+- Main integrations start from a freshly fetched `origin/main`, merge the
+  named feature branch, and exclude unrelated local-main-only commits.
+- Repository-wide readability cleanup must preserve public shapes, ordering,
+  logs, and side effects; consolidate duplication only after tests cover every
+  caller.
 - Cleanup audits require an executable failure or a clearly demonstrated
   invariant violation before behavior changes. Remove code only after caller
   searches and regression tests prove it is redundant or unreachable.
+- Parallel handoffs preserve dirty work on a unique branch without stashing,
+  resetting, cleaning, or touching another worktree; stage only owned paths or
+  hunks.
 - Holdout construction is two-stage: commit reusable tooling first, then
   collect from that exact clean SHA. Exclude both prior benchmarks by stable
   ID, normalized URL, and fallback key without reading their human labels.
@@ -161,3 +197,5 @@
   current row/provenance assembly, and sorting always remain dynamic.
 - Keep profiler data, snapshots, and generated benchmark reports ignored while
   leaving reusable benchmark scripts, tests, and fixtures trackable.
+- Keep rebuildable `analysis-cache.sqlite` transactionally independent from
+  durable `seen.sqlite`; only the durable database belongs on `watcher-data`.
