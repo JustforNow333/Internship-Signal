@@ -14,6 +14,8 @@
 - The user authorized integrating latest `origin/main`, Phase 2A, and
   `agent/hosted-regression-fixes-20260802`; inspect first, validate fully, and
   never force-push `main`.
+- Remote `main` and Phase 2A were verified at `9281ca3`; every subsequent
+  push must refetch and pass a non-force ancestry check.
 - Preserve collection concurrency, workflows, production state, and alerts.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and

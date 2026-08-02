@@ -15,6 +15,8 @@
 - Integration is authorized for latest `origin/main`, Phase 2A, and
   `agent/hosted-regression-fixes-20260802`; inspect ancestry before merging,
   validate the combined tree, and update `main` only without force.
+- Remote `main` and Phase 2A were verified at integrated commit `9281ca3`;
+  refetch and require `origin/main` to be an ancestor before any later push.
 - Preserve scheduled collection and its `serial` application default; do not
   change concurrency, workflows, production state, or notification behavior.
 
