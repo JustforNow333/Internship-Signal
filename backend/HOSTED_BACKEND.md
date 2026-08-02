@@ -1,9 +1,11 @@
-# Hosted backend Phase 1
+# Hosted backend Phases 1 and 2A
 
 Phase 1 adds persistent multi-user accounts, preferences, company watchlists,
 verification/reset tokens, and unsupported-company requests. PostgreSQL is the
-authoritative datastore. It is separate from watcher SQLite state and does not
-collect jobs, match postings, or deliver internship alerts.
+authoritative datastore. Phase 2A adds central final-job persistence and
+idempotent offline snapshot imports. PostgreSQL remains separate from watcher
+SQLite state. User-job matching, `/api/matches`, synchronization scheduling,
+and internship alert delivery are still unimplemented.
 
 ## Storage design
 
@@ -19,6 +21,74 @@ validation enforces supported enum values, uniqueness, list sizes, and string
 lengths before persistence. Company watches use normalized rows with a unique
 `(user_id, company_id)` key because they are independently paused and replaced
 transactionally.
+
+## Hosted jobs and import tracking
+
+Alembic revision `20260802_0002` adds:
+
+- `hosted_jobs`, with a UUID primary key and unique immutable
+  `watcher_job_id`. The watcher-generated ID is the sole hosted job identity;
+  the hosted backend does not recalculate identity or deduplicate postings.
+- `hosted_job_import_runs`, with one unique SHA-256 `source_fingerprint`,
+  nonnegative outcome counters, `matches_created = 0`, and checked
+  `running`/`succeeded`/`failed` completion state.
+- `hosted_job_import_attempts`, linked to its source run by a cascading foreign
+  key and unique `(import_run_id, attempt_number)`. This preserves failed-attempt
+  history when an operator explicitly retries a source.
+
+Posting text uses PostgreSQL `TEXT`; bounded public provenance uses JSONB.
+Only an allowlist of adapter type, direct/backstop type, public requisition ID,
+and merged public adapter labels is retained. Watcher `extra` objects, source
+URLs, credentials, headers, health data, alumni data, and raw payloads are never
+copied into provenance.
+
+`first_seen_at` and `created_at` are set only on first hosted insertion.
+`last_seen_at` and `updated_at` advance on every later observation, including an
+otherwise unchanged job. `closed_at` records the first observed open-to-closed
+transition, remains stable across repeated closed observations, clears on
+reopen, and is set again if the reopened posting later closes.
+
+Company names resolve through the same watcher-derived canonical names and
+aliases used by `GET /api/companies`; unsupported or unselectable companies are
+skipped. Watcher role classifications are converted in one hosted mapper.
+Malformed isolated jobs are skipped with bounded reason codes, while a malformed
+final-job collection fails the import.
+
+## Offline snapshot import
+
+From the repository root, after applying migrations:
+
+```powershell
+$env:HOSTED_DATABASE_URL = "postgresql+psycopg://internship_signal:internship_signal_dev@localhost:55432/internship_signal"
+$env:PYTHONPATH = ".;backend"
+backend\venv\Scripts\python.exe -m app.hosted.import_snapshot --snapshot watcher\collection-snapshots\capture.json.gz
+```
+
+The command uses the official snapshot loader, checks collection-configuration
+compatibility, and runs the snapshot rows through the existing watcher
+deduplication and analysis pipeline using the captured UTC date. It does not
+collect from the network, open watcher SQLite, send email, create matches, mark
+seen jobs, persist health/comparison state, or prime notifications.
+Imports are operator-only CLI operations; Phase 2A adds no HTTP import route.
+
+Collection snapshots do not currently contain a unique content fingerprint;
+their existing digest covers collection configuration. Phase 2A therefore uses
+SHA-256 of the exact validated compressed snapshot bytes, checked before and
+after loading. Reusing a succeeded fingerprint is an idempotent no-op. A
+`running` fingerprint is rejected. A failed fingerprint requires the explicit
+`--retry-failed` flag; the same run is reused and a new attempt row preserves
+the prior failure audit trail. Use `--allow-collection-config-mismatch` only for
+an intentional replay under changed collection configuration.
+
+Inspect recent import outcomes without exposing posting text or raw sources:
+
+```sql
+SELECT source_identifier, source_type, status, started_at, completed_at,
+       jobs_received, jobs_inserted, jobs_updated, jobs_unchanged,
+       jobs_skipped, matches_created, failure_summary
+FROM hosted_job_import_runs
+ORDER BY created_at DESC;
+```
 
 ## Local startup
 
@@ -105,3 +175,7 @@ a database containing data that must be retained.
 When SMTP is absent or rejects a message, the API does not claim delivery.
 Forgot-password and resend-verification responses remain identical for known
 and unknown accounts.
+
+Only `HOSTED_DATABASE_URL` is required by the snapshot-import command. SMTP,
+session-cookie, watcher email, and watcher SQLite settings are neither required
+nor used by imports.

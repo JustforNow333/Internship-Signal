@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from watcher.config import CompanyCfg, load_watchlist  # noqa: E402
+from watcher.config import CompanyCfg, WatcherConfig, load_watchlist  # noqa: E402
 
 DIRECT_ATS = {
     "greenhouse",
@@ -55,16 +55,44 @@ class CompanyCatalog:
         self.by_id = {company.id: company for company in self.companies}
         if len(self.by_id) != len(self.companies):
             raise ValueError("watcher company names produce duplicate public IDs")
+        name_index: dict[str, PublicCompany | None] = {}
+        for company in self.companies:
+            for value in (company.id, company.name, *company.aliases):
+                key = company_slug(value)
+                if not key:
+                    continue
+                existing = name_index.get(key)
+                if existing is None and key in name_index:
+                    continue
+                if existing is not None and existing.id != company.id:
+                    name_index[key] = None
+                else:
+                    name_index[key] = company
+        self._by_name = name_index
 
     @classmethod
-    def from_watcher_config(cls) -> CompanyCatalog:
-        watcher = load_watchlist()
+    def from_watcher_config(
+        cls,
+        watcher: WatcherConfig | None = None,
+    ) -> CompanyCatalog:
+        watcher = watcher or load_watchlist()
         has_backstop = bool(watcher.effective_github_listing_sources())
         return cls(
             tuple(
                 _public_company(company, has_backstop) for company in watcher.companies
             )
         )
+
+    def resolve(self, name_or_id: str) -> PublicCompany | None:
+        """Resolve a catalog ID, canonical name, or unambiguous public alias."""
+
+        value = str(name_or_id or "").strip()
+        if not value:
+            return None
+        direct = self.by_id.get(value)
+        if direct is not None:
+            return direct
+        return self._by_name.get(company_slug(value))
 
 
 def _public_company(company: CompanyCfg, has_backstop: bool) -> PublicCompany:

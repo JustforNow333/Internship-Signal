@@ -1,11 +1,15 @@
 # Agents Guide
 
-## Scheduled collection promotion
+## Hosted matching Phase 2A
 
-- Keep the application default `serial`; the scheduled workflow explicitly
-  selects bounded concurrent collection at `4/1/2` after three passed canaries.
-- Roll back by changing only `WATCHER_COLLECTION_MODE` to `serial`. Do not alter
-  worker limits, pacing, retries, adapters, scoring, state, or notifications.
+- Work only in `C:\\Users\\burst\\internship-signal-hosted-matching` on
+  `agent/hosted-matching-phase-2`; leave every other worktree untouched.
+- Persist only final watcher-analyzed jobs in PostgreSQL. The watcher owns job
+  IDs, normalization, source precedence, dedupe, classification, and scoring.
+- Snapshot imports must be offline, transactional, idempotent by immutable
+  fingerprint, and side-effect-free for watcher state, email, and matches.
+- Preserve scheduled collection and its `serial` application default; do not
+  change concurrency, workflows, production state, or notification behavior.
 
 ## Required every prompt
 

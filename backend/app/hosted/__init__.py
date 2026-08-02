@@ -1,1 +1,1 @@
-"""Persistent hosted-product account services."""
+"""Persistent hosted-product account and watcher-job import services."""

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -22,6 +25,7 @@ from sqlalchemy.types import JSON
 from .database import Base
 
 JsonList = JSON().with_variant(JSONB(), "postgresql")
+JsonObject = JSON().with_variant(JSONB(), "postgresql")
 
 
 class TimestampMixin:
@@ -177,3 +181,139 @@ class UnsupportedCompanyRequest(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class HostedJob(TimestampMixin, Base):
+    __tablename__ = "hosted_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "role_id IN ('software_engineering', 'machine_learning_ai', "
+            "'data_science', 'data_engineering', 'quantitative_development', "
+            "'product_management', 'hardware_embedded', 'other_engineering')",
+            name="role_id",
+        ),
+        CheckConstraint(
+            "last_seen_at >= first_seen_at",
+            name="seen_timestamps",
+        ),
+        CheckConstraint(
+            "closed_at IS NULL OR closed_at >= first_seen_at",
+            name="closed_timestamp",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    watcher_job_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True
+    )
+    company_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    company_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    location: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    remote_status: Mapped[str] = mapped_column(
+        String(120), nullable=False, default=""
+    )
+    role_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    requirements: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    application_url: Mapped[str | None] = mapped_column(String(2048))
+    posting_date: Mapped[date | None] = mapped_column(Date)
+    deadline: Mapped[date | None] = mapped_column(Date)
+    is_open: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_metadata: Mapped[dict[str, object]] = mapped_column(
+        JsonObject, nullable=False, default=dict
+    )
+
+
+class HostedJobImportRun(TimestampMixin, Base):
+    __tablename__ = "hosted_job_import_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'succeeded', 'failed')",
+            name="status",
+        ),
+        CheckConstraint("jobs_received >= 0", name="jobs_received_nonnegative"),
+        CheckConstraint("jobs_inserted >= 0", name="jobs_inserted_nonnegative"),
+        CheckConstraint("jobs_updated >= 0", name="jobs_updated_nonnegative"),
+        CheckConstraint("jobs_unchanged >= 0", name="jobs_unchanged_nonnegative"),
+        CheckConstraint("jobs_skipped >= 0", name="jobs_skipped_nonnegative"),
+        CheckConstraint("matches_created = 0", name="matches_created_zero"),
+        CheckConstraint(
+            "(status = 'running' AND completed_at IS NULL) OR "
+            "(status IN ('succeeded', 'failed') AND completed_at IS NOT NULL)",
+            name="completion_state",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source_fingerprint: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    source_identifier: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    jobs_received: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    jobs_inserted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    jobs_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    jobs_unchanged: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    jobs_skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    matches_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failure_summary: Mapped[str | None] = mapped_column(String(400))
+
+    attempts: Mapped[list[HostedJobImportAttempt]] = relationship(
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        order_by="HostedJobImportAttempt.attempt_number",
+    )
+
+
+class HostedJobImportAttempt(Base):
+    __tablename__ = "hosted_job_import_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "import_run_id",
+            "attempt_number",
+            name="uq_hosted_job_import_attempts_run_number",
+        ),
+        CheckConstraint("attempt_number > 0", name="attempt_number_positive"),
+        CheckConstraint(
+            "status IN ('running', 'succeeded', 'failed')",
+            name="status",
+        ),
+        CheckConstraint(
+            "(status = 'running' AND completed_at IS NULL) OR "
+            "(status IN ('succeeded', 'failed') AND completed_at IS NOT NULL)",
+            name="completion_state",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    import_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "hosted_job_import_runs.id",
+            ondelete="CASCADE",
+            name="fk_hosted_import_attempt_run",
+        ),
+        nullable=False,
+        index=True,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    failure_summary: Mapped[str | None] = mapped_column(String(400))
+
+    import_run: Mapped[HostedJobImportRun] = relationship(back_populates="attempts")

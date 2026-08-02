@@ -173,6 +173,9 @@ def test_empty_database_migrates_to_expected_postgresql_schema(
         "hosted_user_preferences",
         "hosted_user_company_watches",
         "hosted_unsupported_company_requests",
+        "hosted_jobs",
+        "hosted_job_import_runs",
+        "hosted_job_import_attempts",
     }.issubset(tables)
     with database.engine.connect() as connection:
         data_type = connection.scalar(
@@ -183,7 +186,7 @@ def test_empty_database_migrates_to_expected_postgresql_schema(
         )
         revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
     assert data_type == "jsonb"
-    assert revision == "20260801_0001"
+    assert revision == "20260802_0002"
     database.dispose()
 
 

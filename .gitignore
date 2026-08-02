@@ -254,6 +254,9 @@ CLAUDE.local.md
 CLAUDE.*.md
 CLAUDE (*).md
 .claude/settings.local.json
+# Local hosted job-import diagnostics are not source artifacts.
+hosted-job-import*.log
+hosted-job-import*.json
 !/.gitignore
 !/agents.md
 !/claude.md

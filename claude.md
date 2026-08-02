@@ -1,9 +1,12 @@
 # Claude Repository Guide
 
-- Keep the application collection default `serial`; the scheduled workflow
-  explicitly selects bounded concurrent collection at `4/1/2` after three
-  passed canaries. Roll back by changing only `WATCHER_COLLECTION_MODE` to
-  `serial`; do not alter limits or watcher behavior.
+- Implement hosted matching Phase 2A only in
+  `C:\\Users\\burst\\internship-signal-hosted-matching` on
+  `agent/hosted-matching-phase-2`; leave all other worktrees untouched.
+- PostgreSQL imports accept only final watcher-analyzed jobs and use the watcher
+  job ID as their sole identity. Keep snapshot replay offline, transactional,
+  idempotent, and free of watcher-state, email, or matching side effects.
+- Preserve collection concurrency, workflows, production state, and alerts.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.
