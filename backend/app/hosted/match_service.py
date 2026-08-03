@@ -47,6 +47,7 @@ class ReconciliationOutcome:
     reactivated: int = 0
     deactivated: int = 0
     refreshed: int = 0
+    created_match_ids: tuple[uuid.UUID, ...] = ()
 
     def merged(self, other: ReconciliationOutcome) -> ReconciliationOutcome:
         return ReconciliationOutcome(
@@ -54,6 +55,7 @@ class ReconciliationOutcome:
             reactivated=self.reactivated + other.reactivated,
             deactivated=self.deactivated + other.deactivated,
             refreshed=self.refreshed + other.refreshed,
+            created_match_ids=self.created_match_ids + other.created_match_ids,
         )
 
 
@@ -287,7 +289,7 @@ def _apply(
             )
             if inserted is None:
                 return ReconciliationOutcome()
-            return ReconciliationOutcome(created=1)
+            return ReconciliationOutcome(created=1, created_match_ids=(inserted,))
         if existing.no_longer_matches_at is not None:
             existing.no_longer_matches_at = None
             existing.match_reasons = reasons

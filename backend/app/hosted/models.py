@@ -390,3 +390,206 @@ class HostedJobImportAttempt(Base):
     failure_summary: Mapped[str | None] = mapped_column(String(400))
 
     import_run: Mapped[HostedJobImportRun] = relationship(back_populates="attempts")
+
+
+class HostedNotificationBatch(TimestampMixin, Base):
+    """One durable, leased unit of hosted internship-match delivery."""
+
+    __tablename__ = "hosted_notification_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "frequency IN ('as_detected', 'three_hour', 'daily')",
+            name="frequency",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'sent', 'permanent_failed', "
+            "'uncertain', 'cancelled')",
+            name="status",
+        ),
+        CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
+        CheckConstraint(
+            "(frequency = 'as_detected' AND source_import_run_id IS NOT NULL) OR "
+            "(frequency IN ('three_hour', 'daily') AND source_import_run_id IS NULL)",
+            name="source_import_frequency",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND processing_token IS NULL AND "
+            "processing_started_at IS NULL AND lease_expires_at IS NULL AND "
+            "send_started_at IS NULL AND sent_at IS NULL AND cancelled_at IS NULL) OR "
+            "(status = 'processing' AND processing_token IS NOT NULL AND "
+            "processing_started_at IS NOT NULL AND lease_expires_at IS NOT NULL AND "
+            "sent_at IS NULL AND cancelled_at IS NULL) OR "
+            "(status = 'sent' AND processing_token IS NULL AND "
+            "processing_started_at IS NULL AND lease_expires_at IS NULL AND "
+            "send_started_at IS NOT NULL AND sent_at IS NOT NULL AND "
+            "cancelled_at IS NULL) OR "
+            "(status IN ('permanent_failed', 'uncertain') AND "
+            "processing_token IS NULL AND processing_started_at IS NULL AND "
+            "lease_expires_at IS NULL AND send_started_at IS NOT NULL AND "
+            "sent_at IS NULL AND cancelled_at IS NULL) OR "
+            "(status = 'cancelled' AND processing_token IS NULL AND "
+            "processing_started_at IS NULL AND lease_expires_at IS NULL AND "
+            "send_started_at IS NULL AND sent_at IS NULL AND cancelled_at IS NOT NULL)",
+            name="lifecycle",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "source_import_run_id",
+            name="uq_hosted_notification_batches_user_import",
+        ),
+        UniqueConstraint(
+            "email_message_id",
+            name="uq_hosted_notification_batches_message_id",
+        ),
+        Index(
+            "ix_hosted_notification_batches_due_pending",
+            "due_at",
+            "next_attempt_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index(
+            "ix_hosted_notification_batches_expired_leases",
+            "lease_expires_at",
+            postgresql_where=text("status = 'processing'"),
+        ),
+        Index(
+            "ix_hosted_notification_batches_user_history",
+            "user_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("hosted_users.id", ondelete="CASCADE"), nullable=False
+    )
+    frequency: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    processing_token: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    processing_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    send_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    email_message_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(64))
+    source_import_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "hosted_job_import_runs.id",
+            ondelete="RESTRICT",
+            name="fk_hosted_notif_batches_import_run",
+        )
+    )
+
+    items: Mapped[list[HostedNotificationItem]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan"
+    )
+    attempts: Mapped[list[HostedNotificationAttempt]] = relationship(
+        back_populates="batch",
+        cascade="all, delete-orphan",
+        order_by="HostedNotificationAttempt.attempt_number",
+    )
+
+
+class HostedNotificationItem(TimestampMixin, Base):
+    __tablename__ = "hosted_notification_items"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'sent', 'cancelled')", name="status"),
+        CheckConstraint(
+            "(status = 'pending' AND sent_at IS NULL AND cancelled_at IS NULL AND "
+            "cancellation_reason IS NULL) OR "
+            "(status = 'sent' AND sent_at IS NOT NULL AND cancelled_at IS NULL AND "
+            "cancellation_reason IS NULL) OR "
+            "(status = 'cancelled' AND sent_at IS NULL AND cancelled_at IS NOT NULL "
+            "AND cancellation_reason IS NOT NULL)",
+            name="lifecycle",
+        ),
+        UniqueConstraint(
+            "user_job_match_id",
+            name="uq_hosted_notification_items_user_job_match",
+        ),
+        Index("ix_hosted_notification_items_batch", "batch_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "hosted_notification_batches.id",
+            ondelete="CASCADE",
+            name="fk_hosted_notif_items_batch",
+        ),
+        nullable=False,
+    )
+    user_job_match_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "hosted_user_job_matches.id",
+            ondelete="CASCADE",
+            name="fk_hosted_notif_items_match",
+        ),
+        nullable=False,
+    )
+    source_import_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "hosted_job_import_runs.id",
+            ondelete="RESTRICT",
+            name="fk_hosted_notif_items_import_run",
+        ),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    cancellation_reason: Mapped[str | None] = mapped_column(String(64))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    batch: Mapped[HostedNotificationBatch] = relationship(back_populates="items")
+
+
+class HostedNotificationAttempt(Base):
+    __tablename__ = "hosted_notification_attempts"
+    __table_args__ = (
+        CheckConstraint("attempt_number > 0", name="attempt_number_positive"),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('sent', 'retryable_failure', "
+            "'permanent_failure', 'uncertain')",
+            name="outcome",
+        ),
+        CheckConstraint(
+            "(completed_at IS NULL AND outcome IS NULL AND error_code IS NULL) OR "
+            "(completed_at IS NOT NULL AND outcome = 'sent' AND error_code IS NULL) OR "
+            "(completed_at IS NOT NULL AND outcome IN ('retryable_failure', "
+            "'permanent_failure', 'uncertain') AND error_code IS NOT NULL)",
+            name="lifecycle",
+        ),
+        UniqueConstraint(
+            "batch_id",
+            "attempt_number",
+            name="uq_hosted_notification_attempts_batch_number",
+        ),
+        Index("ix_hosted_notification_attempts_batch", "batch_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "hosted_notification_batches.id",
+            ondelete="CASCADE",
+            name="fk_hosted_notif_attempts_batch",
+        ),
+        nullable=False,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[str | None] = mapped_column(String(32))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+
+    batch: Mapped[HostedNotificationBatch] = relationship(back_populates="attempts")

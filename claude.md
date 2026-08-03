@@ -1,8 +1,9 @@
 # Claude Repository Guide
 
-- Phase 2B builds persisted per-user matching on `agent/phase2b-user-matching`
-  from `origin/main` at `0aa9c1d`. Do not push or merge without explicit
-  instruction, and do not implement Phase 3 delivery.
+- Phase 3A builds durable hosted notification creation, rolling digests, and
+  one-shot delivery on `agent/phase3a-notification-delivery` from `origin/main`
+  at `d797c0b`. Do not push or merge without explicit instruction. Scheduling,
+  automated watcher runs/imports, and daemon workers remain Phase 3B.
 - `hosted_user_job_matches` holds one durable row per `(user_id, job_id)`.
   Reconciliation never deletes history: losing a match stamps
   `no_longer_matches_at`, a later rematch clears it, and `saved_at`/
@@ -21,6 +22,19 @@
   final watcher IDs structural failures.
 - Preserve unaffected classifications and IDs, keep replay offline and
   watcher-state safe.
+- Phase 3A enqueueing is import-only and shares the job/match transaction. It
+  accepts only newly inserted matches for active, verified, unpaused users;
+  preference/watch reconciliation, reactivation, and `already_imported` never
+  create notification backlog.
+- Durable batches/items/attempts live only in hosted PostgreSQL. As-detected
+  groups by user/import; three-hour and daily use rolling first-item windows.
+  The one-shot worker claims with `SKIP LOCKED`, token and 10-minute lease,
+  commits before SMTP, retries safely at 1/5/15/60 minutes up to five attempts,
+  and makes post-submission ambiguity terminal `uncertain`.
+- Delivery revalidates users, frequency, matches, dismissals, and job openness.
+  Use only hosted SMTP, resolve the verified address when sending, reuse the
+  deterministic Message-ID, and never store/log addresses, bodies, raw SMTP
+  errors, descriptions, source metadata, or watcher delivery state.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.

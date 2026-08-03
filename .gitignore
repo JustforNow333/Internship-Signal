@@ -275,6 +275,12 @@ hosted-matching-push-verification*.log
 hosted-main-integration*.log
 hosted-main-push-verification*.log
 hosted-main-final-push*.log
+# Hosted notification delivery/smoke diagnostics may contain operational IDs
+# and timings. Reusable tests and scripts remain tracked.
+hosted-notification*.log
+hosted-notification*.json
+phase3a-notification-smoke*.log
+phase3a-notification-smoke*.json
 !/.gitignore
 !/agents.md
 !/claude.md

@@ -23,6 +23,7 @@ from .job_mapper import (
 )
 from .match_service import reconcile_jobs
 from .models import HostedJob, HostedJobImportAttempt, HostedJobImportRun
+from .notification_enqueue import enqueue_import_notifications
 from .services import utc_now
 
 _FINGERPRINT_RE = re.compile(r"[0-9a-f]{64}")
@@ -163,6 +164,12 @@ class JobImportService:
                 # succeeded run can never report partially applied matches.
                 reconciliation = reconcile_jobs(
                     db, affected_job_ids, now=observed_at
+                )
+                enqueue_import_notifications(
+                    db,
+                    reconciliation.created_match_ids,
+                    import_run_id=run.id,
+                    now=observed_at,
                 )
 
                 run.status = "succeeded"

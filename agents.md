@@ -2,10 +2,10 @@
 
 ## Current integration
 
-- Phase 2B builds persisted per-user matching on `agent/phase2b-user-matching`
-  from `origin/main` at `0aa9c1d`. Do not push or merge without explicit
-  instruction, and do not implement Phase 3 delivery (email, digests, queues,
-  workers, or scheduled imports).
+- Phase 3A builds durable hosted notification creation, rolling digests, and
+  one-shot delivery on `agent/phase3a-notification-delivery` from `origin/main`
+  at `d797c0b`. Do not push or merge without explicit instruction. Scheduling,
+  automated watcher runs/imports, and daemon workers remain Phase 3B.
 - Keep classification authoritative in the watcher. Hosted import must gate on
   the watcher internship/co-op predicate before role mapping and keep duplicate
   final watcher IDs structural failures.
@@ -44,6 +44,29 @@
 - Save and dismiss are independent states; dismissing never clears a save.
 - Live frontend mode calls the real endpoints; mock mode keeps working and must
   display the demo-data banner, which live mode must never show.
+
+## Hosted notification delivery (Phase 3A)
+
+- Import-only notification enqueueing runs in the same PostgreSQL transaction
+  as job persistence and Phase 2B reconciliation. Only newly inserted match
+  rows for active, verified, unpaused users create items; reconciliation,
+  reactivation, and `already_imported` never enqueue backlog.
+- `hosted_notification_batches`, `hosted_notification_items`, and
+  `hosted_notification_attempts` own delivery state. As-detected batches group
+  by user/import; three-hour and daily batches use rolling windows from the
+  first item. Only unclaimed pending batches accept new items.
+- `python -m app.hosted.deliver_notifications --limit 25` is one-shot. Claims
+  use `FOR UPDATE SKIP LOCKED`, random tokens, and 10-minute leases, with no
+  transaction held during SMTP. Expiry before submission returns to pending;
+  expiry after `send_started_at` becomes non-retryable `uncertain`.
+- Retryable failures wait 1, 5, 15, then 60 minutes and stop after five
+  attempts. Permanent failures stop immediately; ambiguous post-submission
+  outcomes are never automatically retried. Store only allowlisted codes and
+  reuse the batch's deterministic Message-ID.
+- Delivery revalidates account, preferences, matches, and open jobs. Digests
+  use the hosted SMTP settings, resolve the verified address at send time, and
+  never store/log recipients, bodies, raw SMTP errors, descriptions, or source
+  metadata. Watcher SQLite and watcher email state remain separate.
 
 ## Required every prompt
 
