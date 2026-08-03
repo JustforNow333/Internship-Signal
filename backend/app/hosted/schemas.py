@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -12,8 +12,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 
 from .security import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, normalized_email
@@ -208,3 +210,60 @@ class CompanyRequestResponse(BaseModel):
     career_url: str | None
     status: Literal["received"]
     created_at: datetime
+
+
+MATCH_VIEWS = ("active", "saved", "dismissed", "historical", "all")
+MATCH_PAGE_LIMIT = 50
+MATCH_PAGE_MAX_LIMIT = 100
+MATCH_MAX_OFFSET = 10_000
+
+
+class MatchReason(BaseModel):
+    code: str
+    value: str | None = None
+
+
+class MatchResponse(BaseModel):
+    id: uuid.UUID
+    job_id: uuid.UUID
+    company_id: str
+    company: str
+    title: str
+    location: str
+    remote: bool
+    remote_status: str
+    role_id: str
+    application_url: str | None
+    posting_date: date | None
+    deadline: date | None
+    is_open: bool
+    match_reasons: list[MatchReason]
+    matched_at: datetime
+    last_matched_at: datetime
+    no_longer_matches_at: datetime | None
+    saved_at: datetime | None
+    dismissed_at: datetime | None
+
+
+class MatchListResponse(BaseModel):
+    items: list[MatchResponse]
+    limit: int
+    offset: int
+    total: int
+    has_more: bool
+
+
+class MatchUpdate(BaseModel):
+    """Only user-owned save/dismiss state may be changed by a client."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # StrictBool keeps "yes"/1 from being coerced into a save or dismiss.
+    saved: StrictBool | None = None
+    dismissed: StrictBool | None = None
+
+    @model_validator(mode="after")
+    def at_least_one_change(self) -> MatchUpdate:
+        if self.saved is None and self.dismissed is None:
+            raise ValueError("Provide saved or dismissed.")
+        return self

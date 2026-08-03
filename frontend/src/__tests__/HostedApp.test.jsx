@@ -276,9 +276,18 @@ describe("hosted Internship Signal MVP", () => {
     await screen.findByRole("heading", { name: "Good morning." });
     const save = screen.getAllByRole("button", { name: "☆ Save" })[0];
 
+    // Saving now persists through the hosted API, so the label updates after
+    // the request resolves rather than from local-only component state.
     fireEvent.click(save);
-    expect(screen.getByRole("button", { name: "★ Saved" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "★ Saved" }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "★ Saved" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "★ Saved" }),
+      ).not.toBeInTheDocument(),
+    );
     expect(
       screen.getAllByRole("button", { name: "☆ Save" }).length,
     ).toBeGreaterThan(0);
@@ -303,7 +312,9 @@ describe("hosted Internship Signal MVP", () => {
     renderApp("/app/matches");
     await screen.findByRole("heading", { name: "Matches" });
     fireEvent.click(screen.getAllByRole("button", { name: "☆ Save" })[0]);
-    expect(screen.getByRole("button", { name: "★ Saved" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "★ Saved" }),
+    ).toBeInTheDocument();
   });
 
   it("opens a match with reasons, source, and a prominent application action", async () => {

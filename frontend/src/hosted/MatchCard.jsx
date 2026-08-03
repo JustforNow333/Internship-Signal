@@ -5,6 +5,7 @@ export default function MatchCard({
   onOpen,
   saved = false,
   onToggleSaved,
+  onDismiss,
   compact = false,
 }) {
   const freshness = freshnessFor(match.detected_at);
@@ -43,15 +44,25 @@ export default function MatchCard({
             {saved ? "★ Saved" : "☆ Save"}
           </button>
         )}
+        {onDismiss && (
+          <button
+            className="dismiss-button"
+            onClick={() => onDismiss(match.id)}
+          >
+            Dismiss
+          </button>
+        )}
         <button onClick={() => onOpen(match)}>View details</button>
-        <a
-          className="button-link primary-link"
-          href={match.source_url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Apply now ↗
-        </a>
+        {match.source_url && (
+          <a
+            className="button-link primary-link"
+            href={match.source_url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Apply now ↗
+          </a>
+        )}
       </div>
     </article>
   );

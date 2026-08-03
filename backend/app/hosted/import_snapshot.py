@@ -93,7 +93,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"updated={counters.jobs_updated} "
         f"unchanged={counters.jobs_unchanged} "
         f"skipped={counters.jobs_skipped} "
-        "matches_created=0"
+        f"matches_created={counters.matches_created}"
     )
     if result.skipped_reasons:
         reasons = ",".join(

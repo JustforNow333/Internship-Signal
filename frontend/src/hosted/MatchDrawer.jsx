@@ -42,14 +42,16 @@ export default function MatchDrawer({ match, onClose }) {
           <time dateTime={match.detected_at}>
             {relativeDetection(match.detected_at)}
           </time>
-          <a
-            className="button-link primary-link drawer-apply"
-            href={match.source_url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Apply on {match.company}’s site ↗
-          </a>
+          {match.source_url && (
+            <a
+              className="button-link primary-link drawer-apply"
+              href={match.source_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Apply on {match.company}’s site ↗
+            </a>
+          )}
         </div>
         <section>
           <h3>Why this matched</h3>
@@ -62,10 +64,12 @@ export default function MatchDrawer({ match, onClose }) {
             ))}
           </ul>
         </section>
-        <section>
-          <h3>About this internship</h3>
-          <p>{match.summary}</p>
-        </section>
+        {match.summary && (
+          <section>
+            <h3>About this internship</h3>
+            <p>{match.summary}</p>
+          </section>
+        )}
         {match.responsibilities?.length > 0 && (
           <section>
             <h3>What you’ll do</h3>
@@ -86,26 +90,30 @@ export default function MatchDrawer({ match, onClose }) {
             </ul>
           </section>
         )}
-        <section className="source-section">
-          <h3>Source</h3>
-          <p>
-            Review the employer’s source posting for the complete, current
-            requirements and deadline.
-          </p>
-          <a href={match.source_url} target="_blank" rel="noreferrer">
-            Open source posting ↗
-          </a>
-        </section>
-        <div className="drawer-sticky-action">
-          <a
-            className="button-link primary-link large"
-            href={match.source_url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Apply now ↗
-          </a>
-        </div>
+        {match.source_url && (
+          <section className="source-section">
+            <h3>Source</h3>
+            <p>
+              Review the employer’s source posting for the complete, current
+              requirements and deadline.
+            </p>
+            <a href={match.source_url} target="_blank" rel="noreferrer">
+              Open source posting ↗
+            </a>
+          </section>
+        )}
+        {match.source_url && (
+          <div className="drawer-sticky-action">
+            <a
+              className="button-link primary-link large"
+              href={match.source_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Apply now ↗
+            </a>
+          </div>
+        )}
       </aside>
     </>
   );

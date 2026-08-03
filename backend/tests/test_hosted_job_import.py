@@ -215,6 +215,7 @@ def test_phase2_migration_creates_postgresql_tables_and_jsonb(
         "hosted_jobs",
         "hosted_job_import_runs",
         "hosted_job_import_attempts",
+        "hosted_user_job_matches",
     }.issubset(inspector.get_table_names())
     with database.engine.connect() as connection:
         source_metadata_type = connection.exec_driver_sql(
@@ -225,7 +226,7 @@ def test_phase2_migration_creates_postgresql_tables_and_jsonb(
             "SELECT version_num FROM alembic_version"
         ).scalar_one()
     assert source_metadata_type == "jsonb"
-    assert revision == "20260802_0002"
+    assert revision == "20260803_0003"
     database.dispose()
 
 

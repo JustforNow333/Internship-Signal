@@ -21,6 +21,7 @@ from .job_mapper import (
     MappedJobs,
     map_final_jobs,
 )
+from .match_service import reconcile_jobs
 from .models import HostedJob, HostedJobImportAttempt, HostedJobImportRun
 from .services import utc_now
 
@@ -146,14 +147,23 @@ class JobImportService:
                     or attempt.status != "running"
                 ):
                     raise ImportAlreadyRunning()
+                affected_job_ids: list[uuid.UUID] = []
                 for mapped_job in mapped.jobs:
-                    outcome = self._upsert_job(db, mapped_job, observed_at)
+                    outcome, job_id = self._upsert_job(db, mapped_job, observed_at)
                     if outcome == "inserted":
                         inserted += 1
+                        affected_job_ids.append(job_id)
                     elif outcome == "updated":
                         updated += 1
+                        affected_job_ids.append(job_id)
                     else:
                         unchanged += 1
+
+                # Reconciliation shares the job-persistence transaction, so a
+                # succeeded run can never report partially applied matches.
+                reconciliation = reconcile_jobs(
+                    db, affected_job_ids, now=observed_at
+                )
 
                 run.status = "succeeded"
                 run.completed_at = observed_at
@@ -162,7 +172,7 @@ class JobImportService:
                 run.jobs_updated = updated
                 run.jobs_unchanged = unchanged
                 run.jobs_skipped = mapped.jobs_skipped
-                run.matches_created = 0
+                run.matches_created = reconciliation.created
                 run.failure_summary = None
                 run.updated_at = observed_at
                 attempt.status = "succeeded"
@@ -179,6 +189,7 @@ class JobImportService:
                     jobs_updated=updated,
                     jobs_unchanged=unchanged,
                     jobs_skipped=mapped.jobs_skipped,
+                    matches_created=reconciliation.created,
                 ),
                 skipped_reasons=mapped.skipped_reasons,
             )
@@ -338,7 +349,7 @@ class JobImportService:
         db: Session,
         mapped: MappedJob,
         observed_at: datetime,
-    ) -> str:
+    ) -> tuple[str, uuid.UUID]:
         values = mapped.business_values()
         inserted_id = db.scalar(
             postgresql_insert(HostedJob)
@@ -355,7 +366,7 @@ class JobImportService:
             .returning(HostedJob.id)
         )
         if inserted_id is not None:
-            return "inserted"
+            return "inserted", inserted_id
         existing = db.scalar(
             select(HostedJob)
             .where(HostedJob.watcher_job_id == mapped.watcher_job_id)
@@ -380,7 +391,7 @@ class JobImportService:
             changed = True
         existing.last_seen_at = observed_at
         existing.updated_at = observed_at
-        return "updated" if changed else "unchanged"
+        return ("updated" if changed else "unchanged"), existing.id
 
     def _record_failure(
         self,

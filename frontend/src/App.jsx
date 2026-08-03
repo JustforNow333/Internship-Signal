@@ -189,6 +189,26 @@ export default function App({ client = hostedApi, initialPath }) {
     [client],
   );
 
+  const updateMatch = useCallback(
+    async (matchId, changes) => {
+      const updated = await client.updateMatch(matchId, changes);
+      setResource((current) => {
+        if (!current.data) return current;
+        return {
+          ...current,
+          data: {
+            ...current.data,
+            matches: current.data.matches.map((match) =>
+              match.id === matchId ? { ...match, ...updated } : match,
+            ),
+          },
+        };
+      });
+      return updated;
+    },
+    [client],
+  );
+
   const saveWatchlist = useCallback(
     async (entries) => {
       const saved = await client.updateWatchlist({ companies: entries });
@@ -295,6 +315,7 @@ export default function App({ client = hostedApi, initialPath }) {
       matchCount={newMatchCount}
       onLogout={logout}
       sessionError={sessionError}
+      demoData={client.mode === "mock"}
     >
       {resource.status !== "ready" ? (
         <AsyncPanel
@@ -305,9 +326,15 @@ export default function App({ client = hostedApi, initialPath }) {
       ) : (
         <>
           {appPath === "/app/dashboard" && (
-            <DashboardPage navigate={navigate} data={data} />
+            <DashboardPage
+              navigate={navigate}
+              data={data}
+              updateMatch={updateMatch}
+            />
           )}
-          {appPath === "/app/matches" && <MatchesPage matches={data.matches} />}
+          {appPath === "/app/matches" && (
+            <MatchesPage matches={data.matches} updateMatch={updateMatch} />
+          )}
           {appPath === "/app/watchlist" && (
             <WatchlistPage
               companies={data.companies}

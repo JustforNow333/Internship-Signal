@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import timedelta
 from urllib.parse import urlencode
 
@@ -11,10 +12,11 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Query,
     Response,
     status,
 )
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -24,16 +26,24 @@ from .mailer import (
     password_reset_message,
     verification_message,
 )
+from .match_service import reconcile_user
+from .matching import bounded_reasons, is_remote, job_from_model
 from .models import (
     AuthenticationSession,
     EmailVerificationToken,
+    HostedJob,
     PasswordResetToken,
     UnsupportedCompanyRequest,
     User,
     UserCompanyWatch,
+    UserJobMatch,
     UserPreference,
 )
 from .schemas import (
+    MATCH_MAX_OFFSET,
+    MATCH_PAGE_LIMIT,
+    MATCH_PAGE_MAX_LIMIT,
+    MATCH_VIEWS,
     AcceptedResponse,
     AuthCredentials,
     AuthResponse,
@@ -42,6 +52,10 @@ from .schemas import (
     CompanyResponse,
     CompanyWatchResponse,
     EmailRequest,
+    MatchListResponse,
+    MatchReason,
+    MatchResponse,
+    MatchUpdate,
     PreferencesResponse,
     PreferencesUpdate,
     ResetPasswordRequest,
@@ -452,13 +466,24 @@ def put_preferences(
         raise HTTPException(
             status_code=500, detail="Account preferences are unavailable."
         )
+    # Alert frequency and the global pause govern Phase 3 delivery only, so
+    # they deliberately do not trigger match reconciliation.
+    matching_changed = (
+        list(preferences.role_ids) != list(payload.role_ids)
+        or list(preferences.preferred_locations) != list(payload.preferred_locations)
+        or preferences.include_remote != payload.include_remote
+        or preferences.internship_season != payload.internship_season
+    )
     preferences.role_ids = list(payload.role_ids)
     preferences.preferred_locations = list(payload.preferred_locations)
     preferences.include_remote = payload.include_remote
     preferences.internship_season = payload.internship_season
     preferences.alert_frequency = payload.alert_frequency
     preferences.globally_paused = payload.globally_paused
-    preferences.updated_at = services.clock()
+    now = services.clock()
+    preferences.updated_at = now
+    if matching_changed:
+        reconcile_user(db, identity.user.id, now=now)
     db.commit()
     return _preferences_response(preferences)
 
@@ -503,6 +528,18 @@ def put_watchlist(
             status_code=400, detail="Watchlist contains an unsupported company."
         )
     now = services.clock()
+    previous = db.scalars(
+        select(UserCompanyWatch).where(UserCompanyWatch.user_id == identity.user.id)
+    ).all()
+    # Additions, removals, pauses, and resumes all reconcile, but only for the
+    # companies whose watch state actually changed.
+    previous_state = {watch.company_id: watch.paused for watch in previous}
+    next_state = {entry.company_id: entry.paused for entry in payload.companies}
+    affected = sorted(
+        company_id
+        for company_id in set(previous_state) | set(next_state)
+        if previous_state.get(company_id) != next_state.get(company_id)
+    )
     db.execute(
         delete(UserCompanyWatch).where(UserCompanyWatch.user_id == identity.user.id)
     )
@@ -517,8 +554,132 @@ def put_watchlist(
         for entry in payload.companies
     ]
     db.add_all(watches)
+    if affected:
+        db.flush()
+        reconcile_user(db, identity.user.id, now=now, company_ids=affected)
     db.commit()
     return [_watch_response(watch) for watch in watches]
+
+
+def _match_response(match: UserJobMatch, job: HostedJob) -> MatchResponse:
+    return MatchResponse(
+        id=match.id,
+        job_id=job.id,
+        company_id=job.company_id,
+        company=job.company_name,
+        title=job.title,
+        location=job.location,
+        remote=is_remote(job_from_model(job)),
+        remote_status=job.remote_status,
+        role_id=job.role_id,
+        application_url=job.application_url,
+        posting_date=job.posting_date,
+        deadline=job.deadline,
+        is_open=job.is_open,
+        match_reasons=[
+            MatchReason(code=reason["code"], value=reason.get("value"))
+            for reason in bounded_reasons(match.match_reasons)
+        ],
+        matched_at=match.matched_at,
+        last_matched_at=match.last_matched_at,
+        no_longer_matches_at=match.no_longer_matches_at,
+        saved_at=match.saved_at,
+        dismissed_at=match.dismissed_at,
+    )
+
+
+def _match_view_filters(view: str):
+    if view == "saved":
+        return (UserJobMatch.saved_at.is_not(None),)
+    if view == "dismissed":
+        return (UserJobMatch.dismissed_at.is_not(None),)
+    if view == "historical":
+        return (UserJobMatch.no_longer_matches_at.is_not(None),)
+    if view == "all":
+        return ()
+    # The default view is the user's current, undismissed matches.
+    return (
+        UserJobMatch.no_longer_matches_at.is_(None),
+        UserJobMatch.dismissed_at.is_(None),
+    )
+
+
+@router.get("/matches", response_model=MatchListResponse)
+def list_matches(
+    view: str = Query(default="active"),
+    limit: int = Query(default=MATCH_PAGE_LIMIT, ge=1, le=MATCH_PAGE_MAX_LIMIT),
+    offset: int = Query(default=0, ge=0, le=MATCH_MAX_OFFSET),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: Session = Depends(get_db),
+) -> MatchListResponse:
+    if view not in MATCH_VIEWS:
+        raise HTTPException(status_code=400, detail="Unsupported match view.")
+    filters = _match_view_filters(view)
+    total = db.scalar(
+        select(func.count())
+        .select_from(UserJobMatch)
+        .where(UserJobMatch.user_id == identity.user.id, *filters)
+    )
+    rows = db.execute(
+        select(UserJobMatch, HostedJob)
+        .join(HostedJob, HostedJob.id == UserJobMatch.job_id)
+        .where(UserJobMatch.user_id == identity.user.id, *filters)
+        .order_by(UserJobMatch.matched_at.desc(), UserJobMatch.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    items = [_match_response(match, job) for match, job in rows]
+    return MatchListResponse(
+        items=items,
+        limit=limit,
+        offset=offset,
+        total=int(total or 0),
+        has_more=offset + len(items) < int(total or 0),
+    )
+
+
+def _owned_match(db: Session, user_id, match_id):
+    """Ownership is part of the lookup, so another user's row is a 404."""
+
+    row = db.execute(
+        select(UserJobMatch, HostedJob)
+        .join(HostedJob, HostedJob.id == UserJobMatch.job_id)
+        .where(UserJobMatch.id == match_id, UserJobMatch.user_id == user_id)
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    return row
+
+
+@router.get("/matches/{match_id}", response_model=MatchResponse)
+def get_match(
+    match_id: uuid.UUID,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: Session = Depends(get_db),
+) -> MatchResponse:
+    match, job = _owned_match(db, identity.user.id, match_id)
+    return _match_response(match, job)
+
+
+@router.patch("/matches/{match_id}", response_model=MatchResponse)
+def update_match(
+    match_id: uuid.UUID,
+    payload: MatchUpdate,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: Session = Depends(get_db),
+    services: HostedServices = Depends(get_services),
+) -> MatchResponse:
+    match, job = _owned_match(db, identity.user.id, match_id)
+    now = services.clock()
+    # Save and dismiss are independent states: the current frontend exposes a
+    # save toggle only, so dismissing never silently clears a save.
+    if payload.saved is not None:
+        match.saved_at = now if payload.saved else None
+    if payload.dismissed is not None:
+        match.dismissed_at = now if payload.dismissed else None
+    match.updated_at = now
+    db.commit()
+    return _match_response(match, job)
 
 
 @router.post(

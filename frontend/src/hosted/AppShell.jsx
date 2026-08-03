@@ -14,6 +14,7 @@ export default function AppShell({
   matchCount,
   onLogout,
   sessionError,
+  demoData = false,
   children,
 }) {
   return (
@@ -57,6 +58,11 @@ export default function AppShell({
         </div>
       </header>
       <main className="app-main">
+        {demoData && (
+          <div className="demo-banner" role="note">
+            Demo data — these listings are examples and are not live detections.
+          </div>
+        )}
         {sessionError && (
           <div className="error-banner" role="alert">
             {sessionError}

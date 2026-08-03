@@ -2,13 +2,48 @@
 
 ## Current integration
 
-- Fix and verify the Phase 2A role-recall and hosted internship-scope defects
-  on `agent/phase2a-role-recall-fix`; do not begin Phase 2B.
+- Phase 2B builds persisted per-user matching on `agent/phase2b-user-matching`
+  from `origin/main` at `0aa9c1d`. Do not push or merge without explicit
+  instruction, and do not implement Phase 3 delivery (email, digests, queues,
+  workers, or scheduled imports).
 - Keep classification authoritative in the watcher. Hosted import must gate on
   the watcher internship/co-op predicate before role mapping and keep duplicate
   final watcher IDs structural failures.
 - Preserve unaffected classifications and IDs, keep replay offline and
-  watcher-state safe, and do not push or merge without explicit instruction.
+  watcher-state safe.
+
+## Hosted per-user matching (Phase 2B)
+
+- `hosted_user_job_matches` (Alembic `20260803_0003`) stores one durable row per
+  `(user_id, job_id)` with bounded JSONB reasons, `matched_at`,
+  `last_matched_at`, and nullable `no_longer_matches_at`, `saved_at`, and
+  `dismissed_at`. Rows cascade with the account and are never deleted when
+  preferences change.
+- `hosted/matching.py` is pure and database-free. All hard constraints must
+  pass: watched and unpaused company, open job, selected hosted role,
+  location/remote compatibility, then season compatibility. Never use watcher
+  fit scores, LLM or fuzzy ranking, resume inference, personalized ranking,
+  alert frequency, the global pause, or email-delivery settings.
+- Season is derived from posting titles only; titles without season evidence
+  stay compatible, matching the repository rule that ambiguity passes.
+  `include_remote=false` excludes remote postings outright.
+- Reasons use allowlisted codes carrying only catalog identifiers. Never store
+  descriptions, raw preference payloads, secrets, or source metadata.
+- `hosted/match_service.py` reconciles by job (import) and by user
+  (preferences, company watches), restricting candidates by company watch and
+  existing rows rather than scanning all users by all jobs. Repeat passes with
+  unchanged inputs write nothing.
+- Import reconciliation runs inside the job-persistence transaction.
+  `matches_created` counts only newly inserted rows — never reactivations,
+  timestamp-only updates, or saved/dismissed changes — and `already_imported`
+  changes no rows or timestamps.
+- `GET /api/matches`, `GET /api/matches/{id}`, and `PATCH /api/matches/{id}`
+  are ownership-scoped: another user's UUID returns the ordinary 404. The list
+  defaults to active, undismissed matches with bounded `view`, `limit`, and
+  `offset`. PATCH accepts only strict-boolean `saved`/`dismissed`.
+- Save and dismiss are independent states; dismissing never clears a save.
+- Live frontend mode calls the real endpoints; mock mode keeps working and must
+  display the demo-data banner, which live mode must never show.
 
 ## Required every prompt
 

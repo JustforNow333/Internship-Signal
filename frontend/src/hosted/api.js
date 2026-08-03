@@ -1,4 +1,16 @@
 import { makeHostedFixtures } from "./fixtures.js";
+import { normalizeMatch, normalizeMatchList } from "./matchModel.js";
+
+export const MATCH_VIEWS = ["active", "saved", "dismissed", "historical", "all"];
+
+function matchQuery({ view, limit, offset } = {}) {
+  const query = new URLSearchParams();
+  if (view) query.set("view", view);
+  if (limit != null) query.set("limit", String(limit));
+  if (offset != null) query.set("offset", String(offset));
+  const encoded = query.toString();
+  return encoded ? `?${encoded}` : "";
+}
 
 export class HostedApiError extends Error {
   constructor(message, status, details = null) {
@@ -61,6 +73,7 @@ export function createHttpHostedApi({
   const call = (path, options) =>
     request(baseUrl.replace(/\/$/, ""), path, options);
   return {
+    mode: "live",
     listCompanies: () => call("/api/companies"),
     getMe: () => call("/api/me"),
     signup: (input) =>
@@ -103,8 +116,15 @@ export function createHttpHostedApi({
     getWatchlist: () => call("/api/watchlist"),
     updateWatchlist: (input) =>
       call("/api/watchlist", { method: "PUT", body: JSON.stringify(input) }),
-    // Phase 1 has no matching backend; keep the authenticated shell usable.
-    getMatches: async () => [],
+    getMatches: (params = {}) =>
+      call(`/api/matches${matchQuery(params)}`).then(normalizeMatchList),
+    getMatch: (id) =>
+      call(`/api/matches/${encodeURIComponent(id)}`).then(normalizeMatch),
+    updateMatch: (id, changes) =>
+      call(`/api/matches/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(changes),
+      }).then(normalizeMatch),
     requestCompany: (input) =>
       call("/api/company-requests", {
         method: "POST",
@@ -133,6 +153,7 @@ export function createMockHostedApi({
     });
 
   return {
+    mode: "mock",
     listCompanies: () => respond("companies", state.companies),
     getMe: () =>
       respond("me", {
@@ -161,6 +182,26 @@ export function createMockHostedApi({
       return respond("updateWatchlist", state.watchlist);
     },
     getMatches: () => respond("matches", state.matches),
+    getMatch: (id) =>
+      respond(
+        "match",
+        state.matches.find((match) => match.id === id) || null,
+      ),
+    updateMatch: (id, changes) => {
+      const match = state.matches.find((item) => item.id === id);
+      if (match) {
+        const stamp = new Date().toISOString();
+        if (changes.saved != null) {
+          match.saved = changes.saved;
+          match.saved_at = changes.saved ? stamp : null;
+        }
+        if (changes.dismissed != null) {
+          match.dismissed = changes.dismissed;
+          match.dismissed_at = changes.dismissed ? stamp : null;
+        }
+      }
+      return respond("updateMatch", match);
+    },
     requestCompany: (input) =>
       respond("requestCompany", {
         id: "request-demo",

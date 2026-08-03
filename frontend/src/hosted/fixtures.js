@@ -222,7 +222,14 @@ export function makeHostedFixtures() {
       ],
       source_url: "https://www.notion.so/careers",
     },
-  ];
+  ].map((match) => ({
+    saved: false,
+    dismissed: false,
+    saved_at: null,
+    dismissed_at: null,
+    is_open: true,
+    ...match,
+  }));
 
   return {
     companies,

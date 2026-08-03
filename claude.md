@@ -1,12 +1,26 @@
 # Claude Repository Guide
 
-- Fix and verify the Phase 2A role-recall and hosted internship-scope defects
-  on `agent/phase2a-role-recall-fix`; do not begin Phase 2B.
+- Phase 2B builds persisted per-user matching on `agent/phase2b-user-matching`
+  from `origin/main` at `0aa9c1d`. Do not push or merge without explicit
+  instruction, and do not implement Phase 3 delivery.
+- `hosted_user_job_matches` holds one durable row per `(user_id, job_id)`.
+  Reconciliation never deletes history: losing a match stamps
+  `no_longer_matches_at`, a later rematch clears it, and `saved_at`/
+  `dismissed_at` are user-owned and survive every pass.
+- Matching is pure and database-free in `hosted/matching.py`: watched and
+  unpaused company, open job, selected hosted role, then location/remote and
+  season compatibility. Never use watcher fit scores, LLM or fuzzy ranking,
+  resumes, alert frequency, or the global notification pause.
+- Reasons are allowlisted bounded codes with catalog identifiers only; never
+  descriptions, raw preferences, or source metadata.
+- Reconcile after job import (inside the import transaction), preference
+  changes, and company-watch add/remove/pause/resume. `matches_created` counts
+  only newly inserted rows; `already_imported` stays a strict no-op.
 - Keep classification authoritative in the watcher. Hosted import must gate on
   the watcher internship/co-op predicate before role mapping and keep duplicate
   final watcher IDs structural failures.
 - Preserve unaffected classifications and IDs, keep replay offline and
-  watcher-state safe, and do not push or merge without explicit instruction.
+  watcher-state safe.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.

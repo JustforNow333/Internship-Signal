@@ -4,7 +4,7 @@ import MatchCard from "./MatchCard.jsx";
 import MatchDrawer from "./MatchDrawer.jsx";
 import { ROLE_OPTIONS } from "./constants.js";
 import { freshnessFor } from "./ui.jsx";
-import { newestFirst, toggleSelection } from "./utils.js";
+import { newestFirst } from "./utils.js";
 
 const DEFAULT_FILTERS = {
   search: "",
@@ -14,10 +14,10 @@ const DEFAULT_FILTERS = {
   freshness: "all",
 };
 
-export default function MatchesPage({ matches }) {
+export default function MatchesPage({ matches, updateMatch }) {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [selectedMatch, setSelectedMatch] = useState(null);
-  const [savedIds, setSavedIds] = useState([]);
+  const [actionError, setActionError] = useState("");
   const companies = useMemo(
     () => [...new Set(matches.map((match) => match.company))].sort(),
     [matches],
@@ -26,9 +26,15 @@ export default function MatchesPage({ matches }) {
     () => [...new Set(matches.map((match) => match.location))].sort(),
     [matches],
   );
+  // Dismissed matches stay out of every count so the empty state can tell
+  // "nothing matched yet" apart from "filters hid everything".
+  const available = useMemo(
+    () => matches.filter((match) => !match.dismissed),
+    [matches],
+  );
   const visible = useMemo(
     () =>
-      newestFirst(matches).filter((match) => {
+      newestFirst(available).filter((match) => {
         const haystack =
           `${match.title} ${match.company} ${match.location}`.toLowerCase();
         return (
@@ -41,15 +47,29 @@ export default function MatchesPage({ matches }) {
             freshnessFor(match.detected_at).id === filters.freshness)
         );
       }),
-    [filters, matches],
+    [available, filters],
   );
   const filtersActive = Object.entries(filters).some(
     ([key, value]) => value !== DEFAULT_FILTERS[key],
   );
   const update = (key, value) =>
     setFilters((current) => ({ ...current, [key]: value }));
-  const toggleSaved = (id) =>
-    setSavedIds((current) => toggleSelection(current, id));
+  const applyChange = async (id, changes) => {
+    setActionError("");
+    try {
+      await updateMatch(id, changes);
+    } catch (error) {
+      setActionError(error.message || "That change could not be saved.");
+    }
+  };
+  const toggleSaved = (id) => {
+    const match = matches.find((item) => item.id === id);
+    return applyChange(id, { saved: !match?.saved });
+  };
+  const dismissMatch = (id) => {
+    setSelectedMatch(null);
+    return applyChange(id, { dismissed: true });
+  };
 
   return (
     <>
@@ -146,6 +166,11 @@ export default function MatchesPage({ matches }) {
           </button>
         )}
       </div>
+      {actionError && (
+        <div className="error-banner" role="alert">
+          {actionError}
+        </div>
+      )}
       <section className="matches-list" aria-label="Internship matches">
         {visible.length ? (
           visible.map((match) => (
@@ -153,8 +178,9 @@ export default function MatchesPage({ matches }) {
               key={match.id}
               match={match}
               onOpen={setSelectedMatch}
-              saved={savedIds.includes(match.id)}
+              saved={Boolean(match.saved)}
               onToggleSaved={toggleSaved}
+              onDismiss={dismissMatch}
             />
           ))
         ) : (
@@ -162,12 +188,12 @@ export default function MatchesPage({ matches }) {
             <EmptyState
               glyph="⌕"
               title={
-                matches.length
+                available.length
                   ? "No matches fit these filters"
                   : "No matching internships yet"
               }
               hint={
-                matches.length
+                available.length
                   ? "Try clearing a filter or searching for a broader term."
                   : "We’ll add openings here when a scheduled scan finds a match."
               }

@@ -11,12 +11,14 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -232,6 +234,77 @@ class HostedJob(TimestampMixin, Base):
     )
 
 
+class UserJobMatch(TimestampMixin, Base):
+    """One durable historical match relationship per (user, job).
+
+    Rows are never deleted when preferences stop matching; reconciliation only
+    stamps ``no_longer_matches_at`` so the history stays auditable and a later
+    rematch can reactivate the same row.
+    """
+
+    __tablename__ = "hosted_user_job_matches"
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", name="uq_hosted_user_job_matches_user_job"),
+        CheckConstraint(
+            "last_matched_at >= matched_at",
+            name="match_timestamps",
+        ),
+        # Default authenticated listing: active, non-dismissed, newest first.
+        Index(
+            "ix_hosted_user_job_matches_user_active",
+            "user_id",
+            "matched_at",
+            postgresql_where=text(
+                "no_longer_matches_at IS NULL AND dismissed_at IS NULL"
+            ),
+        ),
+        Index(
+            "ix_hosted_user_job_matches_user_saved",
+            "user_id",
+            "saved_at",
+            postgresql_where=text("saved_at IS NOT NULL"),
+        ),
+        Index(
+            "ix_hosted_user_job_matches_user_dismissed",
+            "user_id",
+            "dismissed_at",
+            postgresql_where=text("dismissed_at IS NOT NULL"),
+        ),
+        Index(
+            "ix_hosted_user_job_matches_user_historical",
+            "user_id",
+            "no_longer_matches_at",
+            postgresql_where=text("no_longer_matches_at IS NOT NULL"),
+        ),
+        # Import reconciliation fans out from the changed jobs. Per-user and
+        # per-company reconciliation is served by the unique (user_id, job_id)
+        # index together with ix_hosted_jobs_company_id on the job side.
+        Index("ix_hosted_user_job_matches_job", "job_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("hosted_users.id", ondelete="CASCADE"), nullable=False
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("hosted_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    match_reasons: Mapped[list[dict[str, str]]] = mapped_column(
+        JsonList, nullable=False, default=list
+    )
+    matched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_matched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    no_longer_matches_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    saved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class HostedJobImportRun(TimestampMixin, Base):
     __tablename__ = "hosted_job_import_runs"
     __table_args__ = (
@@ -244,7 +317,7 @@ class HostedJobImportRun(TimestampMixin, Base):
         CheckConstraint("jobs_updated >= 0", name="jobs_updated_nonnegative"),
         CheckConstraint("jobs_unchanged >= 0", name="jobs_unchanged_nonnegative"),
         CheckConstraint("jobs_skipped >= 0", name="jobs_skipped_nonnegative"),
-        CheckConstraint("matches_created = 0", name="matches_created_zero"),
+        CheckConstraint("matches_created >= 0", name="matches_created_nonnegative"),
         CheckConstraint(
             "(status = 'running' AND completed_at IS NULL) OR "
             "(status IN ('succeeded', 'failed') AND completed_at IS NOT NULL)",

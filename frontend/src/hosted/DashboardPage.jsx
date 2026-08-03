@@ -4,20 +4,30 @@ import EmailPreview from "./EmailPreview.jsx";
 import MatchCard from "./MatchCard.jsx";
 import MatchDrawer from "./MatchDrawer.jsx";
 import { alertFrequencyLabel, formatScanTime } from "./ui.jsx";
-import { newestFirst, toggleSelection } from "./utils.js";
+import { newestFirst } from "./utils.js";
 
-export default function DashboardPage({ navigate, data }) {
+export default function DashboardPage({ navigate, data, updateMatch }) {
   const [selectedMatch, setSelectedMatch] = useState(null);
-  const [savedIds, setSavedIds] = useState([]);
-  const matches = useMemo(() => newestFirst(data.matches), [data.matches]);
+  const [actionError, setActionError] = useState("");
+  const matches = useMemo(
+    () => newestFirst(data.matches.filter((match) => !match.dismissed)),
+    [data.matches],
+  );
   const selectedRoles = ROLE_OPTIONS.filter((role) =>
     data.preferences.role_ids.includes(role.id),
   );
   const alertsPaused =
     data.preferences.globally_paused ||
     data.preferences.alert_frequency === "paused";
-  const toggleSaved = (id) =>
-    setSavedIds((current) => toggleSelection(current, id));
+  const toggleSaved = async (id) => {
+    const match = data.matches.find((item) => item.id === id);
+    setActionError("");
+    try {
+      await updateMatch(id, { saved: !match?.saved });
+    } catch (error) {
+      setActionError(error.message || "That change could not be saved.");
+    }
+  };
 
   return (
     <>
@@ -97,6 +107,11 @@ export default function DashboardPage({ navigate, data }) {
               View all matches →
             </button>
           </div>
+          {actionError && (
+            <div className="error-banner" role="alert">
+              {actionError}
+            </div>
+          )}
           {matches.length ? (
             matches
               .slice(0, 3)
@@ -105,7 +120,7 @@ export default function DashboardPage({ navigate, data }) {
                   key={match.id}
                   match={match}
                   onOpen={setSelectedMatch}
-                  saved={savedIds.includes(match.id)}
+                  saved={Boolean(match.saved)}
                   onToggleSaved={toggleSaved}
                   compact
                 />
