@@ -306,6 +306,100 @@ TECHNICAL_PROGRAM_TRACK_RE = re.compile(
     re.I,
 )
 
+# Bounded title variants recovered from the Phase 2A invalid-role audit. These
+# phrases name a concrete technical discipline or activity; generic words such
+# as "engineering", "technology", "data", "AI", and "systems" remain
+# insufficient on their own.
+SCOPED_ROLE_TITLE_PATTERNS = [
+    (
+        "full_stack",
+        r"\bjava web develop(?:er|ing)\b|entwicklung (?:einer )?web[- ]app",
+    ),
+    (
+        "general_swe",
+        r"\bit[- ]entwicklung\b|datenanalyse und softwaremonitoring",
+    ),
+    ("devops", r"\bpowershell (?:development |automation )?intern(?:ship)?\b"),
+    (
+        "sdet_qa_automation",
+        r"\bautomation tester\b.*\bselenium\b|"
+        r"\bselenium\b.*\bautomation test",
+    ),
+    (
+        "ml_ai",
+        r"\b(?:intern(?:ship)?\W{0,12}ai research|"
+        r"ai research\W{0,12}intern(?:ship)?)\b",
+    ),
+    (
+        "ml_ai",
+        r"\bdata and ai intern(?:ship)?\b|"
+        r"\bai (?:&|and) automation development\b",
+    ),
+    (
+        "ml_ai",
+        r"d[ée]veloppeur ia et automatisation|data et intelligence artificielle",
+    ),
+    (
+        "ml_ai",
+        r"\bai(?:[- ]based)? (?:hvac )?research\b|\bai[- ]based arc detection\b",
+    ),
+    (
+        "ml_ai",
+        r"agentic ai|agentischer ki|generative ki|\bki[- ]entwicklung\b|"
+        r"\bdata\s*&\s*ai solutions\b",
+    ),
+    ("ml_ai", r"world[- ]action model|\bvla\b.{0,50}autonomous driving"),
+    ("electrical_hardware", r"\bhardware penetration testing\b"),
+    ("quant_dev", r"\bquant and portfolio analytics\b"),
+    (
+        "technical_product",
+        r"\bit product business analyst\s*/\s*product owner assistant\b",
+    ),
+    (
+        "it_support",
+        r"\bit (?:global |infrastructure )?support intern(?:ship)?\b|"
+        r"\bit admin intern(?:ship)?\b",
+    ),
+    (
+        "mechanical_manufacturing",
+        r"\binternship\b.{0,100}\bengineering in manufacturing\b",
+    ),
+    (
+        "mechanical_manufacturing",
+        r"\binternship\b.{0,50}\bengineering mechanics and hydraulic\b",
+    ),
+    ("other_engineering", r"\binternship\b.{0,50}\br&d engineering design\b"),
+    (
+        "other_engineering",
+        r"\bintern(?:ship)?\b.{0,70}\btechnical engineering "
+        r"(?:responsibility|function)\b",
+    ),
+    ("other_engineering", r"\bintern,? engineering\b"),
+    (
+        "general_swe",
+        r"\bsoftwareentwicklung\b|\bszoftverfejleszt[őo]\b|"
+        r"ingenier[ií]a inform[aá]tica",
+    ),
+    (
+        "electrical_hardware",
+        r"measurement technology for consumer sensors|"
+        r"hardware[- ]kalibrierung.{0,40}mems|zuverl[aä]ssigkeit von mems|"
+        r"fem simulation.{0,60}elektrischer antriebe",
+    ),
+    (
+        "other_engineering",
+        r"fertigungsverfahren f[üu]r mems|simulationsmodelle f[üu]r mems|"
+        r"versuchsdurchf[üu]hrung und datenanalyse f[üu]r mems",
+    ),
+    (
+        "other_engineering",
+        r"\brobotics system development\b|entwicklung robotischer systeme|"
+        r"humanoide roboter|\b3d[- ]cfd simulation\b",
+    ),
+    ("it_support", r"\binternship in information system and technology\b"),
+    ("technical_product", r"digital experience product ownership"),
+]
+
 
 def _hits(patterns, text: str) -> list[tuple[str, str]]:
     found = []
@@ -417,6 +511,34 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
             ['title: "data entry"'],
             software_evidence,
             non_swe_evidence or ["data entry"],
+        )
+
+    embedded_intern = re.search(r"\bembedded intern(?:ship)?\b", title, re.I)
+    if embedded_intern:
+        embedded_software = re.search(
+            r"\bfirmware\b|\bembedded software\b|\bsoftware development\b|"
+            r"\bprogramming\b|\bcoding\b|\bc\+\+\b",
+            full,
+            re.I,
+        )
+        track = "embedded_software" if embedded_software else "electrical_hardware"
+        return _finish_role(
+            track,
+            0.78,
+            [f'scoped technical title: "{embedded_intern.group(0)}"'],
+            software_evidence,
+            non_swe_evidence,
+        )
+
+    scoped_title_hits = _hits(SCOPED_ROLE_TITLE_PATTERNS, title)
+    if scoped_title_hits:
+        track, hit = scoped_title_hits[0]
+        return _finish_role(
+            track,
+            0.78,
+            [f'scoped technical title: "{hit}"'],
+            software_evidence or ([hit] if track in SOFTWARE_ROLE_TRACKS else []),
+            non_swe_evidence,
         )
 
     umbrella_program_match = UMBRELLA_PROGRAM_TITLE_RE.search(title)

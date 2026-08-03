@@ -52,8 +52,12 @@ rewinding lifecycle state.
 
 Company names resolve through the same watcher-derived canonical names and
 aliases used by `GET /api/companies`, including the watcher's corporate-suffix
-normalization; unsupported or unselectable companies are skipped. Watcher role
-classifications are converted in one hosted mapper. Recognized relative Workday
+normalization; unsupported or unselectable companies are skipped. Before role
+mapping, the hosted mapper reuses the watcher internship/co-op predicate and
+records non-internships as `not_internship`. It still maps closed internships
+so existing hosted jobs can transition to closed. Watcher role classifications
+are converted in one hosted mapper; `invalid_role` therefore means an
+internship or co-op could not be safely mapped. Recognized relative Workday
 posting labels such as `Posted Yesterday` are retained as an unknown
 `posting_date` rather than guessed or treated as malformed. Malformed isolated
 jobs are skipped with bounded reason codes, while a malformed final-job

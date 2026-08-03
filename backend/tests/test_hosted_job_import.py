@@ -454,6 +454,68 @@ def test_invalid_and_unsupported_jobs_are_skipped_with_exact_counters(
         assert len(db.scalars(select(HostedJob)).all()) == 1
 
 
+def test_mapper_applies_internship_scope_before_role_mapping(
+    catalog: CompanyCatalog,
+) -> None:
+    mapped = map_final_jobs(
+        [
+            final_job(id="supported-intern"),
+            final_job(
+                id="full-time-supported",
+                title="Backend Software Engineer",
+                internship_type="FullTime",
+            ),
+            final_job(
+                id="full-time-unmappable",
+                title="Business Operations Associate",
+                internship_type="FullTime",
+                role_classification={"role": "unknown", "role_track": "unknown"},
+            ),
+            final_job(
+                id="unmappable-intern",
+                title="Unclassified Internship",
+                role_classification={"role": "unknown", "role_track": "unknown"},
+            ),
+        ],
+        catalog,
+    )
+
+    assert [job.watcher_job_id for job in mapped.jobs] == ["supported-intern"]
+    assert mapped.skipped_reasons == {"invalid_role": 1, "not_internship": 2}
+
+
+def test_closed_internship_can_map_for_lifecycle_updates(
+    catalog: CompanyCatalog,
+) -> None:
+    mapped = map_final_jobs(
+        [final_job(extra={**final_job()["extra"], "active": False})],
+        catalog,
+    )
+
+    assert mapped.skipped_reasons == {}
+    assert mapped.jobs[0].is_open is False
+
+
+def test_open_full_time_role_cannot_enter_hosted_jobs(import_service) -> None:
+    service, database, _clock = import_service
+    result = import_jobs(
+        service,
+        [
+            final_job(
+                title="Backend Software Engineer",
+                internship_type="FullTime",
+            )
+        ],
+        "e",
+    )
+
+    assert result.counters.jobs_inserted == 0
+    assert result.counters.jobs_skipped == 1
+    assert result.skipped_reasons == {"not_internship": 1}
+    with database.session_factory() as db:
+        assert db.scalar(select(HostedJob)) is None
+
+
 @pytest.mark.parametrize(
     ("track", "role", "expected"),
     [

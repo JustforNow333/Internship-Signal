@@ -1,11 +1,12 @@
 # Claude Repository Guide
 
-- Fix and verify the Phase 2A duplicate final watcher-ID defect on
-  `agent/phase2a-invalid-final-jobs-fix`; do not begin Phase 2B.
-- Keep identity, source precedence, merging, and final-output deduplication in
-  the watcher. Hosted mapping must continue rejecting duplicate final IDs.
-- Preserve unaffected watcher IDs, remain offline and watcher-state safe, and
-  do not push or merge without a separate explicit request.
+- Fix and verify the Phase 2A role-recall and hosted internship-scope defects
+  on `agent/phase2a-role-recall-fix`; do not begin Phase 2B.
+- Keep classification authoritative in the watcher. Hosted import must gate on
+  the watcher internship/co-op predicate before role mapping and keep duplicate
+  final watcher IDs structural failures.
+- Preserve unaffected classifications and IDs, keep replay offline and
+  watcher-state safe, and do not push or merge without explicit instruction.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.

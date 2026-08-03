@@ -307,3 +307,73 @@ def test_cloud_and_devops_need_software_ownership_evidence():
     assert cloud_with_context["role_track"] == "cloud"
     assert devops["role_track"] == "devops"
     assert devops_with_context["role_track"] == "devops"
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "track", "role"),
+    [
+        ("[Bosch R&D - Internship] Java Web Developing Intern", "Build Java web applications.", "full_stack", "swe"),
+        ("[BD] PowerShell Intern", "Develop PowerShell automation scripts.", "devops", "swe"),
+        ("[SX/EIT] Automation Tester Intern (Selenium)", "Build automated Selenium test suites.", "sdet_qa_automation", "swe"),
+        ("Intern, AI Research", "Research machine-learning models.", "ml_ai", "ml_ai"),
+        ("[Internship] Data and AI Intern (Data focused)", "Develop AI data pipelines.", "ml_ai", "ml_ai"),
+        ("Hanoi - Embedded Intern", "Develop embedded firmware in C++.", "embedded_software", "swe"),
+        ("Embedded Intern", "Design embedded electronic controls.", "electrical_hardware", "unknown"),
+        ("[EMN] Internship – Automotive Hardware Penetration Testing", "Test automotive electronics.", "electrical_hardware", "unknown"),
+        ("Quant and Portfolio Analytics Summer Intern", "Develop quantitative portfolio models.", "quant_dev", "quant"),
+        ("[BD] IT Product Business Analyst / Product Owner Assistant", "Support technical delivery for an IT product.", "technical_product", "product"),
+        ("[BD] IT Global Support Intern", "Provide enterprise IT support.", "it_support", "it"),
+        ("Internship – Engineering in Manufacturing (Connector Assembly)", "Design manufacturing equipment.", "mechanical_manufacturing", "unknown"),
+        ("Internship – R&D Engineering Design", "Design and prototype engineered components.", "other_engineering", "unknown"),
+        ("Praktikum in der i4.0 Softwareentwicklung", "Software development internship.", "general_swe", "swe"),
+        ("Szoftverfejlesztő gyakornok", "Software development internship.", "general_swe", "swe"),
+        ("Praktikum: Entwicklung einer Web-App", "Develop a web application.", "full_stack", "swe"),
+        ("Stagiaire Développeur IA et Automatisation", "Développer des modèles d'intelligence artificielle.", "ml_ai", "ml_ai"),
+        ("Prácticas en Ingeniería Informática", "Desarrollo de software.", "general_swe", "swe"),
+        ("Robotics System Development Intern", "Develop robotic control systems.", "other_engineering", "unknown"),
+        ("3D-CFD Simulation Intern", "Develop computational fluid-dynamics simulations.", "other_engineering", "unknown"),
+        ("Research Intern – World-Action Model / VLA for Autonomous Driving", "Research machine-learning models for autonomy.", "ml_ai", "ml_ai"),
+        ("Internship 2026, Engineering Mechanics and Hydraulic", "Design hydraulic systems.", "mechanical_manufacturing", "unknown"),
+        ("Internship 2025, Technical Engineering Function, Chassis System", "Support chassis engineering.", "other_engineering", "unknown"),
+        ("Mandatory Internship AI-Based Arc Detection for Automotive Electrical Systems", "Develop AI detection models.", "ml_ai", "ml_ai"),
+        ("Pflichtpraktikum im Bereich Datenanalyse und Generative KI", "Develop generative AI analysis.", "ml_ai", "ml_ai"),
+        ("Praktikum Data & AI Solutions im industriellen Sondermaschinenbau", "Develop data and AI solutions.", "ml_ai", "ml_ai"),
+        ("Praktikum Datenanalyse und Softwaremonitoring", "Develop software monitoring tools.", "general_swe", "swe"),
+        ("Pflichtpraktikum FEM Simulation und Konstruktion elektrischer Antriebe", "Simulate electrical drives.", "electrical_hardware", "unknown"),
+        ("Praktikum Hardware-Kalibrierung im Bereich MEMS-Sensorik", "Calibrate MEMS hardware.", "electrical_hardware", "unknown"),
+        ("Praktikum in der Entwicklung robotischer Systeme", "Develop robotic systems.", "other_engineering", "unknown"),
+        ("Internship in Information System and Technology", "Support information systems.", "it_support", "it"),
+        ("Praktikum IT-Entwicklung Connected Truck Parking", "Develop connected-parking software.", "general_swe", "swe"),
+        ("Praktikum im Digital Experience Product Ownership", "Own delivery of a digital product.", "technical_product", "product"),
+    ],
+)
+def test_audit_confirmed_supported_title_families(title, description, track, role):
+    got = classify_role(_row(title=title, description=description))
+
+    assert got["role_track"] == track
+    assert got["role"] == role
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "expected_track"),
+    [
+        ("Marketing Analytics Intern", "Measure campaign performance.", "non_technical"),
+        ("AI Marketing Intern", "Create campaigns for AI products.", "non_technical"),
+        ("Technical Sales Engineering Intern", "Support sales demonstrations.", "solutions_engineering"),
+        ("Product Owner Intern", "Own a business backlog.", "unknown"),
+        ("Market Research Intern", "Run consumer surveys.", "non_technical"),
+        ("R&D Engineering Inspection Intern", "Perform manual visual inspection.", "unknown"),
+        ("General Operations Intern", "Coordinate business operations.", "non_technical"),
+        ("Technology Operations Intern", "Coordinate vendors and schedules.", "non_technical"),
+        ("Systems Coordinator Intern", "Coordinate records and meetings.", "unknown"),
+        ("Data Governance Intern", "Maintain business policies and records.", "unknown"),
+    ],
+)
+def test_audit_nearby_negative_controls_remain_excluded(
+    title,
+    description,
+    expected_track,
+):
+    got = classify_role(_row(title=title, description=description))
+
+    assert got["role_track"] == expected_track

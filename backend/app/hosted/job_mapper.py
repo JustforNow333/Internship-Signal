@@ -237,6 +237,8 @@ def _map_final_job(
         allow_relative=True,
     )
     deadline = _optional_date(job.get("deadline"), "invalid_deadline")
+    if not is_internship(dict(job)):
+        raise _SkipJob("not_internship")
     role_id = _hosted_role_id(job)
     open_status = _open_status(job)
     source_metadata = safe_source_metadata(job.get("extra"))

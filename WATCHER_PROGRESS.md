@@ -1003,6 +1003,24 @@ This file tracks completed watcher steps and the next handoff target.
      zero matches). The second import was a byte-stable idempotent no-op and all
      watcher SQLite fingerprints were unchanged.
 
+44. Phase 2A role recall and hosted internship scope (2026-08-02):
+   - The real snapshot audit confirmed and corrected 56 of 87 narrowly scoped
+     technical-internship classification misses across software/web,
+     PowerShell, test automation, AI/ML, embedded/hardware, quant, technical
+     product, IT support, robotics/simulation, manufacturing/sensor engineering,
+     and bounded non-English title variants. The other 31 candidates remain
+     excluded or ambiguous; no generic unknown-role fallback was added.
+   - Hosted mapping now reuses the authoritative watcher internship/co-op
+     predicate before role mapping. The 11,855-job replay maps 185 jobs and
+     separately skips 10,976 `not_internship` and 694 `invalid_role` rows.
+   - Backend/watcher validation passed (`951 passed, 1 warning`); frontend
+     validation passed (`63 passed`) with a successful production build, and
+     Python compileall passed. The real PostgreSQL smoke import inserted 185
+     jobs with one succeeded run/attempt and zero matches; the second import
+     was an unchanged `already_imported` result. All watcher SQLite hashes were
+     byte-identical, and the disposable database and task-started service were
+     cleaned up.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only

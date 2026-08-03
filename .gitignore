@@ -266,6 +266,9 @@ hosted-job-bug-audit*.json
 hosted-job-fix*.log
 hosted-job-fix*.json
 hosted-job-fix*.prof
+phase2a-role-recall-audit*.json
+phase2a-role-recall-audit*.md
+phase2a-role-recall-smoke*.log
 hosted-job-local-commit*.log
 hosted-matching-push*.log
 hosted-matching-push-verification*.log

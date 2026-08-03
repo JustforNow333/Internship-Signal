@@ -26,7 +26,7 @@ AS_OF = date(2026, 7, 30)
 
 
 def test_static_scoring_artifact_bumps_cache_version():
-    assert STATIC_ANALYSIS_CACHE_VERSION == 2
+    assert STATIC_ANALYSIS_CACHE_VERSION == 3
 
 
 def _row(
@@ -594,6 +594,37 @@ def test_cached_analysis_preserves_distinct_ids_for_canonical_collision(tmp_path
     assert len({job["id"] for job in cold.jobs}) == 2
     assert _serialized(cold.jobs) == _serialized(warm.jobs)
     assert _serialized(cold.jobs) == _serialized(expected)
+
+
+def test_role_recall_classification_is_identical_cold_warm_and_uncached(tmp_path):
+    rows = [
+        _row(
+            "ExampleCo",
+            "[SX/EIT] Automation Tester Intern (Selenium)",
+            source_id="recall-cache-1",
+            description="Build automated Selenium test suites.",
+        ),
+        _row(
+            "ExampleCo",
+            "Intern, AI Research",
+            source_id="recall-cache-2",
+            description="Research machine-learning models.",
+        ),
+    ]
+    db_path = tmp_path / "role-recall-cache.sqlite"
+
+    cold = _run(rows, db_path)
+    warm = _run(rows, db_path)
+    uncached = _run(rows, db_path, enabled=False)
+
+    assert sorted(job["role_classification"]["role_track"] for job in cold.jobs) == [
+        "ml_ai",
+        "sdet_qa_automation",
+    ]
+    assert [job["id"] for job in cold.jobs] == [job["id"] for job in warm.jobs]
+    assert [job["id"] for job in cold.jobs] == [job["id"] for job in uncached.jobs]
+    assert _serialized(cold.jobs) == _serialized(warm.jobs)
+    assert _serialized(cold.jobs) == _serialized(uncached.jobs)
 
 
 def test_corrupt_json_and_schema_entries_fall_back_to_fresh_analysis(
