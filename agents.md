@@ -12,6 +12,9 @@
 - JPMorgan GitHub recall uses only its explicit watchlist aliases. Capital One's three
   technology-internship titles use an exact normalized company/title override; do not
   broaden global company matching or generic technology-intern classification.
+- Capital One's retained Workday title may additionally match only the complete
+  normalized form `technology internship program summer YYYY`; suffix years are four
+  digits and extra words remain excluded.
 - Live recall verification uses only configured GitHub feeds with temporary seen,
   cache, and health paths, email/health email off, and no priming; publish only the
   verified `internal-tool` branch.

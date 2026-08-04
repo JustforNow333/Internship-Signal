@@ -260,6 +260,9 @@ CAPITAL_ONE_GENERAL_SWE_TITLES = frozenset(
         norm_title("Technology Internship Program Intern"),
     }
 )
+CAPITAL_ONE_SUMMER_PROGRAM_TITLE = re.compile(
+    r"technology internship program summer [0-9]{4}"
+)
 
 SOFTWARE_TITLE_PATTERNS = [
     ("backend", r"\bback[- ]?end\b|\bserver[- ]side\b"),
@@ -517,9 +520,13 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
         full=full,
     )
 
+    normalized_title = norm_title(title)
     if (
         norm_company(row.get("company", "")) in CAPITAL_ONE_COMPANY_NAMES
-        and norm_title(title) in CAPITAL_ONE_GENERAL_SWE_TITLES
+        and (
+            normalized_title in CAPITAL_ONE_GENERAL_SWE_TITLES
+            or CAPITAL_ONE_SUMMER_PROGRAM_TITLE.fullmatch(normalized_title)
+        )
     ):
         return _finish_role(
             "general_swe",

@@ -280,6 +280,95 @@ def test_sparse_capital_one_and_jpmorgan_github_rows_match_end_to_end(tmp_path):
     }
 
 
+def test_capital_one_workday_title_wins_simplify_merge_and_reaches_matches(
+    tmp_path,
+):
+    company = CompanyCfg(
+        name="Capital One",
+        ats="workday",
+        token="capitalone",
+        workday_shard="wd12",
+        workday_site="Capital_One",
+        aliases=("Capital One Financial",),
+        terms=("Summer 2027",),
+    )
+    config = WatcherConfig(
+        companies=(company,),
+        terms=("Summer 2027",),
+    )
+    application_url = (
+        "https://capitalone.wd12.myworkdayjobs.com/Capital_One/job/"
+        "McLean-VA/Technology-Internship-Program---Summer-2027_R244387-1"
+    )
+    direct_rows = WorkdaySource().parse(
+        {
+            "total": 1,
+            "jobPostings": [
+                {
+                    "title": "Technology Internship Program - Summer 2027",
+                    "externalPath": (
+                        "/job/McLean-VA/Technology-Internship-Program---"
+                        "Summer-2027_R244387-1"
+                    ),
+                    "timeType": "Full time",
+                    "locationsText": "McLean, VA, United States",
+                    "postedOn": "Posted Today",
+                    "bulletFields": ["R244387"],
+                }
+            ],
+        },
+        company,
+    )
+    simplify_rows = GitHubListingsSource(
+        "https://fixtures.example.test/summer-2027/listings.json"
+    ).parse(
+        [
+            {
+                "company_name": "Capital One",
+                "title": "Technology Intern",
+                "locations": ["McLean, VA, United States"],
+                "url": application_url,
+                "date_posted": "2026-08-04",
+                "active": True,
+                "terms": ["Summer 2027"],
+            }
+        ],
+        company,
+    )
+
+    assert direct_rows[0]["extra"]["source_requisition_id"] == "R244387"
+    assert direct_rows[0]["source_url"] == application_url
+    assert simplify_rows[0]["source_url"] == application_url
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"workday": FakeSource({"Capital One": direct_rows})},
+            github_source=FakeGithub(simplify_rows),
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert result.rows_fetched == 2
+    assert result.jobs_scored == 1
+    assert result.cross_source_duplicates_merged == 1
+    assert len(result.duplicate_report) == 1
+    assert result.duplicate_report[0]["matched_on"] == "requisition_id"
+    assert len(result.jobs) == 1
+    merged = result.jobs[0]
+    assert merged["extra"]["primary_source"] == "direct_ats"
+    assert merged["extra"]["sources"] == ["direct_ats", "simplify"]
+    assert merged["title"] == "Technology Internship Program - Summer 2027"
+    assert merged["role_classification"]["role"] == "swe"
+    assert merged["role_classification"]["role_track"] == "general_swe"
+    assert merged["score"]["fit_score"] > 0
+    assert len(result.matches) == 1
+    assert result.matches[0]["id"] == merged["id"]
+    assert result.matches[0]["title"] == merged["title"]
+
+
 def test_categorical_exclusion_is_audited_but_never_emailed_or_marked_seen(
     tmp_path,
 ):

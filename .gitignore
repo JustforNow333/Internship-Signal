@@ -248,6 +248,8 @@ watcher/cleanup-audit*.json
 watcher-recall-regression*.log
 watcher-recall-verification*.log
 watcher-recall-verification*.json
+capital-one-recall-verification*.log
+capital-one-recall-verification*.json
 # Local hosted-backend promotion verification output.
 hosted-backend-promotion*.log
 hosted-backend-push*.log

@@ -1045,6 +1045,26 @@ This file tracks completed watcher steps and the next handoff target.
      neither exact row. Dry-run state remained at zero seen, emailed, and
      primed rows, with no digest sent or production-state write.
 
+46. Capital One retained-Workday-title recall (2026-08-04):
+   - The Capital One-specific override now also accepts only the complete
+     normalized title `technology internship program summer YYYY`, with an
+     exactly four-digit year, for `Capital One` and `Capital One Financial`.
+     Other companies, operations-program titles, and titles with trailing
+     words retain their prior classifications. The static-analysis cache
+     version advanced from 4 to 5.
+   - An end-to-end regression merges the direct Workday and Simplify forms of
+     requisition `R244387`, proves the direct title remains authoritative, and
+     verifies `swe/general_swe`, positive fit, and final watcher inclusion.
+     Focused validation passed (`118 passed`), as did the full watcher suite
+     (`645 passed`) and complete backend suite (`301 passed, 100 skipped, 1
+     existing warning`).
+   - An isolated live dry run used temporary seen, analysis-cache, and health
+     files with email and priming disabled. Workday and the configured
+     `simplify` feed both supplied `R244387`; dedupe merged them on requisition
+     ID, retained the Workday title, classified it `swe/general_swe` with fit
+     score 74, and included it in final matches. No digest was sent and the
+     temporary seen store remained empty.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only

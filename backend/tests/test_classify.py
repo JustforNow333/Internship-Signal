@@ -197,6 +197,17 @@ def test_capital_one_exact_technology_internship_titles_are_general_swe(
     assert got["role_track"] == "general_swe"
 
 
+@pytest.mark.parametrize("company", ["Capital One", "Capital One Financial"])
+def test_capital_one_summer_program_title_is_general_swe(company):
+    got = classify_role(_row(
+        company=company,
+        title="Technology Internship Program - Summer 2027",
+    ))
+
+    assert got["role"] == "swe"
+    assert got["role_track"] == "general_swe"
+
+
 def test_capital_one_technology_internship_override_is_company_and_title_exact():
     unrelated_company = classify_role(
         _row(company="Unrelated Company", title="Technology Intern")
@@ -207,6 +218,40 @@ def test_capital_one_technology_internship_override_is_company_and_title_exact()
 
     assert unrelated_company["role_track"] == "unknown"
     assert broader_title["role_track"] == "non_technical"
+
+
+@pytest.mark.parametrize(
+    ("company", "title", "expected_track"),
+    [
+        (
+            "Unrelated Company",
+            "Technology Internship Program - Summer 2027",
+            "unknown",
+        ),
+        (
+            "Capital One",
+            "Technology Operations Internship Program - Summer 2027",
+            "non_technical",
+        ),
+        (
+            "Capital One",
+            "Technology Internship Program - Summer 2027 Leadership",
+            "unknown",
+        ),
+    ],
+)
+def test_capital_one_summer_program_override_rejects_nearby_titles(
+    company,
+    title,
+    expected_track,
+):
+    got = classify_role(_row(company=company, title=title))
+
+    assert got["role_track"] == expected_track
+    assert not any(
+        "Capital One technology internship title" in evidence
+        for evidence in got["evidence"]
+    )
 
 
 @pytest.mark.parametrize(
