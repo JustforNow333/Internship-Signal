@@ -1,9 +1,12 @@
 # Claude Repository Guide
 
-- Phase 3A builds durable hosted notification creation, rolling digests, and
-  one-shot delivery on `agent/phase3a-notification-delivery` from `origin/main`
-  at `d797c0b`. Do not push or merge without explicit instruction. Scheduling,
-  automated watcher runs/imports, and daemon workers remain Phase 3B.
+- `internal-tool` is the default and primary personal/internal development branch.
+- Work here focuses on watcher collection, personal scoring and ranking,
+  alumni-matching code, evaluations and benchmarks, and the existing scheduled workflow.
+- Hosted Phase 3B belongs only on `product-mvp` when separately authorized and remains
+  paused.
+- This public branch must never contain private data, profiles, credentials, state, or
+  generated private artifacts.
 - `hosted_user_job_matches` holds one durable row per `(user_id, job_id)`.
   Reconciliation never deletes history: losing a match stamps
   `no_longer_matches_at`, a later rematch clears it, and `saved_at`/

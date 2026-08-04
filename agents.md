@@ -2,15 +2,13 @@
 
 ## Current integration
 
-- Phase 3A builds durable hosted notification creation, rolling digests, and
-  one-shot delivery on `agent/phase3a-notification-delivery` from `origin/main`
-  at `d797c0b`. Do not push or merge without explicit instruction. Scheduling,
-  automated watcher runs/imports, and daemon workers remain Phase 3B.
-- Keep classification authoritative in the watcher. Hosted import must gate on
-  the watcher internship/co-op predicate before role mapping and keep duplicate
-  final watcher IDs structural failures.
-- Preserve unaffected classifications and IDs, keep replay offline and
-  watcher-state safe.
+- `internal-tool` is the default and primary personal/internal development branch.
+- Work here focuses on watcher collection, personal scoring and ranking,
+  alumni-matching code, evaluations and benchmarks, and the existing scheduled workflow.
+- Hosted Phase 3B belongs only on `product-mvp` when separately authorized and remains
+  paused.
+- This public branch must never contain private data, profiles, credentials, state, or
+  generated private artifacts.
 
 ## Hosted per-user matching (Phase 2B)
 
