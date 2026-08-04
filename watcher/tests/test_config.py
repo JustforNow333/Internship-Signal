@@ -239,6 +239,55 @@ def test_jpmorgan_watchlist_keeps_canonical_name_and_exact_match_variants():
         "JPMC",
         "Chase",
     }
+    assert jpmorgan.ats == "oracle_hcm"
+    assert jpmorgan.oracle_hcm_host == "jpmc.fa.oraclecloud.com"
+    assert jpmorgan.oracle_hcm_site == "CX_1001"
+    assert jpmorgan.source_url == (
+        "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+        "CX_1001/jobs"
+    )
+
+
+@pytest.mark.parametrize(
+    ("oracle_lines", "message"),
+    [
+        (
+            '    oracle_hcm_site: "CX_1001"\n'
+            '    source_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"\n',
+            "oracle_hcm_host",
+        ),
+        (
+            '    oracle_hcm_host: "jpmc.fa.oraclecloud.com"\n'
+            '    source_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"\n',
+            "oracle_hcm_site",
+        ),
+        (
+            '    oracle_hcm_host: "user@jpmc.fa.oraclecloud.com"\n'
+            '    oracle_hcm_site: "CX_1001"\n'
+            '    source_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"\n',
+            "hostname",
+        ),
+        (
+            '    oracle_hcm_host: "jpmc.fa.oraclecloud.com"\n'
+            '    oracle_hcm_site: "CX_1001"\n'
+            '    source_url: "https://other.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"\n',
+            "source_url",
+        ),
+    ],
+)
+def test_oracle_hcm_configuration_requires_explicit_safe_scope(
+    tmp_path, oracle_lines, message
+):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        '  - name: "Oracle Example"\n'
+        '    ats: oracle_hcm\n'
+        + oracle_lines,
+    )
+
+    with pytest.raises(ConfigError, match=message):
+        load_watchlist(path)
 
 
 def test_recent_direct_watchlist_entries_keep_verified_adapter_metadata():

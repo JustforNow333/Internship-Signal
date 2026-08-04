@@ -6,6 +6,7 @@ from .github_listings import GitHubListingsSource
 from .github_markdown_table import GitHubMarkdownTableSource
 from .greenhouse import GreenhouseSource
 from .lever import LeverSource
+from .oracle_hcm import OracleHcmSource
 from .smartrecruiters import SmartRecruitersSource
 from .workable import WorkableSource
 from .workday import WorkdaySource
@@ -16,6 +17,7 @@ __all__ = [
     "GitHubMarkdownTableSource",
     "GreenhouseSource",
     "LeverSource",
+    "OracleHcmSource",
     "SmartRecruitersSource",
     "Source",
     "SourceError",

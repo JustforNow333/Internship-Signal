@@ -643,6 +643,37 @@ def test_collection_relevant_alias_and_source_changes_change_fingerprint():
     assert collection_config_fingerprint(source_changed) != collection_config_fingerprint(config)
 
 
+def test_oracle_hcm_host_and_site_change_collection_fingerprint():
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="Oracle Example",
+                ats="oracle_hcm",
+                oracle_hcm_host="one.fa.oraclecloud.com",
+                oracle_hcm_site="CX_ONE",
+                source_url=(
+                    "https://one.fa.oraclecloud.com/hcmUI/CandidateExperience/en/"
+                    "sites/CX_ONE/jobs"
+                ),
+            ),
+        )
+    )
+
+    host_changed = replace(
+        config,
+        companies=(
+            replace(config.companies[0], oracle_hcm_host="two.fa.oraclecloud.com"),
+        ),
+    )
+    site_changed = replace(
+        config,
+        companies=(replace(config.companies[0], oracle_hcm_site="CX_TWO"),),
+    )
+
+    assert collection_config_fingerprint(host_changed) != collection_config_fingerprint(config)
+    assert collection_config_fingerprint(site_changed) != collection_config_fingerprint(config)
+
+
 def test_replay_defaults_to_snapshot_date_and_today_can_override(tmp_path):
     config = _config(cache_enabled=False)
     captured = datetime(2026, 6, 9, 23, 59, tzinfo=timezone.utc)

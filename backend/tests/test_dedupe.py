@@ -338,6 +338,46 @@ def test_same_requisition_id_from_direct_and_github_merges_with_direct_priority(
     assert kept[0]["extra"]["primary_source"] == "direct_ats"
 
 
+def test_oracle_hcm_direct_and_github_rows_merge_on_scoped_requisition_identity():
+    direct = _watcher_row(
+        1,
+        requisition_id="210773759",
+        source_adapter="oracle_hcm",
+        source_url=(
+            "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+            "CX_1001/job/210773759"
+        ),
+    )
+    direct["extra"].update(
+        {
+            "source_system": "oracle_hcm",
+            "source_scope": "jpmc.fa.oraclecloud.com:CX_1001",
+        }
+    )
+    github = _watcher_row(
+        2,
+        source="github",
+        source_adapter="github_listings",
+        requisition_id="",
+        company="JPMorgan Chase",
+        title="Software Engineer Program - GitHub wording",
+        location="Multiple Locations",
+        source_url=(
+            "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+            "CX_1001/job/210773759?utm_source=github"
+        ),
+    )
+
+    kept, report = dedupe([github, direct])
+
+    assert stable_requisition_key(github) == stable_requisition_key(direct)
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "requisition_id"
+    assert report[0]["cross_source"] is True
+    assert kept[0]["extra"]["source"] == "direct"
+    assert kept[0]["extra"]["primary_source"] == "direct_ats"
+
+
 def test_posting_specific_url_tracking_variants_merge_without_requisition_id():
     first = _watcher_row(
         1,

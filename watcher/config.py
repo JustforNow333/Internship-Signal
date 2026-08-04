@@ -115,6 +115,7 @@ SUPPORTED_ATS = {
     "smartrecruiters",
     "workable",
     "workday",
+    "oracle_hcm",
     "bespoke",
     "github_only",
 }
@@ -339,6 +340,9 @@ class CompanyCfg:
     token: str = ""
     workday_shard: str = ""
     workday_site: str = ""
+    oracle_hcm_host: str = ""
+    oracle_hcm_site: str = ""
+    source_url: str = ""
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)
     alumni_match: Sequence[str] = field(default_factory=tuple)
@@ -470,6 +474,16 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             raise ConfigError(f"{name}: workday entries require workday_shard")
         if not workday_site:
             raise ConfigError(f"{name}: workday entries require workday_site")
+    oracle_hcm_host = str(entry.get("oracle_hcm_host") or "").strip().casefold()
+    oracle_hcm_site = str(entry.get("oracle_hcm_site") or "").strip()
+    source_url = str(entry.get("source_url") or "").strip()
+    if ats == "oracle_hcm":
+        _validate_oracle_hcm_config(
+            name,
+            host=oracle_hcm_host,
+            site=oracle_hcm_site,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
@@ -480,11 +494,64 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         token=token,
         workday_shard=workday_shard,
         workday_site=workday_site,
+        oracle_hcm_host=oracle_hcm_host,
+        oracle_hcm_site=oracle_hcm_site,
+        source_url=source_url,
         module=str(entry.get("module") or "").strip(),
         aliases=_string_tuple(entry.get("aliases", ())),
         alumni_match=_string_tuple(entry.get("alumni_match", ())),
         terms=company_terms,
     )
+
+
+def _validate_oracle_hcm_config(
+    name: str,
+    *,
+    host: str,
+    site: str,
+    source_url: str,
+) -> None:
+    if not host:
+        raise ConfigError(f"{name}: oracle_hcm entries require oracle_hcm_host")
+    if (
+        not re.fullmatch(r"[a-z0-9.-]+", host)
+        or host.startswith(".")
+        or ".." in host
+    ):
+        raise ConfigError(f"{name}: oracle_hcm_host must be a hostname")
+    try:
+        parsed_host = urlsplit(f"https://{host}")
+    except ValueError as exc:
+        raise ConfigError(f"{name}: oracle_hcm_host must be a hostname") from exc
+    if (
+        parsed_host.hostname != host
+        or parsed_host.username
+        or parsed_host.password
+        or parsed_host.path not in {"", "/"}
+        or parsed_host.query
+        or parsed_host.fragment
+        or not host.endswith(".oraclecloud.com")
+    ):
+        raise ConfigError(f"{name}: oracle_hcm_host must be an Oracle Cloud hostname")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", site):
+        raise ConfigError(f"{name}: oracle_hcm entries require a valid oracle_hcm_site")
+    try:
+        parsed_source = urlsplit(source_url)
+    except ValueError as exc:
+        raise ConfigError(f"{name}: oracle_hcm entries require a valid source_url") from exc
+    if (
+        parsed_source.scheme.casefold() != "https"
+        or (parsed_source.hostname or "").casefold() != host
+        or parsed_source.netloc.casefold() != host
+        or parsed_source.username
+        or parsed_source.password
+        or parsed_source.query
+        or parsed_source.fragment
+        or f"/sites/{site}/" not in parsed_source.path
+    ):
+        raise ConfigError(
+            f"{name}: oracle_hcm source_url must be a credential-free HTTPS URL on oracle_hcm_host"
+        )
 
 
 def _validate_unique_company_names(companies: Sequence[CompanyCfg]) -> None:

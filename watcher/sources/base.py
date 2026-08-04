@@ -216,6 +216,7 @@ def post_json_response(
                 source_name=source_name,
                 max_response_bytes=max_response_bytes,
                 include_preview=include_preview,
+                request_method="POST",
             )
     except HTTPError as exc:
         try:
@@ -225,6 +226,7 @@ def post_json_response(
                 source_name=source_name,
                 max_response_bytes=max_response_bytes,
                 include_preview=include_preview,
+                request_method="POST",
             )
         except SourceFetchError:
             raise
@@ -244,6 +246,60 @@ def post_json_response(
         ) from exc
 
 
+def get_json_response(
+    url: str,
+    source_name: str,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    *,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    include_preview: bool = False,
+    opener: Callable[..., Any] = urlopen,
+) -> JsonHttpResponse:
+    """GET JSON once with the same bounded transport diagnostics as POST."""
+
+    request = Request(
+        url,
+        headers={"Accept": "application/json", "User-Agent": USER_AGENT},
+        method="GET",
+    )
+    try:
+        with opener(request, timeout=timeout) as response:
+            return _decode_json_http_response(
+                response,
+                request_url=url,
+                source_name=source_name,
+                max_response_bytes=max_response_bytes,
+                include_preview=include_preview,
+                request_method="GET",
+            )
+    except HTTPError as exc:
+        try:
+            return _decode_json_http_response(
+                exc,
+                request_url=url,
+                source_name=source_name,
+                max_response_bytes=max_response_bytes,
+                include_preview=include_preview,
+                request_method="GET",
+            )
+        except SourceFetchError:
+            raise
+        except Exception as diagnostic_exc:
+            raise SourceFetchError(
+                f"{source_name} GET failed with HTTP {exc.code}: {_safe_url(url)}",
+                error_code=_http_error_code(exc.code),
+                status_code=exc.code,
+                retryable=exc.code == 429 or exc.code in {500, 502, 503, 504},
+            ) from diagnostic_exc
+    except (TimeoutError, URLError, OSError) as exc:
+        code = _network_error_code(exc)
+        raise SourceFetchError(
+            f"{source_name} GET failed: code={code} endpoint={_safe_url(url)}",
+            error_code=code,
+            retryable=True,
+        ) from exc
+
+
 def _decode_json_http_response(
     response: Any,
     *,
@@ -251,6 +307,7 @@ def _decode_json_http_response(
     source_name: str,
     max_response_bytes: int,
     include_preview: bool,
+    request_method: str = "POST",
 ) -> JsonHttpResponse:
     if max_response_bytes <= 0:
         raise ValueError("max_response_bytes must be positive")
@@ -348,7 +405,7 @@ def _decode_json_http_response(
         error_code, retryable = _classify_http_failure(status, body_kind)
         metadata["transient"] = retryable
         raise SourceFetchError(
-            f"{source_name} POST failed: code={error_code} status={status} endpoint={request_label}",
+            f"{source_name} {request_method} failed: code={error_code} status={status} endpoint={request_label}",
             error_code=error_code,
             status_code=status,
             retryable=retryable,

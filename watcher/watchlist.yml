@@ -494,12 +494,13 @@ companies:
     note: "company-hosted careers portal; unsupported by current watcher adapters"
 
   - name: "JPMorgan Chase"
-    ats: bespoke
-    module: "jpmorgan_chase"
+    ats: oracle_hcm
+    oracle_hcm_host: "jpmc.fa.oraclecloud.com"
+    oracle_hcm_site: "CX_1001"
     aliases: ["JPMorganChase", "JP Morgan Chase", "J.P. Morgan Chase", "J.P. Morgan", "JP Morgan", "JPMorgan", "JPMC", "Chase"]
     alumni_match: ["jpmorgan chase", "j.p. morgan", "jp morgan", "jpmorgan", "jpmc", "chase"]
     source_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"
-    note: "Oracle HCM portal; unsupported by current watcher adapters"
+    note: "Official Oracle HCM Candidate Experience portal"
 
   - name: "Barclays"
     ats: bespoke

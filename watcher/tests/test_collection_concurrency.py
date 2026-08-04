@@ -372,6 +372,19 @@ def test_workday_tenants_use_their_own_host_origin():
     assert urlsplit(WorkdaySource.endpoint("delta", "wd5", "Site")).hostname in delta
 
 
+def test_oracle_hcm_tenants_use_their_configured_host_origin():
+    jpmc = direct_origin_key(
+        "oracle_hcm", oracle_hcm_host="jpmc.fa.oraclecloud.com"
+    )
+    example = direct_origin_key(
+        "oracle_hcm", oracle_hcm_host="example.fa.oraclecloud.com"
+    )
+
+    assert jpmc == "https://jpmc.fa.oraclecloud.com"
+    assert example == "https://example.fa.oraclecloud.com"
+    assert jpmc != example
+
+
 def test_origin_keys_exclude_credentials_paths_and_queries():
     key = origin_key_for_url(
         "https://user:secret@raw.githubusercontent.test:8443/owner/repo/listings.json?token=abc#frag"

@@ -24,6 +24,7 @@ _ATS_ADAPTERS = frozenset(
         "ashby",
         "greenhouse",
         "lever",
+        "oracle_hcm",
         "smartrecruiters",
         "workable",
         "workday",
@@ -655,6 +656,19 @@ def _ats_url_requisition(url: str) -> tuple[str, str, str] | None:
             scope = f"{host.split('.', 1)[0]}:{segments[0] if segments else ''}"
             native_id = re.sub(r"(?<=\d)-\d+$", "", match.group(1))
             return "workday", scope, native_id
+    if host.endswith(".fa.oraclecloud.com"):
+        lowered = [segment.casefold() for segment in segments]
+        try:
+            sites_index = lowered.index("sites")
+        except ValueError:
+            sites_index = -1
+        if sites_index >= 0 and len(segments) > sites_index + 3:
+            route = lowered[sites_index + 2]
+            if route in {"job", "jobs", "requisition", "requisitions"}:
+                site = segments[sites_index + 1]
+                native_id = segments[sites_index + 3]
+                if site and native_id:
+                    return "oracle_hcm", f"{host}:{site}", native_id
     if host in {"careers.google.com", "www.google.com"} and "results" in {
         segment.casefold() for segment in segments
     }:
