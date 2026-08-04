@@ -171,6 +171,9 @@ code-audit*.json
 code-audit*.log
 repository-audit*.json
 repository-audit*.log
+# Local UI audit screenshots and accessibility captures are review scratch.
+ui-audit*.png
+ui-audit*.json
 # Temporary notification-state integration reports belong outside source
 # control; their SQLite databases are covered by the global SQLite patterns.
 watcher-notification-integration*.json
