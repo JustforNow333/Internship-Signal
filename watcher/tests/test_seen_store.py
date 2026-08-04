@@ -181,6 +181,63 @@ def test_seen_store_uses_same_requisition_identity_as_collection_dedupe(tmp_path
         assert store.unseen([github]) == []
 
 
+def test_emailed_fragment_posting_suppresses_equivalent_later_url(tmp_path):
+    emailed = job("shared-content")
+    emailed["source_url"] = (
+        "https://careers.example.test/jobs?utm_source=direct#/job/ABC123"
+    )
+    later = job("changed-content")
+    later["source_url"] = (
+        "https://careers.example.test/jobs?ref=feed#?JOBID=abc123"
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.mark_emailed(
+            emailed,
+            emailed_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        )
+
+        assert store.unseen([later]) == []
+
+
+def test_emailed_fragment_posting_does_not_suppress_different_fragment_id(
+    tmp_path,
+):
+    emailed = job("legacy-collision")
+    emailed["source_url"] = "https://careers.example.test/jobs#/job/ABC123"
+    different = job("legacy-collision")
+    different["source_url"] = "https://careers.example.test/jobs#/job/XYZ789"
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.mark_emailed(
+            emailed,
+            emailed_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        )
+
+        selection = store.partition([different])
+
+    assert selection.pending == [different]
+    assert selection.emailed == []
+
+
+def test_legacy_seen_raw_fragment_url_suppresses_same_current_posting(tmp_path):
+    db_path = tmp_path / "seen.sqlite"
+    legacy = job("legacy-fragment-content")
+    legacy["source_url"] = "https://careers.example.test/jobs#/job/ABC123"
+    _create_legacy_seen_db(
+        db_path,
+        legacy,
+        emailed_at="2026-08-01T00:00:00+00:00",
+    )
+    current = job("current-fragment-content")
+    current["source_url"] = (
+        "https://careers.example.test/jobs?utm_source=later#jobId=abc123"
+    )
+
+    with SeenStore(db_path) as store:
+        assert store.unseen([current]) == []
+
+
 def test_emailed_plain_c_does_not_suppress_cpp_or_csharp(tmp_path):
     plain_c = _fallback_job("C Intern", "Austin, TX")
     cpp = _fallback_job("C++ Intern", "Austin, TX")

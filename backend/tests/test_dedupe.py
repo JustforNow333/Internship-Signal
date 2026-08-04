@@ -1,5 +1,7 @@
 from copy import deepcopy
 
+import pytest
+
 from app.dedupe import (
     analyzed_job_ids,
     canonical_key,
@@ -9,6 +11,8 @@ from app.dedupe import (
     norm_company,
     norm_url,
     posting_identity_key,
+    posting_specific_url_key,
+    stable_requisition_key,
 )
 
 
@@ -47,6 +51,12 @@ def test_norm_url_canonicalizes_greenhouse_host_and_redundant_job_id():
     )
 
     assert norm_url(direct) == norm_url(backstop)
+
+
+def test_norm_url_continues_to_ignore_all_fragments():
+    base = "https://careers.example.test/jobs?department=engineering"
+
+    assert norm_url(f"{base}#/job/ABC123") == norm_url(f"{base}#apply")
 
 
 def test_exact_duplicate_removed_and_reported():
@@ -346,6 +356,156 @@ def test_posting_specific_url_tracking_variants_merge_without_requisition_id():
 
     assert len(kept) == 1
     assert report[0]["matched_on"] == "source_url"
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "job_id=ABC123",
+        "jobId=ABC123",
+        "?jobId=ABC123",
+        "/search?jobId=ABC123",
+        "/job/ABC123",
+        "jobs/ABC123",
+        "/position/ABC123",
+        "positions/ABC123",
+        "/role/ABC123",
+        "roles/%41BC123",
+    ],
+)
+def test_supported_fragment_posting_id_syntaxes_share_one_identity(fragment):
+    canonical = _watcher_row(
+        1,
+        requisition_id="",
+        source_url=(
+            "https://careers.example.test/jobs?utm_source=direct"
+            "#/job/abc123"
+        ),
+    )
+    variant = _watcher_row(
+        2,
+        requisition_id="",
+        source_url=f"https://careers.example.test/jobs?ref=feed#{fragment}",
+    )
+
+    kept, report = dedupe([canonical, variant])
+
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "requisition_id"
+    assert stable_requisition_key(canonical) == stable_requisition_key(variant)
+    assert posting_specific_url_key(canonical) == posting_specific_url_key(variant)
+    assert is_posting_specific_url(variant["source_url"]) is True
+
+
+def test_fragment_ids_keep_same_fallback_postings_and_analyzed_ids_distinct():
+    first = _watcher_row(
+        1,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#/job/ABC123",
+    )
+    second = _watcher_row(
+        2,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#/job/XYZ789",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert len(kept) == 2
+    assert report == []
+    assert len({posting_identity_key(row) for row in kept}) == 2
+    assert len(set(analyzed_job_ids(kept))) == 2
+
+
+def test_fragment_identity_is_scoped_by_host_and_normalized_base_path():
+    rows = [
+        _watcher_row(
+            1,
+            requisition_id="",
+            source_url="https://one.example.test/jobs/#/job/ABC123",
+        ),
+        _watcher_row(
+            2,
+            requisition_id="",
+            source_url="https://two.example.test/jobs#/job/ABC123",
+        ),
+        _watcher_row(
+            3,
+            requisition_id="",
+            source_url="https://one.example.test/careers#/job/ABC123",
+        ),
+    ]
+
+    kept, report = dedupe(rows)
+
+    assert len(kept) == 3
+    assert report == []
+    assert len({stable_requisition_key(row) for row in kept}) == 3
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "apply",
+        "description",
+        "requirements",
+        "benefits",
+        "overview",
+        "top",
+        "job_id=",
+        "?jobId=",
+        "/job/",
+        "/opening/ABC123",
+        "/jobs/ABC123/details",
+        "jobId",
+    ],
+)
+def test_ordinary_blank_and_unsupported_fragments_are_ignored(fragment):
+    row = _watcher_row(
+        1,
+        requisition_id="",
+        source_url=f"https://careers.example.test/jobs#{fragment}",
+    )
+
+    assert stable_requisition_key(row) == ""
+    assert posting_specific_url_key(row) == ""
+    assert is_posting_specific_url(row["source_url"]) is False
+
+
+def test_different_ordinary_anchors_do_not_create_distinct_identities():
+    first = _watcher_row(
+        1,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#apply",
+    )
+    second = _watcher_row(
+        2,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#description",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "company+title+location"
+    assert posting_identity_key(first) == posting_identity_key(second)
+
+
+def test_explicit_source_requisition_id_precedes_fragment_identity():
+    explicit = _watcher_row(
+        1,
+        requisition_id="NATIVE-999",
+        source_url="https://careers.example.test/jobs#/job/ABC123",
+    )
+    fragment_only = _watcher_row(
+        2,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#/job/ABC123",
+    )
+
+    assert stable_requisition_key(explicit).endswith("|native-999")
+    assert stable_requisition_key(explicit) != stable_requisition_key(fragment_only)
+    assert posting_identity_key(explicit) != posting_identity_key(fragment_only)
 
 
 def test_different_posting_specific_urls_remain_distinct_despite_same_fallback():

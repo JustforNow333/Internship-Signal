@@ -135,6 +135,42 @@ def test_trace_search_types(tmp_path, query_factory, matched_field):
     assert matched_field in fields
 
 
+def test_audit_url_query_distinguishes_fragment_postings(tmp_path):
+    config = _config(tmp_path)
+    first = _row(
+        requisition="",
+        url="https://careers.example.test/jobs#/job/ABC123",
+    )
+    second = _row(
+        requisition="",
+        url="https://careers.example.test/jobs#/job/XYZ789",
+    )
+    jobs, duplicates = _analyze(first, second)
+    with SeenStore(config.seen_db_path) as seen:
+        traces = [
+            build_posting_trace(
+                posting,
+                config=config,
+                seen_store=seen,
+                posting_universe=jobs,
+                duplicate_entries=duplicates,
+            )
+            for posting in jobs
+        ]
+
+    matches = [
+        query_matches_trace(
+            trace,
+            AuditQuery(
+                url="https://careers.example.test/jobs?ref=audit#jobId=ABC123"
+            ),
+        )[0]
+        for trace in traces
+    ]
+
+    assert matches == [True, False]
+
+
 def test_state_only_finds_company_alias_and_multiple_titles(tmp_path):
     config = _config(tmp_path)
     jobs, duplicates = _analyze(

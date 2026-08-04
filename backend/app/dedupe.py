@@ -14,7 +14,7 @@ fed before GitHub backstop rows, preserving the direct source tag.
 import hashlib
 import re
 from collections import Counter, defaultdict
-from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 from .normalize import CANONICAL_COLUMNS
 
@@ -93,6 +93,9 @@ _SEARCH_QUERY_KEYS = frozenset(
         "search",
     }
 )
+_FRAGMENT_POSTING_ROUTES = frozenset(
+    {"job", "jobs", "position", "positions", "role", "roles"}
+)
 
 
 def _squash(text: str) -> str:
@@ -145,6 +148,68 @@ def norm_url(url: str) -> str:
     ):
         scheme = "https"
     return urlunsplit((scheme, host, path, urlencode(query), ""))
+
+
+def _fragment_posting_id(url: str) -> str:
+    """Extract only an explicitly recognized posting ID from a URL fragment."""
+
+    try:
+        fragment = unquote(urlsplit(str(url or "").strip()).fragment).strip()
+    except (TypeError, ValueError):
+        return ""
+    if not fragment:
+        return ""
+
+    fragment_path, separator, fragment_query = fragment.partition("?")
+    query_text = fragment_query if separator else fragment
+    if query_text.startswith("?"):
+        query_text = query_text[1:]
+    for key, value in parse_qsl(query_text, keep_blank_values=True):
+        if key.casefold() in _POSTING_ID_QUERY_KEYS and value.strip():
+            return value.strip()
+
+    path_segments = [segment.strip() for segment in fragment_path.split("/")]
+    if path_segments and not path_segments[0]:
+        path_segments = path_segments[1:]
+    if (
+        len(path_segments) == 2
+        and path_segments[0].casefold() in _FRAGMENT_POSTING_ROUTES
+        and path_segments[1]
+    ):
+        return path_segments[1]
+    return ""
+
+
+def _fragment_url_requisition(url: str) -> tuple[str, str, str] | None:
+    native_id = _fragment_posting_id(url)
+    normalized = norm_url(url)
+    if not native_id or not normalized:
+        return None
+    try:
+        parts = urlsplit(normalized)
+        host = (parts.hostname or "").casefold()
+        if not host:
+            return None
+        port = parts.port
+    except (TypeError, ValueError):
+        return None
+    normalized_host = f"{host}:{port}" if port is not None else host
+    scope_material = "\0".join(
+        (normalized_host, parts.path or "/", parts.query)
+    )
+    scope = hashlib.sha256(scope_material.encode("utf-8")).hexdigest()
+    return "url_fragment", scope, native_id
+
+
+def _normalized_posting_url(url: str) -> str:
+    """Normalize a URL and retain only a recognized posting fragment ID."""
+
+    normalized = norm_url(url)
+    fragment_id = _fragment_posting_id(url)
+    if not normalized or not fragment_id:
+        return normalized
+    normalized_id = re.sub(r"\s+", "", fragment_id).casefold()
+    return f"{normalized}#posting_id={quote(normalized_id, safe='')}"
 
 
 def canonical_key(row: dict) -> str:
@@ -247,7 +312,9 @@ def stable_requisition_key(row: dict) -> str:
     if preserved:
         return preserved
 
-    url_identity = _ats_url_requisition(row.get("source_url", ""))
+    source_url = row.get("source_url", "")
+    url_identity = _ats_url_requisition(source_url)
+    fragment_identity = _fragment_url_requisition(source_url)
     source_adapter = str(extra.get("source_adapter") or "").strip().casefold()
     source_system = str(extra.get("source_system") or "").strip().casefold()
     native_id = str(extra.get("source_requisition_id") or "").strip()
@@ -255,7 +322,12 @@ def stable_requisition_key(row: dict) -> str:
         native_id = str(extra.get("source_id") or "").strip()
 
     if native_id:
-        provider = source_system or (url_identity[0] if url_identity else "") or source_adapter
+        provider = (
+            source_system
+            or (url_identity[0] if url_identity else "")
+            or source_adapter
+            or "source_native"
+        )
         if provider:
             scope = (
                 url_identity[1]
@@ -267,13 +339,16 @@ def stable_requisition_key(row: dict) -> str:
 
     if url_identity:
         return _requisition_key(*url_identity)
+    if fragment_identity:
+        return _requisition_key(*fragment_identity)
     return ""
 
 
 def is_posting_specific_url(url: str) -> bool:
     """Conservatively distinguish posting URLs from landing/search URLs."""
 
-    normalized = norm_url(url)
+    raw_url = url
+    normalized = norm_url(raw_url)
     if not normalized:
         return False
     try:
@@ -290,7 +365,7 @@ def is_posting_specific_url(url: str) -> bool:
     except (TypeError, ValueError):
         return False
 
-    if _ats_url_requisition(normalized):
+    if _ats_url_requisition(normalized) or _fragment_url_requisition(raw_url):
         return True
     if any(key in _POSTING_ID_QUERY_KEYS and str(value).strip() for key, value in query.items()):
         return True
@@ -331,10 +406,11 @@ def non_specific_posting_urls(rows) -> frozenset[str]:
     requisitions_by_url: dict[str, set[str]] = defaultdict(set)
     non_specific: set[str] = set()
     for row in rows:
-        normalized = norm_url(row.get("source_url", ""))
+        raw_url = row.get("source_url", "")
+        normalized = _normalized_posting_url(raw_url)
         if not normalized:
             continue
-        if not is_posting_specific_url(normalized):
+        if not is_posting_specific_url(raw_url):
             non_specific.add(normalized)
         requisition = stable_requisition_key(row)
         if requisition:
@@ -352,10 +428,11 @@ def posting_specific_url_key(
     *,
     non_specific_urls: frozenset[str] = frozenset(),
 ) -> str:
-    normalized = norm_url(row.get("source_url", ""))
+    raw_url = row.get("source_url", "")
+    normalized = _normalized_posting_url(raw_url)
     if not normalized or normalized in non_specific_urls:
         return ""
-    return normalized if is_posting_specific_url(normalized) else ""
+    return normalized if is_posting_specific_url(raw_url) else ""
 
 
 def posting_identity_key(

@@ -607,6 +607,7 @@ def build_posting_trace(
             "normalized_posting_url": safe_posting_url(normalized_url),
             "normalized_posting_url_hash": normalized_url_hash(normalized_url),
             "posting_specific_url_key": safe_posting_url(posting_url_key),
+            "posting_specific_url_key_hash": normalized_url_hash(posting_url_key),
             "fallback_key": fallback_key,
             "generic_or_shared_url": bool(normalized_url and not posting_url_key),
         },
@@ -791,12 +792,16 @@ def enrich_duplicate_entries(
                 normalized
             )
             data[f"{prefix}_fallback_key"] = fallback_posting_key(dict(row))
+            posting_url_key = posting_specific_url_key(
+                dict(row),
+                non_specific_urls=non_specific_urls,
+            )
+            data[f"{prefix}_posting_specific_url_key_hash"] = (
+                normalized_url_hash(posting_url_key)
+            )
             data[f"{prefix}_generic_or_shared_url"] = bool(
                 normalized
-                and not posting_specific_url_key(
-                    dict(row),
-                    non_specific_urls=non_specific_urls,
-                )
+                and not posting_url_key
             )
         if isinstance(duplicate, Mapping) and isinstance(kept, Mapping):
             duplicate_raw_url = str(duplicate.get("source_url") or "").strip()
@@ -986,23 +991,55 @@ def query_matches_trace(
         matched.append("title")
     if query.url:
         wanted = norm_url(query.url)
+        wanted_url_key = posting_specific_url_key(
+            {"source_url": query.url}
+        )
+        wanted_requisition = stable_requisition_key(
+            {"source_url": query.url}
+        )
         stored_url = str(posting.get("url") or "")
         stored_normalized = str(identity.get("normalized_posting_url") or "")
         stored_hash = str(identity.get("normalized_posting_url_hash") or "")
-        main_url_match = (
-            wanted not in {norm_url(stored_url), norm_url(stored_normalized)}
-            and normalized_url_hash(wanted) != stored_hash
-        ) is False
-        duplicate_url_match = any(
-            (
-                wanted
-                == norm_url(str(item.get("duplicate_normalized_url") or ""))
-                or normalized_url_hash(wanted)
-                == str(item.get("duplicate_normalized_url_hash") or "")
-            )
-            for item in duplicates
-            if isinstance(item, Mapping)
+        stored_url_key_hash = str(
+            identity.get("posting_specific_url_key_hash") or ""
         )
+        if wanted_url_key and stored_url_key_hash:
+            main_url_match = (
+                normalized_url_hash(wanted_url_key) == stored_url_key_hash
+            )
+            duplicate_url_match = any(
+                normalized_url_hash(wanted_url_key)
+                == str(
+                    item.get("duplicate_posting_specific_url_key_hash") or ""
+                )
+                for item in duplicates
+                if isinstance(item, Mapping)
+            )
+        elif wanted_requisition:
+            main_url_match = wanted_requisition == str(
+                identity.get("requisition_key") or ""
+            )
+            duplicate_url_match = any(
+                wanted_requisition
+                == str(item.get("duplicate_requisition_key") or "")
+                for item in duplicates
+                if isinstance(item, Mapping)
+            )
+        else:
+            main_url_match = (
+                wanted not in {norm_url(stored_url), norm_url(stored_normalized)}
+                and normalized_url_hash(wanted) != stored_hash
+            ) is False
+            duplicate_url_match = any(
+                (
+                    wanted
+                    == norm_url(str(item.get("duplicate_normalized_url") or ""))
+                    or normalized_url_hash(wanted)
+                    == str(item.get("duplicate_normalized_url_hash") or "")
+                )
+                for item in duplicates
+                if isinstance(item, Mapping)
+            )
         if not main_url_match and not duplicate_url_match:
             return False, []
         matched.append("url")

@@ -528,9 +528,28 @@ def _seen_record_matches(
     ).casefold():
         return False
     if query.url:
-        from backend.app.dedupe import norm_url
+        from backend.app.dedupe import (
+            norm_url,
+            posting_specific_url_key,
+            stable_requisition_key,
+        )
 
-        if norm_url(query.url) != norm_url(str(record.get("url") or "")):
+        query_requisition = stable_requisition_key({"source_url": query.url})
+        stored_url = str(record.get("url") or "")
+        query_url_key = posting_specific_url_key({"source_url": query.url})
+        stored_url_key = posting_specific_url_key({"source_url": stored_url})
+        stored_requisition = str(record.get("requisition_key") or "")
+        if not stored_requisition:
+            stored_requisition = stable_requisition_key(
+                {"source_url": stored_url}
+            )
+        if query_url_key or stored_url_key:
+            if query_url_key != stored_url_key:
+                return False
+        elif query_requisition or stored_requisition:
+            if query_requisition != stored_requisition:
+                return False
+        elif norm_url(query.url) != norm_url(stored_url):
             return False
     if query.requisition_id:
         value = str(record.get("requisition_key") or "").casefold()
