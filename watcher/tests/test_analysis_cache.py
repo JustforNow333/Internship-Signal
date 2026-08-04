@@ -26,7 +26,7 @@ AS_OF = date(2026, 7, 30)
 
 
 def test_static_scoring_artifact_bumps_cache_version():
-    assert STATIC_ANALYSIS_CACHE_VERSION == 5
+    assert STATIC_ANALYSIS_CACHE_VERSION == 6
 
 
 def _row(

@@ -247,6 +247,13 @@ ROLE_TRACK_TO_ROLE = {
 
 TECHNICAL_ROLES = {"swe", "data_science", "ml_ai", "quant"}
 
+DATA_AI_INTERN_ANALYST_TITLES = frozenset(
+    {
+        norm_title("Data & AI Intern - Analyst"),
+        norm_title("Data and AI Intern - Analyst"),
+    }
+)
+
 CAPITAL_ONE_COMPANY_NAMES = frozenset(
     {
         norm_company("Capital One"),
@@ -521,6 +528,15 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
     )
 
     normalized_title = norm_title(title)
+    if normalized_title in DATA_AI_INTERN_ANALYST_TITLES:
+        return _finish_role(
+            "ml_ai",
+            0.82,
+            [f'exact Data & AI internship title: "{title}"'],
+            [title],
+            non_swe_evidence,
+        )
+
     if (
         norm_company(row.get("company", "")) in CAPITAL_ONE_COMPANY_NAMES
         and (

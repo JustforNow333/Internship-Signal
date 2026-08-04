@@ -176,6 +176,35 @@ def test_unclassifiable_title_is_unknown():
 
 
 @pytest.mark.parametrize(
+    "title",
+    [
+        "Data & AI Intern - Analyst",
+        "Data and AI Intern - Analyst",
+    ],
+)
+def test_exact_data_and_ai_intern_analyst_titles_are_ml_ai(title):
+    got = classify_role(_row(title=title))
+
+    assert got["role"] == "ml_ai"
+    assert got["role_track"] == "ml_ai"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Data & Analytics Intern - Analyst",
+        "Data & AI Analyst",
+        "AI Marketing Intern - Analyst",
+        "Data & AI Intern - Analyst, Operations",
+    ],
+)
+def test_data_and_ai_intern_analyst_override_rejects_nearby_titles(title):
+    got = classify_role(_row(title=title))
+
+    assert (got["role"], got["role_track"]) != ("ml_ai", "ml_ai")
+
+
+@pytest.mark.parametrize(
     "company",
     ["Capital One", "Capital One Financial"],
 )

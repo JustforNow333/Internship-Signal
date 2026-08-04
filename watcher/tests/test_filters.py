@@ -257,6 +257,57 @@ def test_title_based_internship_still_matches():
     assert is_internship(job(title="Data Science Co-op"))
 
 
+@pytest.mark.parametrize("field", ["title", "internship_type"])
+@pytest.mark.parametrize(
+    "separator",
+    [
+        "-",
+        "\u2010",
+        "\u2011",
+        "\u2012",
+        "\u2013",
+        "\u2014",
+        " ",
+        "",
+    ],
+)
+def test_explicit_coop_separators_are_internship_evidence(field, separator):
+    posting = job(title="Software Engineer", internship_type="")
+    posting[field] = f"Software Engineering Co{separator}op"
+
+    assert is_internship(posting)
+
+
+@pytest.mark.parametrize("field", ["title", "internship_type"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Software Engineering Cooperative Program",
+        "Software Engineering Co-owner Program",
+        "Software Engineering Co/op",
+    ],
+)
+def test_non_coop_words_and_unlisted_punctuation_are_not_internship_evidence(
+    field,
+    value,
+):
+    posting = job(title="Software Engineer", internship_type="")
+    posting[field] = value
+
+    assert not is_internship(posting)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Full-Time Software Engineering Co\u2011op",
+        "Software Engineer New Grad Co\u2011op",
+    ],
+)
+def test_unicode_coop_does_not_override_full_time_or_new_grad_exclusion(title):
+    assert not is_internship(job(title=title, internship_type="Co\u2011op"))
+
+
 def test_truthy_non_intern_employment_type_is_not_internship():
     # Adapters store the ATS employment-type string in internship_type;
     # a plain truthiness check wrongly matched all of them.

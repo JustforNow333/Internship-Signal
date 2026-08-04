@@ -10,7 +10,11 @@ from watcher.eligibility import DEFAULT_TARGET_ROLES, determine_watcher_eligibil
 TARGET_ROLES = DEFAULT_TARGET_ROLES
 MIN_SCORE: int | None = None
 
-INTERNSHIP_RE = re.compile(r"\b(intern|internship|co[- ]?op|summer 20\d\d)\b", re.I)
+COOP_SEPARATOR_PATTERN = r"[-\u2010\u2011\u2012\u2013\u2014 ]?"
+INTERNSHIP_RE = re.compile(
+    rf"\b(intern|internship|co{COOP_SEPARATOR_PATTERN}op|summer 20\d\d)\b",
+    re.I,
+)
 FULL_TIME_RE = re.compile(r"\b(new[- ]?grad|new graduate|full[- ]?time|fulltime|entry[- ]?level)\b", re.I)
 
 

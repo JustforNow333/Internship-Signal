@@ -13,6 +13,7 @@ from watcher.config import (
     WatcherConfig,
     load_watchlist,
 )
+from watcher.filters import is_internship
 from watcher.notify import render_digest
 from watcher.run import (
     CollectionStats,
@@ -278,6 +279,66 @@ def test_sparse_capital_one_and_jpmorgan_github_rows_match_end_to_end(tmp_path):
         "Capital One",
         "JP Morgan Chase",
     }
+
+
+def test_unicode_dash_coop_reaches_final_watcher_matches(tmp_path):
+    company = CompanyCfg(name="Example", ats="greenhouse", token="example")
+    posting = row(
+        "Example",
+        "Software Engineering Co\u2011op",
+        url="https://example.test/jobs/software-engineering-coop",
+    )
+    posting["location"] = "Boston, MA, United States"
+    posting["internship_type"] = ""
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=(company,)),
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"Example": [posting]})},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert is_internship(result.jobs[0])
+    assert len(result.matches) == 1
+    assert result.matches[0]["id"] == result.jobs[0]["id"]
+
+
+def test_sparse_exact_data_and_ai_title_reaches_final_watcher_matches(tmp_path):
+    company = CompanyCfg(name="Example", ats="github_only")
+    posting = make_row(
+        source="github",
+        source_adapter="github_listings",
+        company="Example",
+        title="Data & AI Intern - Analyst",
+        location="United States",
+        source_url="https://example.test/jobs/data-ai-intern-analyst",
+        internship_type="",
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=(company,)),
+            seen_store=store,
+            direct_sources={},
+            github_source=FakeGithub([posting]),
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    analyzed = result.jobs[0]
+    assert is_internship(analyzed)
+    assert analyzed["description"] == ""
+    assert analyzed["requirements"] == ""
+    assert analyzed["role_classification"]["role"] == "ml_ai"
+    assert analyzed["role_classification"]["role_track"] == "ml_ai"
+    assert analyzed["score"]["fit_score"] > 0
+    assert len(result.matches) == 1
+    assert result.matches[0]["id"] == analyzed["id"]
 
 
 def test_capital_one_workday_title_wins_simplify_merge_and_reaches_matches(
