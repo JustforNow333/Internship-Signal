@@ -1,9 +1,10 @@
 # Claude Repository Guide
 
-- Phase 3A builds durable hosted notification creation, rolling digests, and
-  one-shot delivery on `agent/phase3a-notification-delivery` from `origin/main`
-  at `d797c0b`. Do not push or merge without explicit instruction. Scheduling,
-  automated watcher runs/imports, and daemon workers remain Phase 3B.
+- `product-mvp` is the hosted multi-user product branch.
+- Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
+- Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
+  of scope on this branch.
+- Shared watcher and core fixes must arrive as reviewed, isolated commits.
 - `hosted_user_job_matches` holds one durable row per `(user_id, job_id)`.
   Reconciliation never deletes history: losing a match stamps
   `no_longer_matches_at`, a later rematch clears it, and `saved_at`/

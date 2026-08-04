@@ -2,15 +2,11 @@
 
 ## Current integration
 
-- Phase 3A builds durable hosted notification creation, rolling digests, and
-  one-shot delivery on `agent/phase3a-notification-delivery` from `origin/main`
-  at `d797c0b`. Do not push or merge without explicit instruction. Scheduling,
-  automated watcher runs/imports, and daemon workers remain Phase 3B.
-- Keep classification authoritative in the watcher. Hosted import must gate on
-  the watcher internship/co-op predicate before role mapping and keep duplicate
-  final watcher IDs structural failures.
-- Preserve unaffected classifications and IDs, keep replay offline and
-  watcher-state safe.
+- `product-mvp` is the hosted multi-user product branch.
+- Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
+- Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
+  of scope on this branch.
+- Shared watcher and core fixes must arrive as reviewed, isolated commits.
 
 ## Hosted per-user matching (Phase 2B)
 
