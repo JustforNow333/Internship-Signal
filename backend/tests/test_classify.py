@@ -46,6 +46,51 @@ def test_invalid_known_company_shapes_fall_back_safely(tmp_path, monkeypatch, pa
     assert "stripe" in known["tech"]
 
 
+def test_invalid_known_company_entries_do_not_become_company_names(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "known_companies.json"
+    path.write_text(
+        json.dumps(
+            {
+                "tech": [{"company": "Fabricated"}],
+                "non_tech": [],
+                "reputable": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "KNOWN_COMPANIES_PATH", path)
+
+    known = config.load_known_companies()
+
+    assert "stripe" in known["tech"]
+    assert "company fabricated" not in known["tech"]
+
+
+def test_mixed_known_company_entries_fall_back_for_whole_category(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "known_companies.json"
+    path.write_text(
+        json.dumps(
+            {
+                "tech": ["Custom Company", {"company": "Fabricated"}],
+                "non_tech": [],
+                "reputable": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "KNOWN_COMPANIES_PATH", path)
+
+    known = config.load_known_companies()
+
+    assert "stripe" in known["tech"]
+    assert "custom company" not in known["tech"]
+    assert "company fabricated" not in known["tech"]
+
+
 def test_name_token_ai():
     c = classify_company(_row(company="Nimbus AI", title="ML Intern"))
     assert c["category"] in ("tech", "startup")
