@@ -188,6 +188,29 @@ def test_default_watchlist_loads_and_preserves_core_invariants():
             assert entry.get("note")
 
 
+def test_default_watchlist_uses_canonical_procure_name_with_legacy_aliases():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    procure = next(
+        company
+        for company in config.companies
+        if company.module in {"procure_analytics", "procutre_analytics"}
+    )
+
+    assert procure.name == "Procure Analytics"
+    assert procure.module == "procure_analytics"
+    assert tuple(procure.aliases) == (
+        "Procure",
+        "Procutre Analytics",
+        "Procutre",
+    )
+    assert tuple(procure.alumni_match) == (
+        "procure analytics",
+        "procure",
+        "procutre analytics",
+        "procutre",
+    )
+
+
 def test_default_watchlist_contains_recent_priority_companies():
     config = load_watchlist(DEFAULT_WATCHLIST_PATH)
     companies_by_name = {company.name: company for company in config.companies}

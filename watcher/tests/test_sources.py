@@ -786,6 +786,39 @@ def test_github_listings_match_only_exact_jpmorgan_watchlist_variants():
     assert [row["company"] for row in rows] == company_names[:3]
 
 
+def test_github_listings_match_canonical_and_legacy_procure_variants():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    procure = next(
+        company
+        for company in config.companies
+        if company.module in {"procure_analytics", "procutre_analytics"}
+    )
+    company_names = [
+        "Procure Analytics",
+        "Procure",
+        "Procutre Analytics",
+        "Procutre",
+        "Procure Analytics Group",
+    ]
+    payload = [
+        {
+            "company_name": company_name,
+            "title": "Software Engineer Intern",
+            "locations": ["United States"],
+            "url": f"https://example.test/jobs/procure-{index}",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": ["Summer 2027"],
+        }
+        for index, company_name in enumerate(company_names)
+    ]
+
+    rows = GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(payload, procure)
+
+    assert procure.name == "Procure Analytics"
+    assert [row["company"] for row in rows] == company_names[:4]
+
+
 def test_github_schema_change_logs_and_raises(caplog):
     with pytest.raises(SourceSchemaError, match="missing keys"):
         GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(
