@@ -14,7 +14,7 @@ from typing import Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from backend.app.dedupe import (
-    canonical_key,
+    fallback_posting_key,
     non_specific_posting_urls,
     norm_company,
     norm_title,
@@ -388,7 +388,7 @@ def evaluate_posting_outcome(
         requisition_key=requisition_key,
         normalized_url=normalized_url,
         posting_url_key=posting_url_key,
-        fallback_key=canonical_key(job),
+        fallback_key=fallback_posting_key(job),
         generic_or_shared_url=bool(normalized_url and not posting_url_key),
         sources=sources,
         source_details=source_details,
@@ -790,7 +790,7 @@ def enrich_duplicate_entries(
             data[f"{prefix}_normalized_url_hash"] = normalized_url_hash(
                 normalized
             )
-            data[f"{prefix}_fallback_key"] = canonical_key(dict(row))
+            data[f"{prefix}_fallback_key"] = fallback_posting_key(dict(row))
             data[f"{prefix}_generic_or_shared_url"] = bool(
                 normalized
                 and not posting_specific_url_key(

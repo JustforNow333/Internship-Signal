@@ -151,6 +151,44 @@ def canonical_key(row: dict) -> str:
     return "|".join([norm_company(row.get("company", "")), norm_title(row.get("title", "")), norm_location(row.get("location", ""))])
 
 
+def fallback_posting_key(row: dict) -> str:
+    """Return the conservative company/title/location posting identity.
+
+    This is intentionally separate from ``canonical_key`` so historical job
+    IDs remain stable. Posting identity retains programming-language markers
+    that materially distinguish titles and uses the complete location rather
+    than the historical city-only representation.
+    """
+
+    return "|".join(
+        [
+            norm_company(row.get("company", "")),
+            _fallback_title(row.get("title", "")),
+            _fallback_location(row.get("location", "")),
+        ]
+    )
+
+
+def _fallback_title(title: str) -> str:
+    protected = re.sub(
+        r"(?<![a-z0-9])c\s*\+\+(?![a-z0-9+])",
+        " cplusplus ",
+        str(title or ""),
+        flags=re.I,
+    )
+    protected = re.sub(
+        r"(?<![a-z0-9])c\s*#(?![a-z0-9#])",
+        " csharp ",
+        protected,
+        flags=re.I,
+    )
+    return _squash(protected)
+
+
+def _fallback_location(location: str) -> str:
+    return _squash(location)
+
+
 def job_id(row: dict) -> str:
     """Stable id derived from content, so shortlists survive re-ingestion."""
     return hashlib.sha1(canonical_key(row).encode("utf-8")).hexdigest()[:10]
@@ -161,9 +199,9 @@ def analyzed_job_ids(rows) -> list[str]:
 
     The historical 10-character ID remains unchanged unless multiple retained
     postings share it. Distinct watcher postings can legitimately have the same
-    normalized company, title, and location, so colliding rows with unique
-    posting identities receive a deterministic suffix derived from that
-    stronger requisition-or-URL identity.
+    historical normalized company, title, and location, so colliding rows with
+    unique posting identities receive a deterministic suffix derived from the
+    strongest available identity.
 
     If a collision group lacks unique strong identities, its legacy IDs are
     left intact so downstream structural validation continues to reject the
@@ -333,7 +371,7 @@ def posting_identity_key(
     url = posting_specific_url_key(row, non_specific_urls=non_specific_urls)
     if url:
         return f"url|{url}"
-    fallback = canonical_key(row)
+    fallback = fallback_posting_key(row)
     return f"fallback|{fallback}" if fallback.strip("|") else ""
 
 
@@ -360,8 +398,8 @@ def posting_match_reason(
     if first_url and second_url:
         return "source_url" if first_url == second_url else None
 
-    first_fallback = canonical_key(first)
-    second_fallback = canonical_key(second)
+    first_fallback = fallback_posting_key(first)
+    second_fallback = fallback_posting_key(second)
     if (
         first_fallback.strip("|")
         and first_fallback == second_fallback
@@ -404,7 +442,7 @@ def dedupe(rows, *, include_identity_diagnostics: bool = False):
 
     def index_row(row: dict) -> None:
         requisition = stable_requisition_key(row)
-        key = canonical_key(row)
+        key = fallback_posting_key(row)
         url = posting_specific_url_key(row, non_specific_urls=non_specific_urls)
         if requisition:
             by_requisition[requisition].append(row)
@@ -419,7 +457,7 @@ def dedupe(rows, *, include_identity_diagnostics: bool = False):
     for row in ordered_rows:
         _ensure_source_provenance(row)
         requisition = stable_requisition_key(row)
-        key = canonical_key(row)
+        key = fallback_posting_key(row)
         url = posting_specific_url_key(row, non_specific_urls=non_specific_urls)
 
         existing = None

@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 from app.dedupe import (
+    analyzed_job_ids,
     canonical_key,
     dedupe,
     is_posting_specific_url,
@@ -59,7 +60,7 @@ def test_exact_duplicate_removed_and_reported():
 
 def test_case_and_whitespace_near_duplicate():
     r1 = _row(1, company="Datadog", title="SWE Intern - Platform", location="New York, NY")
-    r2 = _row(2, company="  DATADOG ", title="swe intern - platform", location="new york")
+    r2 = _row(2, company="  DATADOG ", title="swe intern - platform", location="new york, ny")
     kept, report = dedupe([r1, r2])
     assert len(kept) == 1 and report[0]["matched_on"] == "company+title+location"
 
@@ -394,6 +395,152 @@ def test_exact_fallback_duplicate_merges_when_no_stronger_identity_exists():
 
     assert len(kept) == 1
     assert report[0]["matched_on"] == "company+title+location"
+
+
+def test_fallback_language_titles_keep_distinct_postings_and_analyzed_ids():
+    rows = [
+        _watcher_row(
+            index,
+            requisition_id="",
+            title=title,
+            location="Austin, TX",
+            source_url="https://careers.example.test/internships",
+        )
+        for index, title in enumerate(
+            ("C++ Intern", "C# Intern", "C Intern"),
+            start=1,
+        )
+    ]
+
+    kept, report = dedupe(rows)
+
+    # The historical content identity remains unchanged, while posting
+    # identity distinguishes the language-specific fallback postings.
+    assert len({canonical_key(row) for row in rows}) == 1
+    assert len(kept) == 3
+    assert report == []
+    assert len({posting_identity_key(row) for row in kept}) == 3
+    assert len(set(analyzed_job_ids(kept))) == 3
+
+
+def test_fallback_language_title_formatting_variants_still_merge():
+    rows = [
+        _watcher_row(
+            1,
+            requisition_id="",
+            title="C++ Intern",
+            source_url="",
+        ),
+        _watcher_row(
+            2,
+            requisition_id="",
+            title="c ++ intern",
+            source_url="",
+        ),
+        _watcher_row(
+            3,
+            requisition_id="",
+            title="C# Intern",
+            source_url="",
+        ),
+        _watcher_row(
+            4,
+            requisition_id="",
+            title="c # intern",
+            source_url="",
+        ),
+    ]
+
+    kept, report = dedupe(rows)
+
+    assert [row["title"] for row in kept] == ["C++ Intern", "C# Intern"]
+    assert [entry["matched_on"] for entry in report] == [
+        "company+title+location",
+        "company+title+location",
+    ]
+
+
+def test_fallback_location_keeps_same_city_in_different_states_distinct():
+    illinois = _watcher_row(
+        1,
+        requisition_id="",
+        location="Springfield, IL",
+        source_url="",
+    )
+    massachusetts = _watcher_row(
+        2,
+        requisition_id="",
+        location="Springfield, MA",
+        source_url="",
+    )
+
+    kept, report = dedupe([illinois, massachusetts])
+
+    assert len(kept) == 2
+    assert report == []
+    assert posting_identity_key(illinois) != posting_identity_key(massachusetts)
+
+
+def test_fallback_complete_location_case_and_whitespace_variants_merge():
+    first = _watcher_row(
+        1,
+        requisition_id="",
+        location="Springfield, IL",
+        source_url="",
+    )
+    second = _watcher_row(
+        2,
+        requisition_id="",
+        location="  SPRINGFIELD ,   il  ",
+        source_url="",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "company+title+location"
+
+
+def test_stronger_identities_still_merge_different_titles_and_locations():
+    requisition_first = _watcher_row(
+        1,
+        requisition_id="GOOG-SHARED",
+        title="C++ Intern",
+        location="Springfield, IL",
+    )
+    requisition_second = _watcher_row(
+        2,
+        requisition_id="GOOG-SHARED",
+        title="C# Intern",
+        location="Springfield, MA",
+    )
+    url_first = _watcher_row(
+        3,
+        requisition_id="",
+        title="C++ Intern",
+        location="Springfield, IL",
+        source_url="https://careers.example.test/jobs/shared-language-role",
+    )
+    url_second = _watcher_row(
+        4,
+        requisition_id="",
+        title="C# Intern",
+        location="Springfield, MA",
+        source_url=(
+            "https://careers.example.test/jobs/shared-language-role"
+            "?utm_source=backstop"
+        ),
+    )
+
+    requisition_kept, requisition_report = dedupe(
+        [requisition_first, requisition_second]
+    )
+    url_kept, url_report = dedupe([url_first, url_second])
+
+    assert len(requisition_kept) == 1
+    assert requisition_report[0]["matched_on"] == "requisition_id"
+    assert len(url_kept) == 1
+    assert url_report[0]["matched_on"] == "source_url"
 
 
 def test_similar_titles_alone_do_not_merge():
