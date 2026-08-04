@@ -7,6 +7,12 @@
   paused.
 - This public branch must never contain private data, profiles, credentials, state, or
   generated private artifacts.
+- JPMorgan GitHub recall uses only its explicit watchlist aliases. Capital One's three
+  technology-internship titles use an exact normalized company/title override; do not
+  broaden global company matching or generic technology-intern classification.
+- Live recall verification uses only configured GitHub feeds with temporary seen,
+  cache, and health paths, email/health email off, and no priming; publish only the
+  verified `internal-tool` branch.
 - `hosted_user_job_matches` holds one durable row per `(user_id, job_id)`.
   Reconciliation never deletes history: losing a match stamps
   `no_longer_matches_at`, a later rematch clears it, and `saved_at`/

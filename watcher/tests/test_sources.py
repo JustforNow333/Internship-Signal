@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from backend.app.normalize import CANONICAL_COLUMNS
-from watcher.config import CompanyCfg
+from watcher.config import CompanyCfg, DEFAULT_WATCHLIST_PATH, load_watchlist
 from watcher.eligibility import LOCATION_US, OUTSIDE_US, assess_us_location
 from watcher.sources import (
     AshbySource,
@@ -754,6 +754,36 @@ def test_github_listings_matches_aliases_and_filters_inactive_or_wrong_term():
     assert [row["company"] for row in alias_rows] == ["Institute of Foundation Models"]
     assert inactive_rows == []
     assert wrong_term_rows == []
+
+
+def test_github_listings_match_only_exact_jpmorgan_watchlist_variants():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    jpmorgan = next(
+        company for company in config.companies if company.name == "JPMorgan Chase"
+    )
+    company_names = [
+        "JPMorganChase",
+        "JP Morgan Chase",
+        "J.P. Morgan Chase",
+        "JP Morgan Stanley",
+        "Chase Bank",
+    ]
+    payload = [
+        {
+            "company_name": company_name,
+            "title": "Software Engineer Intern",
+            "locations": ["United States"],
+            "url": f"https://example.test/jobs/{index}",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": ["Summer 2027"],
+        }
+        for index, company_name in enumerate(company_names)
+    ]
+
+    rows = GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(payload, jpmorgan)
+
+    assert [row["company"] for row in rows] == company_names[:3]
 
 
 def test_github_schema_change_logs_and_raises(caplog):

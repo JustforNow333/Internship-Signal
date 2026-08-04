@@ -176,6 +176,40 @@ def test_unclassifiable_title_is_unknown():
 
 
 @pytest.mark.parametrize(
+    "company",
+    ["Capital One", "Capital One Financial"],
+)
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Technology Intern",
+        "Technology Internship Program",
+        "Technology Internship Program Intern",
+    ],
+)
+def test_capital_one_exact_technology_internship_titles_are_general_swe(
+    company,
+    title,
+):
+    got = classify_role(_row(company=company, title=title))
+
+    assert got["role"] == "swe"
+    assert got["role_track"] == "general_swe"
+
+
+def test_capital_one_technology_internship_override_is_company_and_title_exact():
+    unrelated_company = classify_role(
+        _row(company="Unrelated Company", title="Technology Intern")
+    )
+    broader_title = classify_role(
+        _row(company="Capital One", title="Technology Operations Intern")
+    )
+
+    assert unrelated_company["role_track"] == "unknown"
+    assert broader_title["role_track"] == "non_technical"
+
+
+@pytest.mark.parametrize(
     ("title", "track"),
     [
         ("2027 Electrical Engineer Intern", "electrical_hardware"),

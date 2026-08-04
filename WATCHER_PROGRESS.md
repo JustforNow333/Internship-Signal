@@ -1021,6 +1021,30 @@ This file tracks completed watcher steps and the next handoff target.
      byte-identical, and the disposable database and task-started service were
      cleaned up.
 
+45. Scoped JPMorgan and Capital One watcher recall (2026-08-04):
+   - The canonical `JPMorgan Chase` watchlist entry now explicitly includes
+     `JPMorganChase`, `JP Morgan Chase`, and `J.P. Morgan Chase` alongside its
+     existing exact aliases. GitHub matching remains exact after normal
+     company normalization; nearby names such as `JP Morgan Stanley` and
+     `Chase Bank` remain excluded.
+   - `Capital One` and `Capital One Financial` now classify only the exact
+     normalized titles `Technology Intern`, `Technology Internship Program`,
+     and `Technology Internship Program Intern` as `general_swe`. Unrelated
+     companies and broader titles retain existing behavior. The static-analysis
+     cache version advanced to 4 so stale classifications are not reused.
+   - Offline regression validation passed: focused backend/watcher `296
+     passed`; full watcher `644 passed`; complete backend `296 passed, 100
+     skipped, 1 existing warning`. No network requests, ATS coverage,
+     notification behavior, scoring weights, source URLs, or seen state were
+     changed.
+   - Isolated live verification fetched both configured GitHub feeds into
+     temporary state. Simplify supplied the active JPMorgan software-engineer
+     program row and Capital One technology-intern row; both matched their
+     company configuration, classified as `swe/general_swe`, scored 74, and
+     reached final watcher matches. The Markdown feed succeeded but supplied
+     neither exact row. Dry-run state remained at zero seen, emailed, and
+     primed rows, with no digest sent or production-state write.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only

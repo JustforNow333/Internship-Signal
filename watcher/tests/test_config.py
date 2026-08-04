@@ -198,6 +198,26 @@ def test_default_watchlist_contains_recent_priority_companies():
         assert companies_by_name[name].terms == ("Summer 2027",)
 
 
+def test_jpmorgan_watchlist_keeps_canonical_name_and_exact_match_variants():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    jpmorgan = next(
+        company for company in config.companies if company.name == "JPMorgan Chase"
+    )
+
+    assert jpmorgan.name == "JPMorgan Chase"
+    assert set(jpmorgan.match_names()) == {
+        "JPMorgan Chase",
+        "JPMorganChase",
+        "JP Morgan Chase",
+        "J.P. Morgan Chase",
+        "JP Morgan",
+        "J.P. Morgan",
+        "JPMorgan",
+        "JPMC",
+        "Chase",
+    }
+
+
 def test_recent_direct_watchlist_entries_keep_verified_adapter_metadata():
     config = load_watchlist(DEFAULT_WATCHLIST_PATH)
     companies_by_name = {company.name: company for company in config.companies}

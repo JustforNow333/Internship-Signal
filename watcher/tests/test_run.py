@@ -6,7 +6,13 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from watcher.config import CompanyCfg, GitHubListingSourceCfg, WatcherConfig
+from watcher.config import (
+    CompanyCfg,
+    DEFAULT_WATCHLIST_PATH,
+    GitHubListingSourceCfg,
+    WatcherConfig,
+    load_watchlist,
+)
 from watcher.notify import render_digest
 from watcher.run import (
     CollectionStats,
@@ -33,6 +39,7 @@ from watcher.source_health import (
     render_final_heartbeat,
 )
 from watcher.sources.base import SourceError, SourceFetchError, SourceSchemaError, make_row
+from watcher.sources.github_listings import GitHubListingsSource
 from watcher.sources.workday import WorkdaySource
 
 
@@ -210,6 +217,67 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
         rows = conn.execute("select emailed_at from seen order by job_id").fetchall()
     assert len(rows) == 2
     assert all(row[0] == "2026-06-09T00:00:00+00:00" for row in rows)
+
+
+def test_sparse_capital_one_and_jpmorgan_github_rows_match_end_to_end(tmp_path):
+    production_config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    selected = {
+        company.name: company
+        for company in production_config.companies
+        if company.name in {"Capital One", "JPMorgan Chase"}
+    }
+    config = WatcherConfig(
+        companies=(selected["Capital One"], selected["JPMorgan Chase"]),
+        terms=production_config.terms,
+        target_roles=production_config.target_roles,
+    )
+    payload = [
+        {
+            "company_name": "Capital One",
+            "title": "Technology Intern",
+            "locations": ["United States"],
+            "url": "https://example.test/jobs/capital-one-technology-intern",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": ["Summer 2027"],
+        },
+        {
+            "company_name": "JP Morgan Chase",
+            "title": "Software Engineer Intern - Software Engineer Program",
+            "locations": ["United States"],
+            "url": "https://example.test/jobs/jpmorgan-software-engineer-program",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": ["Summer 2027"],
+        },
+    ]
+    github_source = GitHubListingsSource(
+        "https://fixtures.example.test/summer-2027/listings.json"
+    )
+    github_source.fetch_payload = lambda: payload
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"workday": FakeSource()},
+            github_source=github_source,
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    jobs_by_company = {job["company"]: job for job in result.jobs}
+    capital_one = jobs_by_company["Capital One"]
+    assert capital_one["description"] == ""
+    assert capital_one["requirements"] == ""
+    assert capital_one["role_classification"]["role"] == "swe"
+    assert capital_one["role_classification"]["role_track"] == "general_swe"
+    assert capital_one["score"]["fit_score"] > 0
+    assert {job["company"] for job in result.matches} == {
+        "Capital One",
+        "JP Morgan Chase",
+    }
 
 
 def test_categorical_exclusion_is_audited_but_never_emailed_or_marked_seen(

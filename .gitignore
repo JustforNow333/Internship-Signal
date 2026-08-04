@@ -244,6 +244,10 @@ cleanup-audit*.log
 cleanup-audit*.json
 watcher/cleanup-audit*.log
 watcher/cleanup-audit*.json
+# Local watcher recall regression/live-verification output is scratch; tests stay tracked.
+watcher-recall-regression*.log
+watcher-recall-verification*.log
+watcher-recall-verification*.json
 # Local hosted-backend promotion verification output.
 hosted-backend-promotion*.log
 hosted-backend-push*.log

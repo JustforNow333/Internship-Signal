@@ -16,7 +16,7 @@ can show *why* a verdict was reached.
 import re
 
 from .config import load_known_companies
-from .dedupe import norm_company
+from .dedupe import norm_company, norm_title
 
 # ---------------------------------------------------------------------------
 # Company classification
@@ -246,6 +246,20 @@ ROLE_TRACK_TO_ROLE = {
 }
 
 TECHNICAL_ROLES = {"swe", "data_science", "ml_ai", "quant"}
+
+CAPITAL_ONE_COMPANY_NAMES = frozenset(
+    {
+        norm_company("Capital One"),
+        norm_company("Capital One Financial"),
+    }
+)
+CAPITAL_ONE_GENERAL_SWE_TITLES = frozenset(
+    {
+        norm_title("Technology Intern"),
+        norm_title("Technology Internship Program"),
+        norm_title("Technology Internship Program Intern"),
+    }
+)
 
 SOFTWARE_TITLE_PATTERNS = [
     ("backend", r"\bback[- ]?end\b|\bserver[- ]side\b"),
@@ -502,6 +516,18 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
         requirements,
         full=full,
     )
+
+    if (
+        norm_company(row.get("company", "")) in CAPITAL_ONE_COMPANY_NAMES
+        and norm_title(title) in CAPITAL_ONE_GENERAL_SWE_TITLES
+    ):
+        return _finish_role(
+            "general_swe",
+            0.82,
+            [f'Capital One technology internship title: "{title}"'],
+            [title],
+            non_swe_evidence,
+        )
 
     # Clerical "data entry" must not be diluted by incidental data words.
     if re.search(r"data entry", title, re.I):
