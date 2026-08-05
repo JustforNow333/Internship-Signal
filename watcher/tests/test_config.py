@@ -231,11 +231,9 @@ def test_jpmorgan_watchlist_keeps_canonical_name_and_exact_match_variants():
     assert set(jpmorgan.match_names()) == {
         "JPMorgan Chase",
         "JPMorganChase",
-        "JP Morgan Chase",
         "J.P. Morgan Chase",
         "JP Morgan",
         "J.P. Morgan",
-        "JPMorgan",
         "JPMC",
         "Chase",
     }
@@ -437,7 +435,7 @@ def test_duplicate_normalized_company_names_are_rejected(tmp_path, second_name):
         load_watchlist(path)
 
 
-def test_alias_shared_by_two_companies_is_rejected(tmp_path):
+def test_alumni_match_shared_with_another_company_alias_is_allowed(tmp_path):
     path = _write_watchlist(
         tmp_path,
         '  terms: ["Summer 2027"]\n',
@@ -445,8 +443,9 @@ def test_alias_shared_by_two_companies_is_rejected(tmp_path):
         '  - name: "Second Co"\n    ats: greenhouse\n    token: second\n    alumni_match: ["shared"]\n',
     )
 
-    with pytest.raises(ConfigError, match="ambiguous"):
-        load_watchlist(path)
+    config = load_watchlist(path)
+
+    assert [company.name for company in config.companies] == ["First Co", "Second Co"]
 
 
 def test_feed_urls_differing_only_by_query_are_rejected(tmp_path):

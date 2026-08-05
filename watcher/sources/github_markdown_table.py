@@ -11,9 +11,10 @@ from html import unescape
 from typing import Iterable
 from urllib.parse import urlsplit
 
+from watcher.company_matching import company_matches
 from watcher.config import CompanyCfg
 from watcher.sources.base import SourceError, SourceSchemaError, fetch_text, make_row
-from watcher.sources.github_listings import _normalize_term, _safe_feed_url, company_matches
+from watcher.sources.github_listings import _normalize_term, _safe_feed_url
 
 LOGGER = logging.getLogger(__name__)
 

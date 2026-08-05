@@ -13,6 +13,7 @@ from typing import Mapping, Sequence, TextIO
 
 from backend.app.ingest import analyze_rows
 from backend.app.dedupe import norm_company, norm_title
+from watcher.company_matching import company_matching_key
 from watcher.audit_trace import (
     AuditQuery,
     PostingAuditTrace,
@@ -238,10 +239,10 @@ def _job_may_match_live_query(
             config.companies,
         )
         company_names = {
-            norm_company(str(job.get("company") or "")),
-            norm_company(configured.name) if configured else "",
+            company_matching_key(str(job.get("company") or "")),
+            company_matching_key(configured.name) if configured else "",
         }
-        if norm_company(query.company) not in company_names:
+        if company_matching_key(query.company) not in company_names:
             return False
     if query.title and norm_title(query.title) not in norm_title(
         str(job.get("title") or "")

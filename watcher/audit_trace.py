@@ -23,6 +23,11 @@ from backend.app.dedupe import (
     posting_specific_url_key,
     stable_requisition_key,
 )
+from watcher.company_matching import (
+    company_matching_key,
+    match_watchlist_company,
+    matched_company_label,
+)
 from watcher.config import CompanyCfg, WatcherConfig
 from watcher.eligibility import OUTSIDE_US, determine_watcher_eligibility
 from watcher.filters import is_internship, is_open
@@ -903,17 +908,6 @@ def posting_season(
     }
 
 
-def match_watchlist_company(
-    company_name: str,
-    companies: Iterable[CompanyCfg],
-) -> CompanyCfg | None:
-    normalized = norm_company(company_name)
-    for company in companies:
-        if any(normalized == norm_company(name) for name in company.match_names()):
-            return company
-    return None
-
-
 def source_sightings(extra: Mapping[str, object]) -> tuple[list[str], dict[str, object]]:
     raw_sources = extra.get("sources")
     if isinstance(raw_sources, (list, tuple)):
@@ -972,7 +966,7 @@ def query_matches_trace(
     matched: list[str] = []
 
     if query.company:
-        wanted = norm_company(query.company)
+        wanted = company_matching_key(query.company)
         configured = data.get("watchlist_match")
         configured_name = (
             str(configured.get("configured_company") or "")
@@ -980,8 +974,8 @@ def query_matches_trace(
             else ""
         )
         if wanted not in {
-            norm_company(str(posting.get("company") or "")),
-            norm_company(configured_name),
+            company_matching_key(str(posting.get("company") or "")),
+            company_matching_key(configured_name),
         }:
             return False, []
         matched.append("company")
@@ -1323,11 +1317,7 @@ def _winning_priority(extra: Mapping[str, object]) -> int | None:
 def _matched_alias(posting_company: str, company: CompanyCfg | None) -> str | None:
     if company is None:
         return None
-    normalized = norm_company(posting_company)
-    for name in company.match_names():
-        if norm_company(name) == normalized:
-            return name
-    return None
+    return matched_company_label(posting_company, company)
 
 
 def _term_token(value: object) -> str:

@@ -7,7 +7,7 @@ import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from backend.app.dedupe import norm_company
+from watcher.company_matching import company_matches
 from watcher.config import CompanyCfg
 from watcher.sources.base import SourceError, SourceSchemaError, ensure_list, fetch_json, iso_date, make_row
 
@@ -140,11 +140,6 @@ class GitHubListingsSource:
     def _schema_problem(self, message: str) -> None:
         LOGGER.warning("GitHub listings schema problem: %s", message)
         raise SourceSchemaError(message)
-
-
-def company_matches(source_company: Any, company: CompanyCfg) -> bool:
-    source_norm = norm_company(str(source_company or ""))
-    return any(source_norm == norm_company(name) for name in company.match_names())
 
 
 def _terms_match(source_terms: list, configured_terms: Any) -> bool:

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Sequence
 from urllib.parse import urlsplit
 
-from backend.app.dedupe import norm_company
+from watcher.company_matching import company_matching_key
 
 WATCHER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = WATCHER_DIR.parent
@@ -506,6 +506,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
         company_terms = default_terms
+    aliases = _aliases_tuple(entry["aliases"], name) if "aliases" in entry else ()
     return CompanyCfg(
         name=name,
         ats=ats,
@@ -520,7 +521,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         talentbrew_category_name=talentbrew_category_name,
         source_url=source_url,
         module=str(entry.get("module") or "").strip(),
-        aliases=_string_tuple(entry.get("aliases", ())),
+        aliases=aliases,
         alumni_match=_string_tuple(entry.get("alumni_match", ())),
         terms=company_terms,
     )
@@ -618,11 +619,13 @@ def _validate_talentbrew_config(
 def _validate_unique_company_names(companies: Sequence[CompanyCfg]) -> None:
     owners: dict[str, tuple[int, str]] = {}
     for index, company in enumerate(companies):
-        labels = (company.name, *company.aliases, *company.alumni_match)
+        labels = (company.name, *company.aliases)
         for label in labels:
-            key = norm_company(str(label or ""))
+            key = company_matching_key(label)
             if not key:
-                continue
+                raise ConfigError(
+                    f"{company.name}: company names and aliases must normalize to a nonblank value"
+                )
             owner = owners.get(key)
             if owner is not None and owner[0] != index:
                 raise ConfigError(
@@ -760,6 +763,34 @@ def _string_tuple(value) -> tuple[str, ...]:
     if isinstance(value, Sequence):
         return tuple(str(item).strip() for item in value if str(item).strip())
     return (str(value).strip(),)
+
+
+def _aliases_tuple(value: object, company_name: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        values = (value,)
+    elif isinstance(value, Sequence):
+        values = tuple(value)
+    else:
+        values = (value,)
+    aliases: list[str] = []
+    normalized: dict[str, str] = {}
+    for raw_alias in values:
+        alias = str(raw_alias).strip()
+        if not alias:
+            raise ConfigError(f"{company_name}: aliases may not contain blank values")
+        key = company_matching_key(alias)
+        if not key:
+            raise ConfigError(f"{company_name}: alias {alias!r} normalizes to blank")
+        previous = normalized.get(key)
+        if previous is not None:
+            raise ConfigError(
+                f"{company_name}: aliases {previous!r} and {alias!r} normalize to the same value"
+            )
+        normalized[key] = alias
+        aliases.append(alias)
+    return tuple(aliases)
 
 
 def _terms_tuple(value, label: str) -> tuple[str, ...]:
