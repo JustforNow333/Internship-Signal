@@ -1,0 +1,30 @@
+{
+  "hiringOrganization": {"name": "Example"},
+  "jobPostingInfo": {
+    "canApply": true,
+    "country": {"descriptor": "United States", "id": "USA"},
+    "degreeRequirements": ["Bachelor's degree", "Computer Science"],
+    "endDate": "2026-09-01",
+    "jobDescription": "<h2>What You Will Do</h2><p>Design and build Python services, APIs, and production software.</p><h2>Requirements</h2><ul><li>Experience with Python and SQL.</li><li>Pursuing a bachelor's degree in Computer Science.</li></ul><h2>Benefits</h2><p>Mentorship and learning.</p>",
+    "jobPostingId": "Technology-Intern_R123-1",
+    "jobPostingSiteId": "Site",
+    "jobReqId": "R123",
+    "jobRequisitionLocation": {
+      "country": {"descriptor": "United States", "id": "USA"},
+      "descriptor": "New York, NY"
+    },
+    "location": "New York, NY",
+    "additionalLocations": [{"descriptor": "Boston, MA"}, "Remote - US"],
+    "payRange": "$30 - $40 per hour",
+    "posted": true,
+    "postedOn": "Posted 2 Days Ago",
+    "remoteType": "Hybrid",
+    "startDate": "2026-08-01",
+    "studentProgram": "University Internship",
+    "timeType": "Full time",
+    "title": "Technology Intern",
+    "workerSubType": "Intern"
+  },
+  "similarJobs": [],
+  "userAuthenticated": false
+}

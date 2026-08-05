@@ -643,6 +643,26 @@ def test_collection_relevant_alias_and_source_changes_change_fingerprint():
     assert collection_config_fingerprint(source_changed) != collection_config_fingerprint(config)
 
 
+def test_workday_detail_policy_changes_collection_fingerprint():
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="Workday Example",
+                ats="workday",
+                token="tenant",
+                workday_shard="wd5",
+                workday_site="Site",
+            ),
+        )
+    )
+    disabled = replace(
+        config,
+        companies=(replace(config.companies[0], workday_detail_policy="none"),),
+    )
+
+    assert collection_config_fingerprint(disabled) != collection_config_fingerprint(config)
+
+
 def test_oracle_hcm_host_and_site_change_collection_fingerprint():
     config = WatcherConfig(
         companies=(

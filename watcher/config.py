@@ -108,6 +108,16 @@ MAX_WORKDAY_MAX_CONCURRENCY = 5
 DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY = 2
 MIN_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY = 1
 MAX_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY = 4
+WORKDAY_DETAIL_NONE = "none"
+WORKDAY_DETAIL_INTERNSHIP = "internship_candidates"
+WORKDAY_DETAIL_EARLY_CAREER = "early_career_candidates"
+SUPPORTED_WORKDAY_DETAIL_POLICIES = frozenset(
+    {
+        WORKDAY_DETAIL_NONE,
+        WORKDAY_DETAIL_INTERNSHIP,
+        WORKDAY_DETAIL_EARLY_CAREER,
+    }
+)
 SUPPORTED_ATS = {
     "greenhouse",
     "lever",
@@ -341,6 +351,7 @@ class CompanyCfg:
     token: str = ""
     workday_shard: str = ""
     workday_site: str = ""
+    workday_detail_policy: str = WORKDAY_DETAIL_INTERNSHIP
     oracle_hcm_host: str = ""
     oracle_hcm_site: str = ""
     talentbrew_host: str = ""
@@ -472,6 +483,18 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         raise ConfigError(f"{name}: {ats} entries require token")
     workday_site = str(entry.get("workday_site") or "").strip()
     workday_shard = str(entry.get("workday_shard") or "").strip()
+    if "workday_detail_policy" in entry:
+        raw_detail_policy = entry.get("workday_detail_policy")
+        # YAML commonly decodes an unquoted ``none`` scalar as null. Treat an
+        # explicitly present null as the documented disabled policy while a
+        # missing setting retains the normal internship-candidate default.
+        workday_detail_policy = (
+            WORKDAY_DETAIL_NONE
+            if raw_detail_policy is None
+            else str(raw_detail_policy).strip()
+        )
+    else:
+        workday_detail_policy = WORKDAY_DETAIL_INTERNSHIP
     if ats == "workday":
         if not token:
             raise ConfigError(f"{name}: workday entries require token")
@@ -479,6 +502,11 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             raise ConfigError(f"{name}: workday entries require workday_shard")
         if not workday_site:
             raise ConfigError(f"{name}: workday entries require workday_site")
+        if workday_detail_policy not in SUPPORTED_WORKDAY_DETAIL_POLICIES:
+            supported = ", ".join(sorted(SUPPORTED_WORKDAY_DETAIL_POLICIES))
+            raise ConfigError(
+                f"{name}: workday_detail_policy must be one of: {supported}"
+            )
     oracle_hcm_host = str(entry.get("oracle_hcm_host") or "").strip().casefold()
     oracle_hcm_site = str(entry.get("oracle_hcm_site") or "").strip()
     source_url = str(entry.get("source_url") or "").strip()
@@ -513,6 +541,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         token=token,
         workday_shard=workday_shard,
         workday_site=workday_site,
+        workday_detail_policy=workday_detail_policy,
         oracle_hcm_host=oracle_hcm_host,
         oracle_hcm_site=oracle_hcm_site,
         talentbrew_host=talentbrew_host,

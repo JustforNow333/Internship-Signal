@@ -33,6 +33,7 @@ def workday_company(name="Merck"):
         token="merck",
         workday_shard="wd5",
         workday_site="Search_Jobs",
+        workday_detail_policy="none",
     )
 
 

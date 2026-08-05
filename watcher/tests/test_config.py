@@ -9,6 +9,9 @@ from watcher.config import (
     ConfigError,
     DEFAULT_WATCHLIST_PATH,
     SUPPORTED_ATS,
+    WORKDAY_DETAIL_EARLY_CAREER,
+    WORKDAY_DETAIL_INTERNSHIP,
+    WORKDAY_DETAIL_NONE,
     WatcherConfig,
     _parse_env_assignment,
     _parse_watchlist_yaml,
@@ -177,6 +180,10 @@ def test_default_watchlist_loads_and_preserves_core_invariants():
             assert company.token
             assert company.workday_shard.startswith("wd")
             assert company.workday_site
+            assert company.workday_detail_policy in {
+                WORKDAY_DETAIL_INTERNSHIP,
+                WORKDAY_DETAIL_EARLY_CAREER,
+            }
         elif company.ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "workable"}:
             assert company.token
         elif company.ats == "bespoke":
@@ -312,6 +319,78 @@ def _write_watchlist(tmp_path, defaults: str, companies: str | None = None):
         encoding="utf-8",
     )
     return path
+
+
+def test_default_watchlist_uses_early_career_detail_policy_only_for_verified_sites():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    workday_companies = {
+        company.name: company
+        for company in config.companies
+        if company.ats == "workday"
+    }
+
+    assert {
+        name
+        for name, company in workday_companies.items()
+        if company.workday_detail_policy == WORKDAY_DETAIL_EARLY_CAREER
+    } == {"Workday", "Salesforce"}
+    assert all(
+        company.workday_detail_policy == WORKDAY_DETAIL_INTERNSHIP
+        for name, company in workday_companies.items()
+        if name not in {"Workday", "Salesforce"}
+    )
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [WORKDAY_DETAIL_NONE, WORKDAY_DETAIL_INTERNSHIP, WORKDAY_DETAIL_EARLY_CAREER],
+)
+def test_workday_detail_policy_accepts_supported_values(tmp_path, policy):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        "  - name: Example\n"
+        "    ats: workday\n"
+        "    token: example\n"
+        "    workday_shard: wd5\n"
+        "    workday_site: Site\n"
+        f"    workday_detail_policy: {policy}\n",
+    )
+
+    assert load_watchlist(path).companies[0].workday_detail_policy == policy
+
+
+def test_workday_detail_policy_defaults_to_internship_candidates(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        "  - name: Example\n"
+        "    ats: workday\n"
+        "    token: example\n"
+        "    workday_shard: wd5\n"
+        "    workday_site: Site\n",
+    )
+
+    assert (
+        load_watchlist(path).companies[0].workday_detail_policy
+        == WORKDAY_DETAIL_INTERNSHIP
+    )
+
+
+def test_invalid_workday_detail_policy_is_rejected(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        "  - name: Example\n"
+        "    ats: workday\n"
+        "    token: example\n"
+        "    workday_shard: wd5\n"
+        "    workday_site: Site\n"
+        "    workday_detail_policy: everything\n",
+    )
+
+    with pytest.raises(ConfigError, match="workday_detail_policy"):
+        load_watchlist(path)
 
 
 def test_load_watchlist_parses_explicit_terms_multiple_feeds_and_inheritance(tmp_path):

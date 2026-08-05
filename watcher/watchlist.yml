@@ -33,6 +33,7 @@ companies:
     token: "workday"
     workday_shard: "wd5"
     workday_site: "Workday_Early_Career"
+    workday_detail_policy: "early_career_candidates"
     alumni_match: ["workday"]
     source_url: "https://workday.wd5.myworkdayjobs.com/Workday_Early_Career/job/USA-CA-Pleasanton/Analytics-Engineer-Intern_JR-0101608"
 
@@ -72,6 +73,7 @@ companies:
     token: "salesforce"
     workday_shard: "wd12"
     workday_site: "Futureforce_Internships"
+    workday_detail_policy: "early_career_candidates"
     alumni_match: ["salesforce"]
     source_url: "https://salesforce.wd12.myworkdayjobs.com/Futureforce_Internships/job/California---San-Francisco/Summer-2026-Intern---AI---Data-Science-Analyst_JR340354"
 
