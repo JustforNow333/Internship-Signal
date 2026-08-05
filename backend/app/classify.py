@@ -302,6 +302,13 @@ NON_SWE_TITLE_PATTERNS = [
     ("non_technical", r"consumer insights?|consumer research|market research|survey research|data entry|\bmarketing\b|\bsales\b|business development|\bhr\b|human resources|recruit(ing|er)|social media|\bcontent\b|\bbrand\b|administrative|operations intern|accounting|activities intern|cold[- ]call|copywrit"),
 ]
 
+BUSINESS_STRATEGY_TITLE_RE = re.compile(
+    r"\b(?:strategy analyst|strategy intern|business strategy|"
+    r"corporate strategy|operations strategy|product strategy|"
+    r"strategic planning)\b",
+    re.I,
+)
+
 BACKEND_CONTEXT_RE = re.compile(
     r"\bback[- ]?end\b|\bserver[- ]side\b|\bapis?\b|\brest(ful)?\b|"
     r"\bmicroservices?\b|\bservices?\b|\bdistributed systems?\b|"
@@ -560,6 +567,17 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
             ['title: "data entry"'],
             software_evidence,
             non_swe_evidence or ["data entry"],
+        )
+
+    business_strategy_title = BUSINESS_STRATEGY_TITLE_RE.search(title)
+    if business_strategy_title and not title_software_hits:
+        hit = business_strategy_title.group(0).strip()
+        return _finish_role(
+            "non_technical",
+            0.86,
+            [f'business-strategy title: "{hit}"'],
+            software_evidence,
+            [*non_swe_evidence, f"non_technical: {hit}"],
         )
 
     embedded_intern = re.search(r"\bembedded intern(?:ship)?\b", title, re.I)

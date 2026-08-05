@@ -349,6 +349,56 @@ def test_explicit_internship_evidence_with_soft_full_time_wording_reaches_matche
     }
 
 
+def test_real_run_false_positives_do_not_reach_final_matches(tmp_path):
+    companies = (
+        CompanyCfg(name="DoorDash", ats="github_only"),
+        CompanyCfg(name="Capital One", ats="github_only"),
+        CompanyCfg(name="Example", ats="github_only"),
+    )
+    postings = [
+        row(
+            "DoorDash",
+            "Software Engineer I, Entry-Level (Graduation Date: Fall 2025-Summer 2026)",
+            source="github",
+            description="Build production software and APIs in Python.",
+        ),
+        row(
+            "Capital One",
+            "Intern, Strategy Analyst - Summer 2027",
+            source="github",
+            description=(
+                "Use Python, SQL, analytics, APIs, and software tools to support "
+                "business strategy and strategic planning."
+            ),
+            requirements="Python, SQL, APIs, and analytics.",
+        ),
+        row(
+            "Example",
+            "Software Engineer Intern - Summer 2027",
+            source="github",
+        ),
+    ]
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=companies),
+            seen_store=store,
+            direct_sources={},
+            github_source=FakeGithub(postings),
+            alumni_index={},
+            today=date(2026, 8, 5),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    jobs = {job["title"]: job for job in result.jobs}
+    strategy = jobs["Intern, Strategy Analyst - Summer 2027"]
+    assert strategy["role_classification"]["role_track"] == "non_technical"
+    assert strategy["score"]["fit_score"] == 0
+    assert [match["title"] for match in result.matches] == [
+        "Software Engineer Intern - Summer 2027"
+    ]
+
+
 def test_sparse_exact_data_and_ai_title_reaches_final_watcher_matches(tmp_path):
     company = CompanyCfg(name="Example", ats="github_only")
     posting = make_row(

@@ -33,7 +33,7 @@ LOGGER = logging.getLogger(__name__)
 # detection, profile matching, technology detection, student eligibility,
 # date-independent score categories, fingerprint inputs, or the artifact
 # schema changes. Deadline and final-decision logic are intentionally dynamic.
-STATIC_ANALYSIS_CACHE_VERSION = 6
+STATIC_ANALYSIS_CACHE_VERSION = 7
 ANALYSIS_CACHE_RETENTION_DAYS = 30
 _SQLITE_BATCH_SIZE = 500
 _STATIC_ROW_FIELDS = (

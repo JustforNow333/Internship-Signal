@@ -318,6 +318,39 @@ def test_explicit_internship_evidence_overrides_full_time_or_entry_level(
 @pytest.mark.parametrize(
     "title",
     [
+        "Software Engineer I, Entry-Level (Graduation Date: Fall 2025-Summer 2026)",
+        "Software Engineer I (Expected Graduation: Summer 2027)",
+        "Entry-Level Developer - Graduating Summer 2027",
+        "New Grad Software Engineer - Summer 2027",
+        "Full-Time Analyst - Summer 2027",
+        "Analyst - Graduate Between Spring 2027 and Summer 2027",
+        "Developer, Class of Summer 2027",
+        "Engineer - Degree Completion Summer 2027",
+    ],
+)
+def test_season_evidence_in_professional_or_graduation_context_is_not_internship(
+    title,
+):
+    posting = job(title=title, internship_type="")
+
+    assert not is_internship(posting)
+    assert filter_matches([posting]) == []
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Summer 2027 Software Engineering Program",
+        "2027 Summer Technology Program",
+    ],
+)
+def test_season_only_student_program_titles_remain_internships(title):
+    assert is_internship(job(title=title, internship_type=""))
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
         "Full-Time Software Engineer",
         "Entry-Level Software Engineer",
         "New Grad Software Engineer Intern",

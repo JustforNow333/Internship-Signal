@@ -11,12 +11,24 @@ TARGET_ROLES = DEFAULT_TARGET_ROLES
 MIN_SCORE: int | None = None
 
 COOP_SEPARATOR_PATTERN = r"[-\u2010\u2011\u2012\u2013\u2014 ]?"
-INTERNSHIP_RE = re.compile(
-    rf"\b(intern|internship|co{COOP_SEPARATOR_PATTERN}op|summer 20\d\d)\b",
+STRONG_INTERNSHIP_RE = re.compile(
+    rf"\b(?:intern|internship|co{COOP_SEPARATOR_PATTERN}op)\b",
+    re.I,
+)
+SEASON_YEAR_RE = re.compile(
+    r"(?:\b(?:spring|summer|fall|autumn|winter)"
+    r"[\s\-\u2010\u2011\u2012\u2013\u2014]+20\d{2}\b|"
+    r"\b20\d{2}[\s\-\u2010\u2011\u2012\u2013\u2014]+"
+    r"(?:spring|summer|fall|autumn|winter)\b)",
     re.I,
 )
 NEW_GRAD_RE = re.compile(r"\bnew[- ]?grad(?:uate)?\b", re.I)
-FULL_TIME_RE = re.compile(r"\b(full[- ]?time|fulltime|entry[- ]?level)\b", re.I)
+PROFESSIONAL_SEASON_CONTEXT_RE = re.compile(
+    r"\b(?:full[- ]?time|fulltime|entry[- ]?level|graduation date|"
+    r"expected graduation|graduating|graduate between|class of|"
+    r"degree completion)\b",
+    re.I,
+)
 
 
 def filter_matches(
@@ -56,16 +68,20 @@ def is_internship(job: dict) -> bool:
     evidence = f"{title}\n{internship_type}"
 
     # New-graduate labels identify a different recruiting track and remain a
-    # hard exclusion. Full-time and entry-level labels are only soft negative
-    # evidence because internship programs commonly use both descriptions.
+    # hard exclusion even when explicit internship wording is also present.
     if NEW_GRAD_RE.search(evidence):
         return False
-    positive = bool(INTERNSHIP_RE.search(evidence))
-    if positive:
+
+    # Explicit internship/co-op wording is strong enough to override ordinary
+    # full-time or entry-level wording used by some real student programs.
+    if STRONG_INTERNSHIP_RE.search(evidence):
         return True
-    if FULL_TIME_RE.search(evidence):
+
+    # A bare season/year is useful for program titles, but graduation windows
+    # in professional postings are eligibility criteria, not internship labels.
+    if not SEASON_YEAR_RE.search(evidence):
         return False
-    return False
+    return not PROFESSIONAL_SEASON_CONTEXT_RE.search(evidence)
 
 
 def is_open(job: dict) -> bool:

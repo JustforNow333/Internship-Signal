@@ -170,6 +170,47 @@ def test_data_entry_is_not_data_science():
     assert got["role"] == "non_technical"
 
 
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Use Python and SQL to analyze data and build API-backed software reports.",
+        "Partner with software engineers and apply analytics to strategic planning.",
+        "Our company builds APIs, cloud platforms, and machine-learning software.",
+    ],
+)
+def test_business_strategy_title_is_not_rescued_by_technical_body(description):
+    got = classify_role(
+        _row(
+            company="Capital One",
+            title="Intern, Strategy Analyst - Summer 2027",
+            description=description,
+            requirements="Python, SQL, APIs, analytics, and software tools.",
+        )
+    )
+
+    assert got["role"] == "non_technical"
+    assert got["role_track"] == "non_technical"
+
+
+@pytest.mark.parametrize(
+    ("title", "expected_track"),
+    [
+        ("Software Engineer Intern, Strategy Platform", "general_swe"),
+        ("Data Engineer Intern, Corporate Strategy Technology", "data_engineering"),
+        ("Machine Learning Engineer Intern, Strategy Systems", "ml_ai"),
+        ("Quantitative Developer Intern, Strategy", "quant_dev"),
+        ("Technical Product Manager Intern, Product Strategy", "technical_product"),
+    ],
+)
+def test_explicit_technical_titles_with_strategy_remain_technical(
+    title,
+    expected_track,
+):
+    got = classify_role(_row(title=title))
+
+    assert got["role_track"] == expected_track
+
+
 def test_unclassifiable_title_is_unknown():
     got = classify_role(_row(title="Team Member"))
     assert got["role"] == "unknown" and got["confidence"] <= 0.3
