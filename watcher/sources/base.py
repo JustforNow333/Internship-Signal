@@ -78,6 +78,14 @@ class JsonHttpResponse:
     metadata: Mapping[str, object]
 
 
+@dataclass(frozen=True)
+class TextHttpResponse:
+    """Decoded UTF-8 text plus safe response metadata."""
+
+    text: str
+    metadata: Mapping[str, object]
+
+
 def make_row(*, source: str, source_adapter: str, extra: dict | None = None, **fields: Any) -> dict:
     """Build a canonical-shaped row and attach source metadata.
 
@@ -298,6 +306,139 @@ def get_json_response(
             error_code=code,
             retryable=True,
         ) from exc
+
+
+def get_text_response(
+    url: str,
+    source_name: str,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    *,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    opener: Callable[..., Any] = urlopen,
+) -> TextHttpResponse:
+    """GET UTF-8 HTML/text once with bounded, retry-aware diagnostics."""
+
+    request = Request(
+        url,
+        headers={"Accept": "text/html,application/xhtml+xml", "User-Agent": USER_AGENT},
+        method="GET",
+    )
+    try:
+        with opener(request, timeout=timeout) as response:
+            return _decode_text_http_response(
+                response,
+                request_url=url,
+                source_name=source_name,
+                max_response_bytes=max_response_bytes,
+            )
+    except HTTPError as exc:
+        return _decode_text_http_response(
+            exc,
+            request_url=url,
+            source_name=source_name,
+            max_response_bytes=max_response_bytes,
+        )
+    except (TimeoutError, URLError, OSError) as exc:
+        code = _network_error_code(exc)
+        raise SourceFetchError(
+            f"{source_name} GET failed: code={code} endpoint={_safe_url(url)}",
+            error_code=code,
+            retryable=True,
+        ) from exc
+
+
+def _decode_text_http_response(
+    response: Any,
+    *,
+    request_url: str,
+    source_name: str,
+    max_response_bytes: int,
+) -> TextHttpResponse:
+    if max_response_bytes <= 0:
+        raise ValueError("max_response_bytes must be positive")
+    status = int(getattr(response, "status", 0) or getattr(response, "code", 0) or 200)
+    headers = getattr(response, "headers", None)
+    content_type = _header_value(headers, "Content-Type")
+    content_encoding = _header_value(headers, "Content-Encoding").casefold()
+    final_url = _safe_url(_response_url(response, request_url))
+    request_label = _safe_url(request_url)
+    raw_body = response.read(max_response_bytes + 1)
+    if len(raw_body) > max_response_bytes:
+        raise SourceFetchError(
+            f"{source_name} response exceeded {max_response_bytes} bytes: endpoint={request_label}",
+            error_code="response_too_large",
+            status_code=status,
+        )
+    try:
+        decoded_body = _decode_content_encoding(
+            raw_body,
+            content_encoding,
+            max_response_bytes=max_response_bytes,
+        )
+    except (_DecodedBodyTooLarge, gzip.BadGzipFile, OSError, zlib.error) as exc:
+        raise SourceFetchError(
+            f"{source_name} response could not be decoded: endpoint={request_label}",
+            error_code="compressed_decode_failure",
+            status_code=status,
+            retryable=True,
+        ) from exc
+    text, text_error = _decode_response_text(decoded_body, content_type)
+    body_kind = _body_kind(decoded_body, text)
+    # HTML is the expected representation for this helper. A normal job page
+    # may use the word "challenge" in its copy, so require a concrete access
+    # interstitial phrase before classifying a successful HTML page as one.
+    if (
+        body_kind == "html_challenge"
+        and text is not None
+        and not _is_access_challenge_text(text)
+    ):
+        body_kind = "html"
+    metadata = _response_metadata(
+        status=status,
+        final_url=final_url,
+        content_type=content_type,
+        content_encoding=content_encoding,
+        raw_body=raw_body,
+        body_kind=body_kind,
+        redirected=final_url != request_label,
+        transient=False,
+        retry_after_seconds=_retry_after_seconds(_header_value(headers, "Retry-After")),
+    )
+    if status < 200 or status >= 300:
+        error_code, retryable = _classify_http_failure(status, body_kind)
+        metadata["transient"] = retryable
+        raise SourceFetchError(
+            f"{source_name} GET failed: code={error_code} status={status} endpoint={request_label}",
+            error_code=error_code,
+            status_code=status,
+            retryable=retryable,
+            response_metadata=metadata,
+        )
+    if not decoded_body:
+        raise SourceFetchError(
+            f"{source_name} returned an empty response: endpoint={request_label}",
+            error_code="empty_response",
+            status_code=status,
+            retryable=True,
+            response_metadata=metadata,
+        )
+    if text_error is not None or text is None:
+        raise SourceFetchError(
+            f"{source_name} returned undecodable text: endpoint={request_label}",
+            error_code="text_decode_failure",
+            status_code=status,
+            retryable=False,
+            response_metadata=metadata,
+        ) from text_error
+    if body_kind == "html_challenge":
+        raise SourceFetchError(
+            f"{source_name} returned an access challenge: endpoint={request_label}",
+            error_code="html_challenge",
+            status_code=status,
+            retryable=False,
+            response_metadata=metadata,
+        )
+    return TextHttpResponse(text=text.lstrip("\ufeff"), metadata=metadata)
 
 
 def _decode_json_http_response(
@@ -563,6 +704,21 @@ _HTML_CHALLENGE_MARKERS = (
     "security check",
     "verify you are human",
 )
+
+
+def _is_access_challenge_text(text: str) -> bool:
+    lowered = text[:16_384].casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "access denied",
+            "captcha",
+            "checking your browser",
+            "request blocked",
+            "security check",
+            "verify you are human",
+        )
+    )
 
 
 def _classify_http_failure(status: int, body_kind: str) -> tuple[str, bool]:

@@ -1,0 +1,6 @@
+{
+  "filters": "<div id=\"search-filters\"></div>",
+  "results": "<div id=\"search-results\" data-total-results=\"3\" data-total-pages=\"2\" data-current-page=\"2\" data-records-per-page=\"2\"><ul><li><a class=\"job-title--link\" data-job-id=\"97500000001\" href=\"/en/job/new-york/software-engineer-internship/13015/97500000001\"><strong>Software Engineer Summer Internship</strong></a><div class=\"job-location\">New York, New York</div></li><li><a class=\"job-title--link\" data-job-id=\"97500000002\" href=\"/en/job/london/quantitative-analytics-internship/13015/97500000002\"><strong>Quantitative Analytics Internship</strong></a><div class=\"job-location\">London, England</div></li></ul></div>",
+  "hasJobs": true,
+  "hasContent": true
+}

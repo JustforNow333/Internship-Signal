@@ -8,6 +8,7 @@ from .greenhouse import GreenhouseSource
 from .lever import LeverSource
 from .oracle_hcm import OracleHcmSource
 from .smartrecruiters import SmartRecruitersSource
+from .talentbrew import TalentBrewSource
 from .workable import WorkableSource
 from .workday import WorkdaySource
 
@@ -19,6 +20,7 @@ __all__ = [
     "LeverSource",
     "OracleHcmSource",
     "SmartRecruitersSource",
+    "TalentBrewSource",
     "Source",
     "SourceError",
     "SourceFetchError",

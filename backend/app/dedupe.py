@@ -26,6 +26,7 @@ _ATS_ADAPTERS = frozenset(
         "lever",
         "oracle_hcm",
         "smartrecruiters",
+        "talentbrew",
         "workable",
         "workday",
     }

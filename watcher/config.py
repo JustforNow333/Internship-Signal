@@ -116,6 +116,7 @@ SUPPORTED_ATS = {
     "workable",
     "workday",
     "oracle_hcm",
+    "talentbrew",
     "bespoke",
     "github_only",
 }
@@ -342,6 +343,10 @@ class CompanyCfg:
     workday_site: str = ""
     oracle_hcm_host: str = ""
     oracle_hcm_site: str = ""
+    talentbrew_host: str = ""
+    talentbrew_site_id: str = ""
+    talentbrew_category_id: str = ""
+    talentbrew_category_name: str = ""
     source_url: str = ""
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)
@@ -484,6 +489,19 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             site=oracle_hcm_site,
             source_url=source_url,
         )
+    talentbrew_host = str(entry.get("talentbrew_host") or "").strip().casefold()
+    talentbrew_site_id = str(entry.get("talentbrew_site_id") or "").strip()
+    talentbrew_category_id = str(entry.get("talentbrew_category_id") or "").strip()
+    talentbrew_category_name = str(entry.get("talentbrew_category_name") or "").strip()
+    if ats == "talentbrew":
+        _validate_talentbrew_config(
+            name,
+            host=talentbrew_host,
+            site_id=talentbrew_site_id,
+            category_id=talentbrew_category_id,
+            category_name=talentbrew_category_name,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
@@ -496,6 +514,10 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         workday_site=workday_site,
         oracle_hcm_host=oracle_hcm_host,
         oracle_hcm_site=oracle_hcm_site,
+        talentbrew_host=talentbrew_host,
+        talentbrew_site_id=talentbrew_site_id,
+        talentbrew_category_id=talentbrew_category_id,
+        talentbrew_category_name=talentbrew_category_name,
         source_url=source_url,
         module=str(entry.get("module") or "").strip(),
         aliases=_string_tuple(entry.get("aliases", ())),
@@ -551,6 +573,45 @@ def _validate_oracle_hcm_config(
     ):
         raise ConfigError(
             f"{name}: oracle_hcm source_url must be a credential-free HTTPS URL on oracle_hcm_host"
+        )
+
+
+def _validate_talentbrew_config(
+    name: str,
+    *,
+    host: str,
+    site_id: str,
+    category_id: str,
+    category_name: str,
+    source_url: str,
+) -> None:
+    if (
+        not re.fullmatch(r"[a-z0-9.-]+", host)
+        or host.startswith(".")
+        or ".." in host
+    ):
+        raise ConfigError(f"{name}: talentbrew entries require a valid talentbrew_host")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", site_id):
+        raise ConfigError(f"{name}: talentbrew entries require talentbrew_site_id")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", category_id):
+        raise ConfigError(f"{name}: talentbrew entries require talentbrew_category_id")
+    if not category_name:
+        raise ConfigError(f"{name}: talentbrew entries require talentbrew_category_name")
+    try:
+        parsed = urlsplit(source_url)
+    except ValueError as exc:
+        raise ConfigError(f"{name}: talentbrew entries require a valid source_url") from exc
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != host
+        or parsed.netloc.casefold() != host
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: talentbrew source_url must be a credential-free HTTPS URL on talentbrew_host"
         )
 
 

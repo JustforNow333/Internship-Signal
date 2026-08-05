@@ -503,11 +503,14 @@ companies:
     note: "Official Oracle HCM Candidate Experience portal"
 
   - name: "Barclays"
-    ats: bespoke
-    module: "barclays"
+    ats: talentbrew
+    talentbrew_host: "search.jobs.barclays"
+    talentbrew_site_id: "13015"
+    talentbrew_category_id: "8736272"
+    talentbrew_category_name: "Early Careers"
     alumni_match: ["barclays"]
-    source_url: "https://barclays.wd3.myworkdayjobs.com/External_Career_Site_Barclays"
-    note: "Workday board verified, but current adapter fails this board's schema; adapter follow-up needed"
+    source_url: "https://search.jobs.barclays/search-jobs"
+    note: "Official TalentBrew Early Careers category"
 
   - name: "UBS"
     ats: bespoke
