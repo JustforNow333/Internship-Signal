@@ -15,7 +15,8 @@ INTERNSHIP_RE = re.compile(
     rf"\b(intern|internship|co{COOP_SEPARATOR_PATTERN}op|summer 20\d\d)\b",
     re.I,
 )
-FULL_TIME_RE = re.compile(r"\b(new[- ]?grad|new graduate|full[- ]?time|fulltime|entry[- ]?level)\b", re.I)
+NEW_GRAD_RE = re.compile(r"\bnew[- ]?grad(?:uate)?\b", re.I)
+FULL_TIME_RE = re.compile(r"\b(full[- ]?time|fulltime|entry[- ]?level)\b", re.I)
 
 
 def filter_matches(
@@ -50,15 +51,21 @@ def is_target_role(job: dict, *, target_roles: set[str] | frozenset[str] = TARGE
 
 
 def is_internship(job: dict) -> bool:
-    title = job.get("title", "")
-    if FULL_TIME_RE.search(title):
+    title = str(job.get("title") or "")
+    internship_type = str(job.get("internship_type") or "")
+    evidence = f"{title}\n{internship_type}"
+
+    # New-graduate labels identify a different recruiting track and remain a
+    # hard exclusion. Full-time and entry-level labels are only soft negative
+    # evidence because internship programs commonly use both descriptions.
+    if NEW_GRAD_RE.search(evidence):
         return False
-    # internship_type holds the ATS's generic employment-type STRING
-    # (e.g. "FullTime", "full", "Contract", "Intern"), not a boolean flag,
-    # so a plain truthiness check matched nearly everything. Only count it
-    # as an internship signal when the string itself says intern/co-op.
-    itype = job.get("internship_type", "")
-    return bool(INTERNSHIP_RE.search(itype) or INTERNSHIP_RE.search(title))
+    positive = bool(INTERNSHIP_RE.search(evidence))
+    if positive:
+        return True
+    if FULL_TIME_RE.search(evidence):
+        return False
+    return False
 
 
 def is_open(job: dict) -> bool:

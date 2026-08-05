@@ -632,6 +632,68 @@ def test_github_listings_fixture_filters_active_company_and_terms():
     assert source.url == TEST_GITHUB_FEED_URL
 
 
+@pytest.mark.parametrize(
+    "source_term",
+    [
+        "Summer-2027",
+        "Summer 2027 Internship",
+        "2027 Summer",
+        "Summer '27",
+        "Summer ’27",
+    ],
+)
+def test_github_listings_matches_supported_season_term_variants(source_term):
+    payload = [
+        {
+            "company_name": "GitHub",
+            "title": "Software Engineering Intern",
+            "locations": ["United States"],
+            "url": "https://example.test/jobs/season-variant",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": [source_term],
+        }
+    ]
+
+    rows = GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(
+        payload,
+        CompanyCfg(name="GitHub", terms=("Summer 2027",)),
+    )
+
+    assert len(rows) == 1
+
+
+@pytest.mark.parametrize(
+    "source_term",
+    [
+        "Summer 2028",
+        "Fall 2027",
+        "2027 Internship",
+        "Summer",
+        "Summer 2027 Analyst",
+    ],
+)
+def test_github_listings_rejects_non_equivalent_season_terms(source_term):
+    payload = [
+        {
+            "company_name": "GitHub",
+            "title": "Software Engineering Intern",
+            "locations": ["United States"],
+            "url": "https://example.test/jobs/nonmatching-season",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": [source_term],
+        }
+    ]
+
+    rows = GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(
+        payload,
+        CompanyCfg(name="GitHub", terms=("Summer 2027",)),
+    )
+
+    assert rows == []
+
+
 def test_github_markdown_fixture_parses_links_markers_dates_and_skips_bad_rows(caplog):
     source = GitHubMarkdownTableSource(
         "https://fixtures.example.test/internships/README.md",
@@ -732,6 +794,98 @@ def test_github_markdown_nonempty_all_malformed_table_fails():
 
     with pytest.raises(SourceSchemaError, match="all malformed"):
         source.parse(payload, (CompanyCfg(name="Acme", terms=("Summer 2027",)),))
+
+
+def test_github_markdown_multiple_tables_parse_all_orders_boundaries_and_markers(
+    caplog,
+):
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="multi_table",
+        default_term="Summer ’27",
+    )
+    companies = (
+        CompanyCfg(name="JPMorgan Chase", terms=("Summer 2027",)),
+        CompanyCfg(name="Google", terms=("Summer 2027",)),
+        CompanyCfg(name="KPMG", terms=("Summer 2027",)),
+        CompanyCfg(
+            name="Amazon",
+            aliases=("Amazon Web Services",),
+            terms=("Summer 2027",),
+        ),
+    )
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="watcher.sources.github_markdown_table",
+    ):
+        rows = source.parse(
+            load_text_fixture("github_markdown_multiple_tables.md"),
+            companies,
+        )
+
+    assert [row["company"] for row in rows] == [
+        "JPMorgan Chase & Co.",
+        "Google",
+        "KPMG LLP",
+        "Amazon Web Services",
+    ]
+    assert rows[0]["source_url"].endswith("?utm_source=first")
+    assert rows[2]["extra"]["closed"] is True
+    assert rows[2]["extra"]["no_sponsorship"] is True
+    assert rows[2]["extra"]["us_citizenship_required"] is True
+    assert rows[3]["internship_type"] == "Summer ’27"
+    assert source.last_diagnostics.candidate_tables == 4
+    assert source.last_diagnostics.valid_tables == 3
+    assert source.last_diagnostics.rows_by_table == (2, 1, 1)
+    assert source.last_diagnostics.duplicates_removed == 1
+    assert source.last_diagnostics.malformed_tables == 1
+    assert "malformed candidate table" in caplog.text
+    assert "Ignored Co" not in caplog.text
+
+
+def test_github_markdown_one_malformed_table_does_not_discard_valid_tables():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="multi_table",
+        default_term="Summer 2027",
+    )
+
+    rows = source.parse(
+        load_text_fixture("github_markdown_multiple_tables.md"),
+        (CompanyCfg(name="Google", terms=("Summer 2027",)),),
+    )
+
+    assert [row["company"] for row in rows] == ["Google"]
+    assert source.last_diagnostics.malformed_tables == 1
+
+
+def test_github_markdown_only_malformed_candidate_tables_raise():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="malformed_tables",
+        default_term="Summer 2027",
+    )
+
+    with pytest.raises(SourceSchemaError, match="invalid separator"):
+        source.parse(
+            load_text_fixture("github_markdown_only_malformed_tables.md"),
+            (),
+        )
+
+
+def test_github_markdown_all_candidate_rows_across_tables_malformed_raise():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="malformed_rows",
+        default_term="Summer 2027",
+    )
+
+    with pytest.raises(SourceSchemaError, match="all malformed"):
+        source.parse(
+            load_text_fixture("github_markdown_all_rows_malformed.md"),
+            (CompanyCfg(name="Acme", terms=("Summer 2027",)),),
+        )
 
 
 def test_github_listings_matches_aliases_and_filters_inactive_or_wrong_term():

@@ -307,6 +307,48 @@ def test_unicode_dash_coop_reaches_final_watcher_matches(tmp_path):
     assert result.matches[0]["id"] == result.jobs[0]["id"]
 
 
+def test_explicit_internship_evidence_with_soft_full_time_wording_reaches_matches(
+    tmp_path,
+):
+    company = CompanyCfg(name="Example", ats="greenhouse", token="example")
+    examples = (
+        ("Full-Time Software Engineering Intern", ""),
+        ("Software Engineering Internship - Full Time", ""),
+        ("Entry-Level Software Internship", ""),
+        ("Software Engineer - Full Time", "Intern"),
+        ("Technology Program", "Summer 2027 Internship"),
+    )
+    postings = []
+    for index, (title, internship_type) in enumerate(examples):
+        posting = row(
+            "Example",
+            title,
+            url=f"https://example.test/jobs/precedence-{index}",
+            description=(
+                "Design and build software applications, APIs, and backend services "
+                "with Python, Java, and React."
+            ),
+        )
+        posting["location"] = "Boston, MA, United States"
+        posting["internship_type"] = internship_type
+        postings.append(posting)
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=(company,)),
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"Example": postings})},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert {match["title"] for match in result.matches} == {
+        title for title, _ in examples
+    }
+
+
 def test_sparse_exact_data_and_ai_title_reaches_final_watcher_matches(tmp_path):
     company = CompanyCfg(name="Example", ats="github_only")
     posting = make_row(
