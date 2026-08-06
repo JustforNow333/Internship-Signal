@@ -2063,6 +2063,11 @@ def _direct_diagnostics_from_source(
         failed_requests = recovered_retries
         failed_requests += detail_failures
         failed_requests += int(getattr(diagnostics, "disappeared_postings", 0) or 0)
+        # A continuation page that was lost after earlier pages succeeded is a
+        # failed request that the run still reports as a degraded success.
+        failed_requests += int(
+            getattr(diagnostics, "listing_request_failures", 0) or 0
+        )
         listing_incomplete = bool(
             getattr(diagnostics, "listing_incomplete", False)
         )

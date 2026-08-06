@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import SourceSchemaError
+from watcher.sources.base import SourceFetchError, SourceSchemaError
 from watcher.sources.workday import MAX_LISTING_PAGES, WorkdaySource
 
 PAGE_SIZE = WorkdaySource.page_size
@@ -244,8 +244,33 @@ def test_empty_page_before_reported_total_marks_incomplete(monkeypatch):
     )
 
 
-def test_repeated_full_page_raises_schema_error(monkeypatch):
+def test_repeated_full_page_stops_as_incomplete_with_usable_rows(monkeypatch):
     repeated = board(PAGE_SIZE)
+    offsets: list[int] = []
+
+    def transport(_url, request, _source_name):
+        offsets.append(int(request["offset"]))
+        return {"jobPostings": repeated, "total": 500}
+
+    monkeypatch.setattr("watcher.sources.workday.post_json", transport)
+    source = WorkdaySource()
+
+    rows = source.fetch(workday_company())
+
+    assert offsets == [0, PAGE_SIZE]
+    assert len(rows) == PAGE_SIZE
+    assert source.last_diagnostics.listing_pages == 1
+    assert source.last_diagnostics.listing_rows == PAGE_SIZE
+    assert source.last_diagnostics.listing_incomplete is True
+    assert source.last_diagnostics.listing_incomplete_reasons == (
+        "pagination_repeated_page",
+    )
+
+
+def test_repeated_page_without_usable_rows_still_raises(monkeypatch):
+    """With nothing trustworthy in hand the repeated page stays fatal."""
+
+    repeated = [{"title": f"Bad {index}"} for index in range(PAGE_SIZE)]
     offsets: list[int] = []
 
     def transport(_url, request, _source_name):
@@ -259,6 +284,66 @@ def test_repeated_full_page_raises_schema_error(monkeypatch):
         source.fetch(workday_company())
 
     assert offsets == [0, PAGE_SIZE]
+
+
+def test_failed_continuation_request_keeps_earlier_pages_as_incomplete(monkeypatch):
+    postings = board(PAGE_SIZE)
+    offsets: list[int] = []
+
+    def transport(_url, request, _source_name):
+        offset = int(request["offset"])
+        offsets.append(offset)
+        if offset == 0:
+            return {"jobPostings": postings, "total": 500}
+        raise SourceFetchError(
+            "workday POST failed", error_code="network_failure", retryable=False
+        )
+
+    monkeypatch.setattr("watcher.sources.workday.post_json", transport)
+    source = WorkdaySource()
+
+    rows = source.fetch(workday_company())
+
+    assert len(rows) == PAGE_SIZE
+    assert offsets == [0, PAGE_SIZE]
+    assert source.last_diagnostics.listing_request_failures == 1
+    assert source.last_diagnostics.listing_incomplete is True
+    assert source.last_diagnostics.listing_incomplete_reasons == (
+        "pagination_request_failed",
+    )
+
+
+def test_failed_first_request_remains_a_fatal_source_failure(monkeypatch):
+    def transport(_url, _request, _source_name):
+        raise SourceFetchError(
+            "workday POST failed", error_code="network_failure", retryable=False
+        )
+
+    monkeypatch.setattr("watcher.sources.workday.post_json", transport)
+    source = WorkdaySource()
+
+    with pytest.raises(SourceFetchError):
+        source.fetch(workday_company())
+
+
+def test_schema_error_on_continuation_page_keeps_earlier_pages(monkeypatch):
+    postings = board(PAGE_SIZE)
+
+    def transport(_url, request, _source_name):
+        if int(request["offset"]) == 0:
+            return {"jobPostings": postings, "total": 500}
+        return {"jobPostings": "not-a-list", "total": 500}
+
+    monkeypatch.setattr("watcher.sources.workday.post_json", transport)
+    source = WorkdaySource()
+
+    rows = source.fetch(workday_company())
+
+    assert len(rows) == PAGE_SIZE
+    assert source.last_diagnostics.listing_incomplete is True
+    assert source.last_diagnostics.listing_incomplete_reasons == (
+        "pagination_schema_error",
+    )
 
 
 def test_safety_limit_terminates_endless_board(monkeypatch):

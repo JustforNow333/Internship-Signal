@@ -602,7 +602,7 @@ def test_workday_early_empty_page_returns_rows_but_marks_incomplete(monkeypatch)
     )
 
 
-def test_workday_repeated_page_fails_and_diagnostics_do_not_leak(monkeypatch):
+def test_workday_repeated_page_stops_incomplete_and_diagnostics_do_not_leak(monkeypatch):
     source = WorkdaySource()
     source.parse(
         {"jobPostings": [workday_posting(), {"title": "broken"}], "total": 2},
@@ -624,12 +624,18 @@ def test_workday_repeated_page_fails_and_diagnostics_do_not_leak(monkeypatch):
         return payload
 
     monkeypatch.setattr("watcher.sources.workday.post_json", fake_post_json)
-    with pytest.raises(SourceSchemaError, match="repeated pagination page"):
-        source.fetch(workday_company())
+    rows = source.fetch(workday_company())
 
+    # The repeated page terminates pagination without being counted twice, and
+    # the rows already retrieved survive as an explicitly incomplete listing.
     assert offsets == [0, page_size]
+    assert len(rows) == page_size
     assert source.last_diagnostics.malformed_postings_skipped == 0
-    assert source.last_diagnostics.raw_postings_seen == 0
+    assert source.last_diagnostics.raw_postings_seen == page_size
+    assert source.last_diagnostics.listing_incomplete is True
+    assert source.last_diagnostics.listing_incomplete_reasons == (
+        "pagination_repeated_page",
+    )
 
 
 def test_ashby_fixture_to_canonical_rows():

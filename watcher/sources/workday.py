@@ -203,6 +203,7 @@ class WorkdayParseDiagnostics:
     listing_incomplete: bool = False
     listing_incomplete_reasons: tuple[str, ...] = ()
     pagination_total_anomalies: tuple[tuple[str, int], ...] = ()
+    listing_request_failures: int = 0
 
 
 @dataclass(frozen=True)
@@ -533,19 +534,37 @@ class WorkdaySource:
         incomplete_reasons: set[str] = set()
         seen_pages: set[str] = set()
         while True:
-            payload = self._fetch_page(
-                self.endpoint(token, shard, site),
-                {"appliedFacets": {}, "limit": self.page_size, "offset": offset, "searchText": ""},
-            )
-            postings, total_found = self._page(payload)
-            pages_fetched += 1
-            self._listing_pages += 1
-            self._listing_rows += len(postings)
+            try:
+                payload = self._fetch_page(
+                    self.endpoint(token, shard, site),
+                    {"appliedFacets": {}, "limit": self.page_size, "offset": offset, "searchText": ""},
+                )
+                postings, total_found = self._page(payload)
+            except SourceError as exc:
+                # Losing a continuation page after earlier pages succeeded is
+                # incomplete collection, not a fatal source failure: the rows
+                # already retrieved stay usable and the attempt is reported as
+                # degraded. With nothing usable in hand there is no trustworthy
+                # result, so the failure still propagates.
+                if not rows:
+                    raise
+                self._listing_request_failures += 1
+                incomplete_reasons.add(_continuation_failure_reason(exc))
+                break
             if postings:
                 fingerprint = page_fingerprint(postings)
                 if fingerprint in seen_pages:
-                    raise SourceSchemaError("workday returned a repeated pagination page")
+                    # A repeated page can only appear after an earlier page, and
+                    # re-parsing it would duplicate rows, so stop before it is
+                    # counted and report incomplete coverage instead.
+                    if not rows:
+                        raise SourceSchemaError("workday returned a repeated pagination page")
+                    incomplete_reasons.add("pagination_repeated_page")
+                    break
                 seen_pages.add(fingerprint)
+            pages_fetched += 1
+            self._listing_pages += 1
+            self._listing_rows += len(postings)
             raw_postings_seen += len(postings)
             page_rows, page_reasons = self._parse_postings(postings, company, token, shard, site)
             rows.extend(page_rows)
@@ -954,6 +973,7 @@ class WorkdaySource:
         self._detail_degraded_reason = ""
         self._listing_incomplete_reasons: set[str] = set()
         self._pagination_total_anomalies: Counter[str] = Counter()
+        self._listing_request_failures = 0
         self.last_response_metadata = {}
         self.last_diagnostics = WorkdayParseDiagnostics()
 
@@ -989,6 +1009,7 @@ class WorkdaySource:
             pagination_total_anomalies=tuple(
                 sorted(self._pagination_total_anomalies.items())
             ),
+            listing_request_failures=self._listing_request_failures,
         )
 
     def _parse_posting(self, posting: Any, company: CompanyCfg, token: str, shard: str, site: str) -> dict:
@@ -1253,6 +1274,16 @@ def _bounded_metadata_value(value: object, *, depth: int = 0) -> object:
             not in (None, "", [], {})
         }
     return None
+
+
+def _continuation_failure_reason(error: SourceError) -> str:
+    """Return the stable incomplete-collection reason for a lost page."""
+
+    if isinstance(error, SourceFetchError):
+        return "pagination_request_failed"
+    if isinstance(error, SourceSchemaError):
+        return "pagination_schema_error"
+    return "pagination_request_failed"
 
 
 def _safe_detail_error_code(value: object) -> str:
