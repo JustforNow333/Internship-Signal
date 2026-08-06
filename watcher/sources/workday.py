@@ -86,6 +86,87 @@ _REQUIREMENT_STOP_HEADINGS = (
     "about the role",
     "application",
 )
+_DETAIL_TITLE_FIELDS = ("title",)
+_DETAIL_DESCRIPTION_FIELDS = ("jobDescription",)
+_DETAIL_REQUIREMENT_FIELDS = (
+    "requirements",
+    "qualifications",
+    "minimumQualifications",
+)
+_DETAIL_REQUISITION_ID_FIELDS = (
+    "jobReqId",
+    "requisitionId",
+    "jobRequisitionId",
+)
+_DETAIL_LOCATION_FIELDS = (
+    "location",
+    "jobRequisitionLocation",
+    "additionalLocations",
+    "locations",
+)
+_DETAIL_POSTING_DATE_FIELDS = ("startDate", "postedOn")
+_DETAIL_DEADLINE_FIELDS = (
+    "endDate",
+    "jobPostingEndDate",
+    "jobPostingEndDateAsText",
+    "applicationDeadline",
+)
+_DETAIL_TYPE_FIELDS = (
+    "workerSubType",
+    "jobType",
+    "employmentType",
+    "timeType",
+)
+_DETAIL_REMOTE_FIELDS = ("remoteType", "remoteStatus", "workplaceType")
+_DETAIL_COMPENSATION_FIELDS = (
+    "payRange",
+    "salaryRange",
+    "compensation",
+    "compensationText",
+)
+_DETAIL_METADATA_FIELDS = (
+    ("studentProgram", "student_program"),
+    ("studentPrograms", "student_programs"),
+    ("degreeRequirements", "degree_requirements"),
+    ("educationRequirements", "education_requirements"),
+    ("classYear", "class_year"),
+    ("classYears", "class_years"),
+    ("graduationYear", "graduation_year"),
+    ("graduationYears", "graduation_years"),
+    ("eligibility", "eligibility"),
+    ("eligibilityRequirements", "eligibility_requirements"),
+    ("country", "country"),
+    ("jobRequisitionLocation", "job_requisition_location"),
+    ("workerSubType", "worker_subtype"),
+    ("workerType", "worker_type"),
+    ("employmentType", "employment_type"),
+    ("timeType", "time_type"),
+    ("remoteType", "remote_type"),
+    ("canApply", "can_apply"),
+    ("posted", "posted"),
+)
+# Workday search remains authoritative for the title, so title is a valid
+# contract marker without being merged back over the listing value. Every
+# other schema field below is consumed by a merger helper or metadata mapping.
+_DETAIL_SCHEMA_FIELD_GROUPS = (
+    _DETAIL_TITLE_FIELDS,
+    _DETAIL_DESCRIPTION_FIELDS,
+    _DETAIL_REQUIREMENT_FIELDS,
+    _DETAIL_REQUISITION_ID_FIELDS,
+    _DETAIL_LOCATION_FIELDS,
+    _DETAIL_POSTING_DATE_FIELDS,
+    _DETAIL_DEADLINE_FIELDS,
+    _DETAIL_TYPE_FIELDS,
+    _DETAIL_REMOTE_FIELDS,
+    _DETAIL_COMPENSATION_FIELDS,
+)
+_DETAIL_SCHEMA_FIELDS = frozenset(
+    field
+    for group in _DETAIL_SCHEMA_FIELD_GROUPS
+    for field in group
+) | frozenset(
+    source_field for source_field, _destination_field in _DETAIL_METADATA_FIELDS
+)
 
 
 @dataclass(frozen=True)
@@ -872,11 +953,15 @@ def _detail_posting_info(payload: object) -> dict:
         raise _WorkdayDetailSchemaError(
             "workday detail missing jobPostingInfo object"
         )
+    if not _DETAIL_SCHEMA_FIELDS.intersection(info):
+        raise _WorkdayDetailSchemaError(
+            "workday detail jobPostingInfo has no recognized fields"
+        )
     return info
 
 
 def _detail_requisition_id(info: dict) -> str:
-    for key in ("jobReqId", "requisitionId", "jobRequisitionId"):
+    for key in _DETAIL_REQUISITION_ID_FIELDS:
         value = str(info.get(key) or "").strip()
         if value:
             return value
@@ -892,7 +977,7 @@ def _merge_detail_into_row(row: dict, info: dict) -> Counter[str]:
         extra["source_requisition_id"] = detail_id
         extra["source_id"] = detail_id
 
-    description = html_to_text(info.get("jobDescription"))
+    description = html_to_text(info.get(_DETAIL_DESCRIPTION_FIELDS[0]))
     _fill_blank(row, "description", description, filled)
     requirements = _detail_requirements(info)
     _fill_blank(row, "requirements", requirements, filled)
@@ -906,7 +991,7 @@ def _merge_detail_into_row(row: dict, info: dict) -> Counter[str]:
                 row["location"] = new_location
                 filled["location"] += 1
 
-    posted = _first_text(info, "startDate", "postedOn")
+    posted = _first_text(info, *_DETAIL_POSTING_DATE_FIELDS)
     current_posted = str(row.get("date_posted") or "").strip()
     if posted and (
         not current_posted
@@ -919,34 +1004,14 @@ def _merge_detail_into_row(row: dict, info: dict) -> Counter[str]:
     _fill_blank(
         row,
         "deadline",
-        _first_text(
-            info,
-            "endDate",
-            "jobPostingEndDate",
-            "jobPostingEndDateAsText",
-            "applicationDeadline",
-        ),
+        _first_text(info, *_DETAIL_DEADLINE_FIELDS),
         filled,
     )
     _fill_blank(row, "internship_type", _detail_type(info), filled)
     _fill_blank(row, "remote_status", _detail_remote_status(info), filled)
     _fill_blank(row, "compensation", _detail_compensation(info), filled)
 
-    metadata_fields = {
-        "studentProgram": "student_program",
-        "degreeRequirements": "degree_requirements",
-        "educationRequirements": "education_requirements",
-        "country": "country",
-        "jobRequisitionLocation": "job_requisition_location",
-        "workerSubType": "worker_subtype",
-        "workerType": "worker_type",
-        "employmentType": "employment_type",
-        "timeType": "time_type",
-        "remoteType": "remote_type",
-        "canApply": "can_apply",
-        "posted": "posted",
-    }
-    for source_key, destination_key in metadata_fields.items():
+    for source_key, destination_key in _DETAIL_METADATA_FIELDS:
         value = _bounded_metadata_value(info.get(source_key))
         if value not in (None, "", [], {}):
             extra[destination_key] = value
@@ -979,14 +1044,11 @@ def _first_text(info: dict, *keys: str) -> str:
 
 def _detail_locations(info: dict) -> list[str]:
     values: list[str] = []
-    values.extend(_text_values(info.get("location")))
-    requisition_location = info.get("jobRequisitionLocation")
-    if isinstance(requisition_location, dict):
-        values.extend(_text_values(requisition_location.get("descriptor")))
-    else:
-        values.extend(_text_values(requisition_location))
-    for key in ("additionalLocations", "locations"):
-        values.extend(_text_values(info.get(key)))
+    for key in _DETAIL_LOCATION_FIELDS:
+        value = info.get(key)
+        if key == "jobRequisitionLocation" and isinstance(value, dict):
+            value = value.get("descriptor")
+        values.extend(_text_values(value))
     unique: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -1000,13 +1062,13 @@ def _detail_locations(info: dict) -> list[str]:
 
 def _detail_type(info: dict) -> str:
     values: list[str] = []
-    for key in ("workerSubType", "jobType", "employmentType", "timeType"):
+    for key in _DETAIL_TYPE_FIELDS:
         values.extend(_text_values(info.get(key)))
     return _join_unique(values, separator="; ")
 
 
 def _detail_remote_status(info: dict) -> str:
-    text = _first_text(info, "remoteType", "remoteStatus", "workplaceType")
+    text = _first_text(info, *_DETAIL_REMOTE_FIELDS)
     if not text:
         return ""
     lowered = text.casefold()
@@ -1020,21 +1082,15 @@ def _detail_remote_status(info: dict) -> str:
 
 
 def _detail_compensation(info: dict) -> str:
-    return _first_text(
-        info,
-        "payRange",
-        "salaryRange",
-        "compensation",
-        "compensationText",
-    )
+    return _first_text(info, *_DETAIL_COMPENSATION_FIELDS)
 
 
 def _detail_requirements(info: dict) -> str:
-    for key in ("requirements", "qualifications", "minimumQualifications"):
+    for key in _DETAIL_REQUIREMENT_FIELDS:
         value = html_to_text(info.get(key))
         if value:
             return value
-    raw = str(info.get("jobDescription") or "")
+    raw = str(info.get(_DETAIL_DESCRIPTION_FIELDS[0]) or "")
     if not raw:
         return ""
     text = unescape(raw)

@@ -313,6 +313,133 @@ def test_malformed_detail_retains_listing_and_does_not_discard_other_jobs():
     assert rows[1]["extra"]["workday_detail_status"] == "enriched"
     assert source.last_diagnostics.detail_failures == 1
     assert source.last_diagnostics.detail_successes == 1
+    assert source.last_diagnostics.detail_enrichment_degraded is False
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        {"jobPostingInfo": {}},
+        {"jobPostingInfo": {"unexpectedField": "not a Workday detail record"}},
+    ],
+)
+def test_materially_changed_detail_schema_is_not_counted_as_enriched(detail):
+    source, _calls = source_for(
+        {"jobPostings": [posting()], "total": 1},
+        {"default": detail},
+    )
+
+    row = source.fetch(company())[0]
+
+    assert row["title"] == "Technology Intern"
+    assert row["extra"]["workday_detail_status"] == "failed"
+    assert row["extra"]["workday_detail_error"] == "schema_error"
+    assert source.last_diagnostics.detail_successes == 0
+    assert source.last_diagnostics.detail_failures == 1
+    assert source.last_diagnostics.detail_enrichment_degraded is True
+
+
+@pytest.mark.parametrize(
+    ("detail_info", "expected_row", "expected_extra", "expected_status"),
+    [
+        (
+            {"jobDescription": "Build APIs."},
+            {"description": "Build APIs."},
+            {},
+            "enriched",
+        ),
+        (
+            {"requirements": "Python required."},
+            {"requirements": "Python required."},
+            {},
+            "enriched",
+        ),
+        ({"requisitionId": "R123"}, {}, {"source_requisition_id": "R123"}, "success"),
+        ({"location": "New York, NY"}, {"location": "New York, NY"}, {}, "enriched"),
+        (
+            {"additionalLocations": ["Boston, MA", "Remote - US"]},
+            {"location": "Boston, MA; Remote - US"},
+            {},
+            "enriched",
+        ),
+        ({"startDate": "2026-08-01"}, {"date_posted": "2026-08-01"}, {}, "enriched"),
+        (
+            {"applicationDeadline": "2026-09-01"},
+            {"deadline": "2026-09-01"},
+            {},
+            "enriched",
+        ),
+        (
+            {"employmentType": "Internship"},
+            {"internship_type": "Internship"},
+            {"employment_type": "Internship"},
+            "enriched",
+        ),
+        ({"workerType": "Employee"}, {}, {"worker_type": "Employee"}, "success"),
+        ({"remoteStatus": "Hybrid"}, {"remote_status": "Hybrid"}, {}, "enriched"),
+        (
+            {"salaryRange": "$30-$40 per hour"},
+            {"compensation": "$30-$40 per hour"},
+            {},
+            "enriched",
+        ),
+        (
+            {"studentProgram": "University Internship"},
+            {},
+            {"student_program": "University Internship"},
+            "success",
+        ),
+        (
+            {"degreeRequirements": ["Bachelor's degree"]},
+            {},
+            {"degree_requirements": ["Bachelor's degree"]},
+            "success",
+        ),
+        ({"classYear": "2027"}, {}, {"class_year": "2027"}, "success"),
+        (
+            {"eligibilityRequirements": "Currently enrolled"},
+            {},
+            {"eligibility_requirements": "Currently enrolled"},
+            "success",
+        ),
+    ],
+)
+def test_sparse_supported_detail_categories_are_valid(
+    detail_info,
+    expected_row,
+    expected_extra,
+    expected_status,
+):
+    source, _calls = source_for(
+        {"jobPostings": [posting()], "total": 1},
+        {"default": {"jobPostingInfo": detail_info}},
+    )
+
+    row = source.fetch(company())[0]
+
+    for field, expected in expected_row.items():
+        assert row[field] == expected
+    for field, expected in expected_extra.items():
+        assert row["extra"][field] == expected
+    assert row["extra"]["workday_detail_status"] == expected_status
+    assert source.last_diagnostics.detail_successes == 1
+    assert source.last_diagnostics.detail_failures == 0
+    assert source.last_diagnostics.detail_enrichment_degraded is False
+
+
+def test_recognized_unchanged_detail_is_a_valid_success():
+    source, _calls = source_for(
+        {"jobPostings": [posting()], "total": 1},
+        {"default": {"jobPostingInfo": {"title": "Technology Intern"}}},
+    )
+
+    row = source.fetch(company())[0]
+
+    assert row["title"] == "Technology Intern"
+    assert row["extra"]["workday_detail_status"] == "success"
+    assert source.last_diagnostics.detail_successes == 1
+    assert source.last_diagnostics.detail_failures == 0
+    assert source.last_diagnostics.detail_enrichment_degraded is False
 
 
 @pytest.mark.parametrize("status", [404, 410])
