@@ -599,6 +599,36 @@ def test_workable_fixture_to_canonical_rows():
     assert assess_us_location(first).status == LOCATION_US
 
 
+def test_workable_preserves_non_null_optional_list_values_in_order():
+    payload = {
+        "total": 1,
+        "results": [
+            {
+                "id": "job-1",
+                "title": "Software Intern",
+                "shortcode": "ABC123",
+                "url": "https://example.test/jobs/ABC123",
+                "department": [None, "", 0, False, "Engineering", " Platform "],
+                "locations": [
+                    None,
+                    {"city": "Boston", "region": "MA", "country": "US"},
+                    {},
+                    {"city": "New York", "region": "NY", "country": "US"},
+                ],
+            }
+        ],
+    }
+
+    row = WorkableSource().parse(
+        payload,
+        CompanyCfg(name="Example", ats="workable", token="example"),
+    )[0]
+
+    assert row["location"] == "Boston, MA, US; New York, NY, US"
+    assert row["extra"]["department"] == "0, False, Engineering, Platform"
+    assert "None" not in row["extra"]["department"]
+
+
 def test_workable_watchlist_company_with_no_openings_parses_empty_real_response():
     payload = load_fixture("workable_iceye_empty.json")
     rows = WorkableSource().parse(payload, CompanyCfg(name="ICEYE", ats="workable", token="iceye"))

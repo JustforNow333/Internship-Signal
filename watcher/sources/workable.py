@@ -5,7 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import SourceSchemaError, ensure_list, html_to_text, iso_date, make_row, parse_records, post_json, require_token
+from watcher.sources.base import (
+    SourceSchemaError,
+    ensure_list,
+    html_to_text,
+    iso_date,
+    make_row,
+    parse_records,
+    post_json,
+    require_token,
+)
 
 
 class WorkableSource:
@@ -74,7 +83,8 @@ def _job_url(token: str, shortcode: str) -> str:
 def _location(job: dict) -> str:
     locations = job.get("locations")
     if isinstance(locations, list) and locations:
-        return "; ".join(_location_dict(location) for location in locations if _location_dict(location))
+        location_names = [_location_dict(location) for location in locations]
+        return "; ".join(name for name in location_names if name)
     return _location_dict(job.get("location"))
 
 
@@ -98,5 +108,6 @@ def _remote_status(job: dict) -> str:
 
 def _join(value: Any) -> str:
     if isinstance(value, list):
-        return ", ".join(str(item).strip() for item in value if str(item).strip())
+        items = [str(item).strip() for item in value if item is not None]
+        return ", ".join(item for item in items if item)
     return str(value or "").strip()
