@@ -332,14 +332,23 @@ def test_workday_other_record_schema_error_is_skipped_with_stable_reason(monkeyp
 
 
 def test_workday_fetch_skips_malformed_records_across_pages_and_uses_raw_offsets(monkeypatch):
+    page_size = WorkdaySource.page_size
+    filler = [
+        workday_posting(f"Filler Intern {index}", f"/job/Test/Filler_R{index}")
+        for index in range(page_size - 2)
+    ]
     payloads = [
         {
-            "jobPostings": [workday_posting("First Intern", "/job/Test/First_R1"), {"title": "Bad"}],
-            "total": 4,
+            "jobPostings": [
+                workday_posting("First Intern", "/job/Test/First_R1"),
+                *filler,
+                {"title": "Bad"},
+            ],
+            "total": page_size + 2,
         },
         {
             "jobPostings": [{"externalPath": "/job/Test/Bad_R2"}, workday_posting("Later Intern", "/job/Test/Later_R3")],
-            "total": 4,
+            "total": page_size + 2,
         },
     ]
     offsets = []
@@ -352,10 +361,11 @@ def test_workday_fetch_skips_malformed_records_across_pages_and_uses_raw_offsets
     source = WorkdaySource()
     rows = source.fetch(workday_company())
 
-    assert offsets == [0, 2]
-    assert [item["title"] for item in rows] == ["First Intern", "Later Intern"]
-    assert source.last_diagnostics.raw_postings_seen == 4
-    assert source.last_diagnostics.valid_rows_retained == 2
+    assert offsets == [0, page_size]
+    assert rows[0]["title"] == "First Intern"
+    assert rows[-1]["title"] == "Later Intern"
+    assert source.last_diagnostics.raw_postings_seen == page_size + 2
+    assert source.last_diagnostics.valid_rows_retained == page_size
     assert source.last_diagnostics.malformed_postings_skipped == 2
 
 
@@ -368,16 +378,22 @@ def test_workday_parse_nonempty_all_malformed_raises_schema_error():
 
 
 def test_workday_complete_paginated_fetch_with_no_valid_rows_raises(monkeypatch):
+    page_size = WorkdaySource.page_size
     payloads = [
-        {"jobPostings": [{"title": "Bad"}], "total": 2},
-        {"jobPostings": [{"externalPath": "/job/Test/Bad_R2"}], "total": 2},
+        {
+            "jobPostings": [{"title": f"Bad {index}"} for index in range(page_size)],
+            "total": page_size + 1,
+        },
+        {"jobPostings": [{"externalPath": "/job/Test/Bad_R2"}], "total": page_size + 1},
     ]
 
     def fake_post_json(url, data, source_name):
         return payloads.pop(0)
 
     monkeypatch.setattr("watcher.sources.workday.post_json", fake_post_json)
-    with pytest.raises(SourceSchemaError, match="2 posting record.*none were valid"):
+    with pytest.raises(
+        SourceSchemaError, match=f"{page_size + 1} posting record.*none were valid"
+    ):
         WorkdaySource().fetch(workday_company())
 
 
@@ -594,7 +610,14 @@ def test_workday_repeated_page_fails_and_diagnostics_do_not_leak(monkeypatch):
     )
     assert source.last_diagnostics.malformed_postings_skipped == 1
     offsets = []
-    payload = {"jobPostings": [workday_posting()], "total": 3}
+    page_size = WorkdaySource.page_size
+    payload = {
+        "jobPostings": [
+            workday_posting(f"Repeated Intern {index}", f"/job/Test/Repeated_R{index}")
+            for index in range(page_size)
+        ],
+        "total": page_size * 5,
+    }
 
     def fake_post_json(url, data, source_name):
         offsets.append(data["offset"])
@@ -604,7 +627,7 @@ def test_workday_repeated_page_fails_and_diagnostics_do_not_leak(monkeypatch):
     with pytest.raises(SourceSchemaError, match="repeated pagination page"):
         source.fetch(workday_company())
 
-    assert offsets == [0, 1]
+    assert offsets == [0, page_size]
     assert source.last_diagnostics.malformed_postings_skipped == 0
     assert source.last_diagnostics.raw_postings_seen == 0
 

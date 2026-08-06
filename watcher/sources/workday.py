@@ -40,6 +40,11 @@ DEFAULT_MAX_ATTEMPTS = 3
 MAX_RETRY_AFTER_SECONDS = 10.0
 DEFAULT_MAX_DETAIL_CANDIDATES = 100
 MAX_CONFIGURABLE_DETAIL_CANDIDATES = 500
+# Pagination now continues while a tenant keeps returning full pages, so it
+# needs its own terminal bound for a board that never signals an end. At the
+# fixed page size this allows 10,000 postings, far above the largest configured
+# Workday board, and reaching it is reported as an incomplete listing.
+MAX_LISTING_PAGES = 500
 COOP_SEPARATOR_PATTERN = r"[-\u2010\u2011\u2012\u2013\u2014 ]?"
 _INTERNSHIP_SIGNAL_RE = re.compile(r"\bintern(?:ship)?s?\b", re.IGNORECASE)
 _COOP_SIGNAL_RE = re.compile(
@@ -197,6 +202,7 @@ class WorkdayParseDiagnostics:
     detail_degraded_reason: str = ""
     listing_incomplete: bool = False
     listing_incomplete_reasons: tuple[str, ...] = ()
+    pagination_total_anomalies: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -522,7 +528,8 @@ class WorkdaySource:
         raw_postings_seen = 0
         skip_reasons: Counter[str] = Counter()
         offset = 0
-        total = None
+        total: int | None = None
+        pages_fetched = 0
         incomplete_reasons: set[str] = set()
         seen_pages: set[str] = set()
         while True:
@@ -531,6 +538,7 @@ class WorkdaySource:
                 {"appliedFacets": {}, "limit": self.page_size, "offset": offset, "searchText": ""},
             )
             postings, total_found = self._page(payload)
+            pages_fetched += 1
             self._listing_pages += 1
             self._listing_rows += len(postings)
             if postings:
@@ -543,16 +551,90 @@ class WorkdaySource:
             rows.extend(page_rows)
             skip_reasons.update(page_reasons)
             offset += len(postings)
-            if total is not None and total_found is not None and total_found != total:
-                incomplete_reasons.add("pagination_total_changed")
-            total = total_found if total_found is not None else total
-            if not postings and total is not None and offset < total:
-                incomplete_reasons.add("pagination_ended_early")
-            if not postings or (total is not None and offset >= total):
+            total = self._reconcile_listing_total(total, total_found, offset)
+            # A short page is the tenant's own end-of-board signal, so a full
+            # page is the only reason to ask for another one.
+            if len(postings) < self.page_size:
+                if total is not None and offset < total:
+                    incomplete_reasons.add("pagination_ended_early")
+                break
+            if total is not None and offset >= total:
+                break
+            if pages_fetched >= MAX_LISTING_PAGES:
+                incomplete_reasons.add("pagination_safety_limit_reached")
                 break
         self._listing_incomplete_reasons = incomplete_reasons
+        self._log_listing_summary(company, pages_fetched, offset, total, incomplete_reasons)
         rows = self._finalize(rows, raw_postings_seen, skip_reasons, company)
         return self._enrich_details(rows, company, token, shard, site)
+
+    def _reconcile_listing_total(
+        self,
+        current: int | None,
+        reported: object,
+        offset: int,
+    ) -> int | None:
+        """Return the pagination reference total, keeping the trustworthy value.
+
+        Many Workday tenants report a real total only on the first page and then
+        send ``total: 0`` (or omit it) on every continuation page. Adopting those
+        values ended pagination after two pages, so a later value replaces the
+        reference only when it is credible: a non-negative integer that is not
+        behind the rows already retrieved. A credible change is adopted upward
+        only, so a shrinking board can never shorten pagination. Every ignored or
+        changed value is counted in bounded, payload-free diagnostics.
+        """
+
+        anomalies = self._pagination_total_anomalies
+        if reported is None:
+            if current is not None:
+                anomalies["total_missing"] += 1
+            return current
+        reported_total = int(reported)
+        if reported_total < 0:
+            anomalies["total_negative"] += 1
+            return current
+        if current is not None and reported_total == current:
+            return current
+        # A total behind the rows already in hand contradicts the postings this
+        # page delivered, so it can never become the reference - not even as the
+        # first value seen.
+        if reported_total == 0 and current is not None:
+            anomalies["total_zero"] += 1
+            return current
+        if reported_total < offset:
+            anomalies["total_below_offset"] += 1
+            return current
+        if current is None:
+            return reported_total
+        anomalies[
+            "total_increased" if reported_total > current else "total_decreased"
+        ] += 1
+        return max(current, reported_total)
+
+    def _log_listing_summary(
+        self,
+        company: CompanyCfg,
+        pages: int,
+        rows_seen: int,
+        total: int | None,
+        incomplete_reasons: set[str],
+    ) -> None:
+        log = LOGGER.warning if incomplete_reasons else LOGGER.info
+        log(
+            "Workday listing summary for %s: pages=%d postings=%d total_reference=%s "
+            "anomalies=%s incomplete=%s",
+            _safe_company_name(company.name),
+            pages,
+            rows_seen,
+            "unknown" if total is None else total,
+            ",".join(
+                f"{reason}={count}"
+                for reason, count in sorted(self._pagination_total_anomalies.items())
+            )
+            or "none",
+            ",".join(sorted(incomplete_reasons)) or "none",
+        )
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
         self._reset_diagnostics()
@@ -871,6 +953,7 @@ class WorkdaySource:
         self._detail_enrichment_degraded = False
         self._detail_degraded_reason = ""
         self._listing_incomplete_reasons: set[str] = set()
+        self._pagination_total_anomalies: Counter[str] = Counter()
         self.last_response_metadata = {}
         self.last_diagnostics = WorkdayParseDiagnostics()
 
@@ -903,6 +986,9 @@ class WorkdaySource:
             detail_degraded_reason=self._detail_degraded_reason,
             listing_incomplete=bool(self._listing_incomplete_reasons),
             listing_incomplete_reasons=tuple(sorted(self._listing_incomplete_reasons)),
+            pagination_total_anomalies=tuple(
+                sorted(self._pagination_total_anomalies.items())
+            ),
         )
 
     def _parse_posting(self, posting: Any, company: CompanyCfg, token: str, shard: str, site: str) -> dict:
