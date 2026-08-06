@@ -719,32 +719,45 @@ is healthy.
 
 Direct sources use these deterministic states:
 
-- `healthy`: the latest fetch succeeded with one or more rows.
-- `empty`: the latest fetch succeeded with zero rows and has not met the
-  repeated-empty threshold.
-- `degraded`: the latest fetch failed once or twice, or a previously productive
-  source has returned zero rows in at least two consecutive successful runs.
-- `failing`: the latest fetch failed at least three consecutive times.
-- `unsupported`: the company is intentionally `bespoke` or `github_only`; no
+- `healthy_with_listings`: a valid, complete response retained at least one row.
+- `healthy_empty`: a valid, complete response retained zero rows.
+- `degraded`: usable rows survived, but skipped malformed/schema-invalid
+  records, material enrichment loss, a failed subrequest, or truncation makes
+  completeness uncertain.
+- `failed`: no trustworthy result survived a fatal transport, access, schema,
+  or collection error.
+- `not_configured`: the company is intentionally `bespoke` or `github_only`; no
   direct request was attempted and failure counters do not advance.
-- `unknown`: no usable attempt state exists.
+- `unknown`: the available adapter diagnostics cannot establish a result.
+
+Listing count is separate from health. Safely removed duplicates are counted
+without degrading a source, and optional enrichment failure remains healthy
+when the authoritative listing is complete enough for normal filtering. Each
+direct attempt persists bounded counts for retained, malformed, schema-error,
+duplicate, and failed-request records; incomplete/truncated/degraded/complete
+flags; and at most twelve short reason codes. Payloads and arbitrary exception
+text are never part of this contract.
 
 GitHub feeds are `healthy` after any valid payload, including zero matching
 rows; one or two consecutive failures are `degraded`, and three or more are
-`failing`. Status changes are reported once as transitions. A transition from
-`degraded`/`failing` to `healthy`, or to `empty` after the endpoint responds
-again, is a recovery. Initial states are not treated as transitions or false
-recoveries.
+`failing`. Direct states describe the current attempt; persistent counters
+remain available for trend and cooldown diagnostics. Status changes are
+reported once as transitions, and a transition from `degraded`/`failed` to
+either healthy state is a recovery. Initial states are not transitions.
 
 Per-company effective coverage is reported separately:
 
 - `direct_covered`: direct succeeded with one or more rows.
 - `direct_empty_but_responding`: direct succeeded with zero rows.
-- `backstop_only`: an intentionally unsupported direct source has at least one
+- `direct_degraded` or `direct_degraded_backstop_available`: usable direct rows
+  are incomplete, with the latter indicating that a global GitHub feed also
+  responded.
+- `backstop_only`: a not-configured direct source has at least one
   successfully responding configured GitHub feed.
-- `direct_degraded_backstop_available` or
-  `direct_failing_backstop_available`: direct failed this run, but a GitHub feed
-  responded; persistent direct health chooses degraded versus failing.
+- `direct_failing_backstop_available`: direct failed this run, but a global
+  GitHub feed responded.
+- `direct_unknown_backstop_available`: direct diagnostics were insufficient,
+  but a global GitHub feed responded.
 - `uncovered_for_run`: direct failed or is unsupported and every configured
   GitHub feed failed. Merely finding no active posting never makes a company
   uncovered.
@@ -754,9 +767,8 @@ Health history lives in the existing watcher `seen.sqlite` file, so the current
 source-health history. Opening an older database safely adds
 `source_health_attempts` and `source_health_current` with `CREATE TABLE IF NOT
 EXISTS`; it does not delete, rename, or rewrite `seen`. Deleting `watcher-data`
-resets both histories. The next run initializes successes as `healthy`/`empty`,
-first failures as `degraded`, and unsupported sources as `unsupported`, without
-emitting recovery alerts.
+resets both histories. The next run initializes directly from the current
+attempt without emitting recovery alerts.
 
 The final Actions heartbeat forwards the exact last one-line application
 heartbeat and appends only `seen_loaded`, `seen_saved`, and `seen_store`, so
@@ -764,6 +776,8 @@ current and future application fields are preserved automatically. The
 application heartbeat includes comma-safe integer fields:
 `companies_configured`, `direct_healthy`,
 `direct_empty`, `direct_degraded`, `direct_failing`, `direct_unsupported`,
+`direct_healthy_with_listings`, `direct_healthy_empty`, `direct_failed`,
+`direct_not_configured`, `direct_unknown`,
 `github_feeds_healthy`, `backstop_only_companies`, `uncovered_companies`,
 `health_transitions`, and `health_recoveries`. GitHub Actions also writes the run
 ID, run counts, health aggregates, seen-store status, and actionable details to

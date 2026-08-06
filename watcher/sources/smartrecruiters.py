@@ -6,10 +6,10 @@ import re
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import SourceSchemaError, ensure_list, fetch_json, iso_date, make_row, page_fingerprint, parse_records, require_token
+from watcher.sources.base import DirectDiagnosticsMixin, SourceSchemaError, ensure_list, fetch_json, iso_date, make_row, page_fingerprint, parse_records, require_token
 
 
-class SmartRecruitersSource:
+class SmartRecruitersSource(DirectDiagnosticsMixin):
     name = "smartrecruiters"
     page_size = 100
 
@@ -18,10 +18,13 @@ class SmartRecruitersSource:
         return f"https://api.smartrecruiters.com/v1/companies/{token}/postings?limit={limit}&offset={offset}"
 
     def fetch(self, company: CompanyCfg) -> list[dict]:
+        self._begin_direct_diagnostics()
         token = require_token(company, self.name)
         postings: list[dict] = []
         offset = 0
         total = None
+        incomplete = False
+        incomplete_reasons: list[str] = []
         seen_pages: set[str] = set()
         while True:
             payload = fetch_json(self.endpoint(token, limit=self.page_size, offset=offset), self.name)
@@ -33,15 +36,30 @@ class SmartRecruitersSource:
                 seen_pages.add(fingerprint)
             postings.extend(page_postings)
             offset += len(page_postings)
+            if total is not None and total_found is not None and total_found != total:
+                incomplete = True
+                incomplete_reasons.append("pagination_total_changed")
             total = total_found if total_found is not None else total
+            if not page_postings and total is not None and offset < total:
+                incomplete = True
+                incomplete_reasons.append("pagination_ended_early")
             if not page_postings or (total is not None and offset >= total):
                 break
-        return self._parse_postings(postings, company, token)
+        rows = self._parse_postings(postings, company, token)
+        self._finish_direct_diagnostics(
+            rows,
+            incomplete=incomplete,
+            reason_codes=incomplete_reasons,
+        )
+        return rows
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
+        self._begin_direct_diagnostics()
         token = require_token(company, self.name)
         postings, _ = self._page(payload)
-        return self._parse_postings(postings, company, token)
+        rows = self._parse_postings(postings, company, token)
+        self._finish_direct_diagnostics(rows)
+        return rows
 
     def _parse_postings(self, postings: list, company: CompanyCfg, token: str) -> list[dict]:
         return parse_records(
@@ -49,6 +67,7 @@ class SmartRecruitersSource:
             lambda posting: self._parse_posting(posting, company, token),
             source_name=self.name,
             company_name=company.name,
+            diagnostics=self._record_parse_diagnostics,
         )
 
     def _page(self, payload: Any) -> tuple[list, int | None]:

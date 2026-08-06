@@ -99,6 +99,21 @@ def _attempt(
     rows=1,
     feed_label=None,
 ):
+    direct_diagnostics = (
+        {
+            "malformed_row_count": 0,
+            "schema_error_row_count": 0,
+            "duplicate_row_count": 2,
+            "failed_request_count": 0,
+            "incomplete": False,
+            "truncated": False,
+            "reason_codes": ("duplicates_removed",),
+            "degraded": False,
+            "complete": True,
+        }
+        if source_kind == SOURCE_KIND_DIRECT and succeeded
+        else {}
+    )
     return SourceAttempt(
         health_key=health_key,
         run_id="20260718T131415Z-fixed",
@@ -112,6 +127,7 @@ def _attempt(
         error_kind=None if succeeded else ERROR_FETCH,
         error_message=None if succeeded else "safe failure",
         feed_label=feed_label,
+        **direct_diagnostics,
     )
 
 
@@ -234,10 +250,41 @@ def test_collection_batch_snapshot_round_trip_preserves_every_field_and_order(
     ]
     assert loaded.workday_request_attempts == 7
     assert loaded.workday_failure_codes == (("timeout", 1),)
+    assert loaded.source_attempts[0].duplicate_row_count == 2
+    assert loaded.source_attempts[0].reason_codes == ("duplicates_removed",)
+    assert loaded.source_attempts[0].complete is True
     with pytest.raises(FrozenInstanceError):
         loaded.captured_at = datetime.now(timezone.utc)
     with pytest.raises(TypeError):
         loaded.rows[0]["title"] = "mutated"
+
+
+def test_schema_version_two_snapshot_loads_with_unknown_direct_diagnostics(tmp_path):
+    payload = _batch().as_dict()
+    payload["schema_version"] = 2
+    diagnostic_fields = {
+        "malformed_row_count",
+        "schema_error_row_count",
+        "duplicate_row_count",
+        "failed_request_count",
+        "incomplete",
+        "truncated",
+        "reason_codes",
+        "degraded",
+        "complete",
+    }
+    for item in payload["source_attempts"]:
+        for field in diagnostic_fields:
+            item.pop(field)
+    path = tmp_path / "legacy-v2.json.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True)
+
+    loaded = load_collection_snapshot(path)
+
+    assert loaded.schema_version == COLLECTION_SNAPSHOT_SCHEMA_VERSION
+    assert loaded.source_attempts[0].complete is None
+    assert loaded.source_attempts[0].reason_codes == ()
 
 
 def test_snapshot_serialization_is_byte_deterministic(tmp_path):

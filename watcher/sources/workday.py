@@ -195,6 +195,8 @@ class WorkdayParseDiagnostics:
     detail_failure_reasons: tuple[tuple[str, int], ...] = ()
     detail_enrichment_degraded: bool = False
     detail_degraded_reason: str = ""
+    listing_incomplete: bool = False
+    listing_incomplete_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -521,6 +523,7 @@ class WorkdaySource:
         skip_reasons: Counter[str] = Counter()
         offset = 0
         total = None
+        incomplete_reasons: set[str] = set()
         seen_pages: set[str] = set()
         while True:
             payload = self._fetch_page(
@@ -540,9 +543,14 @@ class WorkdaySource:
             rows.extend(page_rows)
             skip_reasons.update(page_reasons)
             offset += len(postings)
+            if total is not None and total_found is not None and total_found != total:
+                incomplete_reasons.add("pagination_total_changed")
             total = total_found if total_found is not None else total
+            if not postings and total is not None and offset < total:
+                incomplete_reasons.add("pagination_ended_early")
             if not postings or (total is not None and offset >= total):
                 break
+        self._listing_incomplete_reasons = incomplete_reasons
         rows = self._finalize(rows, raw_postings_seen, skip_reasons, company)
         return self._enrich_details(rows, company, token, shard, site)
 
@@ -862,6 +870,7 @@ class WorkdaySource:
         self._detail_failure_reasons: Counter[str] = Counter()
         self._detail_enrichment_degraded = False
         self._detail_degraded_reason = ""
+        self._listing_incomplete_reasons: set[str] = set()
         self.last_response_metadata = {}
         self.last_diagnostics = WorkdayParseDiagnostics()
 
@@ -892,6 +901,8 @@ class WorkdaySource:
             detail_failure_reasons=tuple(sorted(self._detail_failure_reasons.items())),
             detail_enrichment_degraded=self._detail_enrichment_degraded,
             detail_degraded_reason=self._detail_degraded_reason,
+            listing_incomplete=bool(self._listing_incomplete_reasons),
+            listing_incomplete_reasons=tuple(sorted(self._listing_incomplete_reasons)),
         )
 
     def _parse_posting(self, posting: Any, company: CompanyCfg, token: str, shard: str, site: str) -> dict:

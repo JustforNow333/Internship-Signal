@@ -21,6 +21,9 @@ from watcher.source_health import (
     STATUS_DEGRADED,
     STATUS_FAILING,
     STATUS_HEALTHY,
+    DIRECT_STATUS_DEGRADED,
+    DIRECT_STATUS_FAILED,
+    DIRECT_STATUS_UNKNOWN,
     CompanyCoverage,
     HealthSummary,
     HealthTransition,
@@ -84,6 +87,7 @@ class HealthAlertCandidate:
     github_fallback_available: bool | None
     recommended_action: str
     run_id: str
+    diagnostic_summary: str = ""
 
 
 @dataclass(frozen=True)
@@ -336,14 +340,15 @@ def build_alert_candidates(
                 )
             )
             continue
-        if state.status == STATUS_FAILING:
+        if state.status in {STATUS_FAILING, DIRECT_STATUS_FAILED}:
             candidates.append(
                 _candidate(
                     state,
                     transition=transition,
                     alert_type=(
                         "new_failure"
-                        if transition and transition.to_status == STATUS_FAILING
+                        if transition
+                        and transition.to_status in {STATUS_FAILING, DIRECT_STATUS_FAILED}
                         else "continued_failure"
                     ),
                     severity="high",
@@ -354,19 +359,32 @@ def build_alert_candidates(
             )
         elif (
             state.source_kind != SOURCE_KIND_GITHUB_FEED
-            and state.status == STATUS_DEGRADED
-            and state.consecutive_zero_successes >= 2
-            and state.last_nonzero_at is not None
+            and state.status == DIRECT_STATUS_DEGRADED
         ):
             candidates.append(
                 _candidate(
                     state,
                     transition=transition,
-                    alert_type="direct_source_silence",
+                    alert_type="direct_source_degraded",
                     severity="medium",
                     run_id=run_id,
                     coverage=company_coverage,
-                    action="Check whether the board is genuinely empty or its response shape changed.",
+                    action="Inspect the bounded adapter diagnostics for incomplete collection.",
+                )
+            )
+        elif (
+            state.source_kind != SOURCE_KIND_GITHUB_FEED
+            and state.status == DIRECT_STATUS_UNKNOWN
+        ):
+            candidates.append(
+                _candidate(
+                    state,
+                    transition=transition,
+                    alert_type="unknown_diagnostics",
+                    severity="medium",
+                    run_id=run_id,
+                    coverage=company_coverage,
+                    action="Add or restore the adapter's shared collection diagnostics.",
                 )
             )
 
@@ -526,11 +544,12 @@ def render_daily_summary(
         f"Feed stale threshold: {policy.feed_stale_hours} hours",
         "",
         "Current source status",
-        f"  healthy direct sources: {summary.direct_healthy}",
-        f"  empty but responding direct sources: {summary.direct_empty}",
+        f"  healthy direct sources with listings: {summary.direct_healthy_with_listings}",
+        f"  healthy empty direct sources: {summary.direct_healthy_empty}",
         f"  degraded direct sources: {summary.direct_degraded}",
-        f"  failing direct sources: {summary.direct_failing}",
-        f"  unsupported direct sources: {summary.direct_unsupported}",
+        f"  failed direct sources: {summary.direct_failed}",
+        f"  not-configured direct sources: {summary.direct_not_configured}",
+        f"  unknown direct sources: {summary.direct_unknown}",
         f"  healthy GitHub feeds: {summary.github_feeds_healthy}",
         f"  failing GitHub feeds: {summary.github_feeds_failing}",
         f"  backstop-only companies: {len(backstop)}",
@@ -696,7 +715,8 @@ class HealthAlertStore:
                 where health_key = ?
                   and alert_type in (
                     'new_failure', 'continued_failure',
-                    'direct_source_silence', 'feed_stale'
+                    'direct_source_silence', 'direct_source_degraded',
+                    'unknown_diagnostics', 'feed_stale'
                   )
                   and resolved_at is null
                 """,
@@ -955,6 +975,7 @@ def _candidate(
         ),
         recommended_action=action,
         run_id=safe_run_id(run_id),
+        diagnostic_summary=_state_diagnostic_summary(state),
     )
 
 
@@ -967,6 +988,8 @@ def _allowed_by_mode(
             "new_failure",
             "recovery",
             "direct_source_silence",
+            "direct_source_degraded",
+            "unknown_diagnostics",
             "coverage_regression",
             "both_tiers_unavailable",
         }
@@ -1009,12 +1032,31 @@ def _candidate_lines(candidate: HealthAlertCandidate) -> list[str]:
         f"  last successful time: {candidate.last_success_at or 'unknown'}",
         f"  rows returned: {candidate.rows_returned if candidate.rows_returned is not None else 'unknown'}",
         f"  safe error category: {candidate.error_kind or 'none'}",
+        f"  bounded diagnostics: {candidate.diagnostic_summary or 'none'}",
         f"  direct fallback available: {_yes_no_unknown(candidate.direct_fallback_available)}",
         f"  GitHub fallback available: {_yes_no_unknown(candidate.github_fallback_available)}",
         f"  recommended action: {candidate.recommended_action}",
         f"  run ID: {candidate.run_id}",
         "",
     ]
+
+
+def _state_diagnostic_summary(state: SourceHealthState) -> str:
+    parts = []
+    for label, value in (
+        ("malformed", state.last_malformed_row_count),
+        ("schema", state.last_schema_error_row_count),
+        ("duplicates", state.last_duplicate_row_count),
+        ("failed_requests", state.last_failed_request_count),
+    ):
+        if value is not None:
+            parts.append(f"{label}={max(0, int(value))}")
+    if state.last_reason_codes:
+        parts.append(
+            "reasons="
+            + ",".join(safe_error_kind(code) for code in state.last_reason_codes[:12])
+        )
+    return sanitize_error(" ".join(parts))
 
 
 def _append_bounded(

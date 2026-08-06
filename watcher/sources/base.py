@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
 from json import JSONDecodeError
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Iterable, Mapping, Protocol
 from urllib.parse import urlsplit, urlunsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -68,6 +68,114 @@ class Source(Protocol):
 
     def fetch(self, company: CompanyCfg) -> list[dict]:
         """Return canonical-shaped rows or raise SourceError on failure."""
+
+
+@dataclass(frozen=True)
+class DirectSourceDiagnostics:
+    """Bounded, payload-free diagnostics shared by every direct adapter."""
+
+    attempted: bool = True
+    succeeded: bool | None = None
+    retained_row_count: int = 0
+    malformed_row_count: int = 0
+    schema_error_row_count: int = 0
+    duplicate_row_count: int = 0
+    failed_request_count: int = 0
+    incomplete: bool = False
+    truncated: bool = False
+    reason_codes: tuple[str, ...] = ()
+    degraded: bool = False
+    complete: bool = False
+
+    def __post_init__(self) -> None:
+        for field in (
+            "retained_row_count",
+            "malformed_row_count",
+            "schema_error_row_count",
+            "duplicate_row_count",
+            "failed_request_count",
+        ):
+            try:
+                value = max(0, int(getattr(self, field)))
+            except (TypeError, ValueError, OverflowError):
+                value = 0
+            object.__setattr__(self, field, min(1_000_000_000, value))
+        reasons: list[str] = []
+        for reason in self.reason_codes:
+            raw = str(reason or "").strip()
+            if not raw:
+                continue
+            code = _safe_error_code(raw)[:80]
+            if code not in reasons:
+                reasons.append(code)
+            if len(reasons) >= 12:
+                break
+        object.__setattr__(self, "reason_codes", tuple(reasons))
+
+
+class DirectDiagnosticsMixin:
+    """Small helper for adapters that use the standard record parser."""
+
+    last_health_diagnostics = DirectSourceDiagnostics(attempted=False)
+
+    def _begin_direct_diagnostics(self) -> None:
+        self._diagnostic_malformed_rows = 0
+        self._diagnostic_schema_rows = 0
+        self._diagnostic_reasons: list[str] = []
+        self.last_health_diagnostics = DirectSourceDiagnostics()
+
+    def _record_parse_diagnostics(
+        self,
+        malformed_rows: int,
+        schema_error_rows: int,
+        reason_codes: Iterable[str],
+    ) -> None:
+        self._diagnostic_malformed_rows += max(0, int(malformed_rows))
+        self._diagnostic_schema_rows += max(0, int(schema_error_rows))
+        for reason in reason_codes:
+            code = _safe_error_code(reason)[:80]
+            if code and code not in self._diagnostic_reasons:
+                self._diagnostic_reasons.append(code)
+
+    def _finish_direct_diagnostics(
+        self,
+        rows: list[dict],
+        *,
+        duplicate_row_count: int = 0,
+        failed_request_count: int = 0,
+        incomplete: bool = False,
+        truncated: bool = False,
+        degraded: bool | None = None,
+        complete: bool | None = None,
+        reason_codes: Iterable[str] = (),
+    ) -> None:
+        self._record_parse_diagnostics(0, 0, reason_codes)
+        parse_loss = bool(
+            self._diagnostic_malformed_rows or self._diagnostic_schema_rows
+        )
+        is_degraded = (
+            parse_loss or incomplete or truncated
+            if degraded is None
+            else bool(degraded)
+        )
+        known_complete = (
+            not (is_degraded or incomplete or truncated)
+            if complete is None
+            else bool(complete)
+        )
+        self.last_health_diagnostics = DirectSourceDiagnostics(
+            succeeded=True,
+            retained_row_count=len(rows),
+            malformed_row_count=min(1_000_000_000, self._diagnostic_malformed_rows),
+            schema_error_row_count=min(1_000_000_000, self._diagnostic_schema_rows),
+            duplicate_row_count=min(1_000_000_000, max(0, int(duplicate_row_count))),
+            failed_request_count=min(1_000_000_000, max(0, int(failed_request_count))),
+            incomplete=bool(incomplete),
+            truncated=bool(truncated),
+            reason_codes=tuple(self._diagnostic_reasons[:12]),
+            degraded=is_degraded,
+            complete=known_complete,
+        )
 
 
 @dataclass(frozen=True)
@@ -883,17 +991,30 @@ def parse_records(
     source_name: str,
     company_name: str,
     include: Callable[[Any], bool] | None = None,
+    diagnostics: Callable[[int, int, Iterable[str]], None] | None = None,
 ) -> list[dict]:
     """Retain valid direct-source records while rejecting all-malformed payloads."""
 
     candidates = [record for record in records if include is None or include(record)]
     rows: list[dict] = []
-    skipped = 0
+    malformed = 0
+    schema_errors = 0
     for record in candidates:
         try:
             rows.append(parse_record(record))
         except SourceSchemaError:
-            skipped += 1
+            if isinstance(record, Mapping):
+                schema_errors += 1
+            else:
+                malformed += 1
+    skipped = malformed + schema_errors
+    if diagnostics is not None:
+        reasons = []
+        if malformed:
+            reasons.append("malformed_records_skipped")
+        if schema_errors:
+            reasons.append("schema_invalid_records_skipped")
+        diagnostics(malformed, schema_errors, reasons)
     if skipped:
         safe_company = re.sub(r"[\x00-\x1f\x7f]+", " ", str(company_name or "unknown")).strip()[:120]
         LOGGER.warning(

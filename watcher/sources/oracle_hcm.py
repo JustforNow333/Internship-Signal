@@ -39,6 +39,8 @@ class OracleHcmDiagnostics:
     request_attempts: int = 0
     retry_attempts: int = 0
     last_transport_error: str = ""
+    malformed_postings_skipped: int = 0
+    schema_error_postings_skipped: int = 0
 
 
 class OracleHcmSource:
@@ -289,7 +291,17 @@ class OracleHcmSource:
             ),
             source_name=self.name,
             company_name=company.name,
+            diagnostics=self._record_parse_diagnostics,
         )
+
+    def _record_parse_diagnostics(
+        self,
+        malformed_rows: int,
+        schema_error_rows: int,
+        _reason_codes,
+    ) -> None:
+        self._malformed_postings_skipped += max(0, int(malformed_rows))
+        self._schema_error_postings_skipped += max(0, int(schema_error_rows))
 
     def _parse_posting(
         self,
@@ -352,6 +364,8 @@ class OracleHcmSource:
         self._request_attempts = 0
         self._retry_attempts = 0
         self._last_transport_error = ""
+        self._malformed_postings_skipped = 0
+        self._schema_error_postings_skipped = 0
         self.last_response_metadata = {}
         self.last_diagnostics = OracleHcmDiagnostics()
 
@@ -364,6 +378,8 @@ class OracleHcmSource:
             request_attempts=self._request_attempts,
             retry_attempts=self._retry_attempts,
             last_transport_error=self._last_transport_error,
+            malformed_postings_skipped=self._malformed_postings_skipped,
+            schema_error_postings_skipped=self._schema_error_postings_skipped,
         )
 
     def _finish(self, rows: list[dict]) -> None:

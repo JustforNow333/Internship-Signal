@@ -582,18 +582,25 @@ so changing an adapter starts a separate history. GitHub feed keys use a SHA-256
 digest of a query-free, credential-free URL label; raw query strings never
 appear in keys, heartbeats, or annotations.
 
-Direct state rules, in order:
+Direct states describe the latest bounded collection diagnostics:
 
-1. `unsupported` for `bespoke`/`github_only`; no request and no failure-counter
-   increment.
-2. `failing` after at least three consecutive failed direct attempts.
-3. `degraded` after one or two failed attempts, or after at least two
-   consecutive successful zero-row runs when that source has previously
-   returned a nonzero result.
-4. `empty` for any other successful zero-row direct result, including sources
-   that have never returned a row.
-5. `healthy` for a successful nonzero result.
-6. `unknown` only before usable state exists.
+1. `not_configured` for `bespoke`/`github_only`; no request and no
+   failure-counter increment.
+2. `failed` when no trustworthy result survived a fatal transport, access,
+   schema, or collection error.
+3. `degraded` when usable rows survived but malformed/schema-invalid records,
+   a materially failed subrequest or enrichment, unexpected pagination, or a
+   configured limit made completeness uncertain.
+4. `healthy_empty` for a valid, complete zero-listing result.
+5. `healthy_with_listings` for a valid, complete nonzero result.
+6. `unknown` only when the available diagnostics cannot determine a result.
+
+Listing count remains independent of health. Safe duplicate removal is counted
+but does not degrade a source. Optional enrichment failures do not degrade an
+otherwise authoritative listing. Every direct attempt carries bounded retained,
+malformed, schema-error, duplicate, and failed-request counts; incomplete,
+truncated, degraded, and complete flags; and at most twelve short reason codes.
+It never contains payloads, descriptions, secrets, or arbitrary exception text.
 
 GitHub feeds are `healthy` after a valid payload even with zero watchlist rows,
 `degraded` after one or two consecutive failures, and `failing` after three.
@@ -602,9 +609,8 @@ stable typed error kinds. Stored error text and feed labels are bounded and
 sanitized.
 
 Status changes after initialization are transitions. Recoveries are
-`degraded`/`failing` to `healthy`, or to `empty` when a failed direct endpoint
-successfully responds with zero rows. Unchanged failing states do not create
-another transition. Attempt history is never reset after recovery.
+`degraded`/`failed` to either healthy direct state. Unchanged failed states do
+not create another transition. Attempt history is never reset after recovery.
 
 Effective per-company coverage is distinct from posting availability:
 

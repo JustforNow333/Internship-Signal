@@ -29,11 +29,23 @@ STATUS_FAILING = "failing"
 STATUS_UNSUPPORTED = "unsupported"
 STATUS_UNKNOWN = "unknown"
 
+# Direct-source status is an observation about the current collection attempt,
+# not an inference from posting count history.  The legacy constants above
+# remain for GitHub-feed history and serialized compatibility.
+DIRECT_STATUS_NOT_CONFIGURED = "not_configured"
+DIRECT_STATUS_HEALTHY_WITH_LISTINGS = "healthy_with_listings"
+DIRECT_STATUS_HEALTHY_EMPTY = "healthy_empty"
+DIRECT_STATUS_DEGRADED = "degraded"
+DIRECT_STATUS_FAILED = "failed"
+DIRECT_STATUS_UNKNOWN = "unknown"
+
 COVERAGE_DIRECT = "direct_covered"
 COVERAGE_DIRECT_EMPTY = "direct_empty_but_responding"
+COVERAGE_DIRECT_DEGRADED = "direct_degraded"
 COVERAGE_BACKSTOP_ONLY = "backstop_only"
 COVERAGE_DEGRADED_BACKSTOP = "direct_degraded_backstop_available"
 COVERAGE_FAILING_BACKSTOP = "direct_failing_backstop_available"
+COVERAGE_UNKNOWN_BACKSTOP = "direct_unknown_backstop_available"
 COVERAGE_UNCOVERED = "uncovered_for_run"
 
 ERROR_FETCH = "fetch_failure"
@@ -44,6 +56,8 @@ ERROR_SOURCE = "source_failure"
 
 MAX_ERROR_LENGTH = 320
 MAX_FEED_LABEL_LENGTH = 180
+MAX_DIAGNOSTIC_COUNT = 1_000_000_000
+MAX_REASON_CODES = 12
 
 
 @dataclass(frozen=True)
@@ -61,6 +75,15 @@ class SourceAttempt:
     error_message: str | None = None
     feed_label: str | None = None
     unsupported_reason: str | None = None
+    malformed_row_count: int | None = None
+    schema_error_row_count: int | None = None
+    duplicate_row_count: int | None = None
+    failed_request_count: int | None = None
+    incomplete: bool | None = None
+    truncated: bool | None = None
+    reason_codes: tuple[str, ...] = ()
+    degraded: bool | None = None
+    complete: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +106,15 @@ class SourceHealthState:
     last_rows_returned: int | None
     last_error_kind: str | None
     last_error_message: str | None
+    last_malformed_row_count: int | None = None
+    last_schema_error_row_count: int | None = None
+    last_duplicate_row_count: int | None = None
+    last_failed_request_count: int | None = None
+    last_incomplete: bool | None = None
+    last_truncated: bool | None = None
+    last_reason_codes: tuple[str, ...] = ()
+    last_degraded: bool | None = None
+    last_complete: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +161,10 @@ class HealthSummary:
     uncovered_companies: int
     health_transitions: int
     health_recoveries: int
+    direct_healthy_with_listings: int = 0
+    direct_healthy_empty: int = 0
+    direct_failed: int = 0
+    direct_not_configured: int = 0
 
 
 def new_run_id(observed_at: datetime | None = None) -> str:
@@ -208,9 +244,22 @@ def calculate_next_state(
     last_rows_returned = previous.last_rows_returned if previous else None
     last_error_kind = previous.last_error_kind if previous else None
     last_error_message = previous.last_error_message if previous else None
+    last_malformed_row_count = previous.last_malformed_row_count if previous else None
+    last_schema_error_row_count = previous.last_schema_error_row_count if previous else None
+    last_duplicate_row_count = previous.last_duplicate_row_count if previous else None
+    last_failed_request_count = previous.last_failed_request_count if previous else None
+    last_incomplete = previous.last_incomplete if previous else None
+    last_truncated = previous.last_truncated if previous else None
+    last_reason_codes = previous.last_reason_codes if previous else ()
+    last_degraded = previous.last_degraded if previous else None
+    last_complete = previous.last_complete if previous else None
 
     if not attempt.attempted:
-        status = STATUS_UNSUPPORTED if attempt.source_kind == SOURCE_KIND_DIRECT else STATUS_UNKNOWN
+        status = (
+            DIRECT_STATUS_NOT_CONFIGURED
+            if attempt.source_kind == SOURCE_KIND_DIRECT
+            else STATUS_UNKNOWN
+        )
         return SourceHealthState(
             health_key=attempt.health_key,
             source_kind=attempt.source_kind,
@@ -230,10 +279,28 @@ def calculate_next_state(
             last_rows_returned=last_rows_returned,
             last_error_kind=last_error_kind,
             last_error_message=last_error_message,
+            last_malformed_row_count=last_malformed_row_count,
+            last_schema_error_row_count=last_schema_error_row_count,
+            last_duplicate_row_count=last_duplicate_row_count,
+            last_failed_request_count=last_failed_request_count,
+            last_incomplete=last_incomplete,
+            last_truncated=last_truncated,
+            last_reason_codes=last_reason_codes,
+            last_degraded=last_degraded,
+            last_complete=last_complete,
         )
 
     total_attempts += 1
     last_attempt_at = observed_at
+    last_malformed_row_count = attempt.malformed_row_count
+    last_schema_error_row_count = attempt.schema_error_row_count
+    last_duplicate_row_count = attempt.duplicate_row_count
+    last_failed_request_count = attempt.failed_request_count
+    last_incomplete = attempt.incomplete
+    last_truncated = attempt.truncated
+    last_reason_codes = attempt.reason_codes
+    last_degraded = attempt.degraded
+    last_complete = attempt.complete
     if attempt.succeeded is True:
         rows = max(0, int(attempt.rows_returned or 0))
         total_successes += 1
@@ -251,18 +318,20 @@ def calculate_next_state(
             status = STATUS_HEALTHY
         else:
             consecutive_zero_successes += 1
-            status = (
-                STATUS_DEGRADED
-                if consecutive_zero_successes >= 2 and last_nonzero_at is not None
-                else STATUS_EMPTY
-            )
+            status = STATUS_EMPTY
+        if attempt.source_kind == SOURCE_KIND_DIRECT:
+            status = _direct_attempt_status(attempt, rows)
     else:
         consecutive_failures += 1
         consecutive_zero_successes = 0
         last_rows_returned = None
         last_error_kind = attempt.error_kind
         last_error_message = attempt.error_message
-        status = STATUS_FAILING if consecutive_failures >= 3 else STATUS_DEGRADED
+        status = (
+            DIRECT_STATUS_FAILED
+            if attempt.source_kind == SOURCE_KIND_DIRECT
+            else STATUS_FAILING if consecutive_failures >= 3 else STATUS_DEGRADED
+        )
 
     return SourceHealthState(
         health_key=attempt.health_key,
@@ -283,6 +352,44 @@ def calculate_next_state(
         last_rows_returned=last_rows_returned,
         last_error_kind=last_error_kind,
         last_error_message=last_error_message,
+        last_malformed_row_count=last_malformed_row_count,
+        last_schema_error_row_count=last_schema_error_row_count,
+        last_duplicate_row_count=last_duplicate_row_count,
+        last_failed_request_count=last_failed_request_count,
+        last_incomplete=last_incomplete,
+        last_truncated=last_truncated,
+        last_reason_codes=last_reason_codes,
+        last_degraded=last_degraded,
+        last_complete=last_complete,
+    )
+
+
+def _direct_attempt_status(attempt: SourceAttempt, rows: int) -> str:
+    required = (
+        attempt.malformed_row_count,
+        attempt.schema_error_row_count,
+        attempt.duplicate_row_count,
+        attempt.failed_request_count,
+        attempt.incomplete,
+        attempt.truncated,
+        attempt.degraded,
+        attempt.complete,
+    )
+    if any(value is None for value in required):
+        return DIRECT_STATUS_UNKNOWN
+    if (
+        attempt.degraded
+        or attempt.incomplete
+        or attempt.truncated
+        or not attempt.complete
+        or int(attempt.malformed_row_count or 0) > 0
+        or int(attempt.schema_error_row_count or 0) > 0
+    ):
+        return DIRECT_STATUS_DEGRADED
+    return (
+        DIRECT_STATUS_HEALTHY_WITH_LISTINGS
+        if rows > 0
+        else DIRECT_STATUS_HEALTHY_EMPTY
     )
 
 
@@ -292,9 +399,16 @@ def transition_for(
 ) -> HealthTransition | None:
     if previous is None or previous.status == current.status:
         return None
-    recovery = previous.status in {STATUS_DEGRADED, STATUS_FAILING} and current.status in {
+    recovery = previous.status in {
+        STATUS_DEGRADED,
+        STATUS_FAILING,
+        DIRECT_STATUS_FAILED,
+        DIRECT_STATUS_UNKNOWN,
+    } and current.status in {
         STATUS_HEALTHY,
         STATUS_EMPTY,
+        DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        DIRECT_STATUS_HEALTHY_EMPTY,
     }
     return HealthTransition(
         health_key=current.health_key,
@@ -332,16 +446,22 @@ def calculate_company_coverage(
         direct_status = state.status if state else STATUS_UNKNOWN
         succeeded = attempt.succeeded if attempt else None
         rows = attempt.rows_returned if attempt else None
-        if attempt and attempt.attempted and succeeded is True:
-            coverage_state = COVERAGE_DIRECT if (rows or 0) > 0 else COVERAGE_DIRECT_EMPTY
+        if direct_status == DIRECT_STATUS_HEALTHY_WITH_LISTINGS:
+            coverage_state = COVERAGE_DIRECT
+        elif direct_status == DIRECT_STATUS_HEALTHY_EMPTY:
+            coverage_state = COVERAGE_DIRECT_EMPTY
+        elif direct_status == DIRECT_STATUS_DEGRADED:
+            coverage_state = (
+                COVERAGE_DEGRADED_BACKSTOP
+                if github_available
+                else COVERAGE_DIRECT_DEGRADED
+            )
+        elif direct_status == DIRECT_STATUS_UNKNOWN and github_available:
+            coverage_state = COVERAGE_UNKNOWN_BACKSTOP
         elif company.ats in {"bespoke", "github_only"} and github_available:
             coverage_state = COVERAGE_BACKSTOP_ONLY
-        elif attempt and attempt.attempted and succeeded is False and github_available:
-            coverage_state = (
-                COVERAGE_FAILING_BACKSTOP
-                if direct_status == STATUS_FAILING
-                else COVERAGE_DEGRADED_BACKSTOP
-            )
+        elif direct_status == DIRECT_STATUS_FAILED and github_available:
+            coverage_state = COVERAGE_FAILING_BACKSTOP
         else:
             coverage_state = COVERAGE_UNCOVERED
         coverage.append(
@@ -382,12 +502,18 @@ def summarize_health(
             attempt.succeeded is True and attempt.rows_returned == 0 for attempt in direct_attempts
         ),
         direct_failures=sum(attempt.succeeded is False for attempt in direct_attempts),
-        direct_healthy=_status_count(direct_states, STATUS_HEALTHY),
-        direct_empty=_status_count(direct_states, STATUS_EMPTY),
-        direct_degraded=_status_count(direct_states, STATUS_DEGRADED),
-        direct_failing=_status_count(direct_states, STATUS_FAILING),
-        direct_unsupported=_status_count(direct_states, STATUS_UNSUPPORTED),
-        direct_unknown=_status_count(direct_states, STATUS_UNKNOWN),
+        # Legacy aggregate names remain serialized and in the heartbeat.  Their
+        # values now alias the corresponding explicit direct states.
+        direct_healthy=_status_count(
+            direct_states, DIRECT_STATUS_HEALTHY_WITH_LISTINGS
+        ),
+        direct_empty=_status_count(direct_states, DIRECT_STATUS_HEALTHY_EMPTY),
+        direct_degraded=_status_count(direct_states, DIRECT_STATUS_DEGRADED),
+        direct_failing=_status_count(direct_states, DIRECT_STATUS_FAILED),
+        direct_unsupported=_status_count(
+            direct_states, DIRECT_STATUS_NOT_CONFIGURED
+        ),
+        direct_unknown=_status_count(direct_states, DIRECT_STATUS_UNKNOWN),
         github_feeds_configured=sum(
             attempt.source_kind == SOURCE_KIND_GITHUB_FEED for attempt in attempts
         ),
@@ -398,6 +524,16 @@ def summarize_health(
         uncovered_companies=sum(item.state == COVERAGE_UNCOVERED for item in coverage),
         health_transitions=len(transitions),
         health_recoveries=sum(transition.recovery for transition in transitions),
+        direct_healthy_with_listings=_status_count(
+            direct_states, DIRECT_STATUS_HEALTHY_WITH_LISTINGS
+        ),
+        direct_healthy_empty=_status_count(
+            direct_states, DIRECT_STATUS_HEALTHY_EMPTY
+        ),
+        direct_failed=_status_count(direct_states, DIRECT_STATUS_FAILED),
+        direct_not_configured=_status_count(
+            direct_states, DIRECT_STATUS_NOT_CONFIGURED
+        ),
     )
 
 
@@ -480,6 +616,15 @@ class SourceHealthStore:
               rows_returned integer,
               error_kind text,
               error_message text,
+              malformed_row_count integer,
+              schema_error_row_count integer,
+              duplicate_row_count integer,
+              failed_request_count integer,
+              incomplete integer,
+              truncated integer,
+              reason_codes_json text,
+              degraded integer,
+              complete integer,
               unique(run_id, health_key)
             );
             create index if not exists source_health_attempts_run_id_idx
@@ -504,11 +649,58 @@ class SourceHealthStore:
               last_nonzero_at text,
               last_rows_returned integer,
               last_error_kind text,
-              last_error_message text
+              last_error_message text,
+              last_malformed_row_count integer,
+              last_schema_error_row_count integer,
+              last_duplicate_row_count integer,
+              last_failed_request_count integer,
+              last_incomplete integer,
+              last_truncated integer,
+              last_reason_codes_json text,
+              last_degraded integer,
+              last_complete integer
             );
             """
         )
+        self._ensure_diagnostic_columns()
         self._conn.commit()
+
+    def _ensure_diagnostic_columns(self) -> None:
+        attempt_columns = {
+            "malformed_row_count": "integer",
+            "schema_error_row_count": "integer",
+            "duplicate_row_count": "integer",
+            "failed_request_count": "integer",
+            "incomplete": "integer",
+            "truncated": "integer",
+            "reason_codes_json": "text",
+            "degraded": "integer",
+            "complete": "integer",
+        }
+        state_columns = {
+            "last_malformed_row_count": "integer",
+            "last_schema_error_row_count": "integer",
+            "last_duplicate_row_count": "integer",
+            "last_failed_request_count": "integer",
+            "last_incomplete": "integer",
+            "last_truncated": "integer",
+            "last_reason_codes_json": "text",
+            "last_degraded": "integer",
+            "last_complete": "integer",
+        }
+        for table, expected in (
+            ("source_health_attempts", attempt_columns),
+            ("source_health_current", state_columns),
+        ):
+            existing = {
+                str(row[1])
+                for row in self._conn.execute(f"pragma table_info({table})")
+            }
+            for name, sql_type in expected.items():
+                if name not in existing:
+                    self._conn.execute(
+                        f"alter table {table} add column {name} {sql_type}"
+                    )
 
     def _insert_attempt(self, attempt: SourceAttempt) -> None:
         self._conn.execute(
@@ -516,8 +708,10 @@ class SourceHealthStore:
             insert into source_health_attempts(
               run_id, health_key, observed_at, source_kind, company, adapter,
               feed_label, unsupported_reason, attempted, succeeded, rows_returned,
-              error_kind, error_message
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              error_kind, error_message, malformed_row_count,
+              schema_error_row_count, duplicate_row_count, failed_request_count,
+              incomplete, truncated, reason_codes_json, degraded, complete
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 attempt.run_id,
@@ -533,6 +727,15 @@ class SourceHealthStore:
                 attempt.rows_returned,
                 attempt.error_kind,
                 attempt.error_message,
+                attempt.malformed_row_count,
+                attempt.schema_error_row_count,
+                attempt.duplicate_row_count,
+                attempt.failed_request_count,
+                _optional_bool_int(attempt.incomplete),
+                _optional_bool_int(attempt.truncated),
+                json.dumps(list(attempt.reason_codes), separators=(",", ":")),
+                _optional_bool_int(attempt.degraded),
+                _optional_bool_int(attempt.complete),
             ),
         )
 
@@ -544,8 +747,11 @@ class SourceHealthStore:
               unsupported_reason, status, previous_status, total_attempts,
               total_successes, consecutive_failures, consecutive_zero_successes,
               last_attempt_at, last_success_at, last_nonzero_at, last_rows_returned,
-              last_error_kind, last_error_message
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              last_error_kind, last_error_message, last_malformed_row_count,
+              last_schema_error_row_count, last_duplicate_row_count,
+              last_failed_request_count, last_incomplete, last_truncated,
+              last_reason_codes_json, last_degraded, last_complete
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             on conflict(health_key) do update set
               source_kind=excluded.source_kind,
               company=excluded.company,
@@ -563,7 +769,16 @@ class SourceHealthStore:
               last_nonzero_at=excluded.last_nonzero_at,
               last_rows_returned=excluded.last_rows_returned,
               last_error_kind=excluded.last_error_kind,
-              last_error_message=excluded.last_error_message
+              last_error_message=excluded.last_error_message,
+              last_malformed_row_count=excluded.last_malformed_row_count,
+              last_schema_error_row_count=excluded.last_schema_error_row_count,
+              last_duplicate_row_count=excluded.last_duplicate_row_count,
+              last_failed_request_count=excluded.last_failed_request_count,
+              last_incomplete=excluded.last_incomplete,
+              last_truncated=excluded.last_truncated,
+              last_reason_codes_json=excluded.last_reason_codes_json,
+              last_degraded=excluded.last_degraded,
+              last_complete=excluded.last_complete
             """,
             (
                 state.health_key,
@@ -584,6 +799,15 @@ class SourceHealthStore:
                 state.last_rows_returned,
                 state.last_error_kind,
                 state.last_error_message,
+                state.last_malformed_row_count,
+                state.last_schema_error_row_count,
+                state.last_duplicate_row_count,
+                state.last_failed_request_count,
+                _optional_bool_int(state.last_incomplete),
+                _optional_bool_int(state.last_truncated),
+                json.dumps(list(state.last_reason_codes), separators=(",", ":")),
+                _optional_bool_int(state.last_degraded),
+                _optional_bool_int(state.last_complete),
             ),
         )
 
@@ -598,6 +822,12 @@ def normalize_attempt(attempt: SourceAttempt) -> SourceAttempt:
         unsupported_reason=safe_token(attempt.unsupported_reason) if attempt.unsupported_reason else None,
         error_kind=safe_error_kind(attempt.error_kind) if attempt.error_kind else None,
         error_message=sanitize_error(attempt.error_message) if attempt.error_message else None,
+        rows_returned=_bounded_optional_count(attempt.rows_returned),
+        malformed_row_count=_bounded_optional_count(attempt.malformed_row_count),
+        schema_error_row_count=_bounded_optional_count(attempt.schema_error_row_count),
+        duplicate_row_count=_bounded_optional_count(attempt.duplicate_row_count),
+        failed_request_count=_bounded_optional_count(attempt.failed_request_count),
+        reason_codes=_bounded_reason_codes(attempt.reason_codes),
     )
 
 
@@ -614,7 +844,7 @@ def write_health_report(
     run_metadata: Mapping[str, object] | None = None,
 ) -> None:
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": safe_run_id(run_id),
         "observed_at": iso_utc(observed_at),
         "run": _json_safe(dict(run_metadata or {})),
@@ -659,7 +889,13 @@ def render_github_actions_report(
                 f"{transition.get('from_status')} -> {transition.get('to_status')}",
                 file=output,
             )
-        elif transition.get("to_status") in {STATUS_DEGRADED, STATUS_FAILING}:
+        elif transition.get("to_status") in {
+            STATUS_DEGRADED,
+            STATUS_FAILING,
+            DIRECT_STATUS_DEGRADED,
+            DIRECT_STATUS_FAILED,
+            DIRECT_STATUS_UNKNOWN,
+        }:
             print(
                 f"::warning::SOURCE HEALTH: {label}: "
                 f"{transition.get('from_status')} -> {transition.get('to_status')}",
@@ -696,11 +932,12 @@ def render_github_actions_report(
     ]
     for label, key in (
         ("Companies configured", "companies_configured"),
-        ("Direct healthy", "direct_healthy"),
-        ("Direct empty", "direct_empty"),
         ("Direct degraded", "direct_degraded"),
-        ("Direct failing", "direct_failing"),
-        ("Direct unsupported", "direct_unsupported"),
+        ("Direct healthy with listings", "direct_healthy_with_listings"),
+        ("Direct healthy empty", "direct_healthy_empty"),
+        ("Direct failed", "direct_failed"),
+        ("Direct not configured", "direct_not_configured"),
+        ("Direct unknown", "direct_unknown"),
         ("GitHub feeds healthy", "github_feeds_healthy"),
         ("Backstop-only companies", "backstop_only_companies"),
         ("Uncovered companies", "uncovered_companies"),
@@ -731,11 +968,33 @@ def render_github_actions_report(
 def _workflow_detail_rows(states: list[dict], transitions: list[dict], coverage: list[dict]) -> list[str]:
     rows = []
     for state in states:
-        if state.get("status") not in {STATUS_DEGRADED, STATUS_FAILING}:
+        if state.get("status") not in {
+            STATUS_DEGRADED,
+            STATUS_FAILING,
+            DIRECT_STATUS_DEGRADED,
+            DIRECT_STATUS_FAILED,
+            DIRECT_STATUS_UNKNOWN,
+        }:
             continue
         label = _json_source_label(state)
         error_kind = safe_error_kind(state.get("last_error_kind"))
         detail = state.get("last_error_message") or f"rows={state.get('last_rows_returned')}"
+        diagnostic_parts = []
+        for label, key in (
+            ("malformed", "last_malformed_row_count"),
+            ("schema", "last_schema_error_row_count"),
+            ("duplicates", "last_duplicate_row_count"),
+            ("failed_requests", "last_failed_request_count"),
+        ):
+            if state.get(key) is not None:
+                diagnostic_parts.append(f"{label}={int(state[key])}")
+        reasons = state.get("last_reason_codes")
+        if isinstance(reasons, (list, tuple)) and reasons:
+            diagnostic_parts.append(
+                "reasons=" + ",".join(safe_token(item) for item in reasons[:12])
+            )
+        if diagnostic_parts:
+            detail = f"{detail}; {' '.join(diagnostic_parts)}"
         if error_kind:
             detail = f"{error_kind}: {detail}"
         rows.append(_markdown_row(state.get("status"), label, state.get("adapter"), detail))
@@ -813,6 +1072,7 @@ def _json_safe(value: object) -> object:
 
 
 def _state_from_row(row: sqlite3.Row) -> SourceHealthState:
+    keys = set(row.keys())
     return SourceHealthState(
         health_key=row["health_key"],
         source_kind=row["source_kind"],
@@ -832,11 +1092,64 @@ def _state_from_row(row: sqlite3.Row) -> SourceHealthState:
         last_rows_returned=row["last_rows_returned"],
         last_error_kind=row["last_error_kind"],
         last_error_message=row["last_error_message"],
+        last_malformed_row_count=_row_value(row, keys, "last_malformed_row_count"),
+        last_schema_error_row_count=_row_value(row, keys, "last_schema_error_row_count"),
+        last_duplicate_row_count=_row_value(row, keys, "last_duplicate_row_count"),
+        last_failed_request_count=_row_value(row, keys, "last_failed_request_count"),
+        last_incomplete=_row_bool(row, keys, "last_incomplete"),
+        last_truncated=_row_bool(row, keys, "last_truncated"),
+        last_reason_codes=_row_reason_codes(row, keys),
+        last_degraded=_row_bool(row, keys, "last_degraded"),
+        last_complete=_row_bool(row, keys, "last_complete"),
     )
+
+
+def _row_value(row: sqlite3.Row, keys: set[str], name: str) -> object:
+    return row[name] if name in keys else None
+
+
+def _row_bool(row: sqlite3.Row, keys: set[str], name: str) -> bool | None:
+    value = _row_value(row, keys, name)
+    return None if value is None else bool(value)
+
+
+def _row_reason_codes(row: sqlite3.Row, keys: set[str]) -> tuple[str, ...]:
+    raw = _row_value(row, keys, "last_reason_codes_json")
+    if not raw:
+        return ()
+    try:
+        value = json.loads(str(raw))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+    return _bounded_reason_codes(value if isinstance(value, list) else ())
 
 
 def _status_count(states: Iterable[SourceHealthState], status: str) -> int:
     return sum(state.status == status for state in states)
+
+
+def _bounded_optional_count(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return min(MAX_DIAGNOSTIC_COUNT, max(0, int(value)))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _bounded_reason_codes(values: Iterable[object]) -> tuple[str, ...]:
+    result: list[str] = []
+    for value in values:
+        code = safe_token(value)[:80]
+        if code and code not in result:
+            result.append(code)
+        if len(result) >= MAX_REASON_CODES:
+            break
+    return tuple(result)
+
+
+def _optional_bool_int(value: bool | None) -> int | None:
+    return None if value is None else int(bool(value))
 
 
 def safe_token(value: object) -> str:

@@ -23,9 +23,11 @@ from watcher.source_health import (
     utc_datetime,
 )
 
-# Increment whenever the persisted snapshot structure changes. Older or newer
-# versions must fail before entering the watcher pipeline.
-COLLECTION_SNAPSHOT_SCHEMA_VERSION = 2
+# Increment whenever the persisted snapshot structure changes. Explicitly
+# listed older versions receive deterministic compatibility handling; all
+# other versions fail before entering the watcher pipeline.
+COLLECTION_SNAPSHOT_SCHEMA_VERSION = 3
+_COMPATIBLE_COLLECTION_SNAPSHOT_VERSIONS = frozenset({2, 3})
 COLLECTION_SNAPSHOT_EXTENSION = ".json.gz"
 DEFAULT_COLLECTION_SNAPSHOT_DIR = Path("watcher/collection-snapshots")
 _SNAPSHOT_FIELDS = frozenset(
@@ -51,7 +53,7 @@ _WORKDAY_TRANSPORT_FIELDS = frozenset(
         "failure_codes",
     }
 )
-_SOURCE_ATTEMPT_FIELDS = frozenset(
+_SOURCE_ATTEMPT_FIELDS_V2 = frozenset(
     {
         "health_key",
         "run_id",
@@ -67,6 +69,22 @@ _SOURCE_ATTEMPT_FIELDS = frozenset(
         "feed_label",
         "unsupported_reason",
     }
+)
+_SOURCE_ATTEMPT_DIAGNOSTIC_FIELDS = frozenset(
+    {
+        "malformed_row_count",
+        "schema_error_row_count",
+        "duplicate_row_count",
+        "failed_request_count",
+        "incomplete",
+        "truncated",
+        "reason_codes",
+        "degraded",
+        "complete",
+    }
+)
+_SOURCE_ATTEMPT_FIELDS = (
+    _SOURCE_ATTEMPT_FIELDS_V2 | _SOURCE_ATTEMPT_DIAGNOSTIC_FIELDS
 )
 _ROW_FIELDS = frozenset((*CANONICAL_COLUMNS, "extra"))
 
@@ -327,10 +345,10 @@ def _batch_from_dict(value: object) -> CollectionBatch:
     payload = _require_mapping(value, "snapshot")
     _require_exact_fields(payload, _SNAPSHOT_FIELDS, "snapshot")
     version = _require_int(payload.get("schema_version"), "schema_version")
-    if version != COLLECTION_SNAPSHOT_SCHEMA_VERSION:
+    if version not in _COMPATIBLE_COLLECTION_SNAPSHOT_VERSIONS:
         raise CollectionSnapshotError(
             "Unsupported collection snapshot schema_version "
-            f"{version}; supported version is {COLLECTION_SNAPSHOT_SCHEMA_VERSION}"
+            f"{version}; supported versions are 2 and {COLLECTION_SNAPSHOT_SCHEMA_VERSION}"
         )
     captured_text = _require_string(payload.get("captured_at"), "captured_at")
     captured_at = _snapshot_datetime(captured_text, "captured_at")
@@ -347,7 +365,7 @@ def _batch_from_dict(value: object) -> CollectionBatch:
         "source_attempts",
     )
     attempts = tuple(
-        _source_attempt_from_dict(attempt, index)
+        _source_attempt_from_dict(attempt, index, schema_version=version)
         for index, attempt in enumerate(attempts_value)
     )
     github = _require_mapping(
@@ -498,14 +516,28 @@ def _source_attempt_to_dict(attempt: SourceAttempt) -> dict[str, object]:
         "error_message": attempt.error_message,
         "feed_label": attempt.feed_label,
         "unsupported_reason": attempt.unsupported_reason,
+        "malformed_row_count": attempt.malformed_row_count,
+        "schema_error_row_count": attempt.schema_error_row_count,
+        "duplicate_row_count": attempt.duplicate_row_count,
+        "failed_request_count": attempt.failed_request_count,
+        "incomplete": attempt.incomplete,
+        "truncated": attempt.truncated,
+        "reason_codes": list(attempt.reason_codes),
+        "degraded": attempt.degraded,
+        "complete": attempt.complete,
     }
 
 
-def _source_attempt_from_dict(value: object, index: int) -> SourceAttempt:
+def _source_attempt_from_dict(
+    value: object,
+    index: int,
+    *,
+    schema_version: int,
+) -> SourceAttempt:
     item = _require_mapping(value, f"source_attempts[{index}]")
     _require_exact_fields(
         item,
-        _SOURCE_ATTEMPT_FIELDS,
+        _SOURCE_ATTEMPT_FIELDS if schema_version >= 3 else _SOURCE_ATTEMPT_FIELDS_V2,
         f"source_attempts[{index}]",
     )
     observed_text = _require_string(
@@ -571,6 +603,23 @@ def _source_attempt_from_dict(value: object, index: int) -> SourceAttempt:
             item.get("unsupported_reason"),
             f"source_attempts[{index}].unsupported_reason",
         ),
+        malformed_row_count=_optional_count_field(
+            item, "malformed_row_count", index
+        ),
+        schema_error_row_count=_optional_count_field(
+            item, "schema_error_row_count", index
+        ),
+        duplicate_row_count=_optional_count_field(
+            item, "duplicate_row_count", index
+        ),
+        failed_request_count=_optional_count_field(
+            item, "failed_request_count", index
+        ),
+        incomplete=_optional_bool_field(item, "incomplete", index),
+        truncated=_optional_bool_field(item, "truncated", index),
+        reason_codes=_reason_codes_field(item, index),
+        degraded=_optional_bool_field(item, "degraded", index),
+        complete=_optional_bool_field(item, "complete", index),
     )
     _validate_source_attempt(attempt, index)
     return attempt
@@ -611,6 +660,66 @@ def _validate_source_attempt(attempt: SourceAttempt, index: int) -> None:
         raise CollectionSnapshotError(
             f"source_attempts[{index}] cannot have an outcome when not attempted"
         )
+    for field in (
+        "malformed_row_count",
+        "schema_error_row_count",
+        "duplicate_row_count",
+        "failed_request_count",
+    ):
+        value = getattr(attempt, field)
+        if value is not None:
+            _require_count(value, f"source_attempts[{index}].{field}")
+    for field in ("incomplete", "truncated", "degraded", "complete"):
+        value = getattr(attempt, field)
+        if value is not None and not isinstance(value, bool):
+            raise CollectionSnapshotError(
+                f"source_attempts[{index}].{field} must be boolean or null"
+            )
+    if len(attempt.reason_codes) > 12 or any(
+        not isinstance(code, str) or not code or len(code) > 80
+        for code in attempt.reason_codes
+    ):
+        raise CollectionSnapshotError(
+            f"source_attempts[{index}].reason_codes is invalid"
+        )
+
+
+def _optional_count_field(
+    item: Mapping,
+    name: str,
+    index: int,
+) -> int | None:
+    value = item.get(name)
+    if value is None:
+        return None
+    return _require_count(value, f"source_attempts[{index}].{name}")
+
+
+def _optional_bool_field(
+    item: Mapping,
+    name: str,
+    index: int,
+) -> bool | None:
+    value = item.get(name)
+    if value is None:
+        return None
+    return _require_bool(value, f"source_attempts[{index}].{name}")
+
+
+def _reason_codes_field(item: Mapping, index: int) -> tuple[str, ...]:
+    value = item.get("reason_codes")
+    if value is None:
+        return ()
+    codes = _require_list(value, f"source_attempts[{index}].reason_codes")
+    result = tuple(
+        _require_string(code, f"source_attempts[{index}].reason_codes")
+        for code in codes
+    )
+    if len(result) > 12 or any(not code or len(code) > 80 for code in result):
+        raise CollectionSnapshotError(
+            f"source_attempts[{index}].reason_codes is invalid"
+        )
+    return result
 
 
 def _validated_snapshot_path(path: str | Path) -> Path:
@@ -686,9 +795,9 @@ def _require_int(value: object, field: str) -> int:
 
 def _require_count(value: object, field: str) -> int:
     result = _require_int(value, field)
-    if result < 0:
+    if result < 0 or result > 1_000_000_000:
         raise CollectionSnapshotError(
-            f"Collection snapshot {field} must be nonnegative"
+            f"Collection snapshot {field} must be between 0 and 1000000000"
         )
     return result
 
