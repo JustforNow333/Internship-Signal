@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -832,3 +832,83 @@ def test_json_stable_serializable_and_console_bounded(tmp_path, capsys):
     assert "Watcher eligibility" in output
     assert "Notification" in output
     assert "Final result" in output
+
+
+def _shadow_seed(db_path, count=3):
+    base = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    with SeenStore(db_path) as store:
+        for index in range(count):
+            store._conn.execute(
+                "insert into shadow_generation_events(event_id, identity_key, "
+                "company, trigger, stored_season_key, current_season_key, "
+                "current_generation, proposed_generation, absence_epoch, "
+                "absence_days, observed_at) "
+                "values (?, ?, ?, 'season_change', 'season|summer|2026', "
+                "'season|summer|2027', 1, 2, 0, null, ?)",
+                (
+                    f"evt-{index:03d}",
+                    f"requisition|greenhouse|example|{index}",
+                    "Example",
+                    (base + timedelta(days=index)).isoformat(),
+                ),
+            )
+        store._conn.commit()
+    return base
+
+
+def test_shadow_generations_mode_is_read_only_and_newest_first(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    db_path = tmp_path / "seen.sqlite"
+    _shadow_seed(db_path, count=3)
+    monkeypatch.setattr("watcher.audit.load_watchlist", lambda _path: _config(tmp_path))
+    before = db_path.read_bytes()
+
+    exit_code = audit_main(["--seen-db", str(db_path), "--shadow-generations"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Persisted shadow-generation events" in out
+    # Newest first: the last seeded event precedes the first.
+    assert out.index("example|2") < out.index("example|0")
+    # State-only inspection writes nothing back to the database.
+    assert db_path.read_bytes() == before
+
+
+def test_shadow_generations_mode_honours_the_limit_bound(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    db_path = tmp_path / "seen.sqlite"
+    _shadow_seed(db_path, count=5)
+    monkeypatch.setattr("watcher.audit.load_watchlist", lambda _path: _config(tmp_path))
+
+    audit_main(["--seen-db", str(db_path), "--shadow-generations", "--limit", "2"])
+
+    assert "Events shown: 2 (limit 2)" in capsys.readouterr().out
+
+
+def test_shadow_generations_rejects_live_mode(tmp_path, monkeypatch):
+    db_path = tmp_path / "seen.sqlite"
+    _shadow_seed(db_path, count=1)
+    monkeypatch.setattr("watcher.audit.load_watchlist", lambda _path: _config(tmp_path))
+
+    with pytest.raises(SystemExit):
+        audit_main(["--seen-db", str(db_path), "--shadow-generations", "--live"])
+
+
+def test_shadow_generations_reports_an_empty_history_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    db_path = tmp_path / "seen.sqlite"
+    with SeenStore(db_path):
+        pass
+    monkeypatch.setattr("watcher.audit.load_watchlist", lambda _path: _config(tmp_path))
+
+    assert audit_main(["--seen-db", str(db_path), "--shadow-generations"]) == 0
+    assert "No shadow-generation events have been recorded." in capsys.readouterr().out

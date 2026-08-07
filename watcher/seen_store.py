@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -30,6 +30,11 @@ from watcher.generation import (
 # Bumped when the additive shadow-generation columns need a fresh backfill pass.
 SEEN_SCHEMA_VERSION = 1
 
+# Bounded diagnostic history for shadow-generation candidates.
+SHADOW_EVENT_RETENTION_LIMIT = 1_000
+SHADOW_EVENT_RETENTION_DAYS = 180
+DEFAULT_SHADOW_EVENT_QUERY_LIMIT = 25
+
 
 @dataclass(frozen=True)
 class NotificationSelection:
@@ -48,6 +53,7 @@ class ObservationResult:
     rows_created: int
     rows_updated: int
     rows_skipped: int = 0
+    shadow_events_persisted: int = 0
     shadow_candidates: tuple[ShadowGenerationCandidate, ...] = ()
 
 
@@ -241,6 +247,7 @@ class SeenStore:
         created = 0
         updated = 0
         skipped = 0
+        persisted = 0
 
         with self._conn:
             health = collection_health or {}
@@ -313,6 +320,15 @@ class SeenStore:
                 )
                 if candidate is not None:
                     candidates.append(candidate)
+                    # Persist before the stored state advances. A failure here
+                    # aborts the whole transaction rather than leaving state
+                    # advanced with the event lost.
+                    persisted += self._persist_shadow_event(
+                        candidate,
+                        job_id=existing["job_id"],
+                        absence_epoch=int(existing["absence_epoch"] or 0),
+                        observed_at=timestamp,
+                    )
                 self._record_observation(
                     existing["job_id"],
                     observed_at=timestamp,
@@ -324,13 +340,120 @@ class SeenStore:
                 )
                 updated += 1
 
+            self._prune_shadow_events(observed_at=timestamp)
+
         return ObservationResult(
             observed=len(postings),
             rows_created=created,
             rows_updated=updated,
             rows_skipped=skipped,
+            shadow_events_persisted=persisted,
             shadow_candidates=tuple(candidates),
         )
+
+    def _persist_shadow_event(
+        self,
+        candidate: ShadowGenerationCandidate,
+        *,
+        job_id: str,
+        absence_epoch: int,
+        observed_at: datetime,
+    ) -> int:
+        """Record one shadow candidate idempotently. Returns rows inserted.
+
+        The event key is anchored on the stored row's `job_id` rather than the
+        recomputed identity string. Identity strings can legitimately change
+        without the posting changing -- adding an ATS parser re-identifies
+        historical rows -- and legacy rows can have no identity at all, so
+        hashing the recomputed value would both mint duplicates and collide.
+        """
+
+        if candidate.trigger == TRIGGER_SUSTAINED_ABSENCE:
+            # The epoch the absence was measured in, before it is advanced.
+            material = (
+                f"{TRIGGER_SUSTAINED_ABSENCE}|{job_id}|{absence_epoch}"
+                f"|{candidate.current_generation}"
+            )
+        else:
+            material = (
+                f"{candidate.trigger}|{job_id}|{candidate.stored_season_key or ''}"
+                f"|{candidate.current_season_key or ''}|{candidate.current_generation}"
+            )
+        event_id = hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+        cursor = self._conn.execute(
+            """
+            insert or ignore into shadow_generation_events(
+              event_id, identity_key, company, trigger,
+              stored_season_key, current_season_key,
+              current_generation, proposed_generation,
+              absence_epoch, absence_days, observed_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                bounded_text(candidate.identity_key),
+                bounded_text(candidate.company),
+                candidate.trigger,
+                candidate.stored_season_key,
+                candidate.current_season_key,
+                int(candidate.current_generation),
+                int(candidate.proposed_generation),
+                absence_epoch,
+                candidate.absence_days,
+                _iso(observed_at),
+            ),
+        )
+        return int(cursor.rowcount or 0)
+
+    def _prune_shadow_events(self, *, observed_at: datetime) -> None:
+        """Bound the event history deterministically inside the same transaction.
+
+        Only `shadow_generation_events` rows are touched; seen state and
+        source-health records are never considered here.
+        """
+
+        cutoff = _iso(observed_at - timedelta(days=SHADOW_EVENT_RETENTION_DAYS))
+        self._conn.execute(
+            "delete from shadow_generation_events where observed_at < ?",
+            (cutoff,),
+        )
+        self._conn.execute(
+            """
+            delete from shadow_generation_events
+            where event_id not in (
+              select event_id from shadow_generation_events
+              order by observed_at desc, event_id desc
+              limit ?
+            )
+            """,
+            (SHADOW_EVENT_RETENTION_LIMIT,),
+        )
+
+    def shadow_generation_events(
+        self,
+        *,
+        limit: int = DEFAULT_SHADOW_EVENT_QUERY_LIMIT,
+    ) -> list[dict[str, object]]:
+        """Return persisted shadow-generation events, newest first.
+
+        Read-only diagnostics: this never influences notification selection.
+        """
+
+        bounded_limit = max(1, min(int(limit), SHADOW_EVENT_RETENTION_LIMIT))
+        rows = self._conn.execute(
+            """
+            select event_id, identity_key, company, trigger,
+                   stored_season_key, current_season_key,
+                   current_generation, proposed_generation,
+                   absence_epoch, absence_days, observed_at
+            from shadow_generation_events
+            order by observed_at desc, event_id desc
+            limit ?
+            """,
+            (bounded_limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def _shadow_candidate(
         self,
@@ -818,6 +941,31 @@ class SeenStore:
                   last_healthy_at text
                 )
                 """
+            )
+            # Durable, bounded history of shadow-generation candidates. A
+            # candidate fires once and then observation state advances, so
+            # without this the event would vanish from later runs. Diagnostic
+            # only: nothing reads this table when deciding notifications.
+            self._conn.execute(
+                """
+                create table if not exists shadow_generation_events(
+                  event_id text primary key,
+                  identity_key text,
+                  company text,
+                  trigger text not null,
+                  stored_season_key text,
+                  current_season_key text,
+                  current_generation integer not null,
+                  proposed_generation integer not null,
+                  absence_epoch integer,
+                  absence_days real,
+                  observed_at text not null
+                )
+                """
+            )
+            self._conn.execute(
+                "create index if not exists shadow_generation_events_observed_idx "
+                "on shadow_generation_events(observed_at desc, event_id desc)"
             )
             self._conn.execute(
                 "create index if not exists seen_identity_key_idx on seen(identity_key)"

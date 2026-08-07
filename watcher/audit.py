@@ -32,6 +32,7 @@ from watcher.config import (
     resolve_analysis_cache_path,
 )
 from watcher.run import CollectionStats, collect_rows
+from watcher.generation import TRIGGER_SUSTAINED_ABSENCE
 from watcher.seen_store import SeenStore
 from watcher.source_comparison import (
     SourceComparisonReport,
@@ -320,6 +321,45 @@ def _render_trace(trace: PostingAuditTrace, output: TextIO) -> None:
     print(f"  {trace.final_result.get('summary')}", file=output)
 
 
+def render_shadow_generation_events(
+    events: Sequence[Mapping[str, object]],
+    *,
+    limit: int = DEFAULT_LIMIT,
+    output: TextIO | None = None,
+) -> None:
+    """Print bounded persisted shadow-generation events, newest first.
+
+    These are diagnostics for reused requisitions and evergreen postings. They
+    never influenced notification selection and are not being acted on.
+    """
+
+    stream = output or sys.stdout
+    print("Persisted shadow-generation events (diagnostic only):", file=stream)
+    print(f"  Events shown: {len(events)} (limit {limit})", file=stream)
+    if not events:
+        print("  No shadow-generation events have been recorded.", file=stream)
+        return
+    for event in events:
+        detail = (
+            f"absence_days={event['absence_days']}"
+            if event.get("trigger") == TRIGGER_SUSTAINED_ABSENCE
+            else f"season {event.get('stored_season_key')} -> "
+            f"{event.get('current_season_key')}"
+        )
+        print(
+            f"  - {event.get('observed_at')} {event.get('company') or '(unknown)'}: "
+            f"{event.get('trigger')} generation {event.get('current_generation')} -> "
+            f"{event.get('proposed_generation')} ({detail})",
+            file=stream,
+        )
+        print(
+            f"      identity={event.get('identity_key') or '(none)'} "
+            f"absence_epoch={event.get('absence_epoch')} "
+            f"event_id={event.get('event_id')}",
+            file=stream,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -359,6 +399,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Render the current source-comparison report instead of posting traces.",
     )
+    parser.add_argument(
+        "--shadow-generations",
+        action="store_true",
+        help=(
+            "Print persisted shadow-generation events, newest first. "
+            "Read-only: makes no network requests and writes nothing."
+        ),
+    )
     parser.add_argument("--comparison-json", help="Write comparison JSON.")
     parser.add_argument("--comparison-markdown", help="Write comparison Markdown.")
     args = parser.parse_args(argv)
@@ -373,9 +421,15 @@ def main(argv: list[str] | None = None) -> int:
         job_id=args.job_id,
         identity=args.identity,
     )
-    if not args.comparison and not any(query.as_dict().values()):
+    if args.shadow_generations and args.live:
+        parser.error("--shadow-generations is read-only and cannot be used with --live")
+    if (
+        not args.comparison
+        and not args.shadow_generations
+        and not any(query.as_dict().values())
+    ):
         parser.error(
-            "provide at least one posting query or use --comparison"
+            "provide at least one posting query, --comparison, or --shadow-generations"
         )
 
     config = load_watchlist(args.watchlist)
@@ -386,6 +440,12 @@ def main(argv: list[str] | None = None) -> int:
             seen_db_path=seen_db_path,
             analysis_cache_path=resolve_analysis_cache_path(seen_db_path),
         )
+
+    if args.shadow_generations:
+        with SeenStore(config.seen_db_path, read_only=True) as seen_store:
+            events = seen_store.shadow_generation_events(limit=args.limit)
+        render_shadow_generation_events(events, limit=args.limit)
+        return 0
 
     report: SourceComparisonReport | None = None
     with SeenStore(config.seen_db_path, read_only=True) as seen_store:

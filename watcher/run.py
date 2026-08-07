@@ -79,10 +79,9 @@ from watcher.source_comparison import (
     build_source_comparison,
 )
 from watcher.source_health import (
-    COVERAGE_BACKSTOP_ONLY,
-    COVERAGE_DIRECT,
-    COVERAGE_DIRECT_EMPTY,
     COVERAGE_UNCOVERED,
+    DIRECT_STATUS_HEALTHY_EMPTY,
+    DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
     ERROR_FETCH,
     ERROR_MISSING_ADAPTER,
     ERROR_SCHEMA,
@@ -601,7 +600,7 @@ def run_once(
                 observation = seen_store.observe(
                     jobs,
                     observed_at=observed_at,
-                    collection_health=_collection_health_by_company(company_coverage),
+                    collection_health=_generation_absence_health(company_coverage),
                     # Every collected posting that already has a row is refreshed;
                     # only notification-eligible postings may add one, so the
                     # durable store keeps tracking the suppression surface rather
@@ -1945,23 +1944,34 @@ def _github_runtime_source_sort_key(
     return priority, _github_source_name(source).casefold(), _github_source_url(source)
 
 
-_HEALTHY_COVERAGE_STATES = frozenset(
-    {COVERAGE_DIRECT, COVERAGE_DIRECT_EMPTY, COVERAGE_BACKSTOP_ONLY}
+# Only a direct source that completed cleanly proves a specific company was
+# represented this run. Any other status -- including `not_configured`, which is
+# what backstop-only companies report -- yields no absence evidence.
+_ABSENCE_HEALTHY_DIRECT_STATUSES = frozenset(
+    {DIRECT_STATUS_HEALTHY_WITH_LISTINGS, DIRECT_STATUS_HEALTHY_EMPTY}
 )
 
 
-def _collection_health_by_company(
+def _generation_absence_health(
     coverage: tuple[CompanyCoverage, ...],
 ) -> dict[str, bool]:
-    """Map each configured company to whether its collection was clean this run.
+    """Map each company to whether it produced trustworthy *absence* evidence.
 
-    Only fully covered states count as healthy. Degraded, failing, and uncovered
-    companies restart their absence streak, so a source outage can never make a
-    posting look like it disappeared.
+    This is deliberately narrower than company coverage. GitHub backstop health
+    is global: one healthy feed says nothing about whether a particular
+    unsupported company was represented continuously, so `backstop_only`
+    coverage must never let a posting look like it disappeared. Deriving the
+    answer from `direct_status` rather than the coverage label also means a new
+    coverage label cannot silently start granting absence credit.
+
+    Only `healthy_with_listings` and `healthy_empty` count. `degraded`,
+    `failed`, `unknown`, and `not_configured` all restart the absence streak.
+    A single failed direct attempt yields `failed` immediately, so an outage
+    breaks credit in the same run it happens.
     """
 
     return {
-        item.company: item.state in _HEALTHY_COVERAGE_STATES
+        item.company: item.direct_status in _ABSENCE_HEALTHY_DIRECT_STATUSES
         for item in coverage
         if item.company
     }

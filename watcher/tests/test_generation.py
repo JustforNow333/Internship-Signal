@@ -14,7 +14,24 @@ from watcher.generation import (
     generation_absence_days,
     season_key_for_title,
 )
-from watcher.seen_store import SEEN_SCHEMA_VERSION, SeenStore
+from watcher.run import _generation_absence_health
+from watcher.seen_store import (
+    SEEN_SCHEMA_VERSION,
+    SHADOW_EVENT_RETENTION_LIMIT,
+    SeenStore,
+)
+from watcher.source_health import (
+    COVERAGE_BACKSTOP_ONLY,
+    COVERAGE_DIRECT,
+    COVERAGE_DIRECT_EMPTY,
+    DIRECT_STATUS_DEGRADED,
+    DIRECT_STATUS_FAILED,
+    DIRECT_STATUS_HEALTHY_EMPTY,
+    DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+    DIRECT_STATUS_NOT_CONFIGURED,
+    DIRECT_STATUS_UNKNOWN,
+    CompanyCoverage,
+)
 
 BASE = datetime(2026, 7, 1, tzinfo=timezone.utc)
 HEALTHY = {"Example": True}
@@ -532,3 +549,392 @@ def test_marking_after_observing_never_regresses_last_seen(tmp_path):
 
     assert row["last_seen"] == (BASE + timedelta(days=10)).isoformat()
     assert row["emailed_at"] == BASE.isoformat()
+
+
+# ------------------------------------------- absence-evidence health (Part 1)
+
+
+def coverage(company="Example", *, direct_status, state=COVERAGE_DIRECT,
+             github=False, adapter="greenhouse"):
+    return CompanyCoverage(
+        company=company,
+        adapter=adapter,
+        state=state,
+        direct_status=direct_status,
+        direct_attempt_succeeded=None,
+        direct_rows_returned=None,
+        github_backstop_available=github,
+    )
+
+
+def test_direct_healthy_with_listings_contributes_healthy_absence():
+    health = _generation_absence_health(
+        (coverage(direct_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS),)
+    )
+
+    assert health == {"Example": True}
+
+
+def test_direct_healthy_empty_contributes_healthy_absence():
+    health = _generation_absence_health(
+        (coverage(direct_status=DIRECT_STATUS_HEALTHY_EMPTY,
+                  state=COVERAGE_DIRECT_EMPTY),)
+    )
+
+    assert health == {"Example": True}
+
+
+@pytest.mark.parametrize(
+    "direct_status",
+    [
+        DIRECT_STATUS_DEGRADED,
+        DIRECT_STATUS_FAILED,
+        DIRECT_STATUS_UNKNOWN,
+        DIRECT_STATUS_NOT_CONFIGURED,
+    ],
+)
+def test_non_healthy_direct_states_never_contribute_absence(direct_status):
+    health = _generation_absence_health((coverage(direct_status=direct_status),))
+
+    assert health == {"Example": False}
+
+
+def test_backstop_only_never_contributes_absence_even_with_healthy_feeds():
+    # A bespoke company with both GitHub feeds healthy still has no direct
+    # source, so it reports `not_configured` and earns no absence evidence.
+    health = _generation_absence_health(
+        (
+            coverage(
+                company="BespokeCo",
+                adapter="bespoke",
+                direct_status=DIRECT_STATUS_NOT_CONFIGURED,
+                state=COVERAGE_BACKSTOP_ONLY,
+                github=True,
+            ),
+        )
+    )
+
+    assert health == {"BespokeCo": False}
+
+
+def test_backstop_only_company_cannot_gain_sustained_absence_credit(tmp_path):
+    backstop_health = _generation_absence_health(
+        (
+            coverage(
+                company="Example",
+                adapter="github_only",
+                direct_status=DIRECT_STATUS_NOT_CONFIGURED,
+                state=COVERAGE_BACKSTOP_ONLY,
+                github=True,
+            ),
+        )
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.observe([job()], observed_at=BASE, collection_health=backstop_health)
+        for day in (10, 20, 30):
+            store.observe([], observed_at=BASE + timedelta(days=day),
+                          collection_health=backstop_health)
+        result = store.observe(
+            [job()],
+            observed_at=BASE + timedelta(days=40),
+            collection_health=backstop_health,
+        )
+
+        assert result.shadow_candidates == ()
+        assert store.shadow_generation_events() == []
+
+
+def test_backstop_only_company_still_emits_a_season_change_candidate(tmp_path):
+    backstop_health = _generation_absence_health(
+        (
+            coverage(
+                company="Example",
+                adapter="github_only",
+                direct_status=DIRECT_STATUS_NOT_CONFIGURED,
+                state=COVERAGE_BACKSTOP_ONLY,
+                github=True,
+            ),
+        )
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.observe(
+            [job(title="Summer 2026 Software Engineer Intern")],
+            observed_at=BASE,
+            collection_health=backstop_health,
+        )
+        result = store.observe(
+            [job(title="Summer 2027 Software Engineer Intern")],
+            observed_at=BASE + timedelta(days=1),
+            collection_health=backstop_health,
+        )
+
+    assert [c.trigger for c in result.shadow_candidates] == [TRIGGER_SEASON_CHANGE]
+
+
+def test_a_single_direct_outage_breaks_absence_credit(tmp_path):
+    healthy = _generation_absence_health(
+        (coverage(direct_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS),)
+    )
+    outage = _generation_absence_health(
+        (coverage(direct_status=DIRECT_STATUS_FAILED),)
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.observe([job()], observed_at=BASE, collection_health=healthy)
+        # One failed run mid-gap is enough to reset the streak.
+        store.observe([], observed_at=BASE + timedelta(days=10),
+                      collection_health=outage)
+        result = store.observe(
+            [job()],
+            observed_at=BASE + timedelta(days=30),
+            collection_health=healthy,
+        )
+
+    assert result.shadow_candidates == ()
+
+
+# ------------------------------------------ persisted shadow events (Part 2)
+
+
+def test_season_change_event_is_persisted_before_season_key_advances(tmp_path):
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.observe(
+            [job(title="Summer 2026 Software Engineer Intern")],
+            observed_at=BASE,
+            collection_health=HEALTHY,
+        )
+        result = store.observe(
+            [job(title="Summer 2027 Software Engineer Intern")],
+            observed_at=BASE + timedelta(days=1),
+            collection_health=HEALTHY,
+        )
+
+        assert result.shadow_events_persisted == 1
+        events = store.shadow_generation_events()
+        stored_season = store._conn.execute(
+            "select season_key from seen"
+        ).fetchone()[0]
+
+    assert len(events) == 1
+    assert events[0]["trigger"] == TRIGGER_SEASON_CHANGE
+    assert events[0]["stored_season_key"] == "season|summer|2026"
+    assert events[0]["current_season_key"] == "season|summer|2027"
+    assert events[0]["current_generation"] == 1
+    assert events[0]["proposed_generation"] == 2
+    # The event captured the transition even though stored state has moved on.
+    assert stored_season == "season|summer|2027"
+
+
+def test_persisted_event_survives_later_runs_that_no_longer_emit_it(tmp_path):
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.observe(
+            [job(title="Summer 2026 Software Engineer Intern")],
+            observed_at=BASE,
+            collection_health=HEALTHY,
+        )
+        store.observe(
+            [job(title="Summer 2027 Software Engineer Intern")],
+            observed_at=BASE + timedelta(days=1),
+            collection_health=HEALTHY,
+        )
+        later = store.observe(
+            [job(title="Summer 2027 Software Engineer Intern")],
+            observed_at=BASE + timedelta(days=2),
+            collection_health=HEALTHY,
+        )
+
+        assert later.shadow_candidates == ()
+        assert len(store.shadow_generation_events()) == 1
+
+
+def test_replaying_the_same_candidate_does_not_duplicate_the_event(tmp_path):
+    db_path = tmp_path / "seen.sqlite"
+    for _attempt in range(3):
+        with SeenStore(db_path) as store:
+            # Reset stored season each time so the same transition re-fires.
+            store._conn.execute("update seen set season_key='season|summer|2026'")
+            store._conn.commit()
+            store.observe(
+                [job(title="Summer 2027 Software Engineer Intern")],
+                observed_at=BASE + timedelta(days=1),
+                collection_health=HEALTHY,
+            )
+
+    with SeenStore(db_path) as store:
+        events = store.shadow_generation_events()
+
+    assert len(events) == 1
+
+
+def test_two_distinct_season_transitions_remain_distinct_events(tmp_path):
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.observe([job(title="Summer 2026 Intern")], observed_at=BASE,
+                      collection_health=HEALTHY)
+        store.observe([job(title="Summer 2027 Intern")],
+                      observed_at=BASE + timedelta(days=1),
+                      collection_health=HEALTHY)
+        store.observe([job(title="Summer 2028 Intern")],
+                      observed_at=BASE + timedelta(days=2),
+                      collection_health=HEALTHY)
+        events = store.shadow_generation_events()
+
+    assert len(events) == 2
+    assert {(e["stored_season_key"], e["current_season_key"]) for e in events} == {
+        ("season|summer|2026", "season|summer|2027"),
+        ("season|summer|2027", "season|summer|2028"),
+    }
+
+
+def test_sustained_absence_events_are_idempotent_within_one_epoch(tmp_path):
+    db_path = tmp_path / "seen.sqlite"
+    with SeenStore(db_path) as store:
+        store.observe([job()], observed_at=BASE, collection_health=HEALTHY)
+        for _attempt in range(3):
+            # Rewind only the observation state so the same epoch re-fires.
+            store._conn.execute(
+                "update seen set last_seen=?, absence_epoch=0",
+                (BASE.isoformat(),),
+            )
+            store._conn.commit()
+            store.observe([job()], observed_at=BASE + timedelta(days=21),
+                          collection_health=HEALTHY)
+        events = store.shadow_generation_events()
+
+    assert len(events) == 1
+    assert events[0]["trigger"] == TRIGGER_SUSTAINED_ABSENCE
+    assert events[0]["absence_epoch"] == 0
+
+
+def test_a_later_absence_epoch_creates_a_new_event(tmp_path):
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.observe([job()], observed_at=BASE, collection_health=HEALTHY)
+        first = store.observe([job()], observed_at=BASE + timedelta(days=21),
+                              collection_health=HEALTHY)
+        second = store.observe([job()], observed_at=BASE + timedelta(days=60),
+                               collection_health=HEALTHY)
+        events = store.shadow_generation_events()
+
+    assert len(first.shadow_candidates) == 1
+    assert len(second.shadow_candidates) == 1
+    assert len(events) == 2
+    assert sorted(e["absence_epoch"] for e in events) == [0, 1]
+
+
+def test_event_history_is_newest_first_and_bounded_to_one_thousand(tmp_path):
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        for index in range(1005):
+            store._conn.execute(
+                "insert into shadow_generation_events(event_id, identity_key, "
+                "company, trigger, current_generation, proposed_generation, "
+                "absence_epoch, observed_at) values (?, ?, ?, ?, 1, 2, 0, ?)",
+                (
+                    f"event-{index:05d}",
+                    "identity",
+                    "Example",
+                    TRIGGER_SEASON_CHANGE,
+                    (BASE + timedelta(seconds=index)).isoformat(),
+                ),
+            )
+        store._conn.commit()
+        store.observe([job()], observed_at=BASE + timedelta(days=1),
+                      collection_health=HEALTHY)
+
+        total = store._conn.execute(
+            "select count(*) from shadow_generation_events"
+        ).fetchone()[0]
+        newest = store.shadow_generation_events(limit=3)
+
+    assert total == SHADOW_EVENT_RETENTION_LIMIT
+    observed = [event["observed_at"] for event in newest]
+    assert observed == sorted(observed, reverse=True)
+
+
+def test_events_older_than_the_retention_window_are_removed_only_from_events(tmp_path):
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.observe([job()], observed_at=BASE, collection_health=HEALTHY)
+        seen_before = store._conn.execute("select count(*) from seen").fetchone()[0]
+        store._conn.execute(
+            "insert into shadow_generation_events(event_id, identity_key, company, "
+            "trigger, current_generation, proposed_generation, absence_epoch, "
+            "observed_at) values ('ancient', 'identity', 'Example', ?, 1, 2, 0, ?)",
+            (TRIGGER_SEASON_CHANGE, (BASE - timedelta(days=400)).isoformat()),
+        )
+        store._conn.execute(
+            "insert into shadow_generation_events(event_id, identity_key, company, "
+            "trigger, current_generation, proposed_generation, absence_epoch, "
+            "observed_at) values ('recent', 'identity', 'Example', ?, 1, 2, 0, ?)",
+            (TRIGGER_SEASON_CHANGE, (BASE - timedelta(days=10)).isoformat()),
+        )
+        store._conn.commit()
+
+        store.observe([job()], observed_at=BASE + timedelta(days=1),
+                      collection_health=HEALTHY)
+
+        remaining = {
+            row["event_id"]
+            for row in store._conn.execute(
+                "select event_id from shadow_generation_events"
+            ).fetchall()
+        }
+        seen_after = store._conn.execute("select count(*) from seen").fetchone()[0]
+        health_rows = store._conn.execute(
+            "select count(*) from seen_collection_health"
+        ).fetchone()[0]
+
+    assert "ancient" not in remaining
+    assert "recent" in remaining
+    assert seen_after == seen_before
+    assert health_rows == 1
+
+
+def test_shadow_event_persistence_never_touches_notification_state(tmp_path):
+    emailed_at = datetime(2026, 7, 2, tzinfo=timezone.utc)
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        old = job(title="Summer 2026 Software Engineer Intern")
+        store.observe([old], observed_at=BASE, collection_health=HEALTHY)
+        store.mark_many_emailed([old], emailed_at=emailed_at)
+
+        new_generation = job(title="Summer 2027 Software Engineer Intern")
+        before = store.partition([new_generation])
+        result = store.observe(
+            [new_generation],
+            observed_at=BASE + timedelta(days=1),
+            collection_health=HEALTHY,
+        )
+        after = store.partition([new_generation])
+        row = store._conn.execute(
+            "select emailed_at, primed_at, generation from seen"
+        ).fetchone()
+
+    assert result.shadow_events_persisted == 1
+    assert before.pending == after.pending == []
+    assert before.emailed == after.emailed == [new_generation]
+    assert before.primed == after.primed == []
+    assert row["emailed_at"] == emailed_at.isoformat()
+    assert row["primed_at"] is None
+    # Shadow mode still never advances the persisted generation.
+    assert row["generation"] == 1
+
+
+def test_shadow_event_query_is_bounded(tmp_path):
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        for index in range(40):
+            store._conn.execute(
+                "insert into shadow_generation_events(event_id, identity_key, "
+                "company, trigger, current_generation, proposed_generation, "
+                "absence_epoch, observed_at) values (?, 'identity', 'Example', ?, "
+                "1, 2, 0, ?)",
+                (
+                    f"bounded-{index:03d}",
+                    TRIGGER_SEASON_CHANGE,
+                    (BASE + timedelta(seconds=index)).isoformat(),
+                ),
+            )
+        store._conn.commit()
+
+        assert len(store.shadow_generation_events()) == 25
+        assert len(store.shadow_generation_events(limit=5)) == 5
+        assert len(store.shadow_generation_events(limit=10_000)) == 40
+        assert len(store.shadow_generation_events(limit=0)) == 1
