@@ -81,6 +81,19 @@ class AlumniLoadStatus:
         }
 
 
+def alumni_record_from_csv_row(row: Mapping[str, str]) -> AlumniRecord:
+    """Normalize one validated alumni CSV row for runtime and tooling use."""
+
+    first = str(row.get("First Name") or "").strip()
+    last = str(row.get("Last Name") or "").strip()
+    return {
+        "name": " ".join(part for part in (first, last) if part),
+        "occupation": str(row.get("Occupation") or "").strip(),
+        "linkedin_url": str(row.get("LinkedIn URL") or "").strip(),
+        "employer": str(row.get("Employer") or "").strip(),
+    }
+
+
 def load_alumni(path: str | Path = ALUMNI_CSV_PATH) -> AlumniIndex:
     """Read the alumni CSV once and index records by normalized employer."""
 
@@ -88,7 +101,7 @@ def load_alumni(path: str | Path = ALUMNI_CSV_PATH) -> AlumniIndex:
     if not path.exists():
         raise AlumniError(f"Alumni CSV not found: {path}")
 
-    with path.open("r", encoding="utf-8", newline="") as handle:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         headers = tuple(reader.fieldnames or ())
         missing = [column for column in REQUIRED_COLUMNS if column not in headers]
@@ -106,7 +119,7 @@ def load_alumni(path: str | Path = ALUMNI_CSV_PATH) -> AlumniIndex:
             key = norm_company(employer)
             if not key:
                 continue
-            index.setdefault(key, []).append(_record(row))
+            index.setdefault(key, []).append(alumni_record_from_csv_row(row))
     return index
 
 
@@ -468,17 +481,6 @@ def _log_missing_roster(status: AlumniLoadStatus) -> None:
         LOGGER.error(message)
     else:
         LOGGER.warning(message)
-
-
-def _record(row: Mapping[str, str]) -> AlumniRecord:
-    first = str(row.get("First Name") or "").strip()
-    last = str(row.get("Last Name") or "").strip()
-    return {
-        "name": " ".join(part for part in (first, last) if part),
-        "occupation": str(row.get("Occupation") or "").strip(),
-        "linkedin_url": str(row.get("LinkedIn URL") or "").strip(),
-        "employer": str(row.get("Employer") or "").strip(),
-    }
 
 
 def _json_record(row: Mapping[str, object], *, fallback_employer: str) -> AlumniRecord:

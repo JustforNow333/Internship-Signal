@@ -31,6 +31,18 @@ def fake_index(tmp_path):
     return load_alumni(path)
 
 
+def test_load_alumni_accepts_utf8_bom(tmp_path):
+    path = tmp_path / "alumni-with-bom.csv"
+    path.write_text(CSV_TEXT, encoding="utf-8-sig")
+
+    index = load_alumni(path)
+
+    assert [record["name"] for record in index["openai"]] == [
+        "Ada Exact",
+        "Dennis Exact",
+    ]
+
+
 def company_json_text():
     return json.dumps({
         "bosch": [

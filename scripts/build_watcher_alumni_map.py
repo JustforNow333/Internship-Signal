@@ -20,7 +20,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from backend.app.dedupe import norm_company  # noqa: E402
-from watcher.alumni import ALIAS_MAP, FUZZY_THRESHOLD, REQUIRED_COLUMNS  # noqa: E402
+from watcher.alumni import (  # noqa: E402
+    ALIAS_MAP,
+    FUZZY_THRESHOLD,
+    REQUIRED_COLUMNS,
+    alumni_record_from_csv_row,
+)
 from watcher.config import CompanyCfg, load_watchlist  # noqa: E402
 
 
@@ -50,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         if company_key is None:
             continue
 
-        record = _record(row)
+        record = alumni_record_from_csv_row(row)
         dedupe_key = (
             company_key,
             record["name"],
@@ -146,17 +151,6 @@ def _match_company_key(employer_key: str, lookup: Mapping[str, str]) -> str | No
             best_ratio = ratio
             best_company_key = company_key
     return best_company_key if best_ratio >= FUZZY_THRESHOLD else None
-
-
-def _record(row: Mapping[str, str]) -> dict[str, str]:
-    first = str(row.get("First Name") or "").strip()
-    last = str(row.get("Last Name") or "").strip()
-    return {
-        "name": " ".join(part for part in (first, last) if part),
-        "occupation": str(row.get("Occupation") or "").strip(),
-        "linkedin_url": str(row.get("LinkedIn URL") or "").strip(),
-        "employer": str(row.get("Employer") or "").strip(),
-    }
 
 
 if __name__ == "__main__":

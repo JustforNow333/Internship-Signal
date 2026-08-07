@@ -18,6 +18,10 @@
 - Live recall verification uses only configured GitHub feeds with temporary seen,
   cache, and health paths, email/health email off, and no priming; publish only the
   verified `internal-tool` branch.
+- Alumni CSV input is explicit UTF-8 with optional BOM; runtime loading and the
+  compact-map builder share one row-normalization helper.
+- Cleanup changes require a reproduced failure or caller/test proof that code is
+  redundant; preserve public shapes, ordering, logs, and side effects.
 
 ## Hosted per-user matching (Phase 2B)
 
