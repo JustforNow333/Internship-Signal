@@ -536,7 +536,13 @@ def test_match_and_health_email_failures_are_reported_separately(tmp_path):
     assert result.health_alert_result.sent is False
     assert result.health_alert_result.error == "health_sender_returned_false"
     assert len(result.new_matches) == 1
-    assert records == []
+    # The shadow observation pass records sightings; no notification state may
+    # be written when the digest was not sent.
+    assert [
+        record
+        for record in records
+        if record["emailed_at"] or record["primed_at"]
+    ] == []
 
 
 def test_observability_failures_do_not_undo_match_email_state(

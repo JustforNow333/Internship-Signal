@@ -68,6 +68,7 @@ from watcher.season import (
     company_season_warnings,
     season_status,
 )
+from watcher.generation import ShadowGenerationCandidate
 from watcher.seen_store import SeenStore
 from watcher.source_comparison import (
     CATEGORY_BOTH,
@@ -78,6 +79,9 @@ from watcher.source_comparison import (
     build_source_comparison,
 )
 from watcher.source_health import (
+    COVERAGE_BACKSTOP_ONLY,
+    COVERAGE_DIRECT,
+    COVERAGE_DIRECT_EMPTY,
     COVERAGE_UNCOVERED,
     ERROR_FETCH,
     ERROR_MISSING_ADAPTER,
@@ -178,6 +182,8 @@ class RunResult:
         )
     )
     source_comparison_persisted: bool = False
+    shadow_generation_candidates: tuple[ShadowGenerationCandidate, ...] = ()
+    shadow_observations: int = 0
     jobs: list[dict] = field(default_factory=list)
     duplicate_report: list[dict] = field(default_factory=list)
     collection_replayed: bool = False
@@ -234,6 +240,7 @@ WORKDAY_TRANSPORT_ERROR_CODES = frozenset(
         "unsupported_content_type",
     }
 )
+SHADOW_GENERATION_REPORT_LIMIT = 20
 RUN_MODE_LIVE = "live_send"
 RUN_MODE_DRY = "dry_run"
 RUN_MODE_PRIME = "explicit_prime"
@@ -578,6 +585,37 @@ def run_once(
             alumni_index,
             companies=config.companies,
         )
+    with _timed_stage("shadow_generation_observation"):
+        # Shadow only: this records that postings were collected and reports
+        # what *would* qualify as a new generation. It writes no notification
+        # state, and `partition()` below is unchanged by it. Replay is
+        # side-effect-free, so it never observes.
+        shadow_candidates: tuple[ShadowGenerationCandidate, ...] = ()
+        shadow_observations = 0
+        if replay_mode:
+            LOGGER.info(
+                "Collection replay: shadow-generation observation was not recorded."
+            )
+        else:
+            try:
+                observation = seen_store.observe(
+                    jobs,
+                    observed_at=observed_at,
+                    collection_health=_collection_health_by_company(company_coverage),
+                    # Every collected posting that already has a row is refreshed;
+                    # only notification-eligible postings may add one, so the
+                    # durable store keeps tracking the suppression surface rather
+                    # than every posting these companies have ever published.
+                    create_rows_for=matches,
+                )
+                shadow_candidates = observation.shadow_candidates
+                shadow_observations = observation.observed
+            except Exception as exc:  # shadow diagnostics must never block delivery
+                LOGGER.error(
+                    "Shadow-generation observation failed: %s",
+                    sanitize_error(exc),
+                )
+        _log_shadow_generation(shadow_candidates, shadow_observations)
     with _timed_stage("seen_store_partitioning"):
         notification_selection = seen_store.partition(matches)
     new_matches = notification_selection.pending
@@ -753,6 +791,8 @@ def run_once(
         source_comparison=source_comparison,
         health_alert_result=health_alert_result,
         source_comparison_persisted=source_comparison_persisted,
+        shadow_generation_candidates=shadow_candidates,
+        shadow_observations=shadow_observations,
         jobs=jobs,
         duplicate_report=duplicate_report,
         collection_replayed=replay_mode,
@@ -1577,6 +1617,7 @@ def print_report(result: RunResult, *, output: TextIO | None = None) -> None:
             f"{item.get('evidence') or ''}",
             file=output,
         )
+    _print_shadow_generation(result, output=output)
     _print_suppressed_postings("Previously emailed", previously_emailed, output=output)
     _print_suppressed_postings("Explicitly primed", explicitly_primed, output=output)
 
@@ -1904,6 +1945,45 @@ def _github_runtime_source_sort_key(
     return priority, _github_source_name(source).casefold(), _github_source_url(source)
 
 
+_HEALTHY_COVERAGE_STATES = frozenset(
+    {COVERAGE_DIRECT, COVERAGE_DIRECT_EMPTY, COVERAGE_BACKSTOP_ONLY}
+)
+
+
+def _collection_health_by_company(
+    coverage: tuple[CompanyCoverage, ...],
+) -> dict[str, bool]:
+    """Map each configured company to whether its collection was clean this run.
+
+    Only fully covered states count as healthy. Degraded, failing, and uncovered
+    companies restart their absence streak, so a source outage can never make a
+    posting look like it disappeared.
+    """
+
+    return {
+        item.company: item.state in _HEALTHY_COVERAGE_STATES
+        for item in coverage
+        if item.company
+    }
+
+
+def _log_shadow_generation(
+    candidates: tuple[ShadowGenerationCandidate, ...],
+    observations: int,
+) -> None:
+    reasons = Counter(candidate.trigger for candidate in candidates)
+    LOGGER.info(
+        "SHADOW-GENERATION observed=%d candidates=%d triggers=%s (shadow only; "
+        "notification selection unchanged)",
+        observations,
+        len(candidates),
+        ",".join(f"{trigger}={count}" for trigger, count in sorted(reasons.items()))
+        or "none",
+    )
+    for candidate in candidates[:SHADOW_GENERATION_REPORT_LIMIT]:
+        LOGGER.info("SHADOW-GENERATION CANDIDATE: %s", candidate.console_line())
+
+
 def _record_error(errors: list[str], message: str) -> None:
     safe_message = sanitize_error(message)
     LOGGER.warning(safe_message)
@@ -1923,6 +2003,25 @@ def _log_suppressed_postings(label: str, jobs: list[dict], *, limit: int = 10) -
             "Suppressed (%s): %d additional posting(s) omitted from diagnostics.",
             label,
             len(jobs) - limit,
+        )
+
+
+def _print_shadow_generation(result: RunResult, *, output: TextIO) -> None:
+    """Print bounded shadow diagnostics. These never affect delivery."""
+
+    candidates = tuple(getattr(result, "shadow_generation_candidates", ()) or ())
+    print("Shadow generation (diagnostic only, no delivery impact):", file=output)
+    print(
+        f"  Observed posting identities: {getattr(result, 'shadow_observations', 0)}",
+        file=output,
+    )
+    print(f"  Shadow generation candidates: {len(candidates)}", file=output)
+    for candidate in candidates[:SHADOW_GENERATION_REPORT_LIMIT]:
+        print(f"  - {candidate.console_line()}", file=output)
+    if len(candidates) > SHADOW_GENERATION_REPORT_LIMIT:
+        print(
+            f"  - ... {len(candidates) - SHADOW_GENERATION_REPORT_LIMIT} more",
+            file=output,
         )
 
 

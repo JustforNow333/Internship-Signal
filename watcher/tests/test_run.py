@@ -254,7 +254,10 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
     assert first.seen_marked == 2
     assert [len(call) for call in digest_sender.calls] == [2, 0]
     with sqlite3.connect(db_path) as conn:
-        rows = conn.execute("select emailed_at from seen order by job_id").fetchall()
+        rows = conn.execute(
+            "select emailed_at from seen "
+            "where emailed_at is not null order by job_id"
+        ).fetchall()
     assert len(rows) == 2
     assert all(row[0] == "2026-06-09T00:00:00+00:00" for row in rows)
 
@@ -794,7 +797,10 @@ def test_categorical_exclusion_is_audited_but_never_emailed_or_marked_seen(
             notification_mode=RUN_MODE_DRY,
         )
         with sqlite3.connect(db_path) as conn:
-            assert conn.execute("select count(*) from seen").fetchone()[0] == 0
+            assert conn.execute(
+                "select count(*) from seen "
+                "where emailed_at is not null or primed_at is not null"
+            ).fetchone()[0] == 0
 
         live = run_once(
             config,
@@ -824,7 +830,9 @@ def test_categorical_exclusion_is_audited_but_never_emailed_or_marked_seen(
 
     assert [len(call) for call in digest_sender.calls] == [1]
     with sqlite3.connect(db_path) as conn:
-        stored = conn.execute("select title, url from seen").fetchall()
+        stored = conn.execute(
+            "select title, url from seen where emailed_at is not null"
+        ).fetchall()
     assert stored == [
         ("2027 Software Engineer Intern", "https://example.test/jobs/open-202")
     ]
@@ -861,7 +869,10 @@ def test_run_once_does_not_mark_seen_when_digest_not_sent(tmp_path):
     assert first.seen_marked == 0
     assert [len(call) for call in digest_sender.calls] == [1, 1]
     with sqlite3.connect(tmp_path / "seen.sqlite") as conn:
-        assert conn.execute("select count(*) from seen").fetchone()[0] == 0
+        assert conn.execute(
+            "select count(*) from seen "
+            "where emailed_at is not null or primed_at is not null"
+        ).fetchone()[0] == 0
 
 
 def test_run_once_failed_live_send_exception_does_not_mark_emailed(tmp_path):
@@ -891,7 +902,10 @@ def test_run_once_failed_live_send_exception_does_not_mark_emailed(tmp_path):
             )
 
     with sqlite3.connect(db_path) as conn:
-        assert conn.execute("select count(*) from seen").fetchone()[0] == 0
+        assert conn.execute(
+            "select count(*) from seen "
+            "where emailed_at is not null or primed_at is not null"
+        ).fetchone()[0] == 0
 
 
 def test_run_once_ordinary_dry_run_does_not_alter_notification_state(tmp_path):
@@ -917,7 +931,10 @@ def test_run_once_ordinary_dry_run_does_not_alter_notification_state(tmp_path):
     assert result.seen_marked == 0
     assert digest_sender.calls == []
     with sqlite3.connect(db_path) as conn:
-        assert conn.execute("select count(*) from seen").fetchone()[0] == 0
+        assert conn.execute(
+            "select count(*) from seen "
+            "where emailed_at is not null or primed_at is not null"
+        ).fetchone()[0] == 0
 
 
 def test_run_once_can_prime_seen_store_without_sending(tmp_path):
@@ -953,8 +970,14 @@ def test_run_once_can_prime_seen_store_without_sending(tmp_path):
     assert first.seen_marked == 1
     assert digest_sender.calls == []
     with sqlite3.connect(db_path) as conn:
-        seen_row = conn.execute("select first_seen, emailed_at, primed_at from seen").fetchone()
-    assert seen_row == ("2026-06-09T00:00:00+00:00", None, "2026-06-09T00:00:00+00:00")
+        seen_row = conn.execute(
+            "select first_seen, emailed_at, primed_at from seen"
+        ).fetchone()
+    # `first_seen` now records the first observation, which the shadow pass
+    # writes before priming. The notification timestamps are what matter.
+    assert seen_row[0]
+    assert seen_row[1] is None
+    assert seen_row[2] == "2026-06-09T00:00:00+00:00"
 
 
 def test_six_distinct_requisitions_at_one_company_produce_six_matches(tmp_path):
@@ -1088,7 +1111,10 @@ def test_notification_identity_integration_six_requisitions_and_cross_source_dup
             today=date(2026, 7, 28),
             notification_mode=RUN_MODE_DRY,
         )
-        seen_after_dry = store._conn.execute("select count(*) from seen").fetchone()[0]
+        seen_after_dry = store._conn.execute(
+            "select count(*) from seen "
+            "where emailed_at is not null or primed_at is not null"
+        ).fetchone()[0]
 
         live_sender = FakeDigestSender(sent=True)
         live = run_once(
@@ -1374,6 +1400,7 @@ def test_run_once_logs_every_pipeline_stage_without_changing_results(tmp_path, c
         "analysis",
         "filtering_eligibility",
         "alumni_loading_matching",
+        "shadow_generation_observation",
         "seen_store_partitioning",
         "digest_email_handling",
         "source_comparison_generation_persistence",
@@ -1932,7 +1959,10 @@ def test_run_once_persists_health_without_matches_email_or_seen_marking(tmp_path
     assert result.seen_marked == 0
     assert digest_sender.calls == [[]]
     with sqlite3.connect(db_path) as conn:
-        assert conn.execute("select count(*) from seen").fetchone()[0] == 0
+        assert conn.execute(
+            "select count(*) from seen "
+            "where emailed_at is not null or primed_at is not null"
+        ).fetchone()[0] == 0
         assert conn.execute(
             "select count(*) from source_health_attempts where run_id = ?", ("fixed-run",)
         ).fetchone()[0] == 3

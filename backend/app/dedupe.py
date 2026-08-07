@@ -13,6 +13,7 @@ fed before GitHub backstop rows, preserving the direct source tag.
 
 import hashlib
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
@@ -127,12 +128,17 @@ def norm_url(url: str) -> str:
         return url.lower()
     path = parts.path.rstrip("/")
     path_job_id = path.rsplit("/", 1)[-1]
+    # Repeating an identical key/value pair carries no extra identity, so a feed
+    # that emits `?gh_jid=1&gh_jid=1` must canonicalize exactly like `?gh_jid=1`.
+    # Genuinely different values for one key (`?a=1&a=2`) are still preserved.
     query = sorted(
-        (k, v)
-        for k, v in parse_qsl(parts.query)
-        if not k.lower().startswith("utm_")
-        and k.lower() not in _TRACKING_QUERY_KEYS
-        and not (k.lower() == "gh_jid" and v == path_job_id)
+        {
+            (k, v)
+            for k, v in parse_qsl(parts.query)
+            if not k.lower().startswith("utm_")
+            and k.lower() not in _TRACKING_QUERY_KEYS
+            and not (k.lower() == "gh_jid" and v == path_job_id)
+        }
     )
     host = parts.netloc.lower()
     if host == "boards.greenhouse.io":
@@ -249,7 +255,36 @@ def _fallback_title(title: str) -> str:
         protected,
         flags=re.I,
     )
-    return _squash(protected)
+    squashed = _squash(protected)
+    retained = _non_latin_title_text(protected)
+    if not retained:
+        return squashed
+    return f"{squashed} {retained}".strip()
+
+
+def _non_latin_title_text(title: str) -> str:
+    """Return the deterministic non-Latin text that ASCII squashing discards.
+
+    ``_squash`` keeps only ``[a-z0-9]``, so a wholly non-Latin title collapsed to
+    an empty fallback component and every such posting at one company/location
+    shared a single identity. Accented Latin text is unaffected: combining marks
+    are stripped first, so "café" still normalizes to "caf" exactly as before and
+    existing fallback keys for Latin titles stay byte-identical. This is an exact
+    normalization, not fuzzy matching -- distinct scripts stay distinct.
+    """
+
+    decomposed = unicodedata.normalize("NFKD", str(title or "")).casefold()
+    without_marks = "".join(
+        character
+        for character in decomposed
+        if not unicodedata.combining(character)
+    )
+    retained = [
+        character
+        for character in without_marks
+        if character.isalnum() and not character.isascii()
+    ]
+    return unicodedata.normalize("NFKC", "".join(retained))
 
 
 def _fallback_location(location: str) -> str:

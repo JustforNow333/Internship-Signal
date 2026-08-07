@@ -360,3 +360,45 @@ def _create_legacy_seen_db(path, legacy_job, *, emailed_at):
                 emailed_at,
             ),
         )
+
+
+def test_legacy_duplicate_query_url_row_still_suppresses_after_canonicalization(tmp_path):
+    """A row stored before the duplicate-parameter fix must keep suppressing.
+
+    The stored `identity_key` was computed with the old canonicalization, so the
+    exact-identity arm misses. Reconstructing the stored row and re-running the
+    shared matcher recomputes both sides with current logic, which keeps the
+    posting suppressed instead of re-notifying it.
+    """
+
+    db_path = tmp_path / "seen.sqlite"
+    doubled = "https://careers.aqr.com/jobs?gh_jid=7895562&gh_jid=7895562"
+    with SeenStore(db_path) as store:
+        store._conn.execute(
+            "insert into seen(job_id, company, title, url, first_source, "
+            "first_seen, emailed_at, identity_key) values (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-aqr",
+                "AQR Capital",
+                "2027 Trading Summer Analyst",
+                doubled,
+                "github",
+                "2026-07-16T05:06:15+00:00",
+                "2026-07-28T06:36:56+00:00",
+                f"url|{doubled}",
+            ),
+        )
+        store._conn.commit()
+
+        current = {
+            "id": "aqr-current",
+            "company": "AQR Capital",
+            "title": "2027 Trading Summer Analyst",
+            "location": "Greenwich, CT",
+            "source_url": "https://careers.aqr.com/jobs?gh_jid=7895562",
+            "extra": {"source": "github"},
+        }
+        selection = store.partition([current])
+
+    assert selection.emailed == [current]
+    assert selection.pending == []

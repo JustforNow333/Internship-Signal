@@ -4,6 +4,7 @@ import pytest
 
 from app.dedupe import (
     analyzed_job_ids,
+    fallback_posting_key,
     canonical_key,
     dedupe,
     is_posting_specific_url,
@@ -766,3 +767,94 @@ def test_similar_titles_alone_do_not_merge():
         "Software Engineer Intern II",
     }
     assert report == []
+
+
+# --------------------------------------------------------------------------
+# Identity hardening: duplicate query parameters and non-Latin fallback titles
+# --------------------------------------------------------------------------
+
+
+def test_duplicate_identical_query_parameters_canonicalize_to_one_identity():
+    single = "https://example.test/jobs?gh_jid=7895562"
+    doubled = "https://example.test/jobs?gh_jid=7895562&gh_jid=7895562"
+
+    assert norm_url(single) == norm_url(doubled)
+    assert norm_url(doubled) == "https://example.test/jobs?gh_jid=7895562"
+
+
+def test_genuinely_different_repeated_query_values_stay_distinct():
+    normalized = norm_url("https://example.test/jobs?team=1&team=2")
+
+    assert normalized == "https://example.test/jobs?team=1&team=2"
+    assert norm_url("https://example.test/jobs?team=1") != normalized
+
+
+def test_aqr_duplicate_gh_jid_resolves_to_a_single_posting_identity():
+    single = _row(1, company="AQR Capital", title="2027 Trading Summer Analyst",
+                  source_url="https://careers.aqr.com/jobs?gh_jid=7895562")
+    doubled = _row(2, company="AQR Capital", title="2027 Trading Summer Analyst",
+                   source_url="https://careers.aqr.com/jobs?gh_jid=7895562&gh_jid=7895562")
+
+    assert posting_identity_key(single) == posting_identity_key(doubled)
+    kept, report = dedupe([deepcopy(single), deepcopy(doubled)])
+    assert len(kept) == 1
+    assert [entry["matched_on"] for entry in report] == ["source_url"]
+
+
+def test_non_latin_titles_produce_non_empty_deterministic_fallback_keys():
+    row = _row(1, company="Pfizer", title="医学信息沟通专员",
+               location="China - Beijing - Beijing")
+
+    key = fallback_posting_key(row)
+
+    assert key == fallback_posting_key(dict(row))
+    assert key.split("|")[1] != ""
+    assert key == "pfizer|医学信息沟通专员|china beijing beijing"
+
+
+def test_unrelated_non_latin_titles_at_one_company_and_location_do_not_collide():
+    first = _row(1, company="Pfizer", title="医学信息沟通专员",
+                 location="China - Beijing - Beijing")
+    second = _row(2, company="Pfizer", title="渠道支持经理",
+                  location="China - Beijing - Beijing")
+
+    assert fallback_posting_key(first) != fallback_posting_key(second)
+    assert posting_identity_key(first) != posting_identity_key(second)
+    kept, _report = dedupe([deepcopy(first), deepcopy(second)])
+    assert len(kept) == 2
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("Software Engineer Intern", "software engineer intern"),
+        ("C++ Developer Intern", "cplusplus developer intern"),
+        ("C# Developer Intern", "csharp developer intern"),
+        # Accented Latin decomposes to its ASCII base exactly as before.
+        ("Café Engineer", "caf engineer"),
+        # Legacy behaviour: a combining-mark letter has always acted as a
+        # separator here, and the Unicode fix must not disturb that.
+        ("Señor Software Intern", "se or software intern"),
+    ],
+)
+def test_latin_fallback_titles_are_unchanged_by_the_unicode_fix(title, expected):
+    assert fallback_posting_key(_row(1, company="X", title=title)).split("|")[1] == expected
+
+
+def test_mixed_script_titles_retain_both_components():
+    key = fallback_posting_key(_row(1, company="X", title="Software Engineer 医学"))
+
+    assert key.split("|")[1] == "software engineer 医学"
+
+
+def test_workday_requisition_suffix_collapsing_is_unchanged():
+    base = "https://x.wd1.myworkdayjobs.com/Site/job/Loc/Intern_R100"
+    first = _row(1, company="X", title="Intern",
+                 source_url=f"{base}-1",
+                 extra={"source": "direct", "source_adapter": "workday"})
+    second = _row(2, company="X", title="Intern",
+                  source_url=f"{base}-2",
+                  extra={"source": "direct", "source_adapter": "workday"})
+
+    assert stable_requisition_key(first) == stable_requisition_key(second)
+    assert stable_requisition_key(first).endswith("|r100")
