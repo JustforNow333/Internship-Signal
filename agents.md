@@ -228,6 +228,11 @@
   stable source requisition ID, then posting-specific normalized URL, then a
   conservative company/title/location fallback. Generic URLs never collapse
   distinct stable requisitions.
+- Workday `bulletFields` is tenant-configured display metadata, so
+  `_source_id` trusts the first entry only when it is requisition-shaped (a
+  single token carrying a digit) and does not repeat `locationsText`.
+  Otherwise it returns `""` and identity falls through to the URL tier. The
+  detail `requisition_id_conflict` guard is unchanged.
 - Digest policy: no default score gate; exclude ineligible jobs; sort by fit,
   generic score, role priority, company, and title; send nothing for zero new
   matches.

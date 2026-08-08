@@ -180,6 +180,9 @@
 - Collection and notification share one identity policy: stable requisition
   ID, posting-specific normalized URL, then exact company/title/location.
   Generic URLs never collapse distinct stable requisitions.
+- Workday `bulletFields` is tenant display metadata, not a requisition ID.
+  Only a requisition-shaped first entry that does not repeat the listing
+  location becomes an ID; anything else falls through to the URL tier.
 - Alumni data is additive and private.
 - Ignore private/generated payloads, not reusable helper scripts or test
   fixtures; new code and fixtures must remain visible for review.

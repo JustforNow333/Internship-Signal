@@ -103,6 +103,11 @@ _DETAIL_REQUISITION_ID_FIELDS = (
     "requisitionId",
     "jobRequisitionId",
 )
+# Listing requisition IDs are single tokens: letters, digits, and the joiners
+# tenants use between segments. Anything else is display metadata.
+_REQUISITION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+_MIN_REQUISITION_ID_LENGTH = 2
+_MAX_REQUISITION_ID_LENGTH = 64
 _DETAIL_LOCATION_FIELDS = (
     "location",
     "jobRequisitionLocation",
@@ -1316,11 +1321,43 @@ def _required(value: str, field: str, company: CompanyCfg) -> str:
     return value
 
 
+def _looks_like_requisition_id(value: str) -> bool:
+    """Return whether a listing value can be trusted as a requisition ID.
+
+    Real tenant IDs are compact single tokens carrying at least one digit
+    (``R244387``, ``JR-2026-21062-5``, ``PT-JR040904``, ``3166958``). Display
+    metadata is prose: it carries separators such as spaces, commas, or
+    parentheses, or no digit at all.
+    """
+
+    if not _MIN_REQUISITION_ID_LENGTH <= len(value) <= _MAX_REQUISITION_ID_LENGTH:
+        return False
+    if not _REQUISITION_ID_RE.match(value):
+        return False
+    return any(character.isdigit() for character in value)
+
+
 def _source_id(posting: dict) -> str:
+    """Return the listing requisition ID, or "" for tenant display metadata.
+
+    ``bulletFields`` is a tenant-configured *display* array, not a guaranteed
+    requisition ID. Air Products publishes the posting location there, so every
+    posting at one site shared a single requisition identity and distinct
+    postings were absorbed as duplicates. Only a requisition-shaped value that
+    is not simply repeating the listing's own location survives; anything else
+    yields "" so identity falls through to the posting-specific URL tier.
+    """
+
     bullet_fields = posting.get("bulletFields")
-    if isinstance(bullet_fields, list) and bullet_fields:
-        return str(bullet_fields[0] or "").strip()
-    return ""
+    if not (isinstance(bullet_fields, list) and bullet_fields):
+        return ""
+    value = str(bullet_fields[0] or "").strip()
+    if not _looks_like_requisition_id(value):
+        return ""
+    locations_text = str(posting.get("locationsText") or "").strip()
+    if locations_text and value.casefold() == locations_text.casefold():
+        return ""
+    return value
 
 
 def _remote_status(posting: dict) -> str:
