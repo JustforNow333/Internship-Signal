@@ -808,6 +808,16 @@ backstop-only/uncovered companies, recent transitions, stale feeds, and source
 comparison counts. A structurally valid GitHub fetch with zero matching roles
 is not a failure; stale-feed alerts require prior configured-season activity.
 
+Minor degradation — a handful of skipped malformed or schema-invalid records
+relative to the rows retained, or a request that succeeded after a retry with
+the final collection complete — stays `degraded` with its full diagnostics but
+never emails immediately, including its recovery. Those incidents are
+deduplicated per source into one digest sent at most once per UTC day after the
+configured hour; an empty window sends nothing and a failed send retries the
+same day. Pagination loss or truncation, repeated pages, material enrichment
+failure, substantial record loss, direct failure, lost coverage, and any
+unrecognized reason code keep their immediate alerts.
+
 Inspect a local database with SQLite:
 
 ```sql

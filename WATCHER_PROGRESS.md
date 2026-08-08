@@ -8,6 +8,9 @@ This file tracks completed watcher steps and the next handoff target.
 ## Current Status
 
 - Backend `analyze_rows(rows, today=None)` seam is built and reused by watcher.
+- Minor direct-source degradation (bounded record loss, recovered retries)
+  stays `degraded` with full diagnostics but is reported in one daily
+  digest instead of an immediate email; actionable degradation is unchanged.
 - Watcher source layer is built: Greenhouse, Lever, Ashby, SmartRecruiters,
   Workable, Workday, and SimplifyJobs GitHub listings.
 - `watcher/detect.py` and the generated priority `watcher/watchlist.yml` are in
@@ -1064,6 +1067,30 @@ This file tracks completed watcher steps and the next handoff target.
      ID, retained the Workday title, classified it `swe/general_swe` with fit
      score 74, and included it in final matches. No digest was sent and the
      temporary seen store remained empty.
+
+47. Minor source-degradation daily digest (2026-08-08):
+   - Alert delivery now splits the existing `degraded` direct state by impact
+     using only the `DirectSourceDiagnostics` reason codes and counters already
+     persisted by `d822059`/`0647936`/`3d013f0`. No diagnostics, persistence,
+     pagination, or state machinery was added or replaced; the change is
+     confined to `watcher/health_alerts.py`.
+   - Minor means not truncated and only bounded
+     `schema_invalid_records_skipped`/`malformed_records_skipped` loss (at most
+     five skipped, at least twenty retained rows each) or a
+     `request_retry_recovered` whose final attempt is complete. Skip cases are
+     classified from reason codes rather than `incomplete`/`complete`, which
+     the skipped records themselves set. Unknown and mixed sets are actionable.
+   - Minor incidents and their recoveries send no immediate email in any mode.
+     They are deduplicated per source into one `source_health_minor_digest`
+     email per UTC day carrying occurrences, retained rows, the bounded
+     diagnostic summary, reason codes, and later recovery. An empty window
+     sends nothing, only a successful send marks the day, and the digest runs
+     after immediate alerts without delaying or suppressing them.
+   - Validation passed: backend/watcher `1398 passed, 100 skipped, 1 warning`
+     plus one pre-existing environment-only failure
+     (`test_repository_ignores_private_holdout_artifact_paths`, which needs a
+     primary checkout because Windows Git cannot resolve a WSL-created
+     worktree pointer); Python compileall.
 
 ## Next
 

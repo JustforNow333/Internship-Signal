@@ -14,6 +14,7 @@ from watcher.health_alerts import (
     MODE_TRANSITIONS_ONLY,
     HealthAlertPolicy,
     evaluate_and_send_health_alerts,
+    is_minor_degradation,
     load_health_alert_policy,
 )
 from watcher.seen_store import SeenStore
@@ -22,6 +23,9 @@ from watcher.source_health import (
     COVERAGE_BACKSTOP_ONLY,
     COVERAGE_DIRECT,
     COVERAGE_UNCOVERED,
+    DIRECT_STATUS_DEGRADED,
+    DIRECT_STATUS_FAILED,
+    DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
     SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
     STATUS_FAILING,
@@ -55,6 +59,13 @@ def _state(
     rows=10,
     error=None,
     feed_label=None,
+    reason_codes=(),
+    malformed=None,
+    schema_errors=None,
+    incomplete=None,
+    truncated=None,
+    degraded=None,
+    complete=None,
 ):
     return SourceHealthState(
         health_key=key,
@@ -77,6 +88,13 @@ def _state(
         last_error_message="token=secret https://user:pass@example.com?q=secret"
         if error
         else None,
+        last_malformed_row_count=malformed,
+        last_schema_error_row_count=schema_errors,
+        last_incomplete=incomplete,
+        last_truncated=truncated,
+        last_reason_codes=tuple(reason_codes),
+        last_degraded=degraded,
+        last_complete=complete,
     )
 
 
@@ -665,3 +683,497 @@ def test_policy_defaults_and_validation():
     assert policy.cooldown_hours == 24
     with pytest.raises(ValueError):
         load_health_alert_policy({"WATCHER_HEALTH_EMAIL_MODE": "sometimes"})
+
+
+# Minor-degradation policy. Small record-level noise and recovered retries stay
+# degraded and visible but are reported once a day; anything that could hide
+# missing postings keeps its existing immediate alert.
+
+BEFORE_DIGEST_HOUR = NOW.replace(hour=6)
+MINOR_SUBJECT_MARKER = "Minor Source Degradations"
+
+
+def _minor_state(
+    *,
+    reason_codes=("schema_invalid_records_skipped",),
+    schema_errors=1,
+    malformed=0,
+    rows=412,
+    **overrides,
+):
+    """A degraded direct source carrying only tiny record-level loss.
+
+    Skips set ``incomplete``/``complete`` on every adapter, so the defaults
+    mirror what the real diagnostics publish for this case.
+    """
+
+    values = {
+        "incomplete": True,
+        "truncated": False,
+        "degraded": True,
+        "complete": False,
+    }
+    values.update(overrides)
+    return _state(
+        status=DIRECT_STATUS_DEGRADED,
+        previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        rows=rows,
+        reason_codes=reason_codes,
+        malformed=malformed,
+        schema_errors=schema_errors,
+        **values,
+    )
+
+
+def _retry_state(**overrides):
+    """A degraded direct source whose retry recovered and finished complete."""
+
+    values = {
+        "incomplete": False,
+        "truncated": False,
+        "degraded": True,
+        "complete": True,
+    }
+    values.update(overrides)
+    return _state(
+        status=DIRECT_STATUS_DEGRADED,
+        previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        rows=118,
+        reason_codes=("request_retry_recovered",),
+        malformed=0,
+        schema_errors=0,
+        **values,
+    )
+
+
+def _healthy_after_minor(rows=412):
+    return _state(
+        status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        previous_status=DIRECT_STATUS_DEGRADED,
+        rows=rows,
+        reason_codes=(),
+        malformed=0,
+        schema_errors=0,
+        incomplete=False,
+        truncated=False,
+        degraded=False,
+        complete=True,
+    )
+
+
+def _minor_recovery_transition():
+    return _transition(
+        DIRECT_STATUS_DEGRADED,
+        DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        recovery=True,
+    )
+
+
+def test_tiny_schema_loss_is_degraded_without_an_immediate_email(tmp_path):
+    state = _minor_state()
+    quiet, quiet_calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+    digest, digest_calls = _evaluate(tmp_path, state=state, now=NOW)
+
+    assert state.status == DIRECT_STATUS_DEGRADED
+    assert is_minor_degradation(state) is True
+    assert quiet.sent is False
+    assert quiet_calls == []
+    assert digest.sent is False
+    assert digest.minor_digest_sent is True
+    assert digest.minor_incidents_reported == 1
+    subject, body = digest_calls[0]
+    assert MINOR_SUBJECT_MARKER in subject
+    assert "Test Co" in body
+    assert "schema_invalid_records_skipped" in body
+    assert "retained rows: 412" in body
+    assert "schema=1" in body
+
+
+def test_tiny_malformed_loss_is_degraded_without_an_immediate_email(tmp_path):
+    state = _minor_state(
+        reason_codes=("malformed_records_skipped",),
+        schema_errors=0,
+        malformed=1,
+    )
+    quiet, quiet_calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+    digest, digest_calls = _evaluate(tmp_path, state=state, now=NOW)
+
+    assert is_minor_degradation(state) is True
+    assert quiet_calls == []
+    assert digest.minor_digest_sent is True
+    body = digest_calls[0][1]
+    assert "malformed_records_skipped" in body
+    assert "malformed=1" in body
+
+
+def test_recovered_retry_with_complete_collection_is_digest_only(tmp_path):
+    state = _retry_state()
+    quiet, quiet_calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+    recovered, recovery_calls = _evaluate(
+        tmp_path,
+        state=_healthy_after_minor(rows=118),
+        transition=(_minor_recovery_transition(),),
+        now=BEFORE_DIGEST_HOUR + timedelta(hours=1),
+    )
+    digest, digest_calls = _evaluate(
+        tmp_path,
+        state=_healthy_after_minor(rows=118),
+        now=NOW,
+    )
+
+    assert is_minor_degradation(state) is True
+    assert quiet_calls == []
+    assert recovery_calls == []
+    assert recovered.recovery_alerts == 0
+    assert digest.minor_digest_sent is True
+    body = digest_calls[0][1]
+    assert "request_retry_recovered" in body
+    assert "recovered later: yes" in body
+
+
+def test_recovered_retry_with_incomplete_collection_alerts_immediately(tmp_path):
+    state = _retry_state(incomplete=True, complete=False)
+    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+
+    assert is_minor_degradation(state) is False
+    assert result.sent is True
+    assert "direct_source_degraded" in calls[0][1]
+
+
+def test_minor_degradation_followed_by_healthy_sends_no_recovery_email(tmp_path):
+    _evaluate(tmp_path, state=_minor_state(), now=BEFORE_DIGEST_HOUR)
+    recovery, recovery_calls = _evaluate(
+        tmp_path,
+        state=_healthy_after_minor(),
+        transition=(_minor_recovery_transition(),),
+        now=BEFORE_DIGEST_HOUR + timedelta(hours=1),
+    )
+
+    assert recovery.sent is False
+    assert recovery_calls == []
+    assert recovery.recovery_alerts == 0
+
+
+def test_second_minor_cycle_still_sends_no_recovery_email(tmp_path):
+    """A re-detected minor incident must stay minor when it clears again."""
+
+    minor = _minor_state()
+    healthy = _healthy_after_minor()
+    recovery = (_minor_recovery_transition(),)
+
+    _evaluate(tmp_path, state=minor, now=NOW.replace(hour=1))
+    first_recovery, first_calls = _evaluate(
+        tmp_path, state=healthy, transition=recovery, now=NOW.replace(hour=2)
+    )
+    _evaluate(tmp_path, state=minor, now=NOW.replace(hour=3))
+    second_recovery, second_calls = _evaluate(
+        tmp_path, state=healthy, transition=recovery, now=NOW.replace(hour=4)
+    )
+    digest, digest_calls = _evaluate(tmp_path, state=healthy, now=NOW)
+
+    assert first_calls == []
+    assert second_calls == []
+    assert first_recovery.recovery_alerts == 0
+    assert second_recovery.recovery_alerts == 0
+    assert digest.minor_incidents_reported == 1
+    assert "occurrences: 2" in digest_calls[0][1]
+
+
+def test_repeated_minor_incidents_are_summarized_once_per_source(tmp_path):
+    state = _minor_state()
+    for hour in (3, 4, 5):
+        _evaluate(tmp_path, state=state, now=NOW.replace(hour=hour))
+    digest, digest_calls = _evaluate(tmp_path, state=state, now=NOW)
+
+    body = digest_calls[0][1]
+    assert digest.minor_incidents_reported == 1
+    assert body.count("occurrences:") == 1
+    assert "occurrences: 4" in body
+    assert "recovered later: no" in body
+
+
+def test_daily_minor_digest_is_sent_at_most_once_per_reporting_day(tmp_path):
+    state = _minor_state()
+    first, first_calls = _evaluate(tmp_path, state=state, now=NOW)
+    second, second_calls = _evaluate(
+        tmp_path, state=state, now=NOW + timedelta(hours=2)
+    )
+    next_day, next_day_calls = _evaluate(
+        tmp_path, state=state, now=NOW + timedelta(days=1)
+    )
+
+    assert first.minor_digest_sent is True
+    assert MINOR_SUBJECT_MARKER in first_calls[0][0]
+    assert second.minor_digest_sent is False
+    assert second_calls == []
+    assert next_day.minor_digest_sent is True
+    assert MINOR_SUBJECT_MARKER in next_day_calls[0][0]
+
+
+def test_digest_window_excludes_incidents_already_reported(tmp_path):
+    """Events recorded during a digest run are not repeated the next day."""
+
+    first, _ = _evaluate(tmp_path, state=_minor_state(), now=NOW)
+    next_day, next_day_calls = _evaluate(
+        tmp_path,
+        state=_healthy_after_minor(),
+        transition=(_minor_recovery_transition(),),
+        now=NOW + timedelta(days=1),
+    )
+
+    assert first.minor_digest_sent is True
+    assert next_day.minor_digest_sent is False
+    assert next_day_calls == []
+
+
+def test_no_minor_incidents_sends_no_digest(tmp_path):
+    result, calls = _evaluate(tmp_path, state=_state(), now=NOW)
+
+    assert result.minor_digest_sent is False
+    assert result.minor_incidents_reported == 0
+    assert calls == []
+
+
+def test_failed_digest_send_remains_retryable(tmp_path):
+    state = _minor_state()
+
+    def broken_sender(_subject, _body):
+        raise RuntimeError("temporary SMTP outage")
+
+    failed, _ = _evaluate(tmp_path, state=state, now=NOW, sender=broken_sender)
+    retried, retried_calls = _evaluate(
+        tmp_path, state=state, now=NOW + timedelta(hours=1)
+    )
+
+    assert failed.minor_digest_sent is False
+    assert retried.minor_digest_sent is True
+    assert MINOR_SUBJECT_MARKER in retried_calls[0][0]
+
+
+def test_pagination_ended_early_still_alerts_immediately(tmp_path):
+    state = _minor_state(
+        reason_codes=("pagination_ended_early",),
+        schema_errors=0,
+        malformed=0,
+    )
+    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+
+    assert is_minor_degradation(state) is False
+    assert result.sent is True
+    assert result.minor_digest_sent is False
+    assert "MEDIUM" in calls[0][1]
+    assert "direct_source_degraded" in calls[0][1]
+    assert "pagination_ended_early" in calls[0][1]
+
+
+def test_mixed_minor_and_actionable_reasons_alert_immediately(tmp_path):
+    state = _minor_state(
+        reason_codes=(
+            "schema_invalid_records_skipped",
+            "pagination_ended_early",
+        ),
+    )
+    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+
+    assert is_minor_degradation(state) is False
+    assert result.sent is True
+    assert result.minor_incidents_reported == 0
+    assert "MEDIUM" in calls[0][1]
+
+
+def test_truncated_collection_with_minor_reasons_alerts_immediately(tmp_path):
+    state = _minor_state(truncated=True)
+    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+
+    assert is_minor_degradation(state) is False
+    assert result.sent is True
+    assert "direct_source_degraded" in calls[0][1]
+
+
+def test_substantial_record_loss_alerts_immediately(tmp_path):
+    state = _minor_state(schema_errors=9, rows=30)
+    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+
+    assert is_minor_degradation(state) is False
+    assert result.sent is True
+    assert "direct_source_degraded" in calls[0][1]
+
+
+def test_unrecognized_reason_code_is_actionable(tmp_path):
+    state = _minor_state(reason_codes=("unmapped_future_anomaly",))
+    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+
+    assert is_minor_degradation(state) is False
+    assert result.sent is True
+    assert "unmapped_future_anomaly" in calls[0][1]
+
+
+def test_direct_source_failure_still_sends_a_high_alert(tmp_path):
+    state = _state(
+        status=DIRECT_STATUS_FAILED,
+        previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        failures=1,
+        rows=None,
+        error="fetch_failure",
+    )
+    result, calls = _evaluate(
+        tmp_path,
+        state=state,
+        transition=(
+            _transition(DIRECT_STATUS_HEALTHY_WITH_LISTINGS, DIRECT_STATUS_FAILED),
+        ),
+        now=BEFORE_DIGEST_HOUR,
+    )
+
+    subject, body = calls[0]
+    assert result.sent is True
+    assert "HIGH" in body
+    assert "Source Alert" in subject
+
+
+def test_minor_digest_does_not_interfere_with_an_immediate_alert(tmp_path):
+    minor = _minor_state()
+    failing = _state(
+        key="company:other:direct:lever",
+        company="Other Co",
+        status=DIRECT_STATUS_FAILED,
+        failures=1,
+        rows=None,
+        error="fetch_failure",
+    )
+    _evaluate(tmp_path, state=minor, now=NOW.replace(hour=3))
+    calls = []
+
+    def sender(subject, body):
+        calls.append((subject, body))
+        return True
+
+    result = evaluate_and_send_health_alerts(
+        db_path=tmp_path / "state.sqlite",
+        policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+        run_id="run-both",
+        observed_at=NOW,
+        states={minor.health_key: minor, failing.health_key: failing},
+        transitions=(
+            HealthTransition(
+                health_key=failing.health_key,
+                source_kind=SOURCE_KIND_DIRECT,
+                company="Other Co",
+                adapter="lever",
+                feed_label=None,
+                from_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+                to_status=DIRECT_STATUS_FAILED,
+                recovery=False,
+            ),
+        ),
+        coverage=(_coverage(),),
+        summary=_summary(),
+        comparison=None,
+        sender=sender,
+    )
+
+    assert result.sent is True
+    assert result.minor_digest_sent is True
+    assert any("Source Alert" in subject for subject, _ in calls)
+    assert any(MINOR_SUBJECT_MARKER in subject for subject, _ in calls)
+    minor_body = next(
+        body for subject, body in calls if MINOR_SUBJECT_MARKER in subject
+    )
+    assert "Other Co" not in minor_body
+
+
+def test_live_greenhouse_run_defers_one_invalid_record_to_the_digest(
+    tmp_path,
+    monkeypatch,
+):
+    """End-to-end proof that real adapter diagnostics classify as minor.
+
+    The unit tests above build states directly, so this run exercises the
+    actual reason codes the shared record parser publishes.
+    """
+
+    db = tmp_path / "state.sqlite"
+    config = WatcherConfig(
+        companies=(
+            CompanyCfg(
+                name="Test Co",
+                ats="greenhouse",
+                token="test",
+                terms=("Summer 2027",),
+            ),
+        ),
+        terms=("Summer 2027",),
+        seen_db_path=db,
+    )
+    jobs = [
+        {
+            "id": index,
+            "title": "Software Engineering Intern",
+            "absolute_url": f"https://example.com/jobs/{index}",
+            "location": {"name": "United States"},
+            "content": "Build Python APIs and software services.",
+            "updated_at": "2026-07-20T00:00:00Z",
+        }
+        for index in range(1, 41)
+    ]
+    jobs.append({"id": 999, "title": "", "absolute_url": ""})
+    monkeypatch.setattr(
+        "watcher.sources.greenhouse.fetch_json",
+        lambda url, source_name: {"jobs": jobs},
+    )
+
+    calls = []
+
+    def sender(subject, body):
+        calls.append((subject, body))
+        return True
+
+    def run_at(observed_at, run_id):
+        with SeenStore(db) as seen:
+            return run_once(
+                config,
+                seen_store=seen,
+                github_source=[],
+                alumni_index={},
+                digest_sender=lambda matches: True,
+                notification_mode=RUN_MODE_LIVE,
+                health_observed_at=observed_at,
+                run_id=run_id,
+                health_alert_policy=HealthAlertPolicy(
+                    mode=MODE_TRANSITIONS_ONLY,
+                    hour_utc=12,
+                ),
+                health_alert_sender=sender,
+            )
+
+    quiet = run_at(NOW.replace(hour=6), "minor-quiet")
+    quiet_calls = list(calls)
+    digested = run_at(NOW, "minor-digest")
+
+    attempt = next(
+        item
+        for item in quiet.source_attempts
+        if item.source_kind == SOURCE_KIND_DIRECT
+    )
+    assert attempt.succeeded is True
+    assert attempt.rows_returned == 40
+    assert attempt.reason_codes == ("schema_invalid_records_skipped",)
+    assert attempt.schema_error_row_count == 1
+
+    with SourceHealthStore(db) as health:
+        stored = health.current_state(direct_health_key("Test Co", "greenhouse"))
+    assert stored.status == DIRECT_STATUS_DEGRADED
+    assert is_minor_degradation(stored) is True
+
+    assert quiet.health_alert_result.sent is False
+    assert quiet.health_alert_result.minor_digest_sent is False
+    assert quiet_calls == []
+
+    assert digested.health_alert_result.sent is False
+    assert digested.health_alert_result.minor_digest_sent is True
+    subject, body = calls[0]
+    assert MINOR_SUBJECT_MARKER in subject
+    assert "Test Co" in body
+    assert "schema_invalid_records_skipped" in body
+    assert "retained rows: 40" in body
+    assert "schema=1" in body

@@ -243,6 +243,17 @@
   Health-alert
   fingerprints/cooldowns use dedicated tables, never `seen`; health SMTP is
   independently configured and cannot affect match-email delivery or marking.
+- Minor degradation is alert-delivery policy only. Classify it from the
+  existing `DirectSourceDiagnostics` reason codes and counters; never add a
+  second diagnostics, persistence, or pagination system. Minor means
+  `degraded`, not truncated, and only bounded
+  `schema_invalid_records_skipped`/`malformed_records_skipped` loss (at most
+  five skipped and at least twenty retained rows each) or a
+  `request_retry_recovered` whose final attempt is complete. Unknown and mixed
+  reason codes are actionable. Minor incidents keep their state and
+  diagnostics, send no immediate degradation or recovery email, and go to one
+  deduplicated digest per UTC day that never sends empty and retries a failed
+  send the same day.
 
 ## Alumni and private data
 

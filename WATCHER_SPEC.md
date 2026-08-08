@@ -655,7 +655,38 @@ heartbeat is an explicit workflow error rather than a fabricated success.
 Actions job summary. Actions warns on newly degraded/failing transitions and
 recoveries, emits nonfatal error annotations for uncovered companies, validates
 both health tables and current-run attempts, and persists the same SQLite file.
-There is no source-health email; zero internship matches still send no email.
+Source-health email is configured independently of internship mail; zero
+internship matches still send no internship email.
+
+Alert delivery splits `degraded` by impact without changing the state, its
+diagnostics, or its history. A degradation is minor only when the direct
+source is `degraded`, is not `truncated`, and every reason code is
+`schema_invalid_records_skipped`, `malformed_records_skipped`, or
+`request_retry_recovered`. Skipping stays minor only when the malformed and
+schema-invalid counts together are at most five and at least twenty rows were
+retained per skipped record; a recovered retry stays minor only when the final
+attempt is `complete` and not `incomplete`. Classification reads reason codes
+rather than the `incomplete`/`complete` flags for skip cases, because skipped
+records set those flags themselves; every genuinely partial cause publishes its
+own code. An unrecognized code, a mixed set, pagination loss or truncation,
+repeated pages, pagination request/schema failure, material enrichment failure,
+substantial record loss, direct failure, and lost coverage all stay actionable
+and keep their existing immediate alerts.
+
+Minor incidents become `minor_degradation` candidates, and a source returning
+to healthy with no open actionable incident becomes `minor_recovery`. Neither
+is emailed immediately in any mode, and both are recorded in the alert event
+log. At or after `WATCHER_HEALTH_EMAIL_HOUR_UTC`, once per UTC day, and only
+when the window holds at least one minor incident, a separate digest reports
+one deduplicated entry per source: label, occurrences, retained rows, the
+bounded diagnostic summary, reason codes, first and last detection, and whether
+it recovered. The window is the previous digest or 24 hours, whichever is
+shorter, and excludes events already reported by that digest.
+`source_health_minor_digest` records the day; only a successful send marks it,
+so a failed digest retries later the same day and an empty window sends
+nothing. The digest reuses the health-email configuration and sender, runs
+after immediate alerts on every path except `off`, and can neither delay nor
+suppress them.
 All automated health tests use fake sources and temporary SQLite files and must
 remain offline. Adapter recoveries use existing persisted health state; never
 reset `watcher-data` or manually edit a source row to force a recovery.

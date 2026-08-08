@@ -166,6 +166,14 @@
   Keep 30 aggregate runs and three detail runs. Health-alert
   cooldowns use dedicated tables and an independent email switch/renderer;
   they never update internship `emailed_at` or `primed_at`.
+- Minor degradation is an alert-delivery policy over the existing
+  `DirectSourceDiagnostics` reason codes, never a second diagnostics system.
+  Only bounded `schema_invalid_records_skipped`/`malformed_records_skipped`
+  loss and a complete `request_retry_recovered` are minor; unknown, mixed,
+  truncated, pagination, enrichment, failure, and coverage reasons stay
+  actionable. Minor incidents keep `degraded` state and full diagnostics, send
+  no immediate degradation or recovery email, and appear only in one
+  deduplicated digest per UTC day.
 - Rollout verification disables internship email, priming, Workday probes, and
   health email; preserve notification timestamps and existing repository
   variables before enabling conservative health alerts.
