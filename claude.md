@@ -1,8 +1,8 @@
 # Claude Repository Guide
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: port the reviewed reusable classification, recall, and
-  filtering fixes from `internal-tool` as one isolated commit.
+- Current task: port the reviewed reusable direct-source health, bounded
+  diagnostics, and incomplete-collection fixes as one isolated commit.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -153,6 +153,10 @@
   Keep 30 aggregate runs and three detail runs. Health-alert
   cooldowns use dedicated tables and an independent email switch/renderer;
   they never update internship `emailed_at` or `primed_at`.
+- Direct health uses only `healthy_with_listings`, `healthy_empty`, `degraded`,
+  `failed`, `not_configured`, and `unknown`, based on bounded completeness
+  diagnostics. Snapshot v3 persists them, v2 remains readable, and partial
+  Workday continuation failures retain rows while degrading the source.
 - Rollout verification disables internship email, priming, Workday probes, and
   health email; preserve notification timestamps and existing repository
   variables before enabling conservative health alerts.

@@ -30,6 +30,7 @@ from watcher.source_health import (
     CompanyCoverage,
     SourceAttempt,
     SourceHealthState,
+    calculate_next_state,
     iso_utc,
     sanitize_error,
     safe_error_kind,
@@ -895,7 +896,7 @@ def _is_routine_rejection(
 def _has_operational_anomaly(
     entry: SourceComparisonEntry | PostingComparisonSummary,
 ) -> bool:
-    if entry.direct_status in {"degraded", "failing"}:
+    if entry.direct_status in {"degraded", "failed", "failing", "unknown"}:
         return True
     if entry.direct_coverage and any(
         marker in entry.direct_coverage
@@ -1055,27 +1056,32 @@ def _aggregate_counts(
         "collected_rejected": int(counts.get(CATEGORY_REJECTED, 0)),
         "no_postings": int(counts.get(CATEGORY_NO_POSTINGS, 0)),
         "direct_healthy": sum(
-            item.get("attempted") is True
-            and item.get("succeeded") is True
-            and int(item.get("rows_returned") or 0) > 0
+            item.get("status") == "healthy_with_listings"
             for item in direct_sources
             if isinstance(item, Mapping)
         ),
         "direct_empty": sum(
-            item.get("attempted") is True
-            and item.get("succeeded") is True
-            and int(item.get("rows_returned") or 0) == 0
+            item.get("status") == "healthy_empty"
             for item in direct_sources
             if isinstance(item, Mapping)
         ),
         "direct_failed": sum(
-            item.get("attempted") is True
-            and item.get("succeeded") is False
+            item.get("status") == "failed"
             for item in direct_sources
             if isinstance(item, Mapping)
         ),
         "direct_unsupported": sum(
-            item.get("attempted") is False
+            item.get("status") == "not_configured"
+            for item in direct_sources
+            if isinstance(item, Mapping)
+        ),
+        "direct_degraded": sum(
+            item.get("status") == "degraded"
+            for item in direct_sources
+            if isinstance(item, Mapping)
+        ),
+        "direct_unknown": sum(
+            item.get("status") == "unknown"
             for item in direct_sources
             if isinstance(item, Mapping)
         ),
@@ -1099,7 +1105,7 @@ def _comparison_health(
     direct_sources = []
     github_feeds = []
     for attempt in attempts:
-        state = states.get(attempt.health_key)
+        state = states.get(attempt.health_key) or calculate_next_state(None, attempt)
         if attempt.source_kind == SOURCE_KIND_DIRECT:
             direct_sources.append(
                 {
@@ -1116,6 +1122,15 @@ def _comparison_health(
                         if attempt.error_kind
                         else None
                     ),
+                    "malformed_row_count": attempt.malformed_row_count,
+                    "schema_error_row_count": attempt.schema_error_row_count,
+                    "duplicate_row_count": attempt.duplicate_row_count,
+                    "failed_request_count": attempt.failed_request_count,
+                    "incomplete": attempt.incomplete,
+                    "truncated": attempt.truncated,
+                    "reason_codes": list(attempt.reason_codes),
+                    "degraded": attempt.degraded,
+                    "complete": attempt.complete,
                 }
             )
             continue

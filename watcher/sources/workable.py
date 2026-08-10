@@ -6,6 +6,7 @@ from typing import Any
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
+    DirectDiagnosticsMixin,
     SourceSchemaError,
     ensure_list,
     html_to_text,
@@ -17,7 +18,7 @@ from watcher.sources.base import (
 )
 
 
-class WorkableSource:
+class WorkableSource(DirectDiagnosticsMixin):
     name = "workable"
 
     @staticmethod
@@ -29,18 +30,28 @@ class WorkableSource:
         return self.parse(post_json(self.endpoint(token), {}, self.name), company)
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
+        self._begin_direct_diagnostics()
         if not isinstance(payload, dict):
             raise SourceSchemaError("workable expected a JSON object")
         total = payload.get("total")
         if total is not None and not isinstance(total, int):
             raise SourceSchemaError("workable expected total to be an integer")
         jobs = ensure_list(payload.get("results"), self.name, "results")
-        return parse_records(
+        rows = parse_records(
             jobs,
             lambda job: self._parse_job(job, company),
             source_name=self.name,
             company_name=company.name,
+            diagnostics=self._record_parse_diagnostics,
         )
+        incomplete = total is not None and total > len(jobs)
+        self._finish_direct_diagnostics(
+            rows,
+            incomplete=incomplete,
+            truncated=incomplete,
+            reason_codes=("reported_total_exceeds_response",) if incomplete else (),
+        )
+        return rows
 
     def _parse_job(self, job: Any, company: CompanyCfg) -> dict:
         if not isinstance(job, dict):

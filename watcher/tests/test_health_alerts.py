@@ -366,7 +366,7 @@ def test_previously_productive_direct_source_silence_alerts(tmp_path):
         policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
     )
     assert result.sent is True
-    assert "direct_source_silence" in calls[0][1]
+    assert "direct_source_degraded" in calls[0][1]
 
 
 def test_coverage_regression_and_both_tiers_unavailable_are_high_severity(tmp_path):
@@ -528,9 +528,7 @@ def test_match_and_health_email_failures_are_reported_separately(tmp_path):
             notification_mode=RUN_MODE_LIVE,
             health_observed_at=NOW,
             run_id="separate-email-outcomes",
-            health_alert_policy=HealthAlertPolicy(
-                mode=MODE_TRANSITIONS_ONLY
-            ),
+            health_alert_policy=HealthAlertPolicy(mode=MODE_FAILURE_ONLY),
             health_alert_sender=lambda subject, body: False,
         )
         records = seen.records()

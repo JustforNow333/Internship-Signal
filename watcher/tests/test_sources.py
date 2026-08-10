@@ -460,6 +460,37 @@ def test_direct_adapters_retain_valid_rows_when_one_record_is_malformed(source, 
     assert "Skipped 1 malformed" in caplog.text
     assert "Acme" in caplog.text
     assert "broken" not in caplog.text
+    diagnostics = source.last_health_diagnostics
+    assert diagnostics.succeeded is True
+    assert diagnostics.retained_row_count == 1
+    assert diagnostics.schema_error_row_count == 1
+    assert diagnostics.degraded is True
+    assert diagnostics.complete is False
+    assert diagnostics.reason_codes == ("schema_invalid_records_skipped",)
+
+
+def test_workable_reported_total_truncation_is_diagnostic_only():
+    source = WorkableSource()
+    rows = source.parse(
+        {
+            "results": [
+                {
+                    "title": "Intern",
+                    "shortcode": "ONE",
+                    "url": "https://example.test/1",
+                }
+            ],
+            "total": 2,
+        },
+        CompanyCfg(name="Acme", ats="workable", token="acme"),
+    )
+
+    assert len(rows) == 1
+    assert source.last_health_diagnostics.truncated is True
+    assert source.last_health_diagnostics.degraded is True
+    assert source.last_health_diagnostics.reason_codes == (
+        "reported_total_exceeds_response",
+    )
 
 
 @pytest.mark.parametrize(
@@ -515,7 +546,63 @@ def test_smartrecruiters_repeated_page_fails_instead_of_looping(monkeypatch):
     assert offsets == [0, 1]
 
 
-def test_workday_repeated_page_fails_and_diagnostics_do_not_leak(monkeypatch):
+def test_smartrecruiters_early_empty_page_returns_rows_but_marks_incomplete(monkeypatch):
+    payloads = iter(
+        (
+            {
+                "content": [
+                    {
+                        "name": "Intern",
+                        "id": "1",
+                        "postingUrl": "https://example.test/1",
+                    }
+                ],
+                "totalFound": 2,
+            },
+            {"content": [], "totalFound": 2},
+        )
+    )
+    monkeypatch.setattr(
+        "watcher.sources.smartrecruiters.fetch_json",
+        lambda *_: next(payloads),
+    )
+    source = SmartRecruitersSource()
+
+    rows = source.fetch(
+        CompanyCfg(name="Acme", ats="smartrecruiters", token="acme")
+    )
+
+    assert [row["title"] for row in rows] == ["Intern"]
+    assert source.last_health_diagnostics.incomplete is True
+    assert source.last_health_diagnostics.degraded is True
+    assert source.last_health_diagnostics.reason_codes == (
+        "pagination_ended_early",
+    )
+
+
+def test_workday_early_empty_page_returns_rows_but_marks_incomplete(monkeypatch):
+    payloads = iter(
+        (
+            {"jobPostings": [workday_posting()], "total": 2},
+            {"jobPostings": [], "total": 2},
+        )
+    )
+    monkeypatch.setattr(
+        "watcher.sources.workday.post_json",
+        lambda *_args, **_kwargs: next(payloads),
+    )
+    source = WorkdaySource()
+
+    rows = source.fetch(workday_company())
+
+    assert len(rows) == 1
+    assert source.last_diagnostics.listing_incomplete is True
+    assert source.last_diagnostics.listing_incomplete_reasons == (
+        "pagination_ended_early",
+    )
+
+
+def test_workday_repeated_page_stops_incomplete_and_diagnostics_do_not_leak(monkeypatch):
     source = WorkdaySource()
     source.parse(
         {"jobPostings": [workday_posting(), {"title": "broken"}], "total": 2},
@@ -537,12 +624,18 @@ def test_workday_repeated_page_fails_and_diagnostics_do_not_leak(monkeypatch):
         return payload
 
     monkeypatch.setattr("watcher.sources.workday.post_json", fake_post_json)
-    with pytest.raises(SourceSchemaError, match="repeated pagination page"):
-        source.fetch(workday_company())
+    rows = source.fetch(workday_company())
 
+    # The repeated page terminates pagination without being counted twice, and
+    # the rows already retrieved survive as an explicitly incomplete listing.
     assert offsets == [0, page_size]
+    assert len(rows) == page_size
     assert source.last_diagnostics.malformed_postings_skipped == 0
-    assert source.last_diagnostics.raw_postings_seen == 0
+    assert source.last_diagnostics.raw_postings_seen == page_size
+    assert source.last_diagnostics.listing_incomplete is True
+    assert source.last_diagnostics.listing_incomplete_reasons == (
+        "pagination_repeated_page",
+    )
 
 
 def test_ashby_fixture_to_canonical_rows():

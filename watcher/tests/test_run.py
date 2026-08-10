@@ -21,6 +21,7 @@ from watcher.run import (
     RUN_MODE_LIVE,
     RUN_MODE_PRIME,
     WorkdayTransportSummary,
+    _direct_diagnostics_from_source,
     collect_rows,
     main as watcher_main,
     print_heartbeat,
@@ -39,7 +40,13 @@ from watcher.source_health import (
     SourceHealthStore,
     render_final_heartbeat,
 )
-from watcher.sources.base import SourceError, SourceFetchError, SourceSchemaError, make_row
+from watcher.sources.base import (
+    DirectSourceDiagnostics,
+    SourceError,
+    SourceFetchError,
+    SourceSchemaError,
+    make_row,
+)
 from watcher.sources.github_listings import GitHubListingsSource
 from watcher.sources.workday import WorkdaySource
 
@@ -52,7 +59,13 @@ class FakeSource:
     def fetch(self, company):
         if self.error:
             raise self.error
-        return self.rows_by_company.get(company.name, [])
+        rows = self.rows_by_company.get(company.name, [])
+        self.last_health_diagnostics = DirectSourceDiagnostics(
+            succeeded=True,
+            retained_row_count=len(rows),
+            complete=True,
+        )
+        return rows
 
 
 class DiagnosticFakeSource(FakeSource):
@@ -69,6 +82,32 @@ class DiagnosticFakeSource(FakeSource):
             request_attempts=requests,
             retry_attempts=retries,
         )
+
+
+@pytest.mark.parametrize("adapter", ["oracle_hcm", "talentbrew"])
+def test_recovered_direct_request_retry_is_degraded_but_complete(adapter):
+    source = SimpleNamespace(
+        name=adapter,
+        last_diagnostics=SimpleNamespace(
+            retry_attempts=1,
+            malformed_postings_skipped=0,
+            schema_error_postings_skipped=0,
+            duplicate_postings_skipped=0,
+        ),
+    )
+
+    diagnostics = _direct_diagnostics_from_source(
+        source,
+        rows=[{"title": "Intern"}],
+        succeeded=True,
+        error_kind="",
+    )
+
+    assert diagnostics.failed_request_count == 1
+    assert diagnostics.degraded is True
+    assert diagnostics.incomplete is False
+    assert diagnostics.complete is True
+    assert diagnostics.reason_codes == ("request_retry_recovered",)
 
 
 class FakeGithub:
@@ -1931,14 +1970,17 @@ def test_run_once_reuses_injected_health_store_and_detects_recovery(tmp_path):
             health_observed_at=observed.replace(hour=1),
         )
 
-    assert failed.health_summary.direct_degraded == 1
+    assert failed.health_summary.direct_failed == 1
     assert recovered.health_summary.direct_healthy == 1
     assert recovered.health_summary.health_recoveries == 1
     assert recovered.health_transitions[0].recovery is True
-    assert recovered.source_health_states[recovered.source_attempts[0].health_key].status == STATUS_HEALTHY
+    assert (
+        recovered.source_health_states[recovered.source_attempts[0].health_key].status
+        == "healthy_with_listings"
+    )
 
 
-def test_partial_workday_fetch_is_successful_and_recovers_prior_degraded_state(tmp_path, monkeypatch):
+def test_partial_workday_fetch_is_successful_but_reports_degradation(tmp_path, monkeypatch):
     db_path = tmp_path / "seen.sqlite"
     company = CompanyCfg(
         name="Merck",
@@ -1991,14 +2033,14 @@ def test_partial_workday_fetch_is_successful_and_recovers_prior_degraded_state(t
     direct_attempt = next(
         item for item in recovered.source_attempts if item.source_kind == SOURCE_KIND_DIRECT
     )
-    assert failed.health_summary.direct_degraded == 1
+    assert failed.health_summary.direct_failed == 1
     assert recovered.errors == []
     assert direct_attempt.succeeded is True
     assert direct_attempt.rows_returned == 1
-    assert recovered.health_summary.direct_healthy == 1
-    assert recovered.health_summary.health_recoveries == 1
+    assert recovered.health_summary.direct_degraded == 1
+    assert recovered.health_summary.health_recoveries == 0
     assert recovered.health_transitions[0].company == "Merck"
-    assert recovered.health_transitions[0].recovery is True
+    assert recovered.health_transitions[0].recovery is False
 
 
 def test_twenty_four_identical_workday_transport_failures_are_shared_incident():
@@ -2178,7 +2220,9 @@ def test_print_heartbeat(capsys):
         "season_status=ok, configured_terms=Fall_2026|Summer_2027, "
         "github_feeds_configured=2, github_feeds_succeeded=1, "
         "companies_configured=0, direct_healthy=0, direct_empty=0, direct_degraded=0, "
-        "direct_failing=0, direct_unsupported=0, github_feeds_healthy=0, "
+        "direct_failing=0, direct_unsupported=0, direct_healthy_with_listings=0, "
+        "direct_healthy_empty=0, direct_failed=0, direct_not_configured=0, "
+        "direct_unknown=0, github_feeds_healthy=0, "
         "backstop_only_companies=0, uncovered_companies=0, health_transitions=0, "
         "health_recoveries=0, health_email_mode=off, health_alert_candidates=0, "
         "health_alert_sent=no, health_alert_suppressed_by_cooldown=0, "
@@ -2224,6 +2268,11 @@ def test_workflow_preserves_health_fields_validates_db_and_renders_summary():
         "direct_degraded",
         "direct_failing",
         "direct_unsupported",
+        "direct_healthy_with_listings",
+        "direct_healthy_empty",
+        "direct_failed",
+        "direct_not_configured",
+        "direct_unknown",
         "github_feeds_healthy",
         "backstop_only_companies",
         "uncovered_companies",

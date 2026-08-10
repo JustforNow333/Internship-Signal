@@ -155,6 +155,7 @@ def test_valid_rows_survive_a_malformed_record_on_another_page(caplog):
 
     assert [row["extra"]["source_requisition_id"] for row in rows] == ["GOOD-1"]
     assert "Skipped 1 malformed oracle_hcm record" in caplog.text
+    assert source.last_diagnostics.schema_error_postings_skipped == 1
 
 
 @pytest.mark.parametrize(

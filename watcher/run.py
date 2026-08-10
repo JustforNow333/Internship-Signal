@@ -88,6 +88,9 @@ from watcher.source_health import (
     SOURCE_KIND_GITHUB_FEED,
     STATUS_DEGRADED,
     STATUS_FAILING,
+    DIRECT_STATUS_DEGRADED,
+    DIRECT_STATUS_FAILED,
+    DIRECT_STATUS_UNKNOWN,
     CompanyCoverage,
     HealthSummary,
     HealthTransition,
@@ -101,6 +104,7 @@ from watcher.source_health import (
     new_run_id,
     sanitize_error,
     sanitize_feed_label,
+    safe_error_kind,
     summarize_health,
     transition_for,
     utc_datetime,
@@ -108,6 +112,7 @@ from watcher.source_health import (
 )
 from watcher.sources import (
     AshbySource,
+    DirectSourceDiagnostics,
     GitHubListingsSource,
     GitHubMarkdownTableSource,
     GreenhouseSource,
@@ -859,6 +864,7 @@ class _DirectFetchOutcome:
     retry_count: int = 0
     status_code: int | None = None
     challenge_response: bool = False
+    diagnostics: DirectSourceDiagnostics | None = None
 
 
 @dataclass
@@ -1155,6 +1161,12 @@ def _fetch_direct_source(
         retry_count=retry_count or 0,
         status_code=_http_status_from_error(error),
         challenge_response=_challenge_response(error),
+        diagnostics=_direct_diagnostics_from_source(
+            source,
+            rows=rows if succeeded else [],
+            succeeded=succeeded,
+            error_kind=error_kind,
+        ),
     )
 
 
@@ -1212,6 +1224,7 @@ def _apply_direct_outcome(
                 company=company.name,
                 adapter=company.ats,
                 rows_returned=len(outcome.rows),
+                diagnostics=outcome.diagnostics,
             )
         )
         if is_workday:
@@ -1624,6 +1637,11 @@ def print_heartbeat(result: RunResult, *, output: TextIO | None = None) -> None:
         f"direct_degraded={_health_value(health, 'direct_degraded')}, "
         f"direct_failing={_health_value(health, 'direct_failing')}, "
         f"direct_unsupported={_health_value(health, 'direct_unsupported')}, "
+        f"direct_healthy_with_listings={_health_value(health, 'direct_healthy_with_listings')}, "
+        f"direct_healthy_empty={_health_value(health, 'direct_healthy_empty')}, "
+        f"direct_failed={_health_value(health, 'direct_failed')}, "
+        f"direct_not_configured={_health_value(health, 'direct_not_configured')}, "
+        f"direct_unknown={_health_value(health, 'direct_unknown')}, "
         f"github_feeds_healthy={_health_value(health, 'github_feeds_healthy')}, "
         f"backstop_only_companies={_health_value(health, 'backstop_only_companies')}, "
         f"uncovered_companies={_health_value(health, 'uncovered_companies')}, "
@@ -1938,6 +1956,7 @@ def _successful_attempt(
     adapter: str,
     rows_returned: int,
     feed_label: str | None = None,
+    diagnostics: DirectSourceDiagnostics | None = None,
 ) -> SourceAttempt:
     return SourceAttempt(
         health_key=health_key,
@@ -1950,6 +1969,23 @@ def _successful_attempt(
         succeeded=True,
         rows_returned=rows_returned,
         feed_label=feed_label,
+        malformed_row_count=(
+            diagnostics.malformed_row_count if diagnostics is not None else None
+        ),
+        schema_error_row_count=(
+            diagnostics.schema_error_row_count if diagnostics is not None else None
+        ),
+        duplicate_row_count=(
+            diagnostics.duplicate_row_count if diagnostics is not None else None
+        ),
+        failed_request_count=(
+            diagnostics.failed_request_count if diagnostics is not None else None
+        ),
+        incomplete=diagnostics.incomplete if diagnostics is not None else None,
+        truncated=diagnostics.truncated if diagnostics is not None else None,
+        reason_codes=diagnostics.reason_codes if diagnostics is not None else (),
+        degraded=diagnostics.degraded if diagnostics is not None else None,
+        complete=diagnostics.complete if diagnostics is not None else None,
     )
 
 
@@ -1965,6 +2001,8 @@ def _failed_attempt(
     error: Exception,
     feed_label: str | None = None,
 ) -> SourceAttempt:
+    direct = source_kind == SOURCE_KIND_DIRECT
+    reason_code = safe_error_kind(error_kind) or ERROR_SOURCE
     return SourceAttempt(
         health_key=health_key,
         run_id=run_id,
@@ -1978,7 +2016,150 @@ def _failed_attempt(
         error_kind=error_kind,
         error_message=sanitize_error(f"{type(error).__name__}: {error}"),
         feed_label=feed_label,
+        malformed_row_count=0 if direct else None,
+        schema_error_row_count=0 if direct else None,
+        duplicate_row_count=0 if direct else None,
+        failed_request_count=1 if direct else None,
+        incomplete=True if direct else None,
+        truncated=False if direct else None,
+        reason_codes=(reason_code,) if direct else (),
+        degraded=False if direct else None,
+        complete=False if direct else None,
     )
+
+
+def _direct_diagnostics_from_source(
+    source: object,
+    *,
+    rows: list[dict],
+    succeeded: bool,
+    error_kind: str,
+) -> DirectSourceDiagnostics | None:
+    """Map adapter-owned bounded counters into the shared attempt contract."""
+
+    if not succeeded:
+        return DirectSourceDiagnostics(
+            succeeded=False,
+            failed_request_count=1,
+            incomplete=True,
+            reason_codes=(safe_error_kind(error_kind) or ERROR_SOURCE,),
+            complete=False,
+        )
+    shared = getattr(source, "last_health_diagnostics", None)
+    if isinstance(shared, DirectSourceDiagnostics):
+        return shared
+
+    diagnostics = getattr(source, "last_diagnostics", None)
+    adapter = str(getattr(source, "name", "") or "").casefold()
+    if diagnostics is None:
+        return None
+    if adapter == "workday":
+        skip_reasons = dict(getattr(diagnostics, "skip_reasons", ()) or ())
+        malformed = int(skip_reasons.get("posting_not_object", 0) or 0)
+        skipped = int(getattr(diagnostics, "malformed_postings_skipped", 0) or 0)
+        schema_errors = max(0, skipped - malformed)
+        recovered_retries = int(getattr(diagnostics, "retry_attempts", 0) or 0)
+        detail_failures = int(getattr(diagnostics, "detail_failures", 0) or 0)
+        failed_requests = recovered_retries
+        failed_requests += detail_failures
+        failed_requests += int(getattr(diagnostics, "disappeared_postings", 0) or 0)
+        # A continuation page that was lost after earlier pages succeeded is a
+        # failed request that the run still reports as a degraded success.
+        failed_requests += int(
+            getattr(diagnostics, "listing_request_failures", 0) or 0
+        )
+        listing_incomplete = bool(
+            getattr(diagnostics, "listing_incomplete", False)
+        )
+        degraded = bool(getattr(diagnostics, "detail_enrichment_degraded", False))
+        degraded = degraded or listing_incomplete
+        degraded = degraded or skipped > 0
+        degraded = degraded or recovered_retries > 0
+        incomplete = bool(
+            listing_incomplete
+            or skipped > 0
+            or getattr(diagnostics, "detail_enrichment_degraded", False)
+        )
+        reasons: list[str] = []
+        if malformed:
+            reasons.append("malformed_records_skipped")
+        if schema_errors:
+            reasons.append("schema_invalid_records_skipped")
+        if getattr(diagnostics, "detail_enrichment_degraded", False):
+            reasons.append("material_enrichment_failed")
+        elif detail_failures:
+            reasons.append("optional_enrichment_failed")
+        if recovered_retries:
+            reasons.append("request_retry_recovered")
+        reasons.extend(
+            str(code)
+            for code, _count in getattr(diagnostics, "detail_failure_reasons", ()) or ()
+        )
+        reasons.extend(
+            str(code)
+            for code in getattr(diagnostics, "listing_incomplete_reasons", ()) or ()
+        )
+        return DirectSourceDiagnostics(
+            succeeded=True,
+            retained_row_count=len(rows),
+            malformed_row_count=malformed,
+            schema_error_row_count=schema_errors,
+            failed_request_count=failed_requests,
+            incomplete=incomplete,
+            reason_codes=tuple(dict.fromkeys(reasons))[:12],
+            degraded=degraded,
+            complete=not incomplete,
+        )
+    if adapter == "oracle_hcm":
+        malformed = int(
+            getattr(diagnostics, "malformed_postings_skipped", 0) or 0
+        )
+        schema_errors = int(
+            getattr(diagnostics, "schema_error_postings_skipped", 0) or 0
+        )
+        reasons = []
+        if malformed:
+            reasons.append("malformed_records_skipped")
+        if schema_errors:
+            reasons.append("schema_invalid_records_skipped")
+        recovered_retries = int(
+            getattr(diagnostics, "retry_attempts", 0) or 0
+        )
+        if recovered_retries:
+            reasons.append("request_retry_recovered")
+        incomplete = bool(malformed or schema_errors)
+        degraded = bool(incomplete or recovered_retries)
+        return DirectSourceDiagnostics(
+            succeeded=True,
+            retained_row_count=len(rows),
+            malformed_row_count=malformed,
+            schema_error_row_count=schema_errors,
+            duplicate_row_count=int(
+                getattr(diagnostics, "duplicate_postings_skipped", 0) or 0
+            ),
+            failed_request_count=recovered_retries,
+            incomplete=incomplete,
+            reason_codes=tuple(reasons),
+            degraded=degraded,
+            complete=not incomplete,
+        )
+    if adapter == "talentbrew":
+        recovered_retries = int(
+            getattr(diagnostics, "retry_attempts", 0) or 0
+        )
+        return DirectSourceDiagnostics(
+            succeeded=True,
+            retained_row_count=len(rows),
+            duplicate_row_count=int(
+                getattr(diagnostics, "duplicate_postings_skipped", 0) or 0
+            ),
+            failed_request_count=recovered_retries,
+            incomplete=False,
+            reason_codes=("request_retry_recovered",) if recovered_retries else (),
+            degraded=bool(recovered_retries),
+            complete=True,
+        )
+    return None
 
 
 def _fetch_error_kind(error: SourceFetchError) -> str:
@@ -2115,11 +2296,15 @@ def _print_source_health(result: RunResult, *, output: TextIO) -> None:
         return
     print("Source health:", file=output)
     print(f"  Companies configured: {summary.companies_configured}", file=output)
-    print(f"  Direct healthy: {summary.direct_healthy}", file=output)
-    print(f"  Direct empty: {summary.direct_empty}", file=output)
+    print(
+        f"  Direct healthy with listings: {summary.direct_healthy_with_listings}",
+        file=output,
+    )
+    print(f"  Direct healthy empty: {summary.direct_healthy_empty}", file=output)
     print(f"  Direct degraded: {summary.direct_degraded}", file=output)
-    print(f"  Direct failing: {summary.direct_failing}", file=output)
-    print(f"  Direct unsupported: {summary.direct_unsupported}", file=output)
+    print(f"  Direct failed: {summary.direct_failed}", file=output)
+    print(f"  Direct not configured: {summary.direct_not_configured}", file=output)
+    print(f"  Direct unknown: {summary.direct_unknown}", file=output)
     print(
         f"  Backstop feeds healthy: {summary.github_feeds_healthy}/{summary.github_feeds_configured}",
         file=output,
@@ -2141,7 +2326,35 @@ def _print_source_health(result: RunResult, *, output: TextIO) -> None:
             )
 
     states = tuple(getattr(result, "source_health_states", {}).values())
-    actionable = [state for state in states if state.status in {STATUS_DEGRADED, STATUS_FAILING}]
+    direct_states = sorted(
+        (state for state in states if state.source_kind == SOURCE_KIND_DIRECT),
+        key=lambda item: (item.company or "").casefold(),
+    )
+    if direct_states:
+        print("Direct company health:", file=output)
+        for state in direct_states:
+            print(
+                f"  - {state.company or state.health_key} [{state.adapter}]: "
+                f"{state.status}, listings={state.last_rows_returned if state.last_rows_returned is not None else 'unknown'}, "
+                f"malformed={state.last_malformed_row_count if state.last_malformed_row_count is not None else 'unknown'}, "
+                f"schema_errors={state.last_schema_error_row_count if state.last_schema_error_row_count is not None else 'unknown'}, "
+                f"duplicates={state.last_duplicate_row_count if state.last_duplicate_row_count is not None else 'unknown'}, "
+                f"failed_requests={state.last_failed_request_count if state.last_failed_request_count is not None else 'unknown'}, "
+                f"complete={state.last_complete if state.last_complete is not None else 'unknown'}",
+                file=output,
+            )
+    actionable = [
+        state
+        for state in states
+        if state.status
+        in {
+            STATUS_DEGRADED,
+            STATUS_FAILING,
+            DIRECT_STATUS_DEGRADED,
+            DIRECT_STATUS_FAILED,
+            DIRECT_STATUS_UNKNOWN,
+        }
+    ]
     if actionable:
         print("Current degraded/failing sources:", file=output)
         for state in sorted(actionable, key=lambda item: (item.status, item.company or item.feed_label or "")):
@@ -2173,16 +2386,18 @@ def _log_source_health(
     coverage: tuple[CompanyCoverage, ...],
 ) -> None:
     LOGGER.info(
-        "Source health run_id=%s companies=%d direct_healthy=%d direct_empty=%d "
-        "direct_degraded=%d direct_failing=%d direct_unsupported=%d "
+        "Source health run_id=%s companies=%d direct_healthy_with_listings=%d "
+        "direct_healthy_empty=%d direct_degraded=%d direct_failed=%d "
+        "direct_not_configured=%d direct_unknown=%d "
         "github_healthy=%d/%d uncovered=%d transitions=%d recoveries=%d",
         run_id,
         summary.companies_configured,
-        summary.direct_healthy,
-        summary.direct_empty,
+        summary.direct_healthy_with_listings,
+        summary.direct_healthy_empty,
         summary.direct_degraded,
-        summary.direct_failing,
-        summary.direct_unsupported,
+        summary.direct_failed,
+        summary.direct_not_configured,
+        summary.direct_unknown,
         summary.github_feeds_healthy,
         summary.github_feeds_configured,
         summary.uncovered_companies,
@@ -2201,7 +2416,13 @@ def _log_source_health(
             " recovery" if transition.recovery else "",
         )
     for state in states.values():
-        if state.status in {STATUS_DEGRADED, STATUS_FAILING}:
+        if state.status in {
+            STATUS_DEGRADED,
+            STATUS_FAILING,
+            DIRECT_STATUS_DEGRADED,
+            DIRECT_STATUS_FAILED,
+            DIRECT_STATUS_UNKNOWN,
+        }:
             label = state.company or state.feed_label or state.health_key
             LOGGER.warning(
                 "SOURCE HEALTH CURRENT: %s [%s] status=%s consecutive_failures=%d error=%s",

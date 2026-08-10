@@ -6,6 +6,7 @@ from typing import Any
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
+    DirectDiagnosticsMixin,
     SourceSchemaError,
     ensure_list,
     fetch_json,
@@ -17,7 +18,7 @@ from watcher.sources.base import (
 )
 
 
-class LeverSource:
+class LeverSource(DirectDiagnosticsMixin):
     name = "lever"
 
     @staticmethod
@@ -29,13 +30,17 @@ class LeverSource:
         return self.parse(fetch_json(self.endpoint(token), self.name), company)
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
+        self._begin_direct_diagnostics()
         postings = ensure_list(payload, self.name, "payload")
-        return parse_records(
+        rows = parse_records(
             postings,
             lambda posting: self._parse_posting(posting, company),
             source_name=self.name,
             company_name=company.name,
+            diagnostics=self._record_parse_diagnostics,
         )
+        self._finish_direct_diagnostics(rows)
+        return rows
 
     def _parse_posting(self, posting: Any, company: CompanyCfg) -> dict:
         if not isinstance(posting, dict):

@@ -21,7 +21,7 @@ from watcher.audit_trace import (
 from watcher.config import CompanyCfg, WatcherConfig
 from watcher.seen_store import SeenStore
 from watcher.source_comparison import SourceComparisonStore, build_source_comparison
-from watcher.sources.base import make_row
+from watcher.sources.base import DirectSourceDiagnostics, make_row
 
 
 def _config(tmp_path):
@@ -669,6 +669,12 @@ def test_live_audit_can_build_an_unretained_routine_trace_on_demand(tmp_path):
     jobs, duplicates = _analyze(*rows)
 
     class DirectSource:
+        last_health_diagnostics = DirectSourceDiagnostics(
+            succeeded=True,
+            retained_row_count=80,
+            complete=True,
+        )
+
         def fetch(self, _company):
             return rows
 
@@ -735,6 +741,12 @@ def test_live_audit_fills_broad_query_to_limit_beyond_retained_details(tmp_path)
     ]
 
     class DirectSource:
+        last_health_diagnostics = DirectSourceDiagnostics(
+            succeeded=True,
+            retained_row_count=80,
+            complete=True,
+        )
+
         def fetch(self, _company):
             return rows
 

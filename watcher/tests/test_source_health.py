@@ -22,6 +22,12 @@ from watcher.source_health import (
     STATUS_FAILING,
     STATUS_HEALTHY,
     STATUS_UNSUPPORTED,
+    DIRECT_STATUS_DEGRADED,
+    DIRECT_STATUS_FAILED,
+    DIRECT_STATUS_HEALTHY_EMPTY,
+    DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+    DIRECT_STATUS_NOT_CONFIGURED,
+    DIRECT_STATUS_UNKNOWN,
     CompanyCoverage,
     HealthSummary,
     SourceAttempt,
@@ -56,6 +62,7 @@ def attempt(
     error_message=None,
     feed_label=None,
     unsupported_reason=None,
+    **diagnostics,
 ):
     if source_kind == SOURCE_KIND_GITHUB_FEED:
         company = None
@@ -78,11 +85,106 @@ def attempt(
         error_message=error_message,
         feed_label=feed_label,
         unsupported_reason=unsupported_reason,
+        **diagnostics,
     )
 
 
 def next_state(previous, **kwargs):
     return calculate_next_state(previous, attempt(**kwargs))
+
+
+def diagnostic_attempt(*, rows=1, succeeded=True, **overrides):
+    values = {
+        "run_id": "diagnostic-run",
+        "rows": rows,
+        "succeeded": succeeded,
+        "malformed_row_count": 0,
+        "schema_error_row_count": 0,
+        "duplicate_row_count": 0,
+        "failed_request_count": 0,
+        "incomplete": False,
+        "truncated": False,
+        "reason_codes": (),
+        "degraded": False,
+        "complete": True,
+    }
+    values.update(overrides)
+    return attempt(**values)
+
+
+def test_direct_diagnostic_states_are_per_attempt_and_listing_count_is_separate():
+    listed = calculate_next_state(None, diagnostic_attempt(rows=2))
+    empty = calculate_next_state(None, diagnostic_attempt(rows=0))
+    degraded = calculate_next_state(
+        None,
+        diagnostic_attempt(
+            rows=1,
+            malformed_row_count=1,
+            reason_codes=("malformed_records_skipped",),
+            degraded=True,
+            complete=False,
+        ),
+    )
+    failed = calculate_next_state(
+        None,
+        diagnostic_attempt(
+            rows=None,
+            succeeded=False,
+            failed_request_count=1,
+            reason_codes=("fetch_failure",),
+            complete=False,
+        ),
+    )
+    not_configured = calculate_next_state(
+        None,
+        attempt(
+            attempted=False,
+            succeeded=None,
+            rows=None,
+            adapter="github_only",
+            unsupported_reason="github_only",
+        ),
+    )
+
+    assert listed.status == DIRECT_STATUS_HEALTHY_WITH_LISTINGS
+    assert empty.status == DIRECT_STATUS_HEALTHY_EMPTY
+    assert degraded.status == DIRECT_STATUS_DEGRADED
+    assert failed.status == DIRECT_STATUS_FAILED
+    assert not_configured.status == DIRECT_STATUS_NOT_CONFIGURED
+
+
+def test_direct_success_without_sufficient_diagnostics_is_unknown():
+    state = calculate_next_state(None, attempt(rows=4))
+    assert state.status == DIRECT_STATUS_UNKNOWN
+
+
+def test_duplicates_and_optional_enrichment_failure_do_not_force_degradation():
+    duplicates = calculate_next_state(
+        None,
+        diagnostic_attempt(rows=2, duplicate_row_count=3),
+    )
+    optional_enrichment = calculate_next_state(
+        None,
+        diagnostic_attempt(
+            rows=2,
+            failed_request_count=1,
+            reason_codes=("optional_enrichment_failed",),
+        ),
+    )
+    material_enrichment = calculate_next_state(
+        None,
+        diagnostic_attempt(
+            rows=2,
+            failed_request_count=1,
+            reason_codes=("material_enrichment_failed",),
+            degraded=True,
+            complete=False,
+        ),
+    )
+
+    assert duplicates.status == DIRECT_STATUS_HEALTHY_WITH_LISTINGS
+    assert optional_enrichment.status == DIRECT_STATUS_HEALTHY_WITH_LISTINGS
+    assert material_enrichment.status == DIRECT_STATUS_DEGRADED
 
 
 def test_legacy_seen_database_upgrades_without_changing_seen_rows(tmp_path):
@@ -166,7 +268,7 @@ def test_transport_subtype_is_persisted_without_raw_html_or_metadata(tmp_path):
 
     assert stored[0] == "fetch_failure/html_challenge"
     assert state.last_error_kind == "fetch_failure/html_challenge"
-    assert state.status == STATUS_DEGRADED
+    assert state.status == DIRECT_STATUS_FAILED
     assert state.consecutive_failures == 1
     assert raw_marker not in stored[1]
     assert "PRIVATE_CHALLENGE_TOKEN" not in stored[1]
@@ -219,30 +321,33 @@ def test_parameterized_values_accept_sql_metacharacters(tmp_path):
         assert store.attempt_count() == 1
 
 
-def test_direct_success_and_zero_status_thresholds():
-    healthy = next_state(None, rows=2)
-    assert healthy.status == STATUS_HEALTHY
-    first_zero_without_history = next_state(None, rows=0)
-    second_zero_without_history = next_state(first_zero_without_history, run_id="run-2", rows=0)
-    assert first_zero_without_history.status == STATUS_EMPTY
-    assert second_zero_without_history.status == STATUS_EMPTY
+def test_direct_success_and_zero_status_do_not_depend_on_history():
+    healthy = calculate_next_state(None, diagnostic_attempt(rows=2))
+    assert healthy.status == DIRECT_STATUS_HEALTHY_WITH_LISTINGS
+    first_zero = calculate_next_state(None, diagnostic_attempt(rows=0))
+    second_zero = calculate_next_state(
+        first_zero, diagnostic_attempt(run_id="run-2", rows=0)
+    )
+    zero_after_nonzero = calculate_next_state(
+        healthy, diagnostic_attempt(run_id="run-3", rows=0)
+    )
+    assert first_zero.status == DIRECT_STATUS_HEALTHY_EMPTY
+    assert second_zero.status == DIRECT_STATUS_HEALTHY_EMPTY
+    assert zero_after_nonzero.status == DIRECT_STATUS_HEALTHY_EMPTY
 
-    first_zero_after_nonzero = next_state(healthy, run_id="run-2", rows=0)
-    second_zero_after_nonzero = next_state(first_zero_after_nonzero, run_id="run-3", rows=0)
-    assert first_zero_after_nonzero.status == STATUS_EMPTY
-    assert second_zero_after_nonzero.status == STATUS_DEGRADED
 
-
-def test_direct_failure_threshold_and_nonzero_recovery():
+def test_direct_failure_is_immediate_and_nonzero_recovery():
     first = next_state(None, succeeded=False, rows=None, error_kind=ERROR_FETCH)
     second = next_state(first, run_id="run-2", succeeded=False, rows=None, error_kind=ERROR_FETCH)
     third = next_state(second, run_id="run-3", succeeded=False, rows=None, error_kind=ERROR_FETCH)
-    recovered = next_state(third, run_id="run-4", rows=3)
+    recovered = calculate_next_state(
+        third, diagnostic_attempt(run_id="run-4", rows=3)
+    )
     assert [first.status, second.status, third.status, recovered.status] == [
-        STATUS_DEGRADED,
-        STATUS_DEGRADED,
-        STATUS_FAILING,
-        STATUS_HEALTHY,
+        DIRECT_STATUS_FAILED,
+        DIRECT_STATUS_FAILED,
+        DIRECT_STATUS_FAILED,
+        DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
     ]
     transition = transition_for(third, recovered)
     assert transition.recovery is True
@@ -250,9 +355,11 @@ def test_direct_failure_threshold_and_nonzero_recovery():
 
 def test_failure_followed_by_zero_is_empty_recovery():
     failed = next_state(None, succeeded=False, rows=None, error_kind=ERROR_FETCH)
-    responding = next_state(failed, run_id="run-2", rows=0)
+    responding = calculate_next_state(
+        failed, diagnostic_attempt(run_id="run-2", rows=0)
+    )
     transition = transition_for(failed, responding)
-    assert responding.status == STATUS_EMPTY
+    assert responding.status == DIRECT_STATUS_HEALTHY_EMPTY
     assert transition.recovery is True
 
 
@@ -267,7 +374,7 @@ def test_unsupported_does_not_accumulate_failures(adapter):
     )
     first = calculate_next_state(None, unsupported_attempt)
     second = calculate_next_state(first, unsupported_attempt)
-    assert second.status == STATUS_UNSUPPORTED
+    assert second.status == DIRECT_STATUS_NOT_CONFIGURED
     assert second.total_attempts == 0
     assert second.consecutive_failures == 0
 
@@ -296,14 +403,14 @@ def test_github_zero_is_healthy_and_failure_threshold_and_recovery():
 
 
 def test_transitions_omit_initialization_and_unchanged_states():
-    healthy = next_state(None, rows=1)
+    healthy = calculate_next_state(None, diagnostic_attempt(rows=1))
     failed = next_state(healthy, run_id="run-2", succeeded=False, rows=None)
     failed_again = next_state(failed, run_id="run-3", succeeded=False, rows=None)
     failing = next_state(failed_again, run_id="run-4", succeeded=False, rows=None)
     assert transition_for(None, healthy) is None
-    assert transition_for(healthy, failed).to_status == STATUS_DEGRADED
+    assert transition_for(healthy, failed).to_status == DIRECT_STATUS_FAILED
     assert transition_for(failed, failed_again) is None
-    assert transition_for(failed_again, failing).to_status == STATUS_FAILING
+    assert transition_for(failed_again, failing) is None
 
 
 def _coverage(companies, direct_attempt, direct_state, github_succeeded):
@@ -323,17 +430,17 @@ def _coverage(companies, direct_attempt, direct_state, github_succeeded):
 
 def test_company_coverage_states():
     direct_company = CompanyCfg(name="Example Co", ats="greenhouse")
-    success = attempt(rows=2)
+    success = diagnostic_attempt(rows=2)
     success_state = calculate_next_state(None, success)
     assert _coverage((direct_company,), success, success_state, False).state == COVERAGE_DIRECT
 
-    zero = attempt(rows=0)
+    zero = diagnostic_attempt(rows=0)
     zero_state = calculate_next_state(None, zero)
     assert _coverage((direct_company,), zero, zero_state, False).state == COVERAGE_DIRECT_EMPTY
 
     failed = attempt(succeeded=False, rows=None)
     degraded = calculate_next_state(None, failed)
-    assert _coverage((direct_company,), failed, degraded, True).state == COVERAGE_DEGRADED_BACKSTOP
+    assert _coverage((direct_company,), failed, degraded, True).state == COVERAGE_FAILING_BACKSTOP
     assert _coverage((direct_company,), failed, degraded, False).state == COVERAGE_UNCOVERED
 
     failed2 = calculate_next_state(degraded, attempt(run_id="run-2", succeeded=False, rows=None))
@@ -359,7 +466,7 @@ def test_unsupported_coverage_uses_feed_availability_not_active_posting(adapter)
 
 def test_health_summary_counts_current_states_coverage_and_transitions():
     companies = (CompanyCfg(name="Example Co", ats="greenhouse"),)
-    direct = attempt(rows=1)
+    direct = diagnostic_attempt(rows=1)
     github = attempt(source_kind=SOURCE_KIND_GITHUB_FEED, rows=0)
     states = {
         direct.health_key: calculate_next_state(None, direct),
@@ -375,7 +482,7 @@ def test_health_summary_counts_current_states_coverage_and_transitions():
 
 def test_json_report_is_sanitized_and_github_annotations_use_transitions(tmp_path):
     company = CompanyCfg(name="Example Co", ats="greenhouse")
-    healthy_attempt = attempt(run_id="run-1", rows=1)
+    healthy_attempt = diagnostic_attempt(run_id="run-1", rows=1)
     healthy = calculate_next_state(None, healthy_attempt)
     failed_attempt = attempt(
         run_id="run-2",
@@ -384,14 +491,14 @@ def test_json_report_is_sanitized_and_github_annotations_use_transitions(tmp_pat
         error_kind=ERROR_FETCH,
         error_message="HTTP 503 https://example.test/jobs?token=secret",
     )
-    degraded = calculate_next_state(healthy, failed_attempt)
-    transition = transition_for(healthy, degraded)
+    failed = calculate_next_state(healthy, failed_attempt)
+    transition = transition_for(healthy, failed)
     coverage = (
         CompanyCoverage(
             company=company.name,
             adapter=company.ats,
             state=COVERAGE_UNCOVERED,
-            direct_status=degraded.status,
+            direct_status=failed.status,
             direct_attempt_succeeded=False,
             direct_rows_returned=None,
             github_backstop_available=False,
@@ -405,8 +512,8 @@ def test_json_report_is_sanitized_and_github_annotations_use_transitions(tmp_pat
         direct_failures=1,
         direct_healthy=0,
         direct_empty=0,
-        direct_degraded=1,
-        direct_failing=0,
+        direct_degraded=0,
+        direct_failing=1,
         direct_unsupported=0,
         direct_unknown=0,
         github_feeds_configured=0,
@@ -417,6 +524,7 @@ def test_json_report_is_sanitized_and_github_annotations_use_transitions(tmp_pat
         uncovered_companies=1,
         health_transitions=1,
         health_recoveries=0,
+        direct_failed=1,
     )
     report = tmp_path / "health.json"
     write_health_report(
@@ -424,7 +532,7 @@ def test_json_report_is_sanitized_and_github_annotations_use_transitions(tmp_pat
         run_id="fixed-run",
         observed_at=NOW,
         attempts=(failed_attempt,),
-        states={degraded.health_key: degraded},
+        states={failed.health_key: failed},
         transitions=(transition,),
         coverage=coverage,
         summary=summary,
@@ -445,7 +553,7 @@ def test_json_report_is_sanitized_and_github_annotations_use_transitions(tmp_pat
     raw = report.read_text(encoding="utf-8")
     data = json.loads(raw)
     assert data["run_id"] == "fixed-run"
-    assert data["summary"]["direct_degraded"] == 1
+    assert data["summary"]["direct_failed"] == 1
     assert data["run"]["workday_transport"]["dominant_error"] == "html_challenge"
     assert data["run"]["workday_transport"]["failed_tenants"] == 24
     assert "secret" not in raw
@@ -457,7 +565,10 @@ def test_json_report_is_sanitized_and_github_annotations_use_transitions(tmp_pat
     assert "::warning::WORKDAY TRANSPORT INCIDENT:" in annotations
     assert "failed=24" in annotations
     assert "dominant_error=html_challenge" in annotations
-    assert "::warning::SOURCE HEALTH: Example Co: healthy -> degraded" in annotations
+    assert (
+        "::warning::SOURCE HEALTH: Example Co: "
+        "healthy_with_listings -> failed"
+    ) in annotations
     assert "::error::SOURCE COVERAGE: Example Co was uncovered" in annotations
     assert "Internship watcher run" in summary_path.read_text(encoding="utf-8")
     assert "Likely shared incident: `yes`" in summary_path.read_text(encoding="utf-8")
@@ -528,3 +639,135 @@ def test_final_heartbeat_represents_unknown_save_state_honestly():
 def test_final_heartbeat_rejects_missing_or_multiline_application_value(application):
     with pytest.raises(ValueError):
         render_final_heartbeat(application)
+
+
+def _actionable_detail_rows(summary_text: str) -> list[list[str]]:
+    """Return the parsed cells of the 'Actionable source details' table."""
+
+    lines = summary_text.splitlines()
+    start = lines.index("### Actionable source details")
+    rows = []
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells[0] in {"Category", "---"} or set(cells[0]) == {"-"}:
+            continue
+        rows.append(cells)
+    return rows
+
+
+def test_actionable_rows_render_company_not_diagnostic_label(tmp_path):
+    """Regression: run 20260810T031240Z-e85ea6464f9f rendered a degraded Merck
+    Workday source with `failed_requests` in the Company/feed column, because
+    the diagnostic loop variable shadowed the source label."""
+
+    summary_path = tmp_path / "summary.md"
+    payload = {
+        "run_id": "20260810T031240Z-e85ea6464f9f",
+        "run": {},
+        "summary": {},
+        "states": [
+            {
+                "status": DIRECT_STATUS_DEGRADED,
+                "company": "Merck",
+                "adapter": "workday",
+                "health_key": "company:merck:direct:workday",
+                "source_kind": SOURCE_KIND_DIRECT,
+                "last_rows_returned": 818,
+                "last_malformed_row_count": 0,
+                "last_schema_error_row_count": 2,
+                "last_duplicate_row_count": 0,
+                "last_failed_request_count": 0,
+                "last_reason_codes": ["schema_invalid_records_skipped"],
+            }
+        ],
+        "transitions": [],
+        "coverage": [],
+    }
+
+    report_path = tmp_path / "health.json"
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    render_github_actions_report(
+        report_path, output=io.StringIO(), summary_path=summary_path
+    )
+
+    rows = _actionable_detail_rows(summary_path.read_text(encoding="utf-8"))
+    assert len(rows) == 1
+    category, label, adapter, detail = rows[0]
+    assert category == DIRECT_STATUS_DEGRADED
+    assert label == "Merck"
+    assert adapter == "workday"
+    assert "rows=818" in detail
+    assert "schema=2" in detail
+    assert "reasons=schema_invalid_records_skipped" in detail
+
+
+def test_actionable_rows_render_degraded_failed_and_recovered_labels(tmp_path):
+    """Degraded, failed, recovered, and uncovered rows all keep their own
+    company/feed label and adapter."""
+
+    summary_path = tmp_path / "summary.md"
+    payload = {
+        "run_id": "run",
+        "run": {},
+        "summary": {},
+        "states": [
+            {
+                "status": DIRECT_STATUS_DEGRADED,
+                "company": "Merck",
+                "adapter": "workday",
+                "last_rows_returned": 818,
+                "last_schema_error_row_count": 2,
+            },
+            {
+                "status": DIRECT_STATUS_FAILED,
+                "company": "Adobe",
+                "adapter": "workday",
+                "last_error_kind": "fetch_failure/redirected_to_html",
+                "last_error_message": "workday returned non-JSON content",
+                "last_failed_request_count": 1,
+            },
+            {
+                "status": STATUS_FAILING,
+                "feed_label": "github-internships",
+                "adapter": "github_markdown_table",
+                "last_rows_returned": 0,
+            },
+        ],
+        "transitions": [
+            {
+                "recovery": True,
+                "company": "Workday",
+                "adapter": "workday",
+                "from_status": DIRECT_STATUS_FAILED,
+                "to_status": DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+            }
+        ],
+        "coverage": [
+            {
+                "state": COVERAGE_UNCOVERED,
+                "company": "Blackstone",
+                "adapter": "workday",
+            }
+        ],
+    }
+
+    report_path = tmp_path / "health.json"
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    render_github_actions_report(
+        report_path, output=io.StringIO(), summary_path=summary_path
+    )
+
+    rows = _actionable_detail_rows(summary_path.read_text(encoding="utf-8"))
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        (DIRECT_STATUS_DEGRADED, "Merck", "workday"),
+        (DIRECT_STATUS_FAILED, "Adobe", "workday"),
+        (STATUS_FAILING, "github-internships", "github_markdown_table"),
+        ("recovered", "Workday", "workday"),
+        ("uncovered", "Blackstone", "workday"),
+    ]
+    # No row may carry a diagnostic key where the label belongs.
+    assert not any(
+        row[1] in {"malformed", "schema", "duplicates", "failed_requests"} for row in rows
+    )

@@ -3,8 +3,8 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: port the reviewed reusable classification, recall, and
-  filtering fixes from `internal-tool` as one isolated commit.
+- Current task: port the reviewed reusable direct-source health, bounded
+  diagnostics, and incomplete-collection fixes as one isolated commit.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -253,6 +253,11 @@
   affect email or seen marking.
 - Track every configured GitHub source independently; a valid parsed feed is
   healthy even when watchlist filtering yields no matches.
+- Direct state is exactly `healthy_with_listings`, `healthy_empty`, `degraded`,
+  `failed`, `not_configured`, or `unknown`. Bounded adapter diagnostics decide
+  completeness; snapshots write schema v3 and load v2 with unknown diagnostics.
+- Workday continuation failures and repeated pages preserve prior usable rows
+  but mark collection incomplete/degraded; a first-page failure stays fatal.
 - Sanitize stored/logged errors, feed labels, keys, reports, annotations, and
   heartbeats. Never include credentials or raw query strings.
 - Sanitizers must be total. `sanitize_error`, `sanitize_feed_label`, and

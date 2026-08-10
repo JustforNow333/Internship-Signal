@@ -45,7 +45,12 @@ from watcher.source_health import (
     SOURCE_KIND_GITHUB_FEED,
 )
 from watcher.sources.ashby import AshbySource
-from watcher.sources.base import SourceError, SourceFetchError, make_row
+from watcher.sources.base import (
+    DirectSourceDiagnostics,
+    SourceError,
+    SourceFetchError,
+    make_row,
+)
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.lever import LeverSource
 from watcher.sources.smartrecruiters import SmartRecruitersSource
@@ -126,7 +131,13 @@ class DelayedSource:
             error = self.errors.get(company.name)
             if error is not None:
                 raise error
-            return list(self.rows_by_company.get(company.name, []))
+            rows = list(self.rows_by_company.get(company.name, []))
+            self.last_health_diagnostics = DirectSourceDiagnostics(
+                succeeded=True,
+                retained_row_count=len(rows),
+                complete=True,
+            )
+            return rows
         finally:
             if self.probe:
                 self.probe.exit(*scopes)
@@ -166,6 +177,15 @@ def batch_digest(batch):
                 "error_message": attempt.error_message,
                 "feed_label": attempt.feed_label,
                 "unsupported_reason": attempt.unsupported_reason,
+                "malformed_row_count": attempt.malformed_row_count,
+                "schema_error_row_count": attempt.schema_error_row_count,
+                "duplicate_row_count": attempt.duplicate_row_count,
+                "failed_request_count": attempt.failed_request_count,
+                "incomplete": attempt.incomplete,
+                "truncated": attempt.truncated,
+                "reason_codes": list(attempt.reason_codes),
+                "degraded": attempt.degraded,
+                "complete": attempt.complete,
             }
             for attempt in batch.source_attempts
         ],
@@ -978,6 +998,8 @@ def test_downstream_pipeline_outputs_are_identical_in_both_modes(tmp_path):
     assert concurrent_digest == serial_digest
     assert concurrent_result.collection_mode == COLLECTION_MODE_CONCURRENT
     assert serial_result.collection_mode == COLLECTION_MODE_SERIAL
+    assert concurrent_result.health_summary == serial_result.health_summary
+    assert concurrent_result.source_health_states == serial_result.source_health_states
     assert concurrent_result.collection_concurrency.executor_shutdown_clean is True
     assert concurrent_result.collection_concurrency.unexpected_exceptions == 0
 
