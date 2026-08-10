@@ -3,8 +3,8 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: port the reviewed reusable direct-source health, bounded
-  diagnostics, and incomplete-collection fixes as one isolated commit.
+- Current task: publish the reviewed hosted match-pagination fix directly to
+  `origin/product-mvp` with a normal, non-force push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.

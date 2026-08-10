@@ -21,6 +21,32 @@ export class HostedApiError extends Error {
   }
 }
 
+async function loadAllMatches(call) {
+  const matches = [];
+  let page = await call("/api/matches");
+
+  while (true) {
+    const items = normalizeMatchList(page);
+    matches.push(...items);
+    if (page?.has_more !== true) return matches;
+
+    const limit = page.limit;
+    const offset = page.offset;
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      !Number.isInteger(offset) ||
+      offset < 0 ||
+      items.length === 0
+    ) {
+      throw new HostedApiError("Match response pagination is invalid.", 502);
+    }
+    page = await call(
+      `/api/matches${matchQuery({ limit, offset: offset + items.length })}`,
+    );
+  }
+}
+
 function errorMessage(body, fallback) {
   if (typeof body?.detail === "string") return body.detail;
   if (Array.isArray(body?.detail)) {
@@ -116,8 +142,10 @@ export function createHttpHostedApi({
     getWatchlist: () => call("/api/watchlist"),
     updateWatchlist: (input) =>
       call("/api/watchlist", { method: "PUT", body: JSON.stringify(input) }),
-    getMatches: (params = {}) =>
-      call(`/api/matches${matchQuery(params)}`).then(normalizeMatchList),
+    getMatches: (params) =>
+      params
+        ? call(`/api/matches${matchQuery(params)}`).then(normalizeMatchList)
+        : loadAllMatches(call),
     getMatch: (id) =>
       call(`/api/matches/${encodeURIComponent(id)}`).then(normalizeMatch),
     updateMatch: (id, changes) =>

@@ -109,6 +109,47 @@ describe("hosted match API adapter", () => {
     expect(matches[0].why[0]).toBe("Stripe is on your watchlist");
   });
 
+  it("loads every page when the workspace requests its complete match list", async () => {
+    const secondMatch = apiMatch({
+      id: "33333333-3333-4333-8333-333333333333",
+      title: "Machine Learning Intern",
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [apiMatch()],
+          limit: 1,
+          offset: 0,
+          total: 2,
+          has_more: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [secondMatch],
+          limit: 1,
+          offset: 1,
+          total: 2,
+          has_more: false,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createHttpHostedApi();
+
+    const matches = await api.getMatches();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/matches");
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "/api/matches?limit=1&offset=1",
+    );
+    expect(matches.map((match) => match.title)).toEqual([
+      "Software Engineering Intern, Payments",
+      "Machine Learning Intern",
+    ]);
+  });
+
   it("sends bounded view and pagination parameters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [] }));
     vi.stubGlobal("fetch", fetchMock);

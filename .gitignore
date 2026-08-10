@@ -236,9 +236,11 @@ concurrent-canary*.json
 collection-canary-state*.json
 watcher/collection-canary-state*.json
 # Regression, cleanup, integration, push, worktree, and verification logs are
-# local diagnostics, not source artifacts.
+# Local audit/publish diagnostics, not source artifacts.
 cleanup-audit*.log
 cleanup-audit*.json
+repository-bug-audit*.log
+repository-bug-audit*.json
 watcher/cleanup-audit*.log
 watcher/cleanup-audit*.json
 # Local hosted-backend promotion verification output.
