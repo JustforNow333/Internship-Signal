@@ -639,3 +639,135 @@ def test_final_heartbeat_represents_unknown_save_state_honestly():
 def test_final_heartbeat_rejects_missing_or_multiline_application_value(application):
     with pytest.raises(ValueError):
         render_final_heartbeat(application)
+
+
+def _actionable_detail_rows(summary_text: str) -> list[list[str]]:
+    """Return the parsed cells of the 'Actionable source details' table."""
+
+    lines = summary_text.splitlines()
+    start = lines.index("### Actionable source details")
+    rows = []
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells[0] in {"Category", "---"} or set(cells[0]) == {"-"}:
+            continue
+        rows.append(cells)
+    return rows
+
+
+def test_actionable_rows_render_company_not_diagnostic_label(tmp_path):
+    """Regression: run 20260810T031240Z-e85ea6464f9f rendered a degraded Merck
+    Workday source with `failed_requests` in the Company/feed column, because
+    the diagnostic loop variable shadowed the source label."""
+
+    summary_path = tmp_path / "summary.md"
+    payload = {
+        "run_id": "20260810T031240Z-e85ea6464f9f",
+        "run": {},
+        "summary": {},
+        "states": [
+            {
+                "status": DIRECT_STATUS_DEGRADED,
+                "company": "Merck",
+                "adapter": "workday",
+                "health_key": "company:merck:direct:workday",
+                "source_kind": SOURCE_KIND_DIRECT,
+                "last_rows_returned": 818,
+                "last_malformed_row_count": 0,
+                "last_schema_error_row_count": 2,
+                "last_duplicate_row_count": 0,
+                "last_failed_request_count": 0,
+                "last_reason_codes": ["schema_invalid_records_skipped"],
+            }
+        ],
+        "transitions": [],
+        "coverage": [],
+    }
+
+    report_path = tmp_path / "health.json"
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    render_github_actions_report(
+        report_path, output=io.StringIO(), summary_path=summary_path
+    )
+
+    rows = _actionable_detail_rows(summary_path.read_text(encoding="utf-8"))
+    assert len(rows) == 1
+    category, label, adapter, detail = rows[0]
+    assert category == DIRECT_STATUS_DEGRADED
+    assert label == "Merck"
+    assert adapter == "workday"
+    assert "rows=818" in detail
+    assert "schema=2" in detail
+    assert "reasons=schema_invalid_records_skipped" in detail
+
+
+def test_actionable_rows_render_degraded_failed_and_recovered_labels(tmp_path):
+    """Degraded, failed, recovered, and uncovered rows all keep their own
+    company/feed label and adapter."""
+
+    summary_path = tmp_path / "summary.md"
+    payload = {
+        "run_id": "run",
+        "run": {},
+        "summary": {},
+        "states": [
+            {
+                "status": DIRECT_STATUS_DEGRADED,
+                "company": "Merck",
+                "adapter": "workday",
+                "last_rows_returned": 818,
+                "last_schema_error_row_count": 2,
+            },
+            {
+                "status": DIRECT_STATUS_FAILED,
+                "company": "Adobe",
+                "adapter": "workday",
+                "last_error_kind": "fetch_failure/redirected_to_html",
+                "last_error_message": "workday returned non-JSON content",
+                "last_failed_request_count": 1,
+            },
+            {
+                "status": STATUS_FAILING,
+                "feed_label": "github-internships",
+                "adapter": "github_markdown_table",
+                "last_rows_returned": 0,
+            },
+        ],
+        "transitions": [
+            {
+                "recovery": True,
+                "company": "Workday",
+                "adapter": "workday",
+                "from_status": DIRECT_STATUS_FAILED,
+                "to_status": DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+            }
+        ],
+        "coverage": [
+            {
+                "state": COVERAGE_UNCOVERED,
+                "company": "Blackstone",
+                "adapter": "workday",
+            }
+        ],
+    }
+
+    report_path = tmp_path / "health.json"
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    render_github_actions_report(
+        report_path, output=io.StringIO(), summary_path=summary_path
+    )
+
+    rows = _actionable_detail_rows(summary_path.read_text(encoding="utf-8"))
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        (DIRECT_STATUS_DEGRADED, "Merck", "workday"),
+        (DIRECT_STATUS_FAILED, "Adobe", "workday"),
+        (STATUS_FAILING, "github-internships", "github_markdown_table"),
+        ("recovered", "Workday", "workday"),
+        ("uncovered", "Blackstone", "workday"),
+    ]
+    # No row may carry a diagnostic key where the label belongs.
+    assert not any(
+        row[1] in {"malformed", "schema", "duplicates", "failed_requests"} for row in rows
+    )

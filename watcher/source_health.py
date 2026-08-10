@@ -980,14 +980,14 @@ def _workflow_detail_rows(states: list[dict], transitions: list[dict], coverage:
         error_kind = safe_error_kind(state.get("last_error_kind"))
         detail = state.get("last_error_message") or f"rows={state.get('last_rows_returned')}"
         diagnostic_parts = []
-        for label, key in (
+        for diagnostic_label, key in (
             ("malformed", "last_malformed_row_count"),
             ("schema", "last_schema_error_row_count"),
             ("duplicates", "last_duplicate_row_count"),
             ("failed_requests", "last_failed_request_count"),
         ):
             if state.get(key) is not None:
-                diagnostic_parts.append(f"{label}={int(state[key])}")
+                diagnostic_parts.append(f"{diagnostic_label}={int(state[key])}")
         reasons = state.get("last_reason_codes")
         if isinstance(reasons, (list, tuple)) and reasons:
             diagnostic_parts.append(
