@@ -16,7 +16,7 @@ can show *why* a verdict was reached.
 import re
 
 from .config import load_known_companies
-from .dedupe import norm_company
+from .dedupe import norm_company, norm_title
 
 # ---------------------------------------------------------------------------
 # Company classification
@@ -247,6 +247,30 @@ ROLE_TRACK_TO_ROLE = {
 
 TECHNICAL_ROLES = {"swe", "data_science", "ml_ai", "quant"}
 
+DATA_AI_INTERN_ANALYST_TITLES = frozenset(
+    {
+        norm_title("Data & AI Intern - Analyst"),
+        norm_title("Data and AI Intern - Analyst"),
+    }
+)
+
+CAPITAL_ONE_COMPANY_NAMES = frozenset(
+    {
+        norm_company("Capital One"),
+        norm_company("Capital One Financial"),
+    }
+)
+CAPITAL_ONE_GENERAL_SWE_TITLES = frozenset(
+    {
+        norm_title("Technology Intern"),
+        norm_title("Technology Internship Program"),
+        norm_title("Technology Internship Program Intern"),
+    }
+)
+CAPITAL_ONE_SUMMER_PROGRAM_TITLE = re.compile(
+    r"technology internship program summer [0-9]{4}"
+)
+
 SOFTWARE_TITLE_PATTERNS = [
     ("backend", r"\bback[- ]?end\b|\bserver[- ]side\b"),
     ("full_stack", r"\bfull[- ]?stack\b"),
@@ -277,6 +301,13 @@ NON_SWE_TITLE_PATTERNS = [
     ("non_technical", r"commercial (co[- ]?op|intern(ship)?)"),
     ("non_technical", r"consumer insights?|consumer research|market research|survey research|data entry|\bmarketing\b|\bsales\b|business development|\bhr\b|human resources|recruit(ing|er)|social media|\bcontent\b|\bbrand\b|administrative|operations intern|accounting|activities intern|cold[- ]call|copywrit"),
 ]
+
+BUSINESS_STRATEGY_TITLE_RE = re.compile(
+    r"\b(?:strategy analyst|strategy intern|business strategy|"
+    r"corporate strategy|operations strategy|product strategy|"
+    r"strategic planning)\b",
+    re.I,
+)
 
 BACKEND_CONTEXT_RE = re.compile(
     r"\bback[- ]?end\b|\bserver[- ]side\b|\bapis?\b|\brest(ful)?\b|"
@@ -503,6 +534,31 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
         full=full,
     )
 
+    normalized_title = norm_title(title)
+    if normalized_title in DATA_AI_INTERN_ANALYST_TITLES:
+        return _finish_role(
+            "ml_ai",
+            0.82,
+            [f'exact Data & AI internship title: "{title}"'],
+            [title],
+            non_swe_evidence,
+        )
+
+    if (
+        norm_company(row.get("company", "")) in CAPITAL_ONE_COMPANY_NAMES
+        and (
+            normalized_title in CAPITAL_ONE_GENERAL_SWE_TITLES
+            or CAPITAL_ONE_SUMMER_PROGRAM_TITLE.fullmatch(normalized_title)
+        )
+    ):
+        return _finish_role(
+            "general_swe",
+            0.82,
+            [f'Capital One technology internship title: "{title}"'],
+            [title],
+            non_swe_evidence,
+        )
+
     # Clerical "data entry" must not be diluted by incidental data words.
     if re.search(r"data entry", title, re.I):
         return _finish_role(
@@ -511,6 +567,17 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
             ['title: "data entry"'],
             software_evidence,
             non_swe_evidence or ["data entry"],
+        )
+
+    business_strategy_title = BUSINESS_STRATEGY_TITLE_RE.search(title)
+    if business_strategy_title and not title_software_hits:
+        hit = business_strategy_title.group(0).strip()
+        return _finish_role(
+            "non_technical",
+            0.86,
+            [f'business-strategy title: "{hit}"'],
+            software_evidence,
+            [*non_swe_evidence, f"non_technical: {hit}"],
         )
 
     embedded_intern = re.search(r"\bembedded intern(?:ship)?\b", title, re.I)

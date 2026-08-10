@@ -46,6 +46,51 @@ def test_invalid_known_company_shapes_fall_back_safely(tmp_path, monkeypatch, pa
     assert "stripe" in known["tech"]
 
 
+def test_invalid_known_company_entries_do_not_become_company_names(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "known_companies.json"
+    path.write_text(
+        json.dumps(
+            {
+                "tech": [{"company": "Fabricated"}],
+                "non_tech": [],
+                "reputable": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "KNOWN_COMPANIES_PATH", path)
+
+    known = config.load_known_companies()
+
+    assert "stripe" in known["tech"]
+    assert "company fabricated" not in known["tech"]
+
+
+def test_mixed_known_company_entries_fall_back_for_whole_category(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "known_companies.json"
+    path.write_text(
+        json.dumps(
+            {
+                "tech": ["Custom Company", {"company": "Fabricated"}],
+                "non_tech": [],
+                "reputable": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "KNOWN_COMPANIES_PATH", path)
+
+    known = config.load_known_companies()
+
+    assert "stripe" in known["tech"]
+    assert "custom company" not in known["tech"]
+    assert "company fabricated" not in known["tech"]
+
+
 def test_name_token_ai():
     c = classify_company(_row(company="Nimbus AI", title="ML Intern"))
     assert c["category"] in ("tech", "startup")
@@ -125,9 +170,158 @@ def test_data_entry_is_not_data_science():
     assert got["role"] == "non_technical"
 
 
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Use Python and SQL to analyze data and build API-backed software reports.",
+        "Partner with software engineers and apply analytics to strategic planning.",
+        "Our company builds APIs, cloud platforms, and machine-learning software.",
+    ],
+)
+def test_business_strategy_title_is_not_rescued_by_technical_body(description):
+    got = classify_role(
+        _row(
+            company="Capital One",
+            title="Intern, Strategy Analyst - Summer 2027",
+            description=description,
+            requirements="Python, SQL, APIs, analytics, and software tools.",
+        )
+    )
+
+    assert got["role"] == "non_technical"
+    assert got["role_track"] == "non_technical"
+
+
+@pytest.mark.parametrize(
+    ("title", "expected_track"),
+    [
+        ("Software Engineer Intern, Strategy Platform", "general_swe"),
+        ("Data Engineer Intern, Corporate Strategy Technology", "data_engineering"),
+        ("Machine Learning Engineer Intern, Strategy Systems", "ml_ai"),
+        ("Quantitative Developer Intern, Strategy", "quant_dev"),
+        ("Technical Product Manager Intern, Product Strategy", "technical_product"),
+    ],
+)
+def test_explicit_technical_titles_with_strategy_remain_technical(
+    title,
+    expected_track,
+):
+    got = classify_role(_row(title=title))
+
+    assert got["role_track"] == expected_track
+
+
 def test_unclassifiable_title_is_unknown():
     got = classify_role(_row(title="Team Member"))
     assert got["role"] == "unknown" and got["confidence"] <= 0.3
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Data & AI Intern - Analyst",
+        "Data and AI Intern - Analyst",
+    ],
+)
+def test_exact_data_and_ai_intern_analyst_titles_are_ml_ai(title):
+    got = classify_role(_row(title=title))
+
+    assert got["role"] == "ml_ai"
+    assert got["role_track"] == "ml_ai"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Data & Analytics Intern - Analyst",
+        "Data & AI Analyst",
+        "AI Marketing Intern - Analyst",
+        "Data & AI Intern - Analyst, Operations",
+    ],
+)
+def test_data_and_ai_intern_analyst_override_rejects_nearby_titles(title):
+    got = classify_role(_row(title=title))
+
+    assert (got["role"], got["role_track"]) != ("ml_ai", "ml_ai")
+
+
+@pytest.mark.parametrize(
+    "company",
+    ["Capital One", "Capital One Financial"],
+)
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Technology Intern",
+        "Technology Internship Program",
+        "Technology Internship Program Intern",
+    ],
+)
+def test_capital_one_exact_technology_internship_titles_are_general_swe(
+    company,
+    title,
+):
+    got = classify_role(_row(company=company, title=title))
+
+    assert got["role"] == "swe"
+    assert got["role_track"] == "general_swe"
+
+
+@pytest.mark.parametrize("company", ["Capital One", "Capital One Financial"])
+def test_capital_one_summer_program_title_is_general_swe(company):
+    got = classify_role(_row(
+        company=company,
+        title="Technology Internship Program - Summer 2027",
+    ))
+
+    assert got["role"] == "swe"
+    assert got["role_track"] == "general_swe"
+
+
+def test_capital_one_technology_internship_override_is_company_and_title_exact():
+    unrelated_company = classify_role(
+        _row(company="Unrelated Company", title="Technology Intern")
+    )
+    broader_title = classify_role(
+        _row(company="Capital One", title="Technology Operations Intern")
+    )
+
+    assert unrelated_company["role_track"] == "unknown"
+    assert broader_title["role_track"] == "non_technical"
+
+
+@pytest.mark.parametrize(
+    ("company", "title", "expected_track"),
+    [
+        (
+            "Unrelated Company",
+            "Technology Internship Program - Summer 2027",
+            "unknown",
+        ),
+        (
+            "Capital One",
+            "Technology Operations Internship Program - Summer 2027",
+            "non_technical",
+        ),
+        (
+            "Capital One",
+            "Technology Internship Program - Summer 2027 Leadership",
+            "unknown",
+        ),
+    ],
+)
+def test_capital_one_summer_program_override_rejects_nearby_titles(
+    company,
+    title,
+    expected_track,
+):
+    got = classify_role(_row(company=company, title=title))
+
+    assert got["role_track"] == expected_track
+    assert not any(
+        "Capital One technology internship title" in evidence
+        for evidence in got["evidence"]
+    )
 
 
 @pytest.mark.parametrize(

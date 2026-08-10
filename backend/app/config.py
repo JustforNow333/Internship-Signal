@@ -101,11 +101,14 @@ def load_known_companies() -> dict:
     out = {}
     for key in ("tech", "non_tech", "reputable"):
         values = data.get(key, _DEFAULT_KNOWN.get(key, []))
-        if not isinstance(values, (list, tuple, set)):
+        if (
+            not isinstance(values, (list, tuple, set))
+            or any(not isinstance(value, str) for value in values)
+        ):
             values = _DEFAULT_KNOWN.get(key, [])
         out[key] = {
             normalized
             for value in values
-            if (normalized := norm_company(str(value)))
+            if (normalized := norm_company(value))
         }
     return out

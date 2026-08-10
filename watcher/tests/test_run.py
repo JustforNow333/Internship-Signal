@@ -6,7 +6,14 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from watcher.config import CompanyCfg, GitHubListingSourceCfg, WatcherConfig
+from watcher.config import (
+    CompanyCfg,
+    DEFAULT_WATCHLIST_PATH,
+    GitHubListingSourceCfg,
+    WatcherConfig,
+    load_watchlist,
+)
+from watcher.filters import is_internship
 from watcher.notify import render_digest
 from watcher.run import (
     CollectionStats,
@@ -33,6 +40,7 @@ from watcher.source_health import (
     render_final_heartbeat,
 )
 from watcher.sources.base import SourceError, SourceFetchError, SourceSchemaError, make_row
+from watcher.sources.github_listings import GitHubListingsSource
 from watcher.sources.workday import WorkdaySource
 
 
@@ -212,6 +220,96 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
     assert all(row[0] == "2026-06-09T00:00:00+00:00" for row in rows)
 
 
+def test_sparse_capital_one_and_jpmorgan_github_rows_match_end_to_end(tmp_path):
+    production_config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    selected = {
+        company.name: company
+        for company in production_config.companies
+        if company.name in {"Capital One", "JPMorgan Chase"}
+    }
+    config = WatcherConfig(
+        companies=(selected["Capital One"], selected["JPMorgan Chase"]),
+        terms=production_config.terms,
+        target_roles=production_config.target_roles,
+    )
+    payload = [
+        {
+            "company_name": "Capital One",
+            "title": "Technology Intern",
+            "locations": ["United States"],
+            "url": "https://example.test/jobs/capital-one-technology-intern",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": ["Summer 2027"],
+        },
+        {
+            "company_name": "JP Morgan Chase",
+            "title": "Software Engineer Intern - Software Engineer Program",
+            "locations": ["United States"],
+            "url": "https://example.test/jobs/jpmorgan-software-engineer-program",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": ["Summer 2027"],
+        },
+    ]
+    github_source = GitHubListingsSource(
+        "https://fixtures.example.test/summer-2027/listings.json"
+    )
+    github_source.fetch_payload = lambda: payload
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={
+                "workday": FakeSource(),
+                "oracle_hcm": FakeSource(),
+            },
+            github_source=github_source,
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    jobs_by_company = {job["company"]: job for job in result.jobs}
+    capital_one = jobs_by_company["Capital One"]
+    assert capital_one["description"] == ""
+    assert capital_one["requirements"] == ""
+    assert capital_one["role_classification"]["role"] == "swe"
+    assert capital_one["role_classification"]["role_track"] == "general_swe"
+    assert capital_one["score"]["fit_score"] > 0
+    assert {job["company"] for job in result.matches} == {
+        "Capital One",
+        "JP Morgan Chase",
+    }
+
+
+def test_unicode_dash_coop_reaches_final_watcher_matches(tmp_path):
+    company = CompanyCfg(name="Example", ats="greenhouse", token="example")
+    posting = row(
+        "Example",
+        "Software Engineering Co\u2011op",
+        url="https://example.test/jobs/software-engineering-coop",
+    )
+    posting["location"] = "Boston, MA, United States"
+    posting["internship_type"] = ""
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=(company,)),
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"Example": [posting]})},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert is_internship(result.jobs[0])
+    assert len(result.matches) == 1
+    assert result.matches[0]["id"] == result.jobs[0]["id"]
+
+
 def test_explicit_internship_evidence_with_soft_full_time_wording_reaches_matches(
     tmp_path,
 ):
@@ -252,6 +350,179 @@ def test_explicit_internship_evidence_with_soft_full_time_wording_reaches_matche
     assert {match["title"] for match in result.matches} == {
         title for title, _ in examples
     }
+
+
+def test_real_run_false_positives_do_not_reach_final_matches(tmp_path):
+    companies = (
+        CompanyCfg(name="DoorDash", ats="github_only"),
+        CompanyCfg(name="Capital One", ats="github_only"),
+        CompanyCfg(name="Example", ats="github_only"),
+    )
+    postings = [
+        row(
+            "DoorDash",
+            "Software Engineer I, Entry-Level (Graduation Date: Fall 2025-Summer 2026)",
+            source="github",
+            description="Build production software and APIs in Python.",
+        ),
+        row(
+            "Capital One",
+            "Intern, Strategy Analyst - Summer 2027",
+            source="github",
+            description=(
+                "Use Python, SQL, analytics, APIs, and software tools to support "
+                "business strategy and strategic planning."
+            ),
+            requirements="Python, SQL, APIs, and analytics.",
+        ),
+        row(
+            "Example",
+            "Software Engineer Intern - Summer 2027",
+            source="github",
+        ),
+    ]
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=companies),
+            seen_store=store,
+            direct_sources={},
+            github_source=FakeGithub(postings),
+            alumni_index={},
+            today=date(2026, 8, 5),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    jobs = {job["title"]: job for job in result.jobs}
+    strategy = jobs["Intern, Strategy Analyst - Summer 2027"]
+    assert strategy["role_classification"]["role_track"] == "non_technical"
+    assert strategy["score"]["fit_score"] == 0
+    assert [match["title"] for match in result.matches] == [
+        "Software Engineer Intern - Summer 2027"
+    ]
+
+
+def test_sparse_exact_data_and_ai_title_reaches_final_watcher_matches(tmp_path):
+    company = CompanyCfg(name="Example", ats="github_only")
+    posting = make_row(
+        source="github",
+        source_adapter="github_listings",
+        company="Example",
+        title="Data & AI Intern - Analyst",
+        location="United States",
+        source_url="https://example.test/jobs/data-ai-intern-analyst",
+        internship_type="",
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=(company,)),
+            seen_store=store,
+            direct_sources={},
+            github_source=FakeGithub([posting]),
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    analyzed = result.jobs[0]
+    assert is_internship(analyzed)
+    assert analyzed["description"] == ""
+    assert analyzed["requirements"] == ""
+    assert analyzed["role_classification"]["role"] == "ml_ai"
+    assert analyzed["role_classification"]["role_track"] == "ml_ai"
+    assert analyzed["score"]["fit_score"] > 0
+    assert len(result.matches) == 1
+    assert result.matches[0]["id"] == analyzed["id"]
+
+
+def test_capital_one_workday_title_wins_simplify_merge_and_reaches_matches(
+    tmp_path,
+):
+    company = CompanyCfg(
+        name="Capital One",
+        ats="workday",
+        token="capitalone",
+        workday_shard="wd12",
+        workday_site="Capital_One",
+        aliases=("Capital One Financial",),
+        terms=("Summer 2027",),
+    )
+    config = WatcherConfig(
+        companies=(company,),
+        terms=("Summer 2027",),
+    )
+    application_url = (
+        "https://capitalone.wd12.myworkdayjobs.com/Capital_One/job/"
+        "McLean-VA/Technology-Internship-Program---Summer-2027_R244387-1"
+    )
+    direct_rows = WorkdaySource().parse(
+        {
+            "total": 1,
+            "jobPostings": [
+                {
+                    "title": "Technology Internship Program - Summer 2027",
+                    "externalPath": (
+                        "/job/McLean-VA/Technology-Internship-Program---"
+                        "Summer-2027_R244387-1"
+                    ),
+                    "timeType": "Full time",
+                    "locationsText": "McLean, VA, United States",
+                    "postedOn": "Posted Today",
+                    "bulletFields": ["R244387"],
+                }
+            ],
+        },
+        company,
+    )
+    simplify_rows = GitHubListingsSource(
+        "https://fixtures.example.test/summer-2027/listings.json"
+    ).parse(
+        [
+            {
+                "company_name": "Capital One",
+                "title": "Technology Intern",
+                "locations": ["McLean, VA, United States"],
+                "url": application_url,
+                "date_posted": "2026-08-04",
+                "active": True,
+                "terms": ["Summer 2027"],
+            }
+        ],
+        company,
+    )
+
+    assert direct_rows[0]["extra"]["source_requisition_id"] == "R244387"
+    assert direct_rows[0]["source_url"] == application_url
+    assert simplify_rows[0]["source_url"] == application_url
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            config,
+            seen_store=store,
+            direct_sources={"workday": FakeSource({"Capital One": direct_rows})},
+            github_source=FakeGithub(simplify_rows),
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert result.rows_fetched == 2
+    assert result.jobs_scored == 1
+    assert result.cross_source_duplicates_merged == 1
+    assert len(result.duplicate_report) == 1
+    assert result.duplicate_report[0]["matched_on"] == "requisition_id"
+    assert len(result.jobs) == 1
+    merged = result.jobs[0]
+    assert merged["extra"]["primary_source"] == "direct_ats"
+    assert merged["extra"]["sources"] == ["direct_ats", "simplify"]
+    assert merged["title"] == "Technology Internship Program - Summer 2027"
+    assert merged["role_classification"]["role"] == "swe"
+    assert merged["role_classification"]["role_track"] == "general_swe"
+    assert merged["score"]["fit_score"] > 0
+    assert len(result.matches) == 1
+    assert result.matches[0]["id"] == merged["id"]
+    assert result.matches[0]["title"] == merged["title"]
 
 
 def _enriching_workday_source(search_postings, details_by_requisition):

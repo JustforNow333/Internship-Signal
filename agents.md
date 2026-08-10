@@ -3,8 +3,8 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: port the reviewed reusable collection, adapter, coverage, and
-  posting-identity fixes from `internal-tool` as one isolated commit.
+- Current task: port the reviewed reusable classification, recall, and
+  filtering fixes from `internal-tool` as one isolated commit.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.

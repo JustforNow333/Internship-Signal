@@ -248,6 +248,8 @@ hosted-backend-push*.log
 # and tests remain tracked.
 collection-identity-port*.log
 collection-identity-port*.json
+classification-recall-port*.log
+classification-recall-port*.json
 # Prompt-maintained guidance, bug-audit, and branch-handoff scratch stay local.
 agents.local.md
 agents.*.md

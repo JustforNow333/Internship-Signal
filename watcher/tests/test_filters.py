@@ -257,6 +257,46 @@ def test_title_based_internship_still_matches():
     assert is_internship(job(title="Data Science Co-op"))
 
 
+@pytest.mark.parametrize("field", ["title", "internship_type"])
+@pytest.mark.parametrize(
+    "separator",
+    [
+        "-",
+        "\u2010",
+        "\u2011",
+        "\u2012",
+        "\u2013",
+        "\u2014",
+        " ",
+        "",
+    ],
+)
+def test_explicit_coop_separators_are_internship_evidence(field, separator):
+    posting = job(title="Software Engineer", internship_type="")
+    posting[field] = f"Software Engineering Co{separator}op"
+
+    assert is_internship(posting)
+
+
+@pytest.mark.parametrize("field", ["title", "internship_type"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Software Engineering Cooperative Program",
+        "Software Engineering Co-owner Program",
+        "Software Engineering Co/op",
+    ],
+)
+def test_non_coop_words_and_unlisted_punctuation_are_not_internship_evidence(
+    field,
+    value,
+):
+    posting = job(title="Software Engineer", internship_type="")
+    posting[field] = value
+
+    assert not is_internship(posting)
+
+
 @pytest.mark.parametrize(
     ("title", "internship_type"),
     [
@@ -265,7 +305,7 @@ def test_title_based_internship_still_matches():
         ("Entry-Level Software Internship", ""),
         ("Software Engineer - Full Time", "Intern"),
         ("Technology Program", "Summer 2027 Internship"),
-        ("Full-Time Software Engineering Co-op", ""),
+        ("Full-Time Software Engineering Co\u2011op", ""),
     ],
 )
 def test_explicit_internship_evidence_overrides_full_time_or_entry_level(
@@ -273,6 +313,39 @@ def test_explicit_internship_evidence_overrides_full_time_or_entry_level(
     internship_type,
 ):
     assert is_internship(job(title=title, internship_type=internship_type))
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Software Engineer I, Entry-Level (Graduation Date: Fall 2025-Summer 2026)",
+        "Software Engineer I (Expected Graduation: Summer 2027)",
+        "Entry-Level Developer - Graduating Summer 2027",
+        "New Grad Software Engineer - Summer 2027",
+        "Full-Time Analyst - Summer 2027",
+        "Analyst - Graduate Between Spring 2027 and Summer 2027",
+        "Developer, Class of Summer 2027",
+        "Engineer - Degree Completion Summer 2027",
+    ],
+)
+def test_season_evidence_in_professional_or_graduation_context_is_not_internship(
+    title,
+):
+    posting = job(title=title, internship_type="")
+
+    assert not is_internship(posting)
+    assert filter_matches([posting]) == []
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Summer 2027 Software Engineering Program",
+        "2027 Summer Technology Program",
+    ],
+)
+def test_season_only_student_program_titles_remain_internships(title):
+    assert is_internship(job(title=title, internship_type=""))
 
 
 @pytest.mark.parametrize(
