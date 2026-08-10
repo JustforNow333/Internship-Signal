@@ -9,6 +9,9 @@ from watcher.config import (
     ConfigError,
     DEFAULT_WATCHLIST_PATH,
     SUPPORTED_ATS,
+    WORKDAY_DETAIL_EARLY_CAREER,
+    WORKDAY_DETAIL_INTERNSHIP,
+    WORKDAY_DETAIL_NONE,
     WatcherConfig,
     _parse_env_assignment,
     _parse_watchlist_yaml,
@@ -177,6 +180,10 @@ def test_default_watchlist_loads_and_preserves_core_invariants():
             assert company.token
             assert company.workday_shard.startswith("wd")
             assert company.workday_site
+            assert company.workday_detail_policy in {
+                WORKDAY_DETAIL_INTERNSHIP,
+                WORKDAY_DETAIL_EARLY_CAREER,
+            }
         elif company.ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "workable"}:
             assert company.token
         elif company.ats == "bespoke":
@@ -197,6 +204,72 @@ def test_default_watchlist_contains_recent_priority_companies():
     for name in RECENT_PRIORITY_COMPANIES:
         assert companies_by_name[name].terms == ("Summer 2027",)
 
+
+def test_jpmorgan_watchlist_keeps_canonical_name_and_exact_match_variants():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    jpmorgan = next(
+        company for company in config.companies if company.name == "JPMorgan Chase"
+    )
+
+    assert jpmorgan.name == "JPMorgan Chase"
+    assert set(jpmorgan.match_names()) == {
+        "JPMorgan Chase",
+        "JPMorganChase",
+        "J.P. Morgan Chase",
+        "JP Morgan",
+        "J.P. Morgan",
+        "JPMC",
+        "Chase",
+    }
+    assert jpmorgan.ats == "oracle_hcm"
+    assert jpmorgan.oracle_hcm_host == "jpmc.fa.oraclecloud.com"
+    assert jpmorgan.oracle_hcm_site == "CX_1001"
+    assert jpmorgan.source_url == (
+        "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+        "CX_1001/jobs"
+    )
+
+
+@pytest.mark.parametrize(
+    ("oracle_lines", "message"),
+    [
+        (
+            '    oracle_hcm_site: "CX_1001"\n'
+            '    source_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"\n',
+            "oracle_hcm_host",
+        ),
+        (
+            '    oracle_hcm_host: "jpmc.fa.oraclecloud.com"\n'
+            '    source_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"\n',
+            "oracle_hcm_site",
+        ),
+        (
+            '    oracle_hcm_host: "user@jpmc.fa.oraclecloud.com"\n'
+            '    oracle_hcm_site: "CX_1001"\n'
+            '    source_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"\n',
+            "hostname",
+        ),
+        (
+            '    oracle_hcm_host: "jpmc.fa.oraclecloud.com"\n'
+            '    oracle_hcm_site: "CX_1001"\n'
+            '    source_url: "https://other.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"\n',
+            "source_url",
+        ),
+    ],
+)
+def test_oracle_hcm_configuration_requires_explicit_safe_scope(
+    tmp_path, oracle_lines, message
+):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        '  - name: "Oracle Example"\n'
+        '    ats: oracle_hcm\n'
+        + oracle_lines,
+    )
+
+    with pytest.raises(ConfigError, match=message):
+        load_watchlist(path)
 
 def test_recent_direct_watchlist_entries_keep_verified_adapter_metadata():
     config = load_watchlist(DEFAULT_WATCHLIST_PATH)
@@ -222,6 +295,78 @@ def _write_watchlist(tmp_path, defaults: str, companies: str | None = None):
         encoding="utf-8",
     )
     return path
+
+
+def test_default_watchlist_uses_early_career_detail_policy_only_for_verified_sites():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    workday_companies = {
+        company.name: company
+        for company in config.companies
+        if company.ats == "workday"
+    }
+
+    assert {
+        name
+        for name, company in workday_companies.items()
+        if company.workday_detail_policy == WORKDAY_DETAIL_EARLY_CAREER
+    } == {"Workday", "Salesforce"}
+    assert all(
+        company.workday_detail_policy == WORKDAY_DETAIL_INTERNSHIP
+        for name, company in workday_companies.items()
+        if name not in {"Workday", "Salesforce"}
+    )
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [WORKDAY_DETAIL_NONE, WORKDAY_DETAIL_INTERNSHIP, WORKDAY_DETAIL_EARLY_CAREER],
+)
+def test_workday_detail_policy_accepts_supported_values(tmp_path, policy):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        "  - name: Example\n"
+        "    ats: workday\n"
+        "    token: example\n"
+        "    workday_shard: wd5\n"
+        "    workday_site: Site\n"
+        f"    workday_detail_policy: {policy}\n",
+    )
+
+    assert load_watchlist(path).companies[0].workday_detail_policy == policy
+
+
+def test_workday_detail_policy_defaults_to_internship_candidates(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        "  - name: Example\n"
+        "    ats: workday\n"
+        "    token: example\n"
+        "    workday_shard: wd5\n"
+        "    workday_site: Site\n",
+    )
+
+    assert (
+        load_watchlist(path).companies[0].workday_detail_policy
+        == WORKDAY_DETAIL_INTERNSHIP
+    )
+
+
+def test_invalid_workday_detail_policy_is_rejected(tmp_path):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        "  - name: Example\n"
+        "    ats: workday\n"
+        "    token: example\n"
+        "    workday_shard: wd5\n"
+        "    workday_site: Site\n"
+        "    workday_detail_policy: everything\n",
+    )
+
+    with pytest.raises(ConfigError, match="workday_detail_policy"):
+        load_watchlist(path)
 
 
 def test_load_watchlist_parses_explicit_terms_multiple_feeds_and_inheritance(tmp_path):
@@ -345,7 +490,7 @@ def test_duplicate_normalized_company_names_are_rejected(tmp_path, second_name):
         load_watchlist(path)
 
 
-def test_alias_shared_by_two_companies_is_rejected(tmp_path):
+def test_alumni_match_shared_with_another_company_alias_is_allowed(tmp_path):
     path = _write_watchlist(
         tmp_path,
         '  terms: ["Summer 2027"]\n',
@@ -353,8 +498,9 @@ def test_alias_shared_by_two_companies_is_rejected(tmp_path):
         '  - name: "Second Co"\n    ats: greenhouse\n    token: second\n    alumni_match: ["shared"]\n',
     )
 
-    with pytest.raises(ConfigError, match="ambiguous"):
-        load_watchlist(path)
+    config = load_watchlist(path)
+
+    assert [company.name for company in config.companies] == ["First Co", "Second Co"]
 
 
 def test_feed_urls_differing_only_by_query_are_rejected(tmp_path):

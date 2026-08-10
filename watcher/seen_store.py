@@ -437,20 +437,6 @@ class SeenStore:
         if row["identity_key"] and current_identity == row["identity_key"]:
             return True
 
-        current_requisition = stable_requisition_key(job)
-        if (
-            not current_requisition
-            and row["analyzed_job_id"]
-            and str(job.get("id") or "") == row["analyzed_job_id"]
-        ):
-            return True
-        if (
-            not current_requisition
-            and not row["identity_key"]
-            and str(job.get("id") or "") == row["job_id"]
-        ):
-            return True
-
         stored_extra = {"source": row["first_source"] or ""}
         if row["requisition_key"]:
             stored_extra["posting_requisition_key"] = row["requisition_key"]

@@ -224,7 +224,7 @@ def test_filters_drop_non_swe_roles():
     )]) == []
 
 
-def test_filters_drop_new_grad_full_time_titles():
+def test_filters_drop_new_grad_titles():
     assert not is_internship(job(title="Software Engineer New Grad"))
     assert filter_matches([job(title="Software Engineer New Grad")]) == []
 
@@ -255,6 +255,47 @@ def test_full_time_title_with_intern_boilerplate_is_not_internship():
 def test_title_based_internship_still_matches():
     assert is_internship(job(title="Software Engineer Intern - Summer 2026"))
     assert is_internship(job(title="Data Science Co-op"))
+
+
+@pytest.mark.parametrize(
+    ("title", "internship_type"),
+    [
+        ("Full-Time Software Engineering Intern", ""),
+        ("Software Engineering Internship - Full Time", ""),
+        ("Entry-Level Software Internship", ""),
+        ("Software Engineer - Full Time", "Intern"),
+        ("Technology Program", "Summer 2027 Internship"),
+        ("Full-Time Software Engineering Co-op", ""),
+    ],
+)
+def test_explicit_internship_evidence_overrides_full_time_or_entry_level(
+    title,
+    internship_type,
+):
+    assert is_internship(job(title=title, internship_type=internship_type))
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Full-Time Software Engineer",
+        "Entry-Level Software Engineer",
+        "New Grad Software Engineer Intern",
+        "New-Grad Software Engineer Intern",
+        "New Graduate Software Engineer Intern",
+        "Software Engineering Internship / New Graduate Program",
+        "Co-owner, Software Products",
+        "Cooperative Education Manager",
+    ],
+)
+def test_soft_negative_only_and_new_graduate_titles_are_not_internships(title):
+    assert not is_internship(job(title=title, internship_type=""))
+
+
+def test_new_graduate_employment_type_is_a_hard_exclusion():
+    assert not is_internship(
+        job(title="Software Engineer Intern", internship_type="New Graduate")
+    )
 
 
 def test_truthy_non_intern_employment_type_is_not_internship():

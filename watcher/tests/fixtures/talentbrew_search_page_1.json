@@ -1,0 +1,6 @@
+{
+  "filters": "<div id=\"search-filters\"></div>",
+  "results": "<div id=\"search-results\" data-total-results=\"3\" data-total-pages=\"2\" data-current-page=\"1\" data-records-per-page=\"2\"><ul><li><a class=\"job-title--link\" data-job-id=\"97463249760\" href=\"/en/job/singapore/technology-developer-internship/13015/97463249760\"><strong>2027 Technology Developer Summer Internship Programme Singapore</strong></a><div class=\"job-location\">Singapore, Singapore</div><div class=\"job-date\"><span>07 Jul</span></div></li><li><a class=\"job-title--link\" data-job-id=\"97500000001\" href=\"/en/job/new-york/software-engineer-internship/13015/97500000001\"><strong>Software Engineer Summer Internship</strong></a><div class=\"job-location\">New York, New York</div><div class=\"job-date\"><span>08 Jul</span></div></li></ul></div>",
+  "hasJobs": true,
+  "hasContent": true
+}

@@ -7,8 +7,9 @@ import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from backend.app.dedupe import norm_company
+from watcher.company_matching import company_matches
 from watcher.config import CompanyCfg
+from watcher.season_terms import terms_match
 from watcher.sources.base import SourceError, SourceSchemaError, ensure_list, fetch_json, iso_date, make_row
 
 LOGGER = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ class GitHubListingsSource:
                 continue
             if not company_matches(entry["company_name"], company):
                 continue
-            if not _terms_match(entry["terms"], company.terms):
+            if not terms_match(entry["terms"], company.terms):
                 continue
             rows.append(self._parse_entry(entry))
         return rows
@@ -140,21 +141,6 @@ class GitHubListingsSource:
     def _schema_problem(self, message: str) -> None:
         LOGGER.warning("GitHub listings schema problem: %s", message)
         raise SourceSchemaError(message)
-
-
-def company_matches(source_company: Any, company: CompanyCfg) -> bool:
-    source_norm = norm_company(str(source_company or ""))
-    return any(source_norm == norm_company(name) for name in company.match_names())
-
-
-def _terms_match(source_terms: list, configured_terms: Any) -> bool:
-    terms = {_normalize_term(term) for term in source_terms if str(term).strip()}
-    wanted = {_normalize_term(term) for term in configured_terms if str(term).strip()}
-    return not wanted or bool(terms & wanted)
-
-
-def _normalize_term(value: Any) -> str:
-    return " ".join(str(value).split()).casefold()
 
 
 def _safe_feed_url(url: str) -> str:

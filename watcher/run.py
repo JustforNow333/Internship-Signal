@@ -112,7 +112,9 @@ from watcher.sources import (
     GitHubMarkdownTableSource,
     GreenhouseSource,
     LeverSource,
+    OracleHcmSource,
     SmartRecruitersSource,
+    TalentBrewSource,
     SourceError,
     SourceFetchError,
     SourceSchemaError,
@@ -1096,6 +1098,8 @@ def _direct_collection_task(
             company.ats,
             token=company.token,
             workday_shard=company.workday_shard,
+            oracle_hcm_host=company.oracle_hcm_host,
+            talentbrew_host=company.talentbrew_host,
         ),
         provider=company.ats,
         run=run,
@@ -1817,7 +1821,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 _DEFAULT_DIRECT_ADAPTERS = frozenset(
-    {"ashby", "greenhouse", "lever", "smartrecruiters", "workable", "workday"}
+    {
+        "ashby",
+        "greenhouse",
+        "lever",
+        "oracle_hcm",
+        "smartrecruiters",
+        "talentbrew",
+        "workable",
+        "workday",
+    }
 )
 
 
@@ -1829,7 +1842,9 @@ def _default_direct_sources(
         "ashby": AshbySource(),
         "greenhouse": GreenhouseSource(),
         "lever": LeverSource(),
+        "oracle_hcm": OracleHcmSource(),
         "smartrecruiters": SmartRecruitersSource(),
+        "talentbrew": TalentBrewSource(),
         "workable": WorkableSource(),
         "workday": WorkdaySource(pacer=workday_pacer),
     }

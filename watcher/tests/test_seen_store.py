@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from backend.app.dedupe import canonical_key, job_id
 from watcher.seen_store import SeenStore
 
 
@@ -178,6 +179,155 @@ def test_seen_store_uses_same_requisition_identity_as_collection_dedupe(tmp_path
     with SeenStore(tmp_path / "seen.sqlite") as store:
         store.mark_emailed(direct, emailed_at=datetime(2026, 7, 28, tzinfo=timezone.utc))
         assert store.unseen([github]) == []
+
+
+def test_emailed_fragment_posting_suppresses_equivalent_later_url(tmp_path):
+    emailed = job("shared-content")
+    emailed["source_url"] = (
+        "https://careers.example.test/jobs?utm_source=direct#/job/ABC123"
+    )
+    later = job("changed-content")
+    later["source_url"] = (
+        "https://careers.example.test/jobs?ref=feed#?JOBID=abc123"
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.mark_emailed(
+            emailed,
+            emailed_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        )
+
+        assert store.unseen([later]) == []
+
+
+def test_emailed_fragment_posting_does_not_suppress_different_fragment_id(
+    tmp_path,
+):
+    emailed = job("legacy-collision")
+    emailed["source_url"] = "https://careers.example.test/jobs#/job/ABC123"
+    different = job("legacy-collision")
+    different["source_url"] = "https://careers.example.test/jobs#/job/XYZ789"
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.mark_emailed(
+            emailed,
+            emailed_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        )
+
+        selection = store.partition([different])
+
+    assert selection.pending == [different]
+    assert selection.emailed == []
+
+
+def test_legacy_seen_raw_fragment_url_suppresses_same_current_posting(tmp_path):
+    db_path = tmp_path / "seen.sqlite"
+    legacy = job("legacy-fragment-content")
+    legacy["source_url"] = "https://careers.example.test/jobs#/job/ABC123"
+    _create_legacy_seen_db(
+        db_path,
+        legacy,
+        emailed_at="2026-08-01T00:00:00+00:00",
+    )
+    current = job("current-fragment-content")
+    current["source_url"] = (
+        "https://careers.example.test/jobs?utm_source=later#jobId=abc123"
+    )
+
+    with SeenStore(db_path) as store:
+        assert store.unseen([current]) == []
+
+
+def test_emailed_plain_c_does_not_suppress_cpp_or_csharp(tmp_path):
+    plain_c = _fallback_job("C Intern", "Austin, TX")
+    cpp = _fallback_job("C++ Intern", "Austin, TX")
+    csharp = _fallback_job("C# Intern", "Austin, TX")
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.mark_emailed(
+            plain_c,
+            emailed_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        )
+
+        selection = store.partition([cpp, csharp])
+
+    assert selection.pending == [cpp, csharp]
+    assert selection.emailed == []
+
+
+def test_emailed_springfield_illinois_does_not_suppress_massachusetts(tmp_path):
+    illinois = _fallback_job("Software Engineer Intern", "Springfield, IL")
+    massachusetts = _fallback_job(
+        "Software Engineer Intern",
+        "Springfield, MA",
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        store.mark_emailed(
+            illinois,
+            emailed_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        )
+
+        selection = store.partition([massachusetts])
+
+    assert selection.pending == [massachusetts]
+    assert selection.emailed == []
+
+
+def test_legacy_fallback_id_collision_does_not_suppress_distinct_language(tmp_path):
+    db_path = tmp_path / "seen.sqlite"
+    plain_c = _fallback_job("C Intern", "Austin, TX")
+    cpp = _fallback_job("C++ Intern", "Austin, TX")
+    assert plain_c["id"] == cpp["id"]
+
+    _store_with_legacy_fallback_identity(db_path, plain_c)
+
+    with SeenStore(db_path) as store:
+        selection = store.partition([cpp])
+
+    assert selection.pending == [cpp]
+    assert selection.emailed == []
+
+
+def test_same_posting_with_legacy_fallback_identity_remains_suppressed(tmp_path):
+    db_path = tmp_path / "seen.sqlite"
+    stored = _fallback_job("C++ Intern", "Springfield, IL")
+    current = _fallback_job("c ++ intern", "  SPRINGFIELD ,  il ")
+    assert stored["id"] == current["id"]
+
+    _store_with_legacy_fallback_identity(db_path, stored)
+
+    with SeenStore(db_path) as store:
+        selection = store.partition([current])
+
+    assert selection.pending == []
+    assert selection.emailed == [current]
+
+
+def _fallback_job(title, location):
+    posting = job(source="github")
+    posting.update(
+        {
+            "title": title,
+            "location": location,
+            "source_url": "https://careers.example.test/internships",
+        }
+    )
+    posting["id"] = job_id(posting)
+    return posting
+
+
+def _store_with_legacy_fallback_identity(path, posting):
+    with SeenStore(path) as store:
+        store.mark_emailed(
+            posting,
+            emailed_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        )
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "update seen set identity_key = ?",
+            (f"fallback|{canonical_key(posting)}",),
+        )
 
 
 def _create_legacy_seen_db(path, legacy_job, *, emailed_at):

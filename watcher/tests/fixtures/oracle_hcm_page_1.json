@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "Offset": 0,
+      "Limit": 2,
+      "TotalJobsCount": 4,
+      "requisitionList": [
+        {"Id": "ORACLE-1", "Title": "First Internship"},
+        {"Id": "ORACLE-2", "Title": "Second Internship"}
+      ]
+    }
+  ]
+}

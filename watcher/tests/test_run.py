@@ -212,6 +212,244 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
     assert all(row[0] == "2026-06-09T00:00:00+00:00" for row in rows)
 
 
+def test_explicit_internship_evidence_with_soft_full_time_wording_reaches_matches(
+    tmp_path,
+):
+    company = CompanyCfg(name="Example", ats="greenhouse", token="example")
+    examples = (
+        ("Full-Time Software Engineering Intern", ""),
+        ("Software Engineering Internship - Full Time", ""),
+        ("Entry-Level Software Internship", ""),
+        ("Software Engineer - Full Time", "Intern"),
+        ("Technology Program", "Summer 2027 Internship"),
+    )
+    postings = []
+    for index, (title, internship_type) in enumerate(examples):
+        posting = row(
+            "Example",
+            title,
+            url=f"https://example.test/jobs/precedence-{index}",
+            description=(
+                "Design and build software applications, APIs, and backend services "
+                "with Python, Java, and React."
+            ),
+        )
+        posting["location"] = "Boston, MA, United States"
+        posting["internship_type"] = internship_type
+        postings.append(posting)
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=(company,)),
+            seen_store=store,
+            direct_sources={"greenhouse": FakeSource({"Example": postings})},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            today=date(2026, 8, 4),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert {match["title"] for match in result.matches} == {
+        title for title, _ in examples
+    }
+
+
+def _enriching_workday_source(search_postings, details_by_requisition):
+    def detail(url, source_name):
+        requisition = next(
+            requisition
+            for requisition in details_by_requisition
+            if f"_{requisition}" in url
+        )
+        detail_value = details_by_requisition[requisition]
+        if isinstance(detail_value, Exception):
+            raise detail_value
+        return detail_value
+
+    return WorkdaySource(
+        min_interval_seconds=0,
+        request_json=lambda url, payload, source_name: {
+            "jobPostings": search_postings,
+            "total": len(search_postings),
+        },
+        request_detail_json=detail,
+        sleeper=lambda delay: None,
+    )
+
+
+def _workday_search_posting(title, requisition):
+    return {
+        "title": title,
+        "externalPath": f"/job/New-York/{title.replace(' ', '-')}_{requisition}-1",
+        "locationsText": "New York, NY, United States",
+        "postedOn": "Posted Today",
+        "bulletFields": [requisition],
+    }
+
+
+def _workday_detail(requisition, description, *, worker_subtype="Intern"):
+    return {
+        "jobPostingInfo": {
+            "jobReqId": requisition,
+            "jobDescription": f"<p>{description}</p>",
+            "location": "New York, NY, United States",
+            "startDate": "2026-08-05",
+            "timeType": "Full time",
+            "workerSubType": worker_subtype,
+            "canApply": True,
+        }
+    }
+
+
+def test_workday_detail_enrichment_changes_only_technical_candidates_to_matches(
+    tmp_path,
+):
+    company = CompanyCfg(
+        name="Example",
+        ats="workday",
+        token="tenant",
+        workday_shard="wd5",
+        workday_site="Early_Careers",
+        workday_detail_policy="early_career_candidates",
+    )
+    postings = [
+        _workday_search_posting("Technology Intern", "R1"),
+        _workday_search_posting("Technology Programme", "R2"),
+        _workday_search_posting("Business Operations Intern", "R3"),
+    ]
+    source = _enriching_workday_source(
+        postings,
+        {
+            "R1": _workday_detail(
+                "R1",
+                "Design and build Python services, APIs, and production software.",
+            ),
+            "R2": _workday_detail(
+                "R2",
+                "Develop Java applications, backend APIs, and cloud software systems.",
+            ),
+            "R3": _workday_detail(
+                "R3",
+                "Support business operations, financial reporting, and client scheduling.",
+            ),
+        },
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=(company,)),
+            seen_store=store,
+            direct_sources={"workday": source},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            today=date(2026, 8, 5),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    jobs = {job["title"]: job for job in result.jobs}
+    assert jobs["Technology Intern"]["role_classification"]["role"] == "swe"
+    assert jobs["Technology Programme"]["role_classification"]["role"] == "swe"
+    assert (
+        jobs["Business Operations Intern"]["role_classification"]["role"]
+        == "non_technical"
+    )
+    assert {job["title"] for job in result.matches} == {
+        "Technology Intern",
+        "Technology Programme",
+    }
+
+
+def test_workday_detail_failure_preserves_sparse_posting_previous_behavior(tmp_path):
+    company = CompanyCfg(
+        name="Example",
+        ats="workday",
+        token="tenant",
+        workday_shard="wd5",
+        workday_site="Site",
+    )
+    source = _enriching_workday_source(
+        [_workday_search_posting("Technology Intern", "R1")],
+        {
+            "R1": SourceFetchError(
+                "permanent detail failure",
+                error_code="permanent_http_error",
+                status_code=400,
+            )
+        },
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=(company,)),
+            seen_store=store,
+            direct_sources={"workday": source},
+            github_source=FakeGithub([]),
+            alumni_index={},
+            today=date(2026, 8, 5),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert len(result.jobs) == 1
+    assert result.jobs[0]["title"] == "Technology Intern"
+    assert result.jobs[0]["description"] == ""
+    assert result.jobs[0]["role_classification"]["role"] == "unknown"
+    assert result.matches == []
+
+
+def test_enriched_workday_row_merges_with_github_and_remains_primary(tmp_path):
+    company = CompanyCfg(
+        name="Example",
+        ats="workday",
+        token="tenant",
+        workday_shard="wd5",
+        workday_site="Site",
+    )
+    posting = _workday_search_posting("Technology Intern", "R1")
+    source = _enriching_workday_source(
+        [posting],
+        {
+            "R1": _workday_detail(
+                "R1",
+                "Design and build Python services, APIs, and production software.",
+            )
+        },
+    )
+    application_url = WorkdaySource.posting_url(
+        "tenant",
+        "wd5",
+        "Site",
+        posting["externalPath"],
+    )
+    github = github_row(
+        "Example",
+        "Technology Intern",
+        source_name="simplify",
+        source_format="simplify_json",
+        priority=10,
+        url=application_url,
+    )
+
+    with SeenStore(tmp_path / "seen.sqlite") as store:
+        result = run_once(
+            WatcherConfig(companies=(company,)),
+            seen_store=store,
+            direct_sources={"workday": source},
+            github_source=FakeGithub([github]),
+            alumni_index={},
+            today=date(2026, 8, 5),
+            notification_mode=RUN_MODE_DRY,
+        )
+
+    assert result.rows_fetched == 2
+    assert result.jobs_scored == 1
+    assert result.cross_source_duplicates_merged == 1
+    assert result.jobs[0]["extra"]["primary_source"] == "direct_ats"
+    assert result.jobs[0]["extra"]["sources"] == ["direct_ats", "simplify"]
+    assert result.jobs[0]["description"].startswith("Design and build")
+    assert len(result.matches) == 1
+    assert result.matches[0]["id"] == result.jobs[0]["id"]
+
+
 def test_categorical_exclusion_is_audited_but_never_emailed_or_marked_seen(
     tmp_path,
 ):

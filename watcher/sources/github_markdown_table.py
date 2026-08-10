@@ -11,9 +11,12 @@ from html import unescape
 from typing import Iterable
 from urllib.parse import urlsplit
 
+from backend.app.dedupe import norm_url
+from watcher.company_matching import company_matches
 from watcher.config import CompanyCfg
+from watcher.season_terms import terms_match
 from watcher.sources.base import SourceError, SourceSchemaError, fetch_text, make_row
-from watcher.sources.github_listings import _normalize_term, _safe_feed_url, company_matches
+from watcher.sources.github_listings import _safe_feed_url
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +45,23 @@ class _Posting:
     us_citizenship_required: bool
 
 
+@dataclass(frozen=True)
+class _InternshipTable:
+    header_indexes: dict[str, int]
+    candidate_lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MarkdownParseDiagnostics:
+    candidate_tables: int = 0
+    valid_tables: int = 0
+    malformed_tables: int = 0
+    candidate_rows: int = 0
+    malformed_rows: int = 0
+    rows_by_table: tuple[int, ...] = ()
+    duplicates_removed: int = 0
+
+
 class GitHubMarkdownTableSource:
     """Parse a configured five-column GitHub README table."""
 
@@ -60,6 +80,7 @@ class GitHubMarkdownTableSource:
         if not self.default_term:
             raise ValueError("GitHub Markdown source requires a default term")
         self.feed_label = _safe_feed_url(self.url)
+        self.last_diagnostics = MarkdownParseDiagnostics()
 
     def fetch_payload(self) -> str:
         try:
@@ -75,29 +96,75 @@ class GitHubMarkdownTableSource:
         return self.parse(self.fetch_payload(), companies)
 
     def parse(self, markdown: str, companies: Iterable[CompanyCfg]) -> list[dict]:
+        self.last_diagnostics = MarkdownParseDiagnostics()
         if not isinstance(markdown, str):
             raise SourceSchemaError("GitHub Markdown payload must be UTF-8 text")
-        header_indexes, candidate_lines = _find_internship_table(markdown)
+        tables, candidate_table_count, malformed_tables = _find_internship_tables(
+            markdown
+        )
+        if candidate_table_count == 0:
+            self._schema_problem(
+                "GitHub Markdown payload is missing the expected "
+                "Company/Role/Location/Apply/Added table"
+            )
+        if not tables:
+            self.last_diagnostics = MarkdownParseDiagnostics(
+                candidate_tables=candidate_table_count,
+                malformed_tables=malformed_tables,
+            )
+            self._schema_problem(
+                "GitHub Markdown candidate tables had an invalid separator row"
+            )
+
         postings: list[_Posting] = []
         skipped: Counter[str] = Counter()
-        for line in candidate_lines:
-            posting, reason = _parse_candidate(line, header_indexes)
-            if posting is None:
-                skipped[reason or "malformed_row"] += 1
-            else:
+        candidate_rows = 0
+        duplicates_removed = 0
+        rows_by_table: list[int] = []
+        seen_urls: set[str] = set()
+        for table in tables:
+            contributed = 0
+            candidate_rows += len(table.candidate_lines)
+            for line in table.candidate_lines:
+                posting, reason = _parse_candidate(line, table.header_indexes)
+                if posting is None:
+                    skipped[reason or "malformed_row"] += 1
+                    continue
+                url_key = norm_url(posting.source_url)
+                if url_key in seen_urls:
+                    duplicates_removed += 1
+                    continue
+                seen_urls.add(url_key)
                 postings.append(posting)
+                contributed += 1
+            rows_by_table.append(contributed)
 
-        if candidate_lines and not postings:
+        self.last_diagnostics = MarkdownParseDiagnostics(
+            candidate_tables=candidate_table_count,
+            valid_tables=len(tables),
+            malformed_tables=malformed_tables,
+            candidate_rows=candidate_rows,
+            malformed_rows=sum(skipped.values()),
+            rows_by_table=tuple(rows_by_table),
+            duplicates_removed=duplicates_removed,
+        )
+        if candidate_rows and not postings:
             self._schema_problem(
-                f"GitHub Markdown table had {len(candidate_lines)} candidate row(s), all malformed"
+                f"GitHub Markdown tables had {candidate_rows} candidate row(s), all malformed"
             )
-        if skipped:
+        if skipped or malformed_tables:
             reasons = ", ".join(f"{key}={skipped[key]}" for key in sorted(skipped))
+            parts = []
+            if malformed_tables:
+                parts.append(f"ignored {malformed_tables} malformed candidate table(s)")
+            if skipped:
+                parts.append(
+                    f"skipped {sum(skipped.values())} malformed row(s): {reasons[:180]}"
+                )
             LOGGER.warning(
-                "GitHub Markdown source %s skipped %d malformed row(s): %s",
+                "GitHub Markdown source %s %s.",
                 self.source_name,
-                sum(skipped.values()),
-                reasons[:240],
+                "; ".join(parts),
             )
 
         configured_companies = tuple(companies)
@@ -110,7 +177,10 @@ class GitHubMarkdownTableSource:
                 for company in configured_companies
                 if company_matches(posting.company, company)
             ]
-            if not any(_term_matches(self.default_term, company.terms) for company in matching_companies):
+            if not any(
+                terms_match((self.default_term,), company.terms)
+                for company in matching_companies
+            ):
                 continue
             rows.append(self._make_row(posting))
         return rows
@@ -143,32 +213,54 @@ class GitHubMarkdownTableSource:
         raise SourceSchemaError(message)
 
 
-def _find_internship_table(markdown: str) -> tuple[dict[str, int], list[str]]:
+def _find_internship_tables(
+    markdown: str,
+) -> tuple[list[_InternshipTable], int, int]:
     lines = markdown.splitlines()
-    for index, line in enumerate(lines):
+    tables: list[_InternshipTable] = []
+    candidate_tables = 0
+    malformed_tables = 0
+    index = 0
+    while index < len(lines):
+        line = lines[index]
         cells = _split_markdown_row(line)
         normalized = [_normalize_header(cell) for cell in cells]
         if not all(header in normalized for header in EXPECTED_HEADERS):
+            index += 1
             continue
+        candidate_tables += 1
         if index + 1 >= len(lines):
-            raise SourceSchemaError("GitHub Markdown internship table is missing its separator row")
+            malformed_tables += 1
+            index += 1
+            continue
         separators = _split_markdown_row(lines[index + 1])
         if len(separators) != len(cells) or not all(
             SEPARATOR_RE.fullmatch(cell.strip()) for cell in separators
         ):
-            raise SourceSchemaError("GitHub Markdown internship table has an invalid separator row")
-        header_indexes = {header: normalized.index(header) for header in EXPECTED_HEADERS}
+            malformed_tables += 1
+            index += 1
+            continue
+        header_indexes = {
+            header: normalized.index(header) for header in EXPECTED_HEADERS
+        }
         candidates = []
-        for row_line in lines[index + 2 :]:
+        row_index = index + 2
+        while row_index < len(lines):
+            row_line = lines[row_index]
             if not row_line.strip():
                 break
             if "|" not in row_line:
                 break
             candidates.append(row_line)
-        return header_indexes, candidates
-    raise SourceSchemaError(
-        "GitHub Markdown payload is missing the expected Company/Role/Location/Apply/Added table"
-    )
+            row_index += 1
+        tables.append(
+            _InternshipTable(
+                header_indexes=header_indexes,
+                candidate_lines=tuple(candidates),
+            )
+        )
+        index = max(row_index, index + 2)
+    return tables, candidate_tables, malformed_tables
 
 
 def _parse_candidate(
@@ -306,8 +398,3 @@ def _source_added_date(value: str) -> tuple[str, bool]:
         return date.fromisoformat(cleaned).isoformat(), True
     except ValueError:
         return "", False
-
-
-def _term_matches(default_term: str, configured_terms: Iterable[str]) -> bool:
-    wanted = {_normalize_term(term) for term in configured_terms if str(term).strip()}
-    return not wanted or _normalize_term(default_term) in wanted

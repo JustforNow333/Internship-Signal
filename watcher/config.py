@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Sequence
 from urllib.parse import urlsplit
 
-from backend.app.dedupe import norm_company
+from watcher.company_matching import company_matching_key
 
 WATCHER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = WATCHER_DIR.parent
@@ -108,6 +108,16 @@ MAX_WORKDAY_MAX_CONCURRENCY = 5
 DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY = 2
 MIN_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY = 1
 MAX_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY = 4
+WORKDAY_DETAIL_NONE = "none"
+WORKDAY_DETAIL_INTERNSHIP = "internship_candidates"
+WORKDAY_DETAIL_EARLY_CAREER = "early_career_candidates"
+SUPPORTED_WORKDAY_DETAIL_POLICIES = frozenset(
+    {
+        WORKDAY_DETAIL_NONE,
+        WORKDAY_DETAIL_INTERNSHIP,
+        WORKDAY_DETAIL_EARLY_CAREER,
+    }
+)
 SUPPORTED_ATS = {
     "greenhouse",
     "lever",
@@ -115,6 +125,8 @@ SUPPORTED_ATS = {
     "smartrecruiters",
     "workable",
     "workday",
+    "oracle_hcm",
+    "talentbrew",
     "bespoke",
     "github_only",
 }
@@ -339,6 +351,14 @@ class CompanyCfg:
     token: str = ""
     workday_shard: str = ""
     workday_site: str = ""
+    workday_detail_policy: str = WORKDAY_DETAIL_INTERNSHIP
+    oracle_hcm_host: str = ""
+    oracle_hcm_site: str = ""
+    talentbrew_host: str = ""
+    talentbrew_site_id: str = ""
+    talentbrew_category_id: str = ""
+    talentbrew_category_name: str = ""
+    source_url: str = ""
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)
     alumni_match: Sequence[str] = field(default_factory=tuple)
@@ -463,6 +483,18 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         raise ConfigError(f"{name}: {ats} entries require token")
     workday_site = str(entry.get("workday_site") or "").strip()
     workday_shard = str(entry.get("workday_shard") or "").strip()
+    if "workday_detail_policy" in entry:
+        raw_detail_policy = entry.get("workday_detail_policy")
+        # YAML commonly decodes an unquoted ``none`` scalar as null. Treat an
+        # explicitly present null as the documented disabled policy while a
+        # missing setting retains the normal internship-candidate default.
+        workday_detail_policy = (
+            WORKDAY_DETAIL_NONE
+            if raw_detail_policy is None
+            else str(raw_detail_policy).strip()
+        )
+    else:
+        workday_detail_policy = WORKDAY_DETAIL_INTERNSHIP
     if ats == "workday":
         if not token:
             raise ConfigError(f"{name}: workday entries require token")
@@ -470,31 +502,159 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             raise ConfigError(f"{name}: workday entries require workday_shard")
         if not workday_site:
             raise ConfigError(f"{name}: workday entries require workday_site")
+        if workday_detail_policy not in SUPPORTED_WORKDAY_DETAIL_POLICIES:
+            supported = ", ".join(sorted(SUPPORTED_WORKDAY_DETAIL_POLICIES))
+            raise ConfigError(
+                f"{name}: workday_detail_policy must be one of: {supported}"
+            )
+    oracle_hcm_host = str(entry.get("oracle_hcm_host") or "").strip().casefold()
+    oracle_hcm_site = str(entry.get("oracle_hcm_site") or "").strip()
+    source_url = str(entry.get("source_url") or "").strip()
+    if ats == "oracle_hcm":
+        _validate_oracle_hcm_config(
+            name,
+            host=oracle_hcm_host,
+            site=oracle_hcm_site,
+            source_url=source_url,
+        )
+    talentbrew_host = str(entry.get("talentbrew_host") or "").strip().casefold()
+    talentbrew_site_id = str(entry.get("talentbrew_site_id") or "").strip()
+    talentbrew_category_id = str(entry.get("talentbrew_category_id") or "").strip()
+    talentbrew_category_name = str(entry.get("talentbrew_category_name") or "").strip()
+    if ats == "talentbrew":
+        _validate_talentbrew_config(
+            name,
+            host=talentbrew_host,
+            site_id=talentbrew_site_id,
+            category_id=talentbrew_category_id,
+            category_name=talentbrew_category_name,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
         company_terms = default_terms
+    aliases = _aliases_tuple(entry["aliases"], name) if "aliases" in entry else ()
     return CompanyCfg(
         name=name,
         ats=ats,
         token=token,
         workday_shard=workday_shard,
         workday_site=workday_site,
+        workday_detail_policy=workday_detail_policy,
+        oracle_hcm_host=oracle_hcm_host,
+        oracle_hcm_site=oracle_hcm_site,
+        talentbrew_host=talentbrew_host,
+        talentbrew_site_id=talentbrew_site_id,
+        talentbrew_category_id=talentbrew_category_id,
+        talentbrew_category_name=talentbrew_category_name,
+        source_url=source_url,
         module=str(entry.get("module") or "").strip(),
-        aliases=_string_tuple(entry.get("aliases", ())),
+        aliases=aliases,
         alumni_match=_string_tuple(entry.get("alumni_match", ())),
         terms=company_terms,
     )
 
 
+def _validate_oracle_hcm_config(
+    name: str,
+    *,
+    host: str,
+    site: str,
+    source_url: str,
+) -> None:
+    if not host:
+        raise ConfigError(f"{name}: oracle_hcm entries require oracle_hcm_host")
+    if (
+        not re.fullmatch(r"[a-z0-9.-]+", host)
+        or host.startswith(".")
+        or ".." in host
+    ):
+        raise ConfigError(f"{name}: oracle_hcm_host must be a hostname")
+    try:
+        parsed_host = urlsplit(f"https://{host}")
+    except ValueError as exc:
+        raise ConfigError(f"{name}: oracle_hcm_host must be a hostname") from exc
+    if (
+        parsed_host.hostname != host
+        or parsed_host.username
+        or parsed_host.password
+        or parsed_host.path not in {"", "/"}
+        or parsed_host.query
+        or parsed_host.fragment
+        or not host.endswith(".oraclecloud.com")
+    ):
+        raise ConfigError(f"{name}: oracle_hcm_host must be an Oracle Cloud hostname")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", site):
+        raise ConfigError(f"{name}: oracle_hcm entries require a valid oracle_hcm_site")
+    try:
+        parsed_source = urlsplit(source_url)
+    except ValueError as exc:
+        raise ConfigError(f"{name}: oracle_hcm entries require a valid source_url") from exc
+    if (
+        parsed_source.scheme.casefold() != "https"
+        or (parsed_source.hostname or "").casefold() != host
+        or parsed_source.netloc.casefold() != host
+        or parsed_source.username
+        or parsed_source.password
+        or parsed_source.query
+        or parsed_source.fragment
+        or f"/sites/{site}/" not in parsed_source.path
+    ):
+        raise ConfigError(
+            f"{name}: oracle_hcm source_url must be a credential-free HTTPS URL on oracle_hcm_host"
+        )
+
+
+def _validate_talentbrew_config(
+    name: str,
+    *,
+    host: str,
+    site_id: str,
+    category_id: str,
+    category_name: str,
+    source_url: str,
+) -> None:
+    if (
+        not re.fullmatch(r"[a-z0-9.-]+", host)
+        or host.startswith(".")
+        or ".." in host
+    ):
+        raise ConfigError(f"{name}: talentbrew entries require a valid talentbrew_host")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", site_id):
+        raise ConfigError(f"{name}: talentbrew entries require talentbrew_site_id")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", category_id):
+        raise ConfigError(f"{name}: talentbrew entries require talentbrew_category_id")
+    if not category_name:
+        raise ConfigError(f"{name}: talentbrew entries require talentbrew_category_name")
+    try:
+        parsed = urlsplit(source_url)
+    except ValueError as exc:
+        raise ConfigError(f"{name}: talentbrew entries require a valid source_url") from exc
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != host
+        or parsed.netloc.casefold() != host
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: talentbrew source_url must be a credential-free HTTPS URL on talentbrew_host"
+        )
+
+
 def _validate_unique_company_names(companies: Sequence[CompanyCfg]) -> None:
     owners: dict[str, tuple[int, str]] = {}
     for index, company in enumerate(companies):
-        labels = (company.name, *company.aliases, *company.alumni_match)
+        labels = (company.name, *company.aliases)
         for label in labels:
-            key = norm_company(str(label or ""))
+            key = company_matching_key(label)
             if not key:
-                continue
+                raise ConfigError(
+                    f"{company.name}: company names and aliases must normalize to a nonblank value"
+                )
             owner = owners.get(key)
             if owner is not None and owner[0] != index:
                 raise ConfigError(
@@ -632,6 +792,34 @@ def _string_tuple(value) -> tuple[str, ...]:
     if isinstance(value, Sequence):
         return tuple(str(item).strip() for item in value if str(item).strip())
     return (str(value).strip(),)
+
+
+def _aliases_tuple(value: object, company_name: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        values = (value,)
+    elif isinstance(value, Sequence):
+        values = tuple(value)
+    else:
+        values = (value,)
+    aliases: list[str] = []
+    normalized: dict[str, str] = {}
+    for raw_alias in values:
+        alias = str(raw_alias).strip()
+        if not alias:
+            raise ConfigError(f"{company_name}: aliases may not contain blank values")
+        key = company_matching_key(alias)
+        if not key:
+            raise ConfigError(f"{company_name}: alias {alias!r} normalizes to blank")
+        previous = normalized.get(key)
+        if previous is not None:
+            raise ConfigError(
+                f"{company_name}: aliases {previous!r} and {alias!r} normalize to the same value"
+            )
+        normalized[key] = alias
+        aliases.append(alias)
+    return tuple(aliases)
 
 
 def _terms_tuple(value, label: str) -> tuple[str, ...]:

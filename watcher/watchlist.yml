@@ -33,6 +33,7 @@ companies:
     token: "workday"
     workday_shard: "wd5"
     workday_site: "Workday_Early_Career"
+    workday_detail_policy: "early_career_candidates"
     alumni_match: ["workday"]
     source_url: "https://workday.wd5.myworkdayjobs.com/Workday_Early_Career/job/USA-CA-Pleasanton/Analytics-Engineer-Intern_JR-0101608"
 
@@ -63,6 +64,7 @@ companies:
     token: "paypal"
     workday_shard: "wd1"
     workday_site: "jobs"
+    aliases: ["PayPal Holdings"]
     alumni_match: ["paypal"]
     source_url: "https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/San-Jose-California-United-States-of-America/Machine-Learning-Engineer-PhD-Intern_R0130591"
 
@@ -71,6 +73,7 @@ companies:
     token: "salesforce"
     workday_shard: "wd12"
     workday_site: "Futureforce_Internships"
+    workday_detail_policy: "early_career_candidates"
     alumni_match: ["salesforce"]
     source_url: "https://salesforce.wd12.myworkdayjobs.com/Futureforce_Internships/job/California---San-Francisco/Summer-2026-Intern---AI---Data-Science-Analyst_JR340354"
 
@@ -122,6 +125,7 @@ companies:
   - name: "Amazon"
     ats: bespoke
     module: "amazon"
+    aliases: ["Amazon Web Services", "AWS"]
     alumni_match: ["amazon"]
     source_url: "https://amazon.jobs/en/"
     note: "known company-hosted careers portal"
@@ -158,7 +162,7 @@ companies:
   - name: "Bosch"
     ats: smartrecruiters
     token: "BoschGroup"
-    aliases: ["Bosch Group", "Robert Bosch", "BoschGroup"]
+    aliases: ["Bosch Group", "Robert Bosch"]
     alumni_match: ["bosch", "bosch group", "robert bosch", "boschgroup"]
     source_url: "https://jobs.smartrecruiters.com/BoschGroup/744000092298605"
 
@@ -414,6 +418,7 @@ companies:
   - name: "Uber"
     ats: bespoke
     module: "uber"
+    aliases: ["Uber Technologies"]
     alumni_match: ["uber"]
     source_url: "https://www.uber.com/global/en/careers/"
     note: "known company-hosted careers portal with iCIMS university portal"
@@ -442,7 +447,7 @@ companies:
   - name: "ASML"
     ats: smartrecruiters
     token: "ASML1"
-    aliases: ["ASML US"]
+    aliases: ["ASML US", "ASML Holding"]
     alumni_match: ["asml", "asml us"]
     source_url: "https://careers.smartrecruiters.com/ASML1"
 
@@ -451,7 +456,7 @@ companies:
     token: "hp"
     workday_shard: "wd5"
     workday_site: "ExternalCareerSite"
-    aliases: ["HP Inc", "Hewlett Packard", "Hewlett-Packard"]
+    aliases: ["HP Inc", "Hewlett Packard", "Hewlett Packard (HP)"]
     alumni_match: ["hp", "hp inc", "hewlett packard", "hewlett-packard"]
     source_url: "https://hp.wd5.myworkdayjobs.com/ExternalCareerSite"
 
@@ -488,29 +493,34 @@ companies:
   - name: "Goldman Sachs"
     ats: bespoke
     module: "goldman_sachs"
-    aliases: ["Goldman", "The Goldman Sachs Group"]
+    aliases: ["Goldman", "The Goldman Sachs Group", "Goldman Sachs Group"]
     alumni_match: ["goldman sachs", "goldman", "the goldman sachs group"]
     source_url: "https://www.goldmansachs.com/careers"
     note: "company-hosted careers portal; unsupported by current watcher adapters"
 
   - name: "JPMorgan Chase"
-    ats: bespoke
-    module: "jpmorgan_chase"
-    aliases: ["J.P. Morgan", "JP Morgan", "JPMorgan", "JPMC", "Chase"]
+    ats: oracle_hcm
+    oracle_hcm_host: "jpmc.fa.oraclecloud.com"
+    oracle_hcm_site: "CX_1001"
+    aliases: ["JPMorganChase", "J.P. Morgan Chase", "J.P. Morgan", "JP Morgan", "JPMC", "Chase"]
     alumni_match: ["jpmorgan chase", "j.p. morgan", "jp morgan", "jpmorgan", "jpmc", "chase"]
     source_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"
-    note: "Oracle HCM portal; unsupported by current watcher adapters"
+    note: "Official Oracle HCM Candidate Experience portal"
 
   - name: "Barclays"
-    ats: bespoke
-    module: "barclays"
+    ats: talentbrew
+    talentbrew_host: "search.jobs.barclays"
+    talentbrew_site_id: "13015"
+    talentbrew_category_id: "8736272"
+    talentbrew_category_name: "Early Careers"
     alumni_match: ["barclays"]
-    source_url: "https://barclays.wd3.myworkdayjobs.com/External_Career_Site_Barclays"
-    note: "Workday board verified, but current adapter fails this board's schema; adapter follow-up needed"
+    source_url: "https://search.jobs.barclays/search-jobs"
+    note: "Official TalentBrew Early Careers category"
 
   - name: "UBS"
     ats: bespoke
     module: "ubs"
+    aliases: ["UBS Group"]
     alumni_match: ["ubs"]
     source_url: "https://jobs.ubs.com/TGnewUI/Search/Home/Home?partnerid=25008&siteid=5131"
     note: "Taleo-style early careers portal; unsupported by current watcher adapters"
@@ -518,6 +528,7 @@ companies:
   - name: "Nomura"
     ats: bespoke
     module: "nomura"
+    aliases: ["Nomura Holdings"]
     alumni_match: ["nomura"]
     source_url: "https://careers.nomura.com/Nomura/?locale=en_US"
     note: "SuccessFactors portal; unsupported by current watcher adapters"
@@ -540,7 +551,7 @@ companies:
   - name: "Federal Reserve Bank of New York"
     ats: bespoke
     module: "federal_reserve_bank_of_new_york"
-    aliases: ["New York Fed", "FRBNY"]
+    aliases: ["New York Fed", "FRBNY", "Federal Reserve Bank of NY"]
     alumni_match: ["federal reserve bank of new york", "new york fed", "frbny"]
     source_url: "https://rb.wd5.myworkdayjobs.com/FRS"
     note: "Federal Reserve System Workday board verified, but current adapter cannot safely scope to New York Fed; adapter follow-up needed"
@@ -556,7 +567,7 @@ companies:
   - name: "EY"
     ats: bespoke
     module: "ey"
-    aliases: ["Ernst & Young", "Ernst and Young"]
+    aliases: ["Ernst & Young"]
     alumni_match: ["ey", "ernst & young", "ernst and young"]
     source_url: "https://careers.ey.com/"
     note: "SuccessFactors portal; unsupported by current watcher adapters"
@@ -684,7 +695,7 @@ companies:
   - name: "The Carlyle Group"
     ats: bespoke
     module: "the_carlyle_group"
-    aliases: ["Carlyle"]
+    aliases: ["Carlyle", "Carlyle Group"]
     alumni_match: ["the carlyle group", "carlyle"]
     source_url: "https://www.carlyle.com/careers"
     note: "company-hosted careers portal; unsupported by current watcher adapters"
@@ -921,7 +932,7 @@ companies:
   - name: "Strategic Analysis Incorporated"
     ats: bespoke
     module: "strategic_analysis_incorporated"
-    aliases: ["Strategic Analysis, Inc.", "Strategic Analysis"]
+    aliases: ["Strategic Analysis, Inc."]
     alumni_match: ["strategic analysis incorporated", "strategic analysis, inc.", "strategic analysis"]
     source_url: "https://www.vscyberhosting.com/sainc/"
     note: "VSCyberHosting applicant portal; unsupported by current watcher adapters"

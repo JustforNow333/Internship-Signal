@@ -13,8 +13,9 @@ fed before GitHub backstop rows, preserving the direct source tag.
 
 import hashlib
 import re
+import unicodedata
 from collections import Counter, defaultdict
-from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 from .normalize import CANONICAL_COLUMNS
 
@@ -24,7 +25,9 @@ _ATS_ADAPTERS = frozenset(
         "ashby",
         "greenhouse",
         "lever",
+        "oracle_hcm",
         "smartrecruiters",
+        "talentbrew",
         "workable",
         "workday",
     }
@@ -93,6 +96,9 @@ _SEARCH_QUERY_KEYS = frozenset(
         "search",
     }
 )
+_FRAGMENT_POSTING_ROUTES = frozenset(
+    {"job", "jobs", "position", "positions", "role", "roles"}
+)
 
 
 def _squash(text: str) -> str:
@@ -122,12 +128,17 @@ def norm_url(url: str) -> str:
         return url.lower()
     path = parts.path.rstrip("/")
     path_job_id = path.rsplit("/", 1)[-1]
+    # Repeating an identical key/value pair carries no extra identity, so a feed
+    # that emits `?gh_jid=1&gh_jid=1` must canonicalize exactly like `?gh_jid=1`.
+    # Genuinely different values for one key (`?a=1&a=2`) are still preserved.
     query = sorted(
-        (k, v)
-        for k, v in parse_qsl(parts.query)
-        if not k.lower().startswith("utm_")
-        and k.lower() not in _TRACKING_QUERY_KEYS
-        and not (k.lower() == "gh_jid" and v == path_job_id)
+        {
+            (k, v)
+            for k, v in parse_qsl(parts.query)
+            if not k.lower().startswith("utm_")
+            and k.lower() not in _TRACKING_QUERY_KEYS
+            and not (k.lower() == "gh_jid" and v == path_job_id)
+        }
     )
     host = parts.netloc.lower()
     if host == "boards.greenhouse.io":
@@ -147,8 +158,137 @@ def norm_url(url: str) -> str:
     return urlunsplit((scheme, host, path, urlencode(query), ""))
 
 
+def _fragment_posting_id(url: str) -> str:
+    """Extract only an explicitly recognized posting ID from a URL fragment."""
+
+    try:
+        fragment = unquote(urlsplit(str(url or "").strip()).fragment).strip()
+    except (TypeError, ValueError):
+        return ""
+    if not fragment:
+        return ""
+
+    fragment_path, separator, fragment_query = fragment.partition("?")
+    query_text = fragment_query if separator else fragment
+    if query_text.startswith("?"):
+        query_text = query_text[1:]
+    for key, value in parse_qsl(query_text, keep_blank_values=True):
+        if key.casefold() in _POSTING_ID_QUERY_KEYS and value.strip():
+            return value.strip()
+
+    path_segments = [segment.strip() for segment in fragment_path.split("/")]
+    if path_segments and not path_segments[0]:
+        path_segments = path_segments[1:]
+    if (
+        len(path_segments) == 2
+        and path_segments[0].casefold() in _FRAGMENT_POSTING_ROUTES
+        and path_segments[1]
+    ):
+        return path_segments[1]
+    return ""
+
+
+def _fragment_url_requisition(url: str) -> tuple[str, str, str] | None:
+    native_id = _fragment_posting_id(url)
+    normalized = norm_url(url)
+    if not native_id or not normalized:
+        return None
+    try:
+        parts = urlsplit(normalized)
+        host = (parts.hostname or "").casefold()
+        if not host:
+            return None
+        port = parts.port
+    except (TypeError, ValueError):
+        return None
+    normalized_host = f"{host}:{port}" if port is not None else host
+    scope_material = "\0".join(
+        (normalized_host, parts.path or "/", parts.query)
+    )
+    scope = hashlib.sha256(scope_material.encode("utf-8")).hexdigest()
+    return "url_fragment", scope, native_id
+
+
+def _normalized_posting_url(url: str) -> str:
+    """Normalize a URL and retain only a recognized posting fragment ID."""
+
+    normalized = norm_url(url)
+    fragment_id = _fragment_posting_id(url)
+    if not normalized or not fragment_id:
+        return normalized
+    normalized_id = re.sub(r"\s+", "", fragment_id).casefold()
+    return f"{normalized}#posting_id={quote(normalized_id, safe='')}"
+
+
 def canonical_key(row: dict) -> str:
     return "|".join([norm_company(row.get("company", "")), norm_title(row.get("title", "")), norm_location(row.get("location", ""))])
+
+
+def fallback_posting_key(row: dict) -> str:
+    """Return the conservative company/title/location posting identity.
+
+    This is intentionally separate from ``canonical_key`` so historical job
+    IDs remain stable. Posting identity retains programming-language markers
+    that materially distinguish titles and uses the complete location rather
+    than the historical city-only representation.
+    """
+
+    return "|".join(
+        [
+            norm_company(row.get("company", "")),
+            _fallback_title(row.get("title", "")),
+            _fallback_location(row.get("location", "")),
+        ]
+    )
+
+
+def _fallback_title(title: str) -> str:
+    protected = re.sub(
+        r"(?<![a-z0-9])c\s*\+\+(?![a-z0-9+])",
+        " cplusplus ",
+        str(title or ""),
+        flags=re.I,
+    )
+    protected = re.sub(
+        r"(?<![a-z0-9])c\s*#(?![a-z0-9#])",
+        " csharp ",
+        protected,
+        flags=re.I,
+    )
+    squashed = _squash(protected)
+    retained = _non_latin_title_text(protected)
+    if not retained:
+        return squashed
+    return f"{squashed} {retained}".strip()
+
+
+def _non_latin_title_text(title: str) -> str:
+    """Return the deterministic non-Latin text that ASCII squashing discards.
+
+    ``_squash`` keeps only ``[a-z0-9]``, so a wholly non-Latin title collapsed to
+    an empty fallback component and every such posting at one company/location
+    shared a single identity. Accented Latin text is unaffected: combining marks
+    are stripped first, so "café" still normalizes to "caf" exactly as before and
+    existing fallback keys for Latin titles stay byte-identical. This is an exact
+    normalization, not fuzzy matching -- distinct scripts stay distinct.
+    """
+
+    decomposed = unicodedata.normalize("NFKD", str(title or "")).casefold()
+    without_marks = "".join(
+        character
+        for character in decomposed
+        if not unicodedata.combining(character)
+    )
+    retained = [
+        character
+        for character in without_marks
+        if character.isalnum() and not character.isascii()
+    ]
+    return unicodedata.normalize("NFKC", "".join(retained))
+
+
+def _fallback_location(location: str) -> str:
+    return _squash(location)
 
 
 def job_id(row: dict) -> str:
@@ -161,9 +301,9 @@ def analyzed_job_ids(rows) -> list[str]:
 
     The historical 10-character ID remains unchanged unless multiple retained
     postings share it. Distinct watcher postings can legitimately have the same
-    normalized company, title, and location, so colliding rows with unique
-    posting identities receive a deterministic suffix derived from that
-    stronger requisition-or-URL identity.
+    historical normalized company, title, and location, so colliding rows with
+    unique posting identities receive a deterministic suffix derived from the
+    strongest available identity.
 
     If a collision group lacks unique strong identities, its legacy IDs are
     left intact so downstream structural validation continues to reject the
@@ -209,7 +349,9 @@ def stable_requisition_key(row: dict) -> str:
     if preserved:
         return preserved
 
-    url_identity = _ats_url_requisition(row.get("source_url", ""))
+    source_url = row.get("source_url", "")
+    url_identity = _ats_url_requisition(source_url)
+    fragment_identity = _fragment_url_requisition(source_url)
     source_adapter = str(extra.get("source_adapter") or "").strip().casefold()
     source_system = str(extra.get("source_system") or "").strip().casefold()
     native_id = str(extra.get("source_requisition_id") or "").strip()
@@ -217,7 +359,12 @@ def stable_requisition_key(row: dict) -> str:
         native_id = str(extra.get("source_id") or "").strip()
 
     if native_id:
-        provider = source_system or (url_identity[0] if url_identity else "") or source_adapter
+        provider = (
+            source_system
+            or (url_identity[0] if url_identity else "")
+            or source_adapter
+            or "source_native"
+        )
         if provider:
             scope = (
                 url_identity[1]
@@ -229,13 +376,16 @@ def stable_requisition_key(row: dict) -> str:
 
     if url_identity:
         return _requisition_key(*url_identity)
+    if fragment_identity:
+        return _requisition_key(*fragment_identity)
     return ""
 
 
 def is_posting_specific_url(url: str) -> bool:
     """Conservatively distinguish posting URLs from landing/search URLs."""
 
-    normalized = norm_url(url)
+    raw_url = url
+    normalized = norm_url(raw_url)
     if not normalized:
         return False
     try:
@@ -252,7 +402,7 @@ def is_posting_specific_url(url: str) -> bool:
     except (TypeError, ValueError):
         return False
 
-    if _ats_url_requisition(normalized):
+    if _ats_url_requisition(normalized) or _fragment_url_requisition(raw_url):
         return True
     if any(key in _POSTING_ID_QUERY_KEYS and str(value).strip() for key, value in query.items()):
         return True
@@ -293,10 +443,11 @@ def non_specific_posting_urls(rows) -> frozenset[str]:
     requisitions_by_url: dict[str, set[str]] = defaultdict(set)
     non_specific: set[str] = set()
     for row in rows:
-        normalized = norm_url(row.get("source_url", ""))
+        raw_url = row.get("source_url", "")
+        normalized = _normalized_posting_url(raw_url)
         if not normalized:
             continue
-        if not is_posting_specific_url(normalized):
+        if not is_posting_specific_url(raw_url):
             non_specific.add(normalized)
         requisition = stable_requisition_key(row)
         if requisition:
@@ -314,10 +465,11 @@ def posting_specific_url_key(
     *,
     non_specific_urls: frozenset[str] = frozenset(),
 ) -> str:
-    normalized = norm_url(row.get("source_url", ""))
+    raw_url = row.get("source_url", "")
+    normalized = _normalized_posting_url(raw_url)
     if not normalized or normalized in non_specific_urls:
         return ""
-    return normalized if is_posting_specific_url(normalized) else ""
+    return normalized if is_posting_specific_url(raw_url) else ""
 
 
 def posting_identity_key(
@@ -333,7 +485,7 @@ def posting_identity_key(
     url = posting_specific_url_key(row, non_specific_urls=non_specific_urls)
     if url:
         return f"url|{url}"
-    fallback = canonical_key(row)
+    fallback = fallback_posting_key(row)
     return f"fallback|{fallback}" if fallback.strip("|") else ""
 
 
@@ -360,8 +512,8 @@ def posting_match_reason(
     if first_url and second_url:
         return "source_url" if first_url == second_url else None
 
-    first_fallback = canonical_key(first)
-    second_fallback = canonical_key(second)
+    first_fallback = fallback_posting_key(first)
+    second_fallback = fallback_posting_key(second)
     if (
         first_fallback.strip("|")
         and first_fallback == second_fallback
@@ -404,7 +556,7 @@ def dedupe(rows, *, include_identity_diagnostics: bool = False):
 
     def index_row(row: dict) -> None:
         requisition = stable_requisition_key(row)
-        key = canonical_key(row)
+        key = fallback_posting_key(row)
         url = posting_specific_url_key(row, non_specific_urls=non_specific_urls)
         if requisition:
             by_requisition[requisition].append(row)
@@ -419,7 +571,7 @@ def dedupe(rows, *, include_identity_diagnostics: bool = False):
     for row in ordered_rows:
         _ensure_source_provenance(row)
         requisition = stable_requisition_key(row)
-        key = canonical_key(row)
+        key = fallback_posting_key(row)
         url = posting_specific_url_key(row, non_specific_urls=non_specific_urls)
 
         existing = None
@@ -540,6 +692,19 @@ def _ats_url_requisition(url: str) -> tuple[str, str, str] | None:
             scope = f"{host.split('.', 1)[0]}:{segments[0] if segments else ''}"
             native_id = re.sub(r"(?<=\d)-\d+$", "", match.group(1))
             return "workday", scope, native_id
+    if host.endswith(".fa.oraclecloud.com"):
+        lowered = [segment.casefold() for segment in segments]
+        try:
+            sites_index = lowered.index("sites")
+        except ValueError:
+            sites_index = -1
+        if sites_index >= 0 and len(segments) > sites_index + 3:
+            route = lowered[sites_index + 2]
+            if route in {"job", "jobs", "requisition", "requisitions"}:
+                site = segments[sites_index + 1]
+                native_id = segments[sites_index + 3]
+                if site and native_id:
+                    return "oracle_hcm", f"{host}:{site}", native_id
     if host in {"careers.google.com", "www.google.com"} and "results" in {
         segment.casefold() for segment in segments
     }:

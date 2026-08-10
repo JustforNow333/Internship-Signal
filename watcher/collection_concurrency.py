@@ -93,7 +93,13 @@ def origin_key_for_url(url: str) -> str:
     return _safe_key(label)
 
 
-def direct_origin_key(ats: str, token: str = "", workday_shard: str = "") -> str:
+def direct_origin_key(
+    ats: str,
+    token: str = "",
+    workday_shard: str = "",
+    oracle_hcm_host: str = "",
+    talentbrew_host: str = "",
+) -> str:
     """Return the shared origin key for one direct adapter fetch.
 
     Companies that share an ATS host share this key, so two different companies
@@ -107,6 +113,16 @@ def direct_origin_key(ats: str, token: str = "", workday_shard: str = "") -> str
         if tenant == UNKNOWN_ORIGIN or shard == UNKNOWN_ORIGIN:
             return _safe_key("https://myworkdayjobs.com")
         return _safe_key(f"https://{tenant}.{shard}.myworkdayjobs.com")
+    if adapter == "oracle_hcm":
+        host = _safe_key(oracle_hcm_host, limit=253)
+        return _safe_key(
+            f"https://{host}" if host != UNKNOWN_ORIGIN else "https://oraclecloud.com"
+        )
+    if adapter == "talentbrew":
+        host = _safe_key(talentbrew_host, limit=253)
+        return _safe_key(
+            f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:talentbrew"
+        )
     host = DIRECT_ORIGIN_HOSTS.get(adapter)
     if host:
         return _safe_key(f"https://{host}")

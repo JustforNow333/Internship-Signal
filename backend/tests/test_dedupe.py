@@ -1,6 +1,10 @@
 from copy import deepcopy
 
+import pytest
+
 from app.dedupe import (
+    analyzed_job_ids,
+    fallback_posting_key,
     canonical_key,
     dedupe,
     is_posting_specific_url,
@@ -8,6 +12,8 @@ from app.dedupe import (
     norm_company,
     norm_url,
     posting_identity_key,
+    posting_specific_url_key,
+    stable_requisition_key,
 )
 
 
@@ -48,6 +54,12 @@ def test_norm_url_canonicalizes_greenhouse_host_and_redundant_job_id():
     assert norm_url(direct) == norm_url(backstop)
 
 
+def test_norm_url_continues_to_ignore_all_fragments():
+    base = "https://careers.example.test/jobs?department=engineering"
+
+    assert norm_url(f"{base}#/job/ABC123") == norm_url(f"{base}#apply")
+
+
 def test_exact_duplicate_removed_and_reported():
     r1 = _row(1, company="Stripe", title="Backend Intern", location="New York, NY")
     r2 = _row(2, company="Stripe", title="Backend Intern", location="New York, NY")
@@ -59,7 +71,7 @@ def test_exact_duplicate_removed_and_reported():
 
 def test_case_and_whitespace_near_duplicate():
     r1 = _row(1, company="Datadog", title="SWE Intern - Platform", location="New York, NY")
-    r2 = _row(2, company="  DATADOG ", title="swe intern - platform", location="new york")
+    r2 = _row(2, company="  DATADOG ", title="swe intern - platform", location="new york, ny")
     kept, report = dedupe([r1, r2])
     assert len(kept) == 1 and report[0]["matched_on"] == "company+title+location"
 
@@ -327,6 +339,46 @@ def test_same_requisition_id_from_direct_and_github_merges_with_direct_priority(
     assert kept[0]["extra"]["primary_source"] == "direct_ats"
 
 
+def test_oracle_hcm_direct_and_github_rows_merge_on_scoped_requisition_identity():
+    direct = _watcher_row(
+        1,
+        requisition_id="210773759",
+        source_adapter="oracle_hcm",
+        source_url=(
+            "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+            "CX_1001/job/210773759"
+        ),
+    )
+    direct["extra"].update(
+        {
+            "source_system": "oracle_hcm",
+            "source_scope": "jpmc.fa.oraclecloud.com:CX_1001",
+        }
+    )
+    github = _watcher_row(
+        2,
+        source="github",
+        source_adapter="github_listings",
+        requisition_id="",
+        company="JPMorgan Chase",
+        title="Software Engineer Program - GitHub wording",
+        location="Multiple Locations",
+        source_url=(
+            "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+            "CX_1001/job/210773759?utm_source=github"
+        ),
+    )
+
+    kept, report = dedupe([github, direct])
+
+    assert stable_requisition_key(github) == stable_requisition_key(direct)
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "requisition_id"
+    assert report[0]["cross_source"] is True
+    assert kept[0]["extra"]["source"] == "direct"
+    assert kept[0]["extra"]["primary_source"] == "direct_ats"
+
+
 def test_posting_specific_url_tracking_variants_merge_without_requisition_id():
     first = _watcher_row(
         1,
@@ -345,6 +397,156 @@ def test_posting_specific_url_tracking_variants_merge_without_requisition_id():
 
     assert len(kept) == 1
     assert report[0]["matched_on"] == "source_url"
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "job_id=ABC123",
+        "jobId=ABC123",
+        "?jobId=ABC123",
+        "/search?jobId=ABC123",
+        "/job/ABC123",
+        "jobs/ABC123",
+        "/position/ABC123",
+        "positions/ABC123",
+        "/role/ABC123",
+        "roles/%41BC123",
+    ],
+)
+def test_supported_fragment_posting_id_syntaxes_share_one_identity(fragment):
+    canonical = _watcher_row(
+        1,
+        requisition_id="",
+        source_url=(
+            "https://careers.example.test/jobs?utm_source=direct"
+            "#/job/abc123"
+        ),
+    )
+    variant = _watcher_row(
+        2,
+        requisition_id="",
+        source_url=f"https://careers.example.test/jobs?ref=feed#{fragment}",
+    )
+
+    kept, report = dedupe([canonical, variant])
+
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "requisition_id"
+    assert stable_requisition_key(canonical) == stable_requisition_key(variant)
+    assert posting_specific_url_key(canonical) == posting_specific_url_key(variant)
+    assert is_posting_specific_url(variant["source_url"]) is True
+
+
+def test_fragment_ids_keep_same_fallback_postings_and_analyzed_ids_distinct():
+    first = _watcher_row(
+        1,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#/job/ABC123",
+    )
+    second = _watcher_row(
+        2,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#/job/XYZ789",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert len(kept) == 2
+    assert report == []
+    assert len({posting_identity_key(row) for row in kept}) == 2
+    assert len(set(analyzed_job_ids(kept))) == 2
+
+
+def test_fragment_identity_is_scoped_by_host_and_normalized_base_path():
+    rows = [
+        _watcher_row(
+            1,
+            requisition_id="",
+            source_url="https://one.example.test/jobs/#/job/ABC123",
+        ),
+        _watcher_row(
+            2,
+            requisition_id="",
+            source_url="https://two.example.test/jobs#/job/ABC123",
+        ),
+        _watcher_row(
+            3,
+            requisition_id="",
+            source_url="https://one.example.test/careers#/job/ABC123",
+        ),
+    ]
+
+    kept, report = dedupe(rows)
+
+    assert len(kept) == 3
+    assert report == []
+    assert len({stable_requisition_key(row) for row in kept}) == 3
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "apply",
+        "description",
+        "requirements",
+        "benefits",
+        "overview",
+        "top",
+        "job_id=",
+        "?jobId=",
+        "/job/",
+        "/opening/ABC123",
+        "/jobs/ABC123/details",
+        "jobId",
+    ],
+)
+def test_ordinary_blank_and_unsupported_fragments_are_ignored(fragment):
+    row = _watcher_row(
+        1,
+        requisition_id="",
+        source_url=f"https://careers.example.test/jobs#{fragment}",
+    )
+
+    assert stable_requisition_key(row) == ""
+    assert posting_specific_url_key(row) == ""
+    assert is_posting_specific_url(row["source_url"]) is False
+
+
+def test_different_ordinary_anchors_do_not_create_distinct_identities():
+    first = _watcher_row(
+        1,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#apply",
+    )
+    second = _watcher_row(
+        2,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#description",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "company+title+location"
+    assert posting_identity_key(first) == posting_identity_key(second)
+
+
+def test_explicit_source_requisition_id_precedes_fragment_identity():
+    explicit = _watcher_row(
+        1,
+        requisition_id="NATIVE-999",
+        source_url="https://careers.example.test/jobs#/job/ABC123",
+    )
+    fragment_only = _watcher_row(
+        2,
+        requisition_id="",
+        source_url="https://careers.example.test/jobs#/job/ABC123",
+    )
+
+    assert stable_requisition_key(explicit).endswith("|native-999")
+    assert stable_requisition_key(explicit) != stable_requisition_key(fragment_only)
+    assert posting_identity_key(explicit) != posting_identity_key(fragment_only)
 
 
 def test_different_posting_specific_urls_remain_distinct_despite_same_fallback():
@@ -396,6 +598,152 @@ def test_exact_fallback_duplicate_merges_when_no_stronger_identity_exists():
     assert report[0]["matched_on"] == "company+title+location"
 
 
+def test_fallback_language_titles_keep_distinct_postings_and_analyzed_ids():
+    rows = [
+        _watcher_row(
+            index,
+            requisition_id="",
+            title=title,
+            location="Austin, TX",
+            source_url="https://careers.example.test/internships",
+        )
+        for index, title in enumerate(
+            ("C++ Intern", "C# Intern", "C Intern"),
+            start=1,
+        )
+    ]
+
+    kept, report = dedupe(rows)
+
+    # The historical content identity remains unchanged, while posting
+    # identity distinguishes the language-specific fallback postings.
+    assert len({canonical_key(row) for row in rows}) == 1
+    assert len(kept) == 3
+    assert report == []
+    assert len({posting_identity_key(row) for row in kept}) == 3
+    assert len(set(analyzed_job_ids(kept))) == 3
+
+
+def test_fallback_language_title_formatting_variants_still_merge():
+    rows = [
+        _watcher_row(
+            1,
+            requisition_id="",
+            title="C++ Intern",
+            source_url="",
+        ),
+        _watcher_row(
+            2,
+            requisition_id="",
+            title="c ++ intern",
+            source_url="",
+        ),
+        _watcher_row(
+            3,
+            requisition_id="",
+            title="C# Intern",
+            source_url="",
+        ),
+        _watcher_row(
+            4,
+            requisition_id="",
+            title="c # intern",
+            source_url="",
+        ),
+    ]
+
+    kept, report = dedupe(rows)
+
+    assert [row["title"] for row in kept] == ["C++ Intern", "C# Intern"]
+    assert [entry["matched_on"] for entry in report] == [
+        "company+title+location",
+        "company+title+location",
+    ]
+
+
+def test_fallback_location_keeps_same_city_in_different_states_distinct():
+    illinois = _watcher_row(
+        1,
+        requisition_id="",
+        location="Springfield, IL",
+        source_url="",
+    )
+    massachusetts = _watcher_row(
+        2,
+        requisition_id="",
+        location="Springfield, MA",
+        source_url="",
+    )
+
+    kept, report = dedupe([illinois, massachusetts])
+
+    assert len(kept) == 2
+    assert report == []
+    assert posting_identity_key(illinois) != posting_identity_key(massachusetts)
+
+
+def test_fallback_complete_location_case_and_whitespace_variants_merge():
+    first = _watcher_row(
+        1,
+        requisition_id="",
+        location="Springfield, IL",
+        source_url="",
+    )
+    second = _watcher_row(
+        2,
+        requisition_id="",
+        location="  SPRINGFIELD ,   il  ",
+        source_url="",
+    )
+
+    kept, report = dedupe([first, second])
+
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "company+title+location"
+
+
+def test_stronger_identities_still_merge_different_titles_and_locations():
+    requisition_first = _watcher_row(
+        1,
+        requisition_id="GOOG-SHARED",
+        title="C++ Intern",
+        location="Springfield, IL",
+    )
+    requisition_second = _watcher_row(
+        2,
+        requisition_id="GOOG-SHARED",
+        title="C# Intern",
+        location="Springfield, MA",
+    )
+    url_first = _watcher_row(
+        3,
+        requisition_id="",
+        title="C++ Intern",
+        location="Springfield, IL",
+        source_url="https://careers.example.test/jobs/shared-language-role",
+    )
+    url_second = _watcher_row(
+        4,
+        requisition_id="",
+        title="C# Intern",
+        location="Springfield, MA",
+        source_url=(
+            "https://careers.example.test/jobs/shared-language-role"
+            "?utm_source=backstop"
+        ),
+    )
+
+    requisition_kept, requisition_report = dedupe(
+        [requisition_first, requisition_second]
+    )
+    url_kept, url_report = dedupe([url_first, url_second])
+
+    assert len(requisition_kept) == 1
+    assert requisition_report[0]["matched_on"] == "requisition_id"
+    assert len(url_kept) == 1
+    assert url_report[0]["matched_on"] == "source_url"
+
+
 def test_similar_titles_alone_do_not_merge():
     first = _watcher_row(
         1,
@@ -419,3 +767,94 @@ def test_similar_titles_alone_do_not_merge():
         "Software Engineer Intern II",
     }
     assert report == []
+
+
+# --------------------------------------------------------------------------
+# Identity hardening: duplicate query parameters and non-Latin fallback titles
+# --------------------------------------------------------------------------
+
+
+def test_duplicate_identical_query_parameters_canonicalize_to_one_identity():
+    single = "https://example.test/jobs?gh_jid=7895562"
+    doubled = "https://example.test/jobs?gh_jid=7895562&gh_jid=7895562"
+
+    assert norm_url(single) == norm_url(doubled)
+    assert norm_url(doubled) == "https://example.test/jobs?gh_jid=7895562"
+
+
+def test_genuinely_different_repeated_query_values_stay_distinct():
+    normalized = norm_url("https://example.test/jobs?team=1&team=2")
+
+    assert normalized == "https://example.test/jobs?team=1&team=2"
+    assert norm_url("https://example.test/jobs?team=1") != normalized
+
+
+def test_aqr_duplicate_gh_jid_resolves_to_a_single_posting_identity():
+    single = _row(1, company="AQR Capital", title="2027 Trading Summer Analyst",
+                  source_url="https://careers.aqr.com/jobs?gh_jid=7895562")
+    doubled = _row(2, company="AQR Capital", title="2027 Trading Summer Analyst",
+                   source_url="https://careers.aqr.com/jobs?gh_jid=7895562&gh_jid=7895562")
+
+    assert posting_identity_key(single) == posting_identity_key(doubled)
+    kept, report = dedupe([deepcopy(single), deepcopy(doubled)])
+    assert len(kept) == 1
+    assert [entry["matched_on"] for entry in report] == ["source_url"]
+
+
+def test_non_latin_titles_produce_non_empty_deterministic_fallback_keys():
+    row = _row(1, company="Pfizer", title="医学信息沟通专员",
+               location="China - Beijing - Beijing")
+
+    key = fallback_posting_key(row)
+
+    assert key == fallback_posting_key(dict(row))
+    assert key.split("|")[1] != ""
+    assert key == "pfizer|医学信息沟通专员|china beijing beijing"
+
+
+def test_unrelated_non_latin_titles_at_one_company_and_location_do_not_collide():
+    first = _row(1, company="Pfizer", title="医学信息沟通专员",
+                 location="China - Beijing - Beijing")
+    second = _row(2, company="Pfizer", title="渠道支持经理",
+                  location="China - Beijing - Beijing")
+
+    assert fallback_posting_key(first) != fallback_posting_key(second)
+    assert posting_identity_key(first) != posting_identity_key(second)
+    kept, _report = dedupe([deepcopy(first), deepcopy(second)])
+    assert len(kept) == 2
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("Software Engineer Intern", "software engineer intern"),
+        ("C++ Developer Intern", "cplusplus developer intern"),
+        ("C# Developer Intern", "csharp developer intern"),
+        # Accented Latin decomposes to its ASCII base exactly as before.
+        ("Café Engineer", "caf engineer"),
+        # Legacy behaviour: a combining-mark letter has always acted as a
+        # separator here, and the Unicode fix must not disturb that.
+        ("Señor Software Intern", "se or software intern"),
+    ],
+)
+def test_latin_fallback_titles_are_unchanged_by_the_unicode_fix(title, expected):
+    assert fallback_posting_key(_row(1, company="X", title=title)).split("|")[1] == expected
+
+
+def test_mixed_script_titles_retain_both_components():
+    key = fallback_posting_key(_row(1, company="X", title="Software Engineer 医学"))
+
+    assert key.split("|")[1] == "software engineer 医学"
+
+
+def test_workday_requisition_suffix_collapsing_is_unchanged():
+    base = "https://x.wd1.myworkdayjobs.com/Site/job/Loc/Intern_R100"
+    first = _row(1, company="X", title="Intern",
+                 source_url=f"{base}-1",
+                 extra={"source": "direct", "source_adapter": "workday"})
+    second = _row(2, company="X", title="Intern",
+                  source_url=f"{base}-2",
+                  extra={"source": "direct", "source_adapter": "workday"})
+
+    assert stable_requisition_key(first) == stable_requisition_key(second)
+    assert stable_requisition_key(first).endswith("|r100")

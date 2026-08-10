@@ -14,7 +14,7 @@ from typing import Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from backend.app.dedupe import (
-    canonical_key,
+    fallback_posting_key,
     non_specific_posting_urls,
     norm_company,
     norm_title,
@@ -22,6 +22,11 @@ from backend.app.dedupe import (
     posting_identity_key,
     posting_specific_url_key,
     stable_requisition_key,
+)
+from watcher.company_matching import (
+    company_matching_key,
+    match_watchlist_company,
+    matched_company_label,
 )
 from watcher.config import CompanyCfg, WatcherConfig
 from watcher.eligibility import OUTSIDE_US, determine_watcher_eligibility
@@ -388,7 +393,7 @@ def evaluate_posting_outcome(
         requisition_key=requisition_key,
         normalized_url=normalized_url,
         posting_url_key=posting_url_key,
-        fallback_key=canonical_key(job),
+        fallback_key=fallback_posting_key(job),
         generic_or_shared_url=bool(normalized_url and not posting_url_key),
         sources=sources,
         source_details=source_details,
@@ -607,6 +612,7 @@ def build_posting_trace(
             "normalized_posting_url": safe_posting_url(normalized_url),
             "normalized_posting_url_hash": normalized_url_hash(normalized_url),
             "posting_specific_url_key": safe_posting_url(posting_url_key),
+            "posting_specific_url_key_hash": normalized_url_hash(posting_url_key),
             "fallback_key": fallback_key,
             "generic_or_shared_url": bool(normalized_url and not posting_url_key),
         },
@@ -790,13 +796,17 @@ def enrich_duplicate_entries(
             data[f"{prefix}_normalized_url_hash"] = normalized_url_hash(
                 normalized
             )
-            data[f"{prefix}_fallback_key"] = canonical_key(dict(row))
+            data[f"{prefix}_fallback_key"] = fallback_posting_key(dict(row))
+            posting_url_key = posting_specific_url_key(
+                dict(row),
+                non_specific_urls=non_specific_urls,
+            )
+            data[f"{prefix}_posting_specific_url_key_hash"] = (
+                normalized_url_hash(posting_url_key)
+            )
             data[f"{prefix}_generic_or_shared_url"] = bool(
                 normalized
-                and not posting_specific_url_key(
-                    dict(row),
-                    non_specific_urls=non_specific_urls,
-                )
+                and not posting_url_key
             )
         if isinstance(duplicate, Mapping) and isinstance(kept, Mapping):
             duplicate_raw_url = str(duplicate.get("source_url") or "").strip()
@@ -898,17 +908,6 @@ def posting_season(
     }
 
 
-def match_watchlist_company(
-    company_name: str,
-    companies: Iterable[CompanyCfg],
-) -> CompanyCfg | None:
-    normalized = norm_company(company_name)
-    for company in companies:
-        if any(normalized == norm_company(name) for name in company.match_names()):
-            return company
-    return None
-
-
 def source_sightings(extra: Mapping[str, object]) -> tuple[list[str], dict[str, object]]:
     raw_sources = extra.get("sources")
     if isinstance(raw_sources, (list, tuple)):
@@ -967,7 +966,7 @@ def query_matches_trace(
     matched: list[str] = []
 
     if query.company:
-        wanted = norm_company(query.company)
+        wanted = company_matching_key(query.company)
         configured = data.get("watchlist_match")
         configured_name = (
             str(configured.get("configured_company") or "")
@@ -975,8 +974,8 @@ def query_matches_trace(
             else ""
         )
         if wanted not in {
-            norm_company(str(posting.get("company") or "")),
-            norm_company(configured_name),
+            company_matching_key(str(posting.get("company") or "")),
+            company_matching_key(configured_name),
         }:
             return False, []
         matched.append("company")
@@ -986,23 +985,55 @@ def query_matches_trace(
         matched.append("title")
     if query.url:
         wanted = norm_url(query.url)
+        wanted_url_key = posting_specific_url_key(
+            {"source_url": query.url}
+        )
+        wanted_requisition = stable_requisition_key(
+            {"source_url": query.url}
+        )
         stored_url = str(posting.get("url") or "")
         stored_normalized = str(identity.get("normalized_posting_url") or "")
         stored_hash = str(identity.get("normalized_posting_url_hash") or "")
-        main_url_match = (
-            wanted not in {norm_url(stored_url), norm_url(stored_normalized)}
-            and normalized_url_hash(wanted) != stored_hash
-        ) is False
-        duplicate_url_match = any(
-            (
-                wanted
-                == norm_url(str(item.get("duplicate_normalized_url") or ""))
-                or normalized_url_hash(wanted)
-                == str(item.get("duplicate_normalized_url_hash") or "")
-            )
-            for item in duplicates
-            if isinstance(item, Mapping)
+        stored_url_key_hash = str(
+            identity.get("posting_specific_url_key_hash") or ""
         )
+        if wanted_url_key and stored_url_key_hash:
+            main_url_match = (
+                normalized_url_hash(wanted_url_key) == stored_url_key_hash
+            )
+            duplicate_url_match = any(
+                normalized_url_hash(wanted_url_key)
+                == str(
+                    item.get("duplicate_posting_specific_url_key_hash") or ""
+                )
+                for item in duplicates
+                if isinstance(item, Mapping)
+            )
+        elif wanted_requisition:
+            main_url_match = wanted_requisition == str(
+                identity.get("requisition_key") or ""
+            )
+            duplicate_url_match = any(
+                wanted_requisition
+                == str(item.get("duplicate_requisition_key") or "")
+                for item in duplicates
+                if isinstance(item, Mapping)
+            )
+        else:
+            main_url_match = (
+                wanted not in {norm_url(stored_url), norm_url(stored_normalized)}
+                and normalized_url_hash(wanted) != stored_hash
+            ) is False
+            duplicate_url_match = any(
+                (
+                    wanted
+                    == norm_url(str(item.get("duplicate_normalized_url") or ""))
+                    or normalized_url_hash(wanted)
+                    == str(item.get("duplicate_normalized_url_hash") or "")
+                )
+                for item in duplicates
+                if isinstance(item, Mapping)
+            )
         if not main_url_match and not duplicate_url_match:
             return False, []
         matched.append("url")
@@ -1286,11 +1317,7 @@ def _winning_priority(extra: Mapping[str, object]) -> int | None:
 def _matched_alias(posting_company: str, company: CompanyCfg | None) -> str | None:
     if company is None:
         return None
-    normalized = norm_company(posting_company)
-    for name in company.match_names():
-        if norm_company(name) == normalized:
-            return name
-    return None
+    return matched_company_label(posting_company, company)
 
 
 def _term_token(value: object) -> str:

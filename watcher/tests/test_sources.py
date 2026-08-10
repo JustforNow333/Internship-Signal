@@ -33,6 +33,7 @@ def workday_company(name="Merck"):
         token="merck",
         workday_shard="wd5",
         workday_site="Search_Jobs",
+        workday_detail_policy="none",
     )
 
 
@@ -331,14 +332,23 @@ def test_workday_other_record_schema_error_is_skipped_with_stable_reason(monkeyp
 
 
 def test_workday_fetch_skips_malformed_records_across_pages_and_uses_raw_offsets(monkeypatch):
+    page_size = WorkdaySource.page_size
+    filler = [
+        workday_posting(f"Filler Intern {index}", f"/job/Test/Filler_R{index}")
+        for index in range(page_size - 2)
+    ]
     payloads = [
         {
-            "jobPostings": [workday_posting("First Intern", "/job/Test/First_R1"), {"title": "Bad"}],
-            "total": 4,
+            "jobPostings": [
+                workday_posting("First Intern", "/job/Test/First_R1"),
+                *filler,
+                {"title": "Bad"},
+            ],
+            "total": page_size + 2,
         },
         {
             "jobPostings": [{"externalPath": "/job/Test/Bad_R2"}, workday_posting("Later Intern", "/job/Test/Later_R3")],
-            "total": 4,
+            "total": page_size + 2,
         },
     ]
     offsets = []
@@ -351,10 +361,11 @@ def test_workday_fetch_skips_malformed_records_across_pages_and_uses_raw_offsets
     source = WorkdaySource()
     rows = source.fetch(workday_company())
 
-    assert offsets == [0, 2]
-    assert [item["title"] for item in rows] == ["First Intern", "Later Intern"]
-    assert source.last_diagnostics.raw_postings_seen == 4
-    assert source.last_diagnostics.valid_rows_retained == 2
+    assert offsets == [0, page_size]
+    assert rows[0]["title"] == "First Intern"
+    assert rows[-1]["title"] == "Later Intern"
+    assert source.last_diagnostics.raw_postings_seen == page_size + 2
+    assert source.last_diagnostics.valid_rows_retained == page_size
     assert source.last_diagnostics.malformed_postings_skipped == 2
 
 
@@ -367,16 +378,22 @@ def test_workday_parse_nonempty_all_malformed_raises_schema_error():
 
 
 def test_workday_complete_paginated_fetch_with_no_valid_rows_raises(monkeypatch):
+    page_size = WorkdaySource.page_size
     payloads = [
-        {"jobPostings": [{"title": "Bad"}], "total": 2},
-        {"jobPostings": [{"externalPath": "/job/Test/Bad_R2"}], "total": 2},
+        {
+            "jobPostings": [{"title": f"Bad {index}"} for index in range(page_size)],
+            "total": page_size + 1,
+        },
+        {"jobPostings": [{"externalPath": "/job/Test/Bad_R2"}], "total": page_size + 1},
     ]
 
     def fake_post_json(url, data, source_name):
         return payloads.pop(0)
 
     monkeypatch.setattr("watcher.sources.workday.post_json", fake_post_json)
-    with pytest.raises(SourceSchemaError, match="2 posting record.*none were valid"):
+    with pytest.raises(
+        SourceSchemaError, match=f"{page_size + 1} posting record.*none were valid"
+    ):
         WorkdaySource().fetch(workday_company())
 
 
@@ -506,7 +523,14 @@ def test_workday_repeated_page_fails_and_diagnostics_do_not_leak(monkeypatch):
     )
     assert source.last_diagnostics.malformed_postings_skipped == 1
     offsets = []
-    payload = {"jobPostings": [workday_posting()], "total": 3}
+    page_size = WorkdaySource.page_size
+    payload = {
+        "jobPostings": [
+            workday_posting(f"Repeated Intern {index}", f"/job/Test/Repeated_R{index}")
+            for index in range(page_size)
+        ],
+        "total": page_size * 5,
+    }
 
     def fake_post_json(url, data, source_name):
         offsets.append(data["offset"])
@@ -516,7 +540,7 @@ def test_workday_repeated_page_fails_and_diagnostics_do_not_leak(monkeypatch):
     with pytest.raises(SourceSchemaError, match="repeated pagination page"):
         source.fetch(workday_company())
 
-    assert offsets == [0, 1]
+    assert offsets == [0, page_size]
     assert source.last_diagnostics.malformed_postings_skipped == 0
     assert source.last_diagnostics.raw_postings_seen == 0
 
@@ -598,6 +622,36 @@ def test_workable_fixture_to_canonical_rows():
     assert assess_us_location(first).status == LOCATION_US
 
 
+def test_workable_preserves_non_null_optional_list_values_in_order():
+    payload = {
+        "total": 1,
+        "results": [
+            {
+                "id": "job-1",
+                "title": "Software Intern",
+                "shortcode": "ABC123",
+                "url": "https://example.test/jobs/ABC123",
+                "department": [None, "", 0, False, "Engineering", " Platform "],
+                "locations": [
+                    None,
+                    {"city": "Boston", "region": "MA", "country": "US"},
+                    {},
+                    {"city": "New York", "region": "NY", "country": "US"},
+                ],
+            }
+        ],
+    }
+
+    row = WorkableSource().parse(
+        payload,
+        CompanyCfg(name="Example", ats="workable", token="example"),
+    )[0]
+
+    assert row["location"] == "Boston, MA, US; New York, NY, US"
+    assert row["extra"]["department"] == "0, False, Engineering, Platform"
+    assert "None" not in row["extra"]["department"]
+
+
 def test_workable_watchlist_company_with_no_openings_parses_empty_real_response():
     payload = load_fixture("workable_iceye_empty.json")
     rows = WorkableSource().parse(payload, CompanyCfg(name="ICEYE", ats="workable", token="iceye"))
@@ -630,6 +684,68 @@ def test_github_listings_fixture_filters_active_company_and_terms():
     assert row["extra"]["source_adapter"] == "github_listings"
     assert row["extra"]["feed_url"] == TEST_GITHUB_FEED_URL
     assert source.url == TEST_GITHUB_FEED_URL
+
+
+@pytest.mark.parametrize(
+    "source_term",
+    [
+        "Summer-2027",
+        "Summer 2027 Internship",
+        "2027 Summer",
+        "Summer '27",
+        "Summer ’27",
+    ],
+)
+def test_github_listings_matches_supported_season_term_variants(source_term):
+    payload = [
+        {
+            "company_name": "GitHub",
+            "title": "Software Engineering Intern",
+            "locations": ["United States"],
+            "url": "https://example.test/jobs/season-variant",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": [source_term],
+        }
+    ]
+
+    rows = GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(
+        payload,
+        CompanyCfg(name="GitHub", terms=("Summer 2027",)),
+    )
+
+    assert len(rows) == 1
+
+
+@pytest.mark.parametrize(
+    "source_term",
+    [
+        "Summer 2028",
+        "Fall 2027",
+        "2027 Internship",
+        "Summer",
+        "Summer 2027 Analyst",
+    ],
+)
+def test_github_listings_rejects_non_equivalent_season_terms(source_term):
+    payload = [
+        {
+            "company_name": "GitHub",
+            "title": "Software Engineering Intern",
+            "locations": ["United States"],
+            "url": "https://example.test/jobs/nonmatching-season",
+            "date_posted": "2026-08-04",
+            "active": True,
+            "terms": [source_term],
+        }
+    ]
+
+    rows = GitHubListingsSource(TEST_GITHUB_FEED_URL).parse(
+        payload,
+        CompanyCfg(name="GitHub", terms=("Summer 2027",)),
+    )
+
+    assert rows == []
 
 
 def test_github_markdown_fixture_parses_links_markers_dates_and_skips_bad_rows(caplog):
@@ -732,6 +848,98 @@ def test_github_markdown_nonempty_all_malformed_table_fails():
 
     with pytest.raises(SourceSchemaError, match="all malformed"):
         source.parse(payload, (CompanyCfg(name="Acme", terms=("Summer 2027",)),))
+
+
+def test_github_markdown_multiple_tables_parse_all_orders_boundaries_and_markers(
+    caplog,
+):
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="multi_table",
+        default_term="Summer ’27",
+    )
+    companies = (
+        CompanyCfg(name="JPMorgan Chase", terms=("Summer 2027",)),
+        CompanyCfg(name="Google", terms=("Summer 2027",)),
+        CompanyCfg(name="KPMG", terms=("Summer 2027",)),
+        CompanyCfg(
+            name="Amazon",
+            aliases=("Amazon Web Services",),
+            terms=("Summer 2027",),
+        ),
+    )
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="watcher.sources.github_markdown_table",
+    ):
+        rows = source.parse(
+            load_text_fixture("github_markdown_multiple_tables.md"),
+            companies,
+        )
+
+    assert [row["company"] for row in rows] == [
+        "JPMorgan Chase & Co.",
+        "Google",
+        "KPMG LLP",
+        "Amazon Web Services",
+    ]
+    assert rows[0]["source_url"].endswith("?utm_source=first")
+    assert rows[2]["extra"]["closed"] is True
+    assert rows[2]["extra"]["no_sponsorship"] is True
+    assert rows[2]["extra"]["us_citizenship_required"] is True
+    assert rows[3]["internship_type"] == "Summer ’27"
+    assert source.last_diagnostics.candidate_tables == 4
+    assert source.last_diagnostics.valid_tables == 3
+    assert source.last_diagnostics.rows_by_table == (2, 1, 1)
+    assert source.last_diagnostics.duplicates_removed == 1
+    assert source.last_diagnostics.malformed_tables == 1
+    assert "malformed candidate table" in caplog.text
+    assert "Ignored Co" not in caplog.text
+
+
+def test_github_markdown_one_malformed_table_does_not_discard_valid_tables():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="multi_table",
+        default_term="Summer 2027",
+    )
+
+    rows = source.parse(
+        load_text_fixture("github_markdown_multiple_tables.md"),
+        (CompanyCfg(name="Google", terms=("Summer 2027",)),),
+    )
+
+    assert [row["company"] for row in rows] == ["Google"]
+    assert source.last_diagnostics.malformed_tables == 1
+
+
+def test_github_markdown_only_malformed_candidate_tables_raise():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="malformed_tables",
+        default_term="Summer 2027",
+    )
+
+    with pytest.raises(SourceSchemaError, match="invalid separator"):
+        source.parse(
+            load_text_fixture("github_markdown_only_malformed_tables.md"),
+            (),
+        )
+
+
+def test_github_markdown_all_candidate_rows_across_tables_malformed_raise():
+    source = GitHubMarkdownTableSource(
+        "https://fixtures.example.test/internships/README.md",
+        source_name="malformed_rows",
+        default_term="Summer 2027",
+    )
+
+    with pytest.raises(SourceSchemaError, match="all malformed"):
+        source.parse(
+            load_text_fixture("github_markdown_all_rows_malformed.md"),
+            (CompanyCfg(name="Acme", terms=("Summer 2027",)),),
+        )
 
 
 def test_github_listings_matches_aliases_and_filters_inactive_or_wrong_term():

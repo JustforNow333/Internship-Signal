@@ -513,9 +513,19 @@ def test_pacer_waits_between_tenants_and_can_be_disabled():
 
 
 def test_pagination_does_not_apply_tenant_pacing_per_page():
+    page_size = WorkdaySource.page_size
     payloads = [
-        {"jobPostings": [{"title": "One", "externalPath": "/job/One"}], "total": 2},
-        {"jobPostings": [{"title": "Two", "externalPath": "/job/Two"}], "total": 2},
+        {
+            "jobPostings": [
+                {"title": f"Page One {index}", "externalPath": f"/job/One_{index}"}
+                for index in range(page_size)
+            ],
+            "total": page_size + 1,
+        },
+        {
+            "jobPostings": [{"title": "Two", "externalPath": "/job/Two"}],
+            "total": page_size + 1,
+        },
     ]
     sleeps = []
     source = WorkdaySource(
@@ -527,7 +537,7 @@ def test_pagination_does_not_apply_tenant_pacing_per_page():
 
     rows = source.fetch(workday_company())
 
-    assert len(rows) == 2
+    assert len(rows) == page_size + 1
     assert sleeps == []
     assert source.last_diagnostics.request_attempts == 2
 

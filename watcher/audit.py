@@ -13,6 +13,7 @@ from typing import Mapping, Sequence, TextIO
 
 from backend.app.ingest import analyze_rows
 from backend.app.dedupe import norm_company, norm_title
+from watcher.company_matching import company_matching_key
 from watcher.audit_trace import (
     AuditQuery,
     PostingAuditTrace,
@@ -238,10 +239,10 @@ def _job_may_match_live_query(
             config.companies,
         )
         company_names = {
-            norm_company(str(job.get("company") or "")),
-            norm_company(configured.name) if configured else "",
+            company_matching_key(str(job.get("company") or "")),
+            company_matching_key(configured.name) if configured else "",
         }
-        if norm_company(query.company) not in company_names:
+        if company_matching_key(query.company) not in company_names:
             return False
     if query.title and norm_title(query.title) not in norm_title(
         str(job.get("title") or "")
@@ -528,9 +529,28 @@ def _seen_record_matches(
     ).casefold():
         return False
     if query.url:
-        from backend.app.dedupe import norm_url
+        from backend.app.dedupe import (
+            norm_url,
+            posting_specific_url_key,
+            stable_requisition_key,
+        )
 
-        if norm_url(query.url) != norm_url(str(record.get("url") or "")):
+        query_requisition = stable_requisition_key({"source_url": query.url})
+        stored_url = str(record.get("url") or "")
+        query_url_key = posting_specific_url_key({"source_url": query.url})
+        stored_url_key = posting_specific_url_key({"source_url": stored_url})
+        stored_requisition = str(record.get("requisition_key") or "")
+        if not stored_requisition:
+            stored_requisition = stable_requisition_key(
+                {"source_url": stored_url}
+            )
+        if query_url_key or stored_url_key:
+            if query_url_key != stored_url_key:
+                return False
+        elif query_requisition or stored_requisition:
+            if query_requisition != stored_requisition:
+                return False
+        elif norm_url(query.url) != norm_url(stored_url):
             return False
     if query.requisition_id:
         value = str(record.get("requisition_key") or "").casefold()

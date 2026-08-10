@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "Offset": 0,
+      "Limit": 2,
+      "TotalJobsCount": 2,
+      "requisitionList": [
+        {
+          "Id": "210773759",
+          "Title": "2027 Software Engineer Program - Summer Internship",
+          "PrimaryLocation": "New York, NY, United States",
+          "secondaryLocations": [
+            {"Name": "Chicago, IL, United States"},
+            {"Name": "New York, NY, United States"}
+          ],
+          "otherWorkLocations": [
+            {"Name": "Dallas, TX, United States"}
+          ],
+          "ExternalResponsibilitiesStr": "<p>Build reliable software.</p>",
+          "ExternalQualificationsStr": "<p>Currently enrolled in a degree program.</p>",
+          "ShortDescriptionStr": "Join a software engineering team.",
+          "PostedDate": "2026-07-15T00:00:00+00:00",
+          "PostingEndDate": "2026-10-01T23:59:59+00:00",
+          "Category": "Intern",
+          "JobType": "Full time",
+          "WorkplaceType": "Hybrid"
+        },
+        {
+          "Id": "210800001",
+          "Title": "Operations Analyst"
+        }
+      ]
+    }
+  ],
+  "count": 1,
+  "hasMore": false,
+  "limit": 25,
+  "offset": 0
+}
