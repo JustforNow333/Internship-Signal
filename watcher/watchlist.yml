@@ -24,6 +24,7 @@ companies:
   - name: "Arm"
     ats: bespoke
     module: "arm"
+    platform_family: "iCIMS"
     alumni_match: ["arm"]
     source_url: "https://careers.arm.com/"
     note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
@@ -80,6 +81,7 @@ companies:
   - name: "JHU Applied Physics Laboratory"
     ats: bespoke
     module: "jhu_applied_physics_laboratory"
+    platform_family: "iCIMS"
     aliases: ["JHU Applied Physics", "JHU APL", "Applied Physics Laboratory"]
     alumni_match: ["jhu applied physics laboratory", "jhu applied physics", "jhu apl", "applied physics laboratory"]
     source_url: "https://careers.jhuapl.edu/jobs"
@@ -103,6 +105,7 @@ companies:
 
   - name: "Ab Initio Software"
     ats: github_only
+    coverage_status: no_source_found
     aliases: ["Ab Initio"]
     alumni_match: ["ab initio software", "ab initio"]
     note: "no confident supported ATS or active careers portal found"
@@ -133,6 +136,7 @@ companies:
   - name: "American Express"
     ats: bespoke
     module: "american_express"
+    platform_family: "Eightfold"
     alumni_match: ["american express"]
     source_url: "https://aexp.eightfold.ai/careers"
     note: "Eightfold portal; unsupported by current watchlist schema"
@@ -147,6 +151,7 @@ companies:
   - name: "Balyasny Asset Management"
     ats: bespoke
     module: "balyasny_asset_management"
+    platform_family: "Salesforce Experience"
     aliases: ["Balyasny"]
     alumni_match: ["balyasny asset management", "balyasny"]
     source_url: "https://www.bamfunds.com/careers/internships"
@@ -155,6 +160,7 @@ companies:
   - name: "BlackLine"
     ats: bespoke
     module: "blackline"
+    platform_family: "iCIMS"
     alumni_match: ["blackline"]
     source_url: "https://careers.blackline.com/careers-home/"
     note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
@@ -175,6 +181,7 @@ companies:
 
   - name: "Cell Systems Logic"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["cell systems logic"]
     note: "no confident company careers page or supported ATS URL found"
 
@@ -186,6 +193,7 @@ companies:
 
   - name: "Cogni Dao"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["cogni dao"]
     note: "no confident company careers page or supported ATS URL found"
 
@@ -199,12 +207,14 @@ companies:
   - name: "Coursedog"
     ats: bespoke
     module: "coursedog"
+    platform_family: "Pinpoint"
     alumni_match: ["coursedog"]
     source_url: "https://coursedog.pinpointhq.com/"
     note: "Pinpoint portal; unsupported by current watchlist schema"
 
   - name: "FanAmp"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["fanamp"]
     note: "no confident company careers page or supported ATS URL found"
 
@@ -287,17 +297,20 @@ companies:
 
   - name: "Maximal"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["maximal"]
     note: "ambiguous search results; no confident ATS or exact company careers page found"
 
   - name: "MercuryVote"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["mercuryvote"]
     note: "no confident company careers page or supported ATS URL found"
 
   - name: "MIT Lincoln Laboratory"
     ats: bespoke
     module: "mit_lincoln_laboratory"
+    platform_family: "SuccessFactors"
     aliases: ["MIT Lincoln", "MIT Lincoln Lab"]
     alumni_match: ["mit lincoln laboratory", "mit lincoln", "mit lincoln lab"]
     source_url: "https://careers.ll.mit.edu/"
@@ -334,6 +347,7 @@ companies:
   - name: "Oracle"
     ats: bespoke
     module: "oracle"
+    platform_family: "Oracle HCM"
     alumni_match: ["oracle"]
     source_url: "https://www.oracle.com/careers/"
     note: "known company-hosted Oracle HCM careers portal"
@@ -348,6 +362,7 @@ companies:
   - name: "Procure Analytics"
     ats: bespoke
     module: "procure_analytics"
+    platform_family: "Paylocity"
     aliases: ["Procure", "Procutre Analytics", "Procutre"]
     alumni_match: ["procure analytics", "procure", "procutre analytics", "procutre"]
     source_url: "https://procureanalytics.com/careers-culture/"
@@ -355,12 +370,14 @@ companies:
 
   - name: "Progenic Labs"
     ats: github_only
+    coverage_status: no_source_found
     aliases: ["Progenic"]
     alumni_match: ["progenic labs", "progenic"]
     note: "no confident exact company careers page or supported ATS URL found"
 
   - name: "Rec Technologies"
     ats: github_only
+    coverage_status: no_source_found
     aliases: ["Rec"]
     alumni_match: ["rec technologies", "rec"]
     note: "no confident exact company careers page or supported ATS URL found"
@@ -399,6 +416,7 @@ companies:
 
   - name: "thrive holdings"
     ats: github_only
+    coverage_status: no_source_found
     aliases: ["Thrive"]
     alumni_match: ["thrive holdings", "thrive"]
     note: "no confident exact company careers page or supported ATS URL found"
@@ -418,6 +436,7 @@ companies:
   - name: "Uber"
     ats: bespoke
     module: "uber"
+    platform_family: "iCIMS"
     aliases: ["Uber Technologies"]
     alumni_match: ["uber"]
     source_url: "https://www.uber.com/global/en/careers/"
@@ -426,6 +445,7 @@ companies:
   - name: "ZS"
     ats: bespoke
     module: "zs"
+    platform_family: "iCIMS"
     alumni_match: ["zs"]
     source_url: "https://jobs.zs.com/jobs"
     note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
@@ -479,6 +499,7 @@ companies:
   - name: "Whatnot"
     ats: bespoke
     module: "whatnot"
+    platform_family: "Ashby"
     aliases: ["WhatNot"]
     alumni_match: ["whatnot"]
     source_url: "https://jobs.ashbyhq.com/whatnot"
@@ -520,6 +541,7 @@ companies:
   - name: "UBS"
     ats: bespoke
     module: "ubs"
+    platform_family: "Taleo"
     aliases: ["UBS Group"]
     alumni_match: ["ubs"]
     source_url: "https://jobs.ubs.com/TGnewUI/Search/Home/Home?partnerid=25008&siteid=5131"
@@ -528,6 +550,7 @@ companies:
   - name: "Nomura"
     ats: bespoke
     module: "nomura"
+    platform_family: "SuccessFactors"
     aliases: ["Nomura Holdings"]
     alumni_match: ["nomura"]
     source_url: "https://careers.nomura.com/Nomura/?locale=en_US"
@@ -551,6 +574,7 @@ companies:
   - name: "Federal Reserve Bank of New York"
     ats: bespoke
     module: "federal_reserve_bank_of_new_york"
+    platform_family: "Workday"
     aliases: ["New York Fed", "FRBNY", "Federal Reserve Bank of NY"]
     alumni_match: ["federal reserve bank of new york", "new york fed", "frbny"]
     source_url: "https://rb.wd5.myworkdayjobs.com/FRS"
@@ -567,6 +591,7 @@ companies:
   - name: "EY"
     ats: bespoke
     module: "ey"
+    platform_family: "SuccessFactors"
     aliases: ["Ernst & Young"]
     alumni_match: ["ey", "ernst & young", "ernst and young"]
     source_url: "https://careers.ey.com/"
@@ -581,6 +606,7 @@ companies:
 
   - name: "Worklytics"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["worklytics"]
     note: "no supported ATS URL or active careers portal found"
 
@@ -593,11 +619,13 @@ companies:
 
   - name: "Bnchmrk"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["bnchmrk"]
     note: "no supported ATS URL or active careers portal found"
 
   - name: "Ardent"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["ardent"]
     note: "ambiguous company name; no confident exact careers source selected"
 
@@ -612,6 +640,7 @@ companies:
   - name: "General Dynamics Electric Boat"
     ats: bespoke
     module: "general_dynamics_electric_boat"
+    platform_family: "iCIMS"
     aliases: ["Electric Boat", "GDEB"]
     alumni_match: ["general dynamics electric boat", "electric boat", "gdeb"]
     source_url: "https://careers-gdeb.icims.com/"
@@ -627,6 +656,7 @@ companies:
 
   - name: "Proterra"
     ats: github_only
+    platform_family: "UKG/UltiPro"
     alumni_match: ["proterra"]
     source_url: "https://recruiting2.ultipro.com/PRO1047PROTI/JobBoard/e33a1c2e-8d7a-4008-851e-f7bd1d7bf788/?q=&o=postedDateDesc&w=&wc=&we=&wpst="
     note: "UKG/UltiPro portal; unsupported by current watcher adapters"
@@ -647,6 +677,7 @@ companies:
 
   - name: "Taula Capital"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["taula capital"]
     source_url: "https://www.taulacapital.com/"
     note: "no supported ATS URL or active careers portal found"
@@ -724,6 +755,7 @@ companies:
   - name: "Analysis Group"
     ats: bespoke
     module: "analysis_group"
+    platform_family: "iCIMS"
     alumni_match: ["analysis group"]
     source_url: "https://www.analysisgroup.com/careers/"
     note: "iCIMS portal; unsupported by current watcher adapters"
@@ -763,6 +795,7 @@ companies:
   - name: "Aon"
     ats: bespoke
     module: "aon"
+    platform_family: "iCIMS"
     alumni_match: ["aon"]
     source_url: "https://jobs.aon.com/"
     note: "company-hosted iCIMS portal; unsupported by current watcher adapters"
@@ -777,6 +810,7 @@ companies:
   - name: "Arup"
     ats: bespoke
     module: "arup"
+    platform_family: "Taleo"
     alumni_match: ["arup"]
     source_url: "https://jobs.arup.com/"
     note: "Taleo/company-hosted careers portal; unsupported by current watcher adapters"
@@ -799,6 +833,7 @@ companies:
   - name: "Bechtel Corporation"
     ats: bespoke
     module: "bechtel_corporation"
+    platform_family: "BrassRing/Phenom"
     aliases: ["Bechtel"]
     alumni_match: ["bechtel corporation", "bechtel"]
     source_url: "https://jobs.bechtel.com/"
@@ -836,6 +871,7 @@ companies:
 
   - name: "Fractal Energy Storage Consultants"
     ats: github_only
+    coverage_status: no_source_found
     aliases: ["Fractal"]
     alumni_match: ["fractal energy storage consultants", "fractal"]
     source_url: "https://www.energystorageconsultants.com/"
@@ -843,6 +879,7 @@ companies:
 
   - name: "ClimaData Corporation"
     ats: github_only
+    coverage_status: no_source_found
     aliases: ["ClimaData"]
     alumni_match: ["climadata corporation", "climadata"]
     source_url: "https://climadata.com/"
@@ -858,6 +895,7 @@ companies:
   - name: "Vaisala"
     ats: bespoke
     module: "vaisala"
+    platform_family: "Salesforce Experience"
     alumni_match: ["vaisala"]
     source_url: "https://www.vaisala.com/en/careers/open-jobs"
     note: "company-hosted/Salesforce Experience careers portal; unsupported by current watcher adapters"
@@ -900,6 +938,7 @@ companies:
   - name: "Exxon Mobil"
     ats: bespoke
     module: "exxon_mobil"
+    platform_family: "SuccessFactors"
     aliases: ["ExxonMobil", "Exxon"]
     alumni_match: ["exxon mobil", "exxonmobil", "exxon"]
     source_url: "https://jobs.exxonmobil.com/"
@@ -925,6 +964,7 @@ companies:
 
   - name: "SGLang"
     ats: github_only
+    coverage_status: no_source_found
     alumni_match: ["sglang"]
     source_url: "https://github.com/sgl-project/sglang"
     note: "open-source project; no supported company ATS URL found"
@@ -932,6 +972,7 @@ companies:
   - name: "Strategic Analysis Incorporated"
     ats: bespoke
     module: "strategic_analysis_incorporated"
+    platform_family: "VSCyberHosting"
     aliases: ["Strategic Analysis, Inc."]
     alumni_match: ["strategic analysis incorporated", "strategic analysis, inc.", "strategic analysis"]
     source_url: "https://www.vscyberhosting.com/sainc/"

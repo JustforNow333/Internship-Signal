@@ -134,6 +134,9 @@ SUPPORTED_GITHUB_LISTING_FORMATS = {
     "simplify_json",
     "github_markdown_table",
 }
+COVERAGE_STATUS_NO_SOURCE_FOUND = "no_source_found"
+SUPPORTED_COVERAGE_STATUSES = {COVERAGE_STATUS_NO_SOURCE_FOUND}
+MAX_PLATFORM_FAMILY_LENGTH = 80
 
 
 class ConfigError(ValueError):
@@ -363,6 +366,8 @@ class CompanyCfg:
     aliases: Sequence[str] = field(default_factory=tuple)
     alumni_match: Sequence[str] = field(default_factory=tuple)
     terms: Sequence[str] = field(default_factory=tuple)
+    coverage_status: str = ""
+    platform_family: str = ""
 
     def match_names(self) -> tuple[str, ...]:
         return (self.name, *tuple(self.aliases))
@@ -479,6 +484,21 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         raise ConfigError("company entry missing name")
     if ats not in SUPPORTED_ATS:
         raise ConfigError(f"{name}: unsupported ats '{ats}'")
+    coverage_status = str(entry.get("coverage_status") or "").strip().casefold()
+    if coverage_status and coverage_status not in SUPPORTED_COVERAGE_STATUSES:
+        raise ConfigError(
+            f"{name}: coverage_status must be one of: "
+            + ", ".join(sorted(SUPPORTED_COVERAGE_STATUSES))
+        )
+    if coverage_status and ats not in {"bespoke", "github_only"}:
+        raise ConfigError(
+            f"{name}: coverage_status '{coverage_status}' requires bespoke or github_only ats"
+        )
+    platform_family = _platform_family(entry.get("platform_family"), name)
+    if platform_family and ats not in {"bespoke", "github_only"}:
+        raise ConfigError(
+            f"{name}: platform_family requires bespoke or github_only ats"
+        )
     if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "workable"} and not token:
         raise ConfigError(f"{name}: {ats} entries require token")
     workday_site = str(entry.get("workday_site") or "").strip()
@@ -553,7 +573,24 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         aliases=aliases,
         alumni_match=_string_tuple(entry.get("alumni_match", ())),
         terms=company_terms,
+        coverage_status=coverage_status,
+        platform_family=platform_family,
     )
+
+
+def _platform_family(value: object, company: str) -> str:
+    if value in (None, ""):
+        return ""
+    if not isinstance(value, str):
+        raise ConfigError(f"{company}: platform_family must be a string")
+    normalized = re.sub(r"\s+", " ", value).strip()
+    if not normalized or len(normalized) > MAX_PLATFORM_FAMILY_LENGTH:
+        raise ConfigError(
+            f"{company}: platform_family must be 1-{MAX_PLATFORM_FAMILY_LENGTH} characters"
+        )
+    if re.search(r"[\x00-\x1f\x7f]", normalized):
+        raise ConfigError(f"{company}: platform_family contains invalid control characters")
+    return normalized
 
 
 def _validate_oracle_hcm_config(

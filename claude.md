@@ -20,6 +20,9 @@
   compact-map builder share one row-normalization helper.
 - Cleanup changes require a reproduced failure or caller/test proof that code is
   redundant; preserve public shapes, ordering, logs, and side effects.
+- Coverage audits are offline and read-only. Trust persisted direct-source
+  health, use explicit watchlist metadata for investigation/platform status,
+  and never treat global GitHub-feed health as company listing evidence.
 - `hosted_user_job_matches` holds one durable row per `(user_id, job_id)`.
   Reconciliation never deletes history: losing a match stamps
   `no_longer_matches_at`, a later rematch clears it, and `saved_at`/

@@ -22,6 +22,9 @@
   compact-map builder share one row-normalization helper.
 - Cleanup changes require a reproduced failure or caller/test proof that code is
   redundant; preserve public shapes, ordering, logs, and side effects.
+- Coverage audits are offline and read-only. Trust persisted direct-source
+  health, use explicit watchlist metadata for investigation/platform status,
+  and never treat global GitHub-feed health as company listing evidence.
 
 ## Hosted per-user matching (Phase 2B)
 

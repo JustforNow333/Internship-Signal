@@ -704,6 +704,38 @@ order by attempt_id desc
 limit 100;
 ```
 
+### Offline company-source coverage audit
+
+`python -m watcher.audit --coverage` projects the configured cohort and the
+latest persisted `source_health_current` rows into one mutually exclusive
+state per company without collecting jobs, making network requests, sending
+email, or modifying SQLite. `--coverage --json` emits schema-versioned,
+deterministically sorted JSON for CI and cohort comparisons. `--watchlist`
+keeps the same logic reusable for later cohorts.
+
+The audit states are:
+
+1. `direct_verified`: the current adapter-specific health key is persisted as
+   `healthy_with_listings` or `healthy_empty` (legacy successful
+   `healthy`/`empty` rows remain trustworthy).
+2. `direct_degraded`: a direct source is configured and has persisted health,
+   but that status is degraded, failed, unknown, or otherwise not a trustworthy
+   success.
+3. `backstop_only`: `bespoke` or `github_only` intentionally has no current
+   direct collection and at least one GitHub backstop is configured. Feed
+   health and listing counts do not prove company-level availability.
+4. `no_source_found`: the company explicitly declares
+   `coverage_status: no_source_found` after investigation.
+5. `needs_investigation`: no persisted adapter-specific health exists for a
+   configured direct source, or a no-direct-source entry has no configured
+   backstop and no explicit investigation result.
+
+Direct coverage is `direct_verified / total`. Accounted coverage includes
+every state except `needs_investigation`. Optional bounded `platform_family`
+metadata groups unsupported or currently bespoke platform gaps; unspecified
+`bespoke` entries remain visible in a deterministic catch-all group. Both
+fields are backward-compatible and omitted legacy entries continue to load.
+
 ---
 
 ## 15. Persistent static-analysis cache

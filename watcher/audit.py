@@ -45,8 +45,11 @@ from watcher.source_comparison import (
     write_json as write_comparison_json,
 )
 from watcher.source_health import (
+    SourceHealthStore,
+    build_coverage_audit,
     calculate_company_coverage,
     calculate_next_state,
+    render_coverage_audit,
     utc_datetime,
 )
 
@@ -400,6 +403,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Render the current source-comparison report instead of posting traces.",
     )
     parser.add_argument(
+        "--coverage",
+        action="store_true",
+        help=(
+            "Audit configured company-source coverage from watchlist metadata "
+            "and persisted health without collection."
+        ),
+    )
+    parser.add_argument(
         "--shadow-generations",
         action="store_true",
         help=(
@@ -423,8 +434,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.shadow_generations and args.live:
         parser.error("--shadow-generations is read-only and cannot be used with --live")
+    if args.coverage and args.live:
+        parser.error("--coverage is read-only and cannot be used with --live")
+    if args.coverage and (args.comparison or args.shadow_generations):
+        parser.error("--coverage cannot be combined with other audit report modes")
     if (
         not args.comparison
+        and not args.coverage
         and not args.shadow_generations
         and not any(query.as_dict().values())
     ):
@@ -440,6 +456,30 @@ def main(argv: list[str] | None = None) -> int:
             seen_db_path=seen_db_path,
             analysis_cache_path=resolve_analysis_cache_path(seen_db_path),
         )
+
+    if args.coverage:
+        with SourceHealthStore(config.seen_db_path, read_only=True) as health_store:
+            coverage_report = build_coverage_audit(
+                config,
+                health_store.all_current_states(),
+            )
+        payload = coverage_report.as_dict()
+        if args.json == "-":
+            print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
+        else:
+            render_coverage_audit(coverage_report)
+            if args.json:
+                Path(args.json).write_text(
+                    json.dumps(
+                        payload,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+        return 0
 
     if args.shadow_generations:
         with SeenStore(config.seen_db_path, read_only=True) as seen_store:

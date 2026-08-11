@@ -157,7 +157,8 @@ _scratch*.py
 # Local eligibility demonstrations are audit scratch; regression fixtures stay
 # visible for review.
 eligibility-demo*.json
-# Read-only audit/comparison exports may contain operational posting metadata.
+# Read-only posting/coverage audit and comparison exports may contain
+# operational source metadata.
 watcher-audit*.json
 watcher-source-comparison*.json
 source-comparison*.json

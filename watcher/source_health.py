@@ -17,7 +17,11 @@ from typing import Iterable, Mapping, Sequence, TextIO
 from urllib.parse import urlsplit, urlunsplit
 
 from backend.app.dedupe import norm_company
-from watcher.config import CompanyCfg
+from watcher.config import (
+    COVERAGE_STATUS_NO_SOURCE_FOUND,
+    CompanyCfg,
+    WatcherConfig,
+)
 
 SOURCE_KIND_DIRECT = "direct"
 SOURCE_KIND_GITHUB_FEED = "github_feed"
@@ -47,6 +51,19 @@ COVERAGE_DEGRADED_BACKSTOP = "direct_degraded_backstop_available"
 COVERAGE_FAILING_BACKSTOP = "direct_failing_backstop_available"
 COVERAGE_UNKNOWN_BACKSTOP = "direct_unknown_backstop_available"
 COVERAGE_UNCOVERED = "uncovered_for_run"
+
+COVERAGE_AUDIT_DIRECT_VERIFIED = "direct_verified"
+COVERAGE_AUDIT_DIRECT_DEGRADED = "direct_degraded"
+COVERAGE_AUDIT_BACKSTOP_ONLY = "backstop_only"
+COVERAGE_AUDIT_NO_SOURCE_FOUND = "no_source_found"
+COVERAGE_AUDIT_NEEDS_INVESTIGATION = "needs_investigation"
+COVERAGE_AUDIT_STATES = (
+    COVERAGE_AUDIT_DIRECT_VERIFIED,
+    COVERAGE_AUDIT_DIRECT_DEGRADED,
+    COVERAGE_AUDIT_BACKSTOP_ONLY,
+    COVERAGE_AUDIT_NO_SOURCE_FOUND,
+    COVERAGE_AUDIT_NEEDS_INVESTIGATION,
+)
 
 ERROR_FETCH = "fetch_failure"
 ERROR_SCHEMA = "schema_failure"
@@ -138,6 +155,127 @@ class CompanyCoverage:
     direct_attempt_succeeded: bool | None
     direct_rows_returned: int | None
     github_backstop_available: bool
+
+
+@dataclass(frozen=True)
+class CompanyCoverageAudit:
+    """One configuration-and-health coverage classification."""
+
+    company: str
+    ats: str
+    state: str
+    direct_health_status: str | None
+    platform_family: str
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class PlatformCoverageGap:
+    platform_family: str
+    companies: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "platform_family": self.platform_family,
+            "companies": list(self.companies),
+        }
+
+
+@dataclass(frozen=True)
+class CoverageAuditReport:
+    """Deterministic, bounded company-source coverage report."""
+
+    companies: tuple[CompanyCoverageAudit, ...]
+
+    @property
+    def total_companies(self) -> int:
+        return len(self.companies)
+
+    @property
+    def state_counts(self) -> dict[str, int]:
+        return {
+            state: sum(company.state == state for company in self.companies)
+            for state in COVERAGE_AUDIT_STATES
+        }
+
+    @property
+    def state_percentages(self) -> dict[str, float]:
+        return {
+            state: _coverage_percentage(count, self.total_companies)
+            for state, count in self.state_counts.items()
+        }
+
+    @property
+    def direct_coverage_percentage(self) -> float:
+        return _coverage_percentage(
+            self.state_counts[COVERAGE_AUDIT_DIRECT_VERIFIED],
+            self.total_companies,
+        )
+
+    @property
+    def accounted_coverage_percentage(self) -> float:
+        investigated = (
+            self.total_companies
+            - self.state_counts[COVERAGE_AUDIT_NEEDS_INVESTIGATION]
+        )
+        return _coverage_percentage(investigated, self.total_companies)
+
+    @property
+    def needs_investigation(self) -> tuple[str, ...]:
+        return tuple(
+            company.company
+            for company in self.companies
+            if company.state == COVERAGE_AUDIT_NEEDS_INVESTIGATION
+        )
+
+    @property
+    def degraded_direct_sources(self) -> tuple[CompanyCoverageAudit, ...]:
+        return tuple(
+            company
+            for company in self.companies
+            if company.state == COVERAGE_AUDIT_DIRECT_DEGRADED
+        )
+
+    @property
+    def platform_gaps(self) -> tuple[PlatformCoverageGap, ...]:
+        grouped: dict[str, list[str]] = {}
+        for company in self.companies:
+            if not company.platform_family:
+                continue
+            grouped.setdefault(company.platform_family, []).append(company.company)
+        return tuple(
+            PlatformCoverageGap(
+                platform_family=platform,
+                companies=tuple(sorted(companies, key=_coverage_sort_key)),
+            )
+            for platform, companies in sorted(
+                grouped.items(), key=lambda item: _coverage_sort_key(item[0])
+            )
+        )
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "report_type": "company_source_coverage",
+            "total_companies": self.total_companies,
+            "state_counts": self.state_counts,
+            "state_percentages": self.state_percentages,
+            "direct_coverage_percentage": self.direct_coverage_percentage,
+            "accounted_coverage_percentage": self.accounted_coverage_percentage,
+            "needs_investigation": list(self.needs_investigation),
+            "degraded_direct_sources": [
+                {
+                    "company": company.company,
+                    "ats": company.ats,
+                    "direct_health_status": company.direct_health_status,
+                }
+                for company in self.degraded_direct_sources
+            ],
+            "platform_gaps": [gap.as_dict() for gap in self.platform_gaps],
+            "companies": [company.as_dict() for company in self.companies],
+        }
 
 
 @dataclass(frozen=True)
@@ -478,6 +616,131 @@ def calculate_company_coverage(
     return tuple(coverage)
 
 
+def build_coverage_audit(
+    config: WatcherConfig,
+    states: Mapping[str, SourceHealthState],
+) -> CoverageAuditReport:
+    """Classify configured companies without collection or state mutation.
+
+    GitHub configuration establishes intentional backstop reliance only. Feed
+    health and row counts are deliberately ignored because a global feed's
+    success is not evidence that it currently lists any particular company.
+    """
+
+    companies = tuple(getattr(config, "companies", ()))
+    has_github_backstop = bool(config.effective_github_listing_sources())
+    audited: list[CompanyCoverageAudit] = []
+    for company in companies:
+        health = states.get(direct_health_key(company.name, company.ats))
+        health_status = health.status if health is not None else None
+        no_direct_source = company.ats in {"bespoke", "github_only"}
+        if company.coverage_status == COVERAGE_STATUS_NO_SOURCE_FOUND:
+            coverage_state = COVERAGE_AUDIT_NO_SOURCE_FOUND
+        elif no_direct_source:
+            coverage_state = (
+                COVERAGE_AUDIT_BACKSTOP_ONLY
+                if has_github_backstop
+                else COVERAGE_AUDIT_NEEDS_INVESTIGATION
+            )
+        elif health is None:
+            coverage_state = COVERAGE_AUDIT_NEEDS_INVESTIGATION
+        elif health_status in {
+            DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+            DIRECT_STATUS_HEALTHY_EMPTY,
+            # Persisted databases from before the explicit direct-state names
+            # still contain trustworthy successful collection evidence.
+            STATUS_HEALTHY,
+            STATUS_EMPTY,
+        }:
+            coverage_state = COVERAGE_AUDIT_DIRECT_VERIFIED
+        else:
+            coverage_state = COVERAGE_AUDIT_DIRECT_DEGRADED
+
+        platform_family = company.platform_family
+        if no_direct_source and company.ats == "bespoke" and not platform_family:
+            platform_family = "Bespoke / unspecified"
+        audited.append(
+            CompanyCoverageAudit(
+                company=company.name,
+                ats=company.ats,
+                state=coverage_state,
+                direct_health_status=health_status,
+                platform_family=platform_family,
+            )
+        )
+    return CoverageAuditReport(
+        companies=tuple(sorted(audited, key=lambda item: _coverage_sort_key(item.company)))
+    )
+
+
+def render_coverage_audit(
+    report: CoverageAuditReport,
+    *,
+    output: TextIO | None = None,
+) -> None:
+    """Render the bounded human-readable coverage audit."""
+
+    stream = output or sys.stdout
+    labels = {
+        COVERAGE_AUDIT_DIRECT_VERIFIED: "Direct verified",
+        COVERAGE_AUDIT_DIRECT_DEGRADED: "Direct degraded",
+        COVERAGE_AUDIT_BACKSTOP_ONLY: "Backstop only",
+        COVERAGE_AUDIT_NO_SOURCE_FOUND: "No source found",
+        COVERAGE_AUDIT_NEEDS_INVESTIGATION: "Needs investigation",
+    }
+    print("Coverage Audit", file=stream)
+    print("", file=stream)
+    print(f"Total companies:        {report.total_companies}", file=stream)
+    for state in COVERAGE_AUDIT_STATES:
+        count = report.state_counts[state]
+        percentage = report.state_percentages[state]
+        print(f"{labels[state] + ':':24}{count:5d} ({percentage:.1f}%)", file=stream)
+    print("", file=stream)
+    print(f"Direct coverage:       {report.direct_coverage_percentage:.1f}%", file=stream)
+    print(f"Accounted coverage:    {report.accounted_coverage_percentage:.1f}%", file=stream)
+    print("", file=stream)
+    _render_company_names(
+        "Needs investigation",
+        report.needs_investigation,
+        stream,
+    )
+    print("", file=stream)
+    print("Degraded direct sources:", file=stream)
+    if not report.degraded_direct_sources:
+        print("  (none)", file=stream)
+    for company in report.degraded_direct_sources:
+        print(
+            f"  - {company.company} ({company.ats}: "
+            f"{company.direct_health_status or 'unknown'})",
+            file=stream,
+        )
+    print("", file=stream)
+    print("Unsupported/platform gaps:", file=stream)
+    if not report.platform_gaps:
+        print("  (none)", file=stream)
+    for gap in report.platform_gaps:
+        print(f"  {gap.platform_family}:", file=stream)
+        for company in gap.companies:
+            print(f"    - {company}", file=stream)
+
+
+def _render_company_names(label: str, companies: Sequence[str], output: TextIO) -> None:
+    print(f"{label}:", file=output)
+    if not companies:
+        print("  (none)", file=output)
+        return
+    for company in companies:
+        print(f"  - {company}", file=output)
+
+
+def _coverage_percentage(count: int, total: int) -> float:
+    return round((count * 100.0 / total) if total else 0.0, 1)
+
+
+def _coverage_sort_key(value: str) -> tuple[str, str]:
+    return value.casefold(), value
+
+
 def summarize_health(
     companies: Sequence[CompanyCfg],
     attempts: Sequence[SourceAttempt],
@@ -540,11 +803,24 @@ def summarize_health(
 class SourceHealthStore:
     """Persist health attempts and current state in the watcher's SQLite file."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, read_only: bool = False):
         self.path = Path(path)
-        if self.path.parent:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
+        self.read_only = read_only
+        if read_only:
+            self._conn = sqlite3.connect(":memory:")
+            if self.path.is_file():
+                source = sqlite3.connect(
+                    f"{self.path.resolve().as_uri()}?mode=ro",
+                    uri=True,
+                )
+                try:
+                    source.backup(self._conn)
+                finally:
+                    source.close()
+        else:
+            if self.path.parent:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(self.path)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
 
@@ -574,6 +850,8 @@ class SourceHealthStore:
         self,
         attempts: Iterable[SourceAttempt],
     ) -> tuple[dict[str, SourceHealthState], tuple[HealthTransition, ...]]:
+        if self.read_only:
+            raise RuntimeError("source-health store is read-only")
         normalized = tuple(normalize_attempt(attempt) for attempt in attempts)
         states: dict[str, SourceHealthState] = {}
         transitions: list[HealthTransition] = []

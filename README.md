@@ -657,6 +657,21 @@ PYTHONPATH=.:backend python3 -m watcher.audit --requisition-id 300697 --json aud
 PYTHONPATH=.:backend python3 -m watcher.audit --job-id "<analyzed-id>" --live
 ```
 
+Company-source coverage is a separate offline, read-only report:
+
+```bash
+PYTHONPATH=.:backend python3 -m watcher.audit --coverage
+PYTHONPATH=.:backend python3 -m watcher.audit --coverage --json
+```
+
+It classifies every configured company from explicit watchlist metadata and the
+latest persisted direct-source health. Only `healthy_with_listings` and
+`healthy_empty` count as verified direct coverage; a configured ATS alone does
+not. Global GitHub feeds establish intentional backstop reliance, never proof
+that an individual company has a current listing. Optional company fields
+`coverage_status: no_source_found` and `platform_family` record reviewed gaps
+without changing collection.
+
 Queries may use configured company names or aliases, partial titles, exact or
 normalized URLs, native requisition IDs, analyzed job IDs, or canonical
 identity keys. `--limit 25` bounds ambiguous results. `--live` performs normal

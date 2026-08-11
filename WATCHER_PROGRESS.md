@@ -30,6 +30,10 @@ This file tracks completed watcher steps and the next handoff target.
 - Persistent per-company source health records direct and GitHub outcomes,
   transitions, recoveries, and effective coverage in the existing seen-store
   database without changing digest or seen semantics.
+- `watcher.audit --coverage` now reports the full configured company cohort
+  from explicit watchlist metadata and persisted direct-source health without
+  network, collection, email, or SQLite writes; deterministic JSON supports
+  later cohort comparison.
 - The Actions final heartbeat now forwards the complete application heartbeat
   before appending seen-store persistence, and Workday isolates malformed
   posting records without hiding structurally broken/all-malformed feeds.
@@ -1091,6 +1095,28 @@ This file tracks completed watcher steps and the next handoff target.
      (`test_repository_ignores_private_holdout_artifact_paths`, which needs a
      primary checkout because Windows Git cannot resolve a WSL-created
      worktree pointer); Python compileall.
+
+48. Offline company-source coverage audit (2026-08-11):
+   - `python -m watcher.audit --coverage` classifies every configured company as
+     `direct_verified`, `direct_degraded`, `backstop_only`,
+     `no_source_found`, or `needs_investigation`. Direct verification requires
+     trustworthy persisted source health; GitHub configuration records
+     backstop reliance without claiming company-level listings.
+   - Optional backward-compatible `coverage_status: no_source_found` and
+     `platform_family` metadata records explicit research outcomes and groups
+     unsupported/currently bespoke platform families. The current 129-company
+     watchlist records 16 explicit no-source findings.
+   - Human output includes per-state totals/percentages, direct/accounted
+     coverage, investigation and degraded lists, and grouped platform gaps.
+     `--coverage --json` emits a bounded deterministic schema-version-1 report.
+   - The audit opens persisted source health through an in-memory read-only
+     snapshot and never collects, requests the network, sends email, or writes
+     watcher state.
+   - Focused audit/config/health validation passed (`144 passed`). Full
+     backend/watcher validation completed with `1,437 passed, 100 skipped, 1
+     warning` plus the pre-existing Windows-Git worktree-pointer-only ignore
+     check failure; native WSL `git check-ignore` confirmed the invariant.
+     Python compileall and `git diff --check` passed.
 
 ## Next
 
