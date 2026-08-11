@@ -134,12 +134,11 @@ companies:
     note: "known company-hosted careers portal"
 
   - name: "American Express"
-    ats: bespoke
-    module: "american_express"
-    platform_family: "Eightfold"
+    ats: oracle_hcm
+    oracle_hcm_host: "egug.fa.us2.oraclecloud.com"
+    oracle_hcm_site: "CX_1"
     alumni_match: ["american express"]
-    source_url: "https://aexp.eightfold.ai/careers"
-    note: "Eightfold portal; unsupported by current watchlist schema"
+    source_url: "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs"
 
   - name: "Anduril Industries"
     ats: greenhouse
@@ -158,12 +157,12 @@ companies:
     note: "company-hosted Salesforce Experience portal"
 
   - name: "BlackLine"
-    ats: bespoke
-    module: "blackline"
-    platform_family: "iCIMS"
+    ats: workday
+    token: "blackline"
+    workday_shard: "wd108"
+    workday_site: "BlackLineCareers"
     alumni_match: ["blackline"]
-    source_url: "https://careers.blackline.com/careers-home/"
-    note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
+    source_url: "https://blackline.wd108.myworkdayjobs.com/BlackLineCareers"
 
   - name: "Bosch"
     ats: smartrecruiters
@@ -198,11 +197,10 @@ companies:
     note: "no confident company careers page or supported ATS URL found"
 
   - name: "Compass"
-    ats: bespoke
-    module: "compass"
+    ats: greenhouse
+    token: "urbancompass"
     alumni_match: ["compass"]
-    source_url: "https://www.compass.com/careers/"
-    note: "company-hosted careers portal"
+    source_url: "https://job-boards.greenhouse.io/urbancompass"
 
   - name: "Coursedog"
     ats: bespoke
@@ -345,12 +343,11 @@ companies:
     source_url: "https://jobs.ashbyhq.com/openai/1f3353ed-78eb-4a01-b783-c44b1c086711/application"
 
   - name: "Oracle"
-    ats: bespoke
-    module: "oracle"
-    platform_family: "Oracle HCM"
+    ats: oracle_hcm
+    oracle_hcm_host: "eeho.fa.us2.oraclecloud.com"
+    oracle_hcm_site: "CX_45001"
     alumni_match: ["oracle"]
-    source_url: "https://www.oracle.com/careers/"
-    note: "known company-hosted Oracle HCM careers portal"
+    source_url: "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_45001/jobs"
 
   - name: "Premise Health"
     ats: bespoke
@@ -434,13 +431,12 @@ companies:
     source_url: "https://job-boards.greenhouse.io/twilio/jobs/7560246"
 
   - name: "Uber"
-    ats: bespoke
-    module: "uber"
-    platform_family: "iCIMS"
+    ats: oracle_hcm
+    oracle_hcm_host: "iaziqy.fa.ocs.oraclecloud.com"
+    oracle_hcm_site: "UberCareers"
     aliases: ["Uber Technologies"]
     alumni_match: ["uber"]
-    source_url: "https://www.uber.com/global/en/careers/"
-    note: "known company-hosted careers portal with iCIMS university portal"
+    source_url: "https://iaziqy.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/UberCareers/jobs"
 
   - name: "ZS"
     ats: bespoke
@@ -512,12 +508,12 @@ companies:
     source_url: "https://boards.greenhouse.io/augury"
 
   - name: "Goldman Sachs"
-    ats: bespoke
-    module: "goldman_sachs"
+    ats: oracle_hcm
+    oracle_hcm_host: "hdpc.fa.us2.oraclecloud.com"
+    oracle_hcm_site: "CampusHiring"
     aliases: ["Goldman", "The Goldman Sachs Group", "Goldman Sachs Group"]
     alumni_match: ["goldman sachs", "goldman", "the goldman sachs group"]
-    source_url: "https://www.goldmansachs.com/careers"
-    note: "company-hosted careers portal; unsupported by current watcher adapters"
+    source_url: "https://hdpc.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CampusHiring/jobs"
 
   - name: "JPMorgan Chase"
     ats: oracle_hcm
@@ -572,13 +568,13 @@ companies:
     source_url: "https://boards.greenhouse.io/aqr"
 
   - name: "Federal Reserve Bank of New York"
-    ats: bespoke
-    module: "federal_reserve_bank_of_new_york"
-    platform_family: "Workday"
+    ats: workday
+    token: "rb"
+    workday_shard: "wd5"
+    workday_site: "FRS"
     aliases: ["New York Fed", "FRBNY", "Federal Reserve Bank of NY"]
     alumni_match: ["federal reserve bank of new york", "new york fed", "frbny"]
     source_url: "https://rb.wd5.myworkdayjobs.com/FRS"
-    note: "Federal Reserve System Workday board verified, but current adapter cannot safely scope to New York Fed; adapter follow-up needed"
 
   - name: "KPMG"
     ats: bespoke
@@ -716,20 +712,22 @@ companies:
     source_url: "https://athene.wd5.myworkdayjobs.com/Apollo_Careers"
 
   - name: "Brookfield"
-    ats: bespoke
-    module: "brookfield"
+    ats: workday
+    token: "brookfield"
+    workday_shard: "wd5"
+    workday_site: "brookfield"
     aliases: ["Brookfield Asset Management"]
     alumni_match: ["brookfield", "brookfield asset management"]
-    source_url: "https://www.brookfield.com/careers/life-at-brookfield"
-    note: "company-hosted careers portal"
+    source_url: "https://brookfield.wd5.myworkdayjobs.com/brookfield"
 
   - name: "The Carlyle Group"
-    ats: bespoke
-    module: "the_carlyle_group"
+    ats: workday
+    token: "carlyle"
+    workday_shard: "wd1"
+    workday_site: "Carlyle"
     aliases: ["Carlyle", "Carlyle Group"]
     alumni_match: ["the carlyle group", "carlyle"]
-    source_url: "https://www.carlyle.com/careers"
-    note: "company-hosted careers portal; unsupported by current watcher adapters"
+    source_url: "https://carlyle.wd1.myworkdayjobs.com/Carlyle"
 
   - name: "TPG Capital"
     ats: greenhouse
@@ -739,11 +737,10 @@ companies:
     source_url: "https://job-boards.greenhouse.io/tpgcareers"
 
   - name: "Sixth Street"
-    ats: bespoke
-    module: "sixth_street"
+    ats: greenhouse
+    token: "sixthstreet"
     alumni_match: ["sixth street"]
-    source_url: "https://sixth.com/careers"
-    note: "company-hosted careers portal"
+    source_url: "https://job-boards.greenhouse.io/sixthstreet"
 
   - name: "Vitol"
     ats: smartrecruiters

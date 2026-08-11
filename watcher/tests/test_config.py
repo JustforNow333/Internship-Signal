@@ -74,6 +74,84 @@ RECENT_DIRECT_ADAPTER_METADATA = {
 }
 
 
+CONFIRMED_DIRECT_SOURCE_ADDITIONS = {
+    "BlackLine": {
+        "ats": "workday",
+        "token": "blackline",
+        "workday_shard": "wd108",
+        "workday_site": "BlackLineCareers",
+        "source_url": "https://blackline.wd108.myworkdayjobs.com/BlackLineCareers",
+    },
+    "Federal Reserve Bank of New York": {
+        "ats": "workday",
+        "token": "rb",
+        "workday_shard": "wd5",
+        "workday_site": "FRS",
+        "source_url": "https://rb.wd5.myworkdayjobs.com/FRS",
+    },
+    "Brookfield": {
+        "ats": "workday",
+        "token": "brookfield",
+        "workday_shard": "wd5",
+        "workday_site": "brookfield",
+        "source_url": "https://brookfield.wd5.myworkdayjobs.com/brookfield",
+    },
+    "The Carlyle Group": {
+        "ats": "workday",
+        "token": "carlyle",
+        "workday_shard": "wd1",
+        "workday_site": "Carlyle",
+        "source_url": "https://carlyle.wd1.myworkdayjobs.com/Carlyle",
+    },
+    "American Express": {
+        "ats": "oracle_hcm",
+        "oracle_hcm_host": "egug.fa.us2.oraclecloud.com",
+        "oracle_hcm_site": "CX_1",
+        "source_url": (
+            "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/"
+            "sites/CX_1/jobs"
+        ),
+    },
+    "Goldman Sachs": {
+        "ats": "oracle_hcm",
+        "oracle_hcm_host": "hdpc.fa.us2.oraclecloud.com",
+        "oracle_hcm_site": "CampusHiring",
+        "source_url": (
+            "https://hdpc.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/"
+            "sites/CampusHiring/jobs"
+        ),
+    },
+    "Oracle": {
+        "ats": "oracle_hcm",
+        "oracle_hcm_host": "eeho.fa.us2.oraclecloud.com",
+        "oracle_hcm_site": "CX_45001",
+        "source_url": (
+            "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/"
+            "sites/CX_45001/jobs"
+        ),
+    },
+    "Uber": {
+        "ats": "oracle_hcm",
+        "oracle_hcm_host": "iaziqy.fa.ocs.oraclecloud.com",
+        "oracle_hcm_site": "UberCareers",
+        "source_url": (
+            "https://iaziqy.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/"
+            "sites/UberCareers/jobs"
+        ),
+    },
+    "Compass": {
+        "ats": "greenhouse",
+        "token": "urbancompass",
+        "source_url": "https://job-boards.greenhouse.io/urbancompass",
+    },
+    "Sixth Street": {
+        "ats": "greenhouse",
+        "token": "sixthstreet",
+        "source_url": "https://job-boards.greenhouse.io/sixthstreet",
+    },
+}
+
+
 def _duplicates(values):
     counts = Counter(values)
     return sorted(value for value, count in counts.items() if count > 1)
@@ -307,6 +385,23 @@ def test_recent_direct_watchlist_entries_keep_verified_adapter_metadata():
         assert company.token == token
         assert company.workday_shard == workday_shard
         assert company.workday_site == workday_site
+
+
+def test_confirmed_direct_source_additions_use_exact_supported_configurations():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    companies_by_name = {company.name: company for company in config.companies}
+    entries_by_name = {entry["name"]: entry for entry in _default_watchlist_entries()}
+
+    for name, expected in CONFIRMED_DIRECT_SOURCE_ADDITIONS.items():
+        company = companies_by_name[name]
+        entry = entries_by_name[name]
+
+        for field, value in expected.items():
+            assert getattr(company, field) == value
+        assert company.module == ""
+        assert company.coverage_status == ""
+        assert company.platform_family == ""
+        assert not ({"module", "coverage_status", "platform_family", "note"} & set(entry))
 
 
 def _write_watchlist(tmp_path, defaults: str, companies: str | None = None):
