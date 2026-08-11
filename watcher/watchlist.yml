@@ -22,12 +22,14 @@ companies:
     source_url: "https://capitalone.wd12.myworkdayjobs.com/Capital_One/job/Toronto-ON/Intern--Backend-Software-Engineer---Summer-2026_R232315-1"
 
   - name: "Arm"
-    ats: bespoke
-    module: "arm"
-    platform_family: "iCIMS"
+    ats: talentbrew
+    talentbrew_host: "careers.arm.com"
+    talentbrew_site_id: "33099"
+    talentbrew_category_id: "8097056"
+    talentbrew_category_name: "Graduate"
     alumni_match: ["arm"]
-    source_url: "https://careers.arm.com/"
-    note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
+    source_url: "https://careers.arm.com/search-jobs"
+    note: "Official TalentBrew Graduate category"
 
   - name: "Workday"
     ats: workday
@@ -350,11 +352,14 @@ companies:
     source_url: "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_45001/jobs"
 
   - name: "Premise Health"
-    ats: bespoke
-    module: "premise_health"
+    ats: talentbrew
+    talentbrew_host: "jobs.premisehealth.com"
+    talentbrew_site_id: "1388"
+    talentbrew_category_id: "8343072"
+    talentbrew_category_name: "Information Technology Jobs"
     alumni_match: ["premise health"]
-    source_url: "https://jobs.premisehealth.com/"
-    note: "company-hosted careers portal"
+    source_url: "https://jobs.premisehealth.com/search-jobs"
+    note: "Official TalentBrew Information Technology Jobs category"
 
   - name: "Procure Analytics"
     ats: bespoke

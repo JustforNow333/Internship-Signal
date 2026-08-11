@@ -38,6 +38,32 @@ def company():
     )
 
 
+def arm_company():
+    return CompanyCfg(
+        name="Arm",
+        ats="talentbrew",
+        talentbrew_host="careers.arm.com",
+        talentbrew_site_id="33099",
+        talentbrew_category_id="8097056",
+        talentbrew_category_name="Graduate",
+        source_url="https://careers.arm.com/search-jobs",
+        terms=("intern", "internship", "graduate"),
+    )
+
+
+def premise_company():
+    return CompanyCfg(
+        name="Premise Health",
+        ats="talentbrew",
+        talentbrew_host="jobs.premisehealth.com",
+        talentbrew_site_id="1388",
+        talentbrew_category_id="8343072",
+        talentbrew_category_name="Information Technology Jobs",
+        source_url="https://jobs.premisehealth.com/search-jobs",
+        terms=("intern", "internship", "student"),
+    )
+
+
 DETAILS = {
     "97463249760": "talentbrew_detail_reference.html",
     "97500000001": "talentbrew_detail_fallback.html",
@@ -48,6 +74,142 @@ DETAILS = {
 def detail_request(url, _source_name):
     posting_id = urlsplit(url).path.rstrip("/").split("/")[-1]
     return text_fixture(DETAILS[posting_id])
+
+
+def variant_detail_request(url, _source_name):
+    parsed = urlsplit(url)
+    posting_id = parsed.path.rstrip("/").split("/")[-1]
+    if parsed.hostname == "careers.arm.com":
+        title = {
+            "98111111111": "Graduate Software Engineer",
+            "98111111112": "Graduate Hardware Engineer",
+        }[posting_id]
+        location = ""
+    else:
+        title = {
+            "98222222221": "Software Engineer Intern",
+            "98222222222": "Data Analyst Intern",
+            "98222222223": "Security Intern",
+        }[posting_id]
+        location = (
+            ', "jobLocation": {"@type": "Place", "address": '
+            '{"@type": "PostalAddress", "addressLocality": "Brentwood", '
+            '"addressRegion": "Tennessee", "addressCountry": "United States"}}'
+        )
+    return (
+        '<script type="application/ld+json">'
+        f'{{"@context": "https://schema.org", "@type": "JobPosting", '
+        f'"title": {json.dumps(title)}, "url": {json.dumps(url)}{location}}}'
+        "</script>"
+    )
+
+
+def test_semantic_job_anchor_accepts_shared_radancy_variants_and_ignores_content():
+    arm_source = TalentBrewSource(request_text=variant_detail_request)
+    arm_rows = arm_source.parse(
+        json_fixture("talentbrew_search_job_card.json"), arm_company()
+    )
+    premise_source = TalentBrewSource(request_text=variant_detail_request)
+    premise_rows = premise_source.parse(
+        json_fixture("talentbrew_search_heading_card.json"), premise_company()
+    )
+
+    assert [row["title"] for row in arm_rows] == [
+        "Graduate Software Engineer",
+        "Graduate Hardware Engineer",
+    ]
+    assert [row["location"] for row in arm_rows] == [
+        "Austin, Texas",
+        "San Jose, California",
+    ]
+    assert [row["title"] for row in premise_rows] == [
+        "Software Engineer Intern",
+        "Data Analyst Intern",
+    ]
+    assert all(
+        row["location"] == "Brentwood, Tennessee, United States"
+        for row in premise_rows
+    )
+    assert [row["extra"]["source_id"] for row in arm_rows] == [
+        "98111111111",
+        "98111111112",
+    ]
+    assert [row["extra"]["source_requisition_id"] for row in premise_rows] == [
+        "98222222221",
+        "98222222222",
+    ]
+    assert all(
+        row["source_url"].endswith(
+            ("/33099/98111111111", "/33099/98111111112")
+        )
+        for row in arm_rows
+    )
+    assert all(
+        row["source_url"].endswith(
+            ("/1388/98222222221", "/1388/98222222222")
+        )
+        for row in premise_rows
+    )
+    assert arm_source.last_diagnostics.raw_postings_seen == 2
+
+
+def test_semantic_job_anchor_skips_malformed_neighbor_but_all_malformed_still_fails():
+    payload = json_fixture("talentbrew_search_heading_card.json")
+    payload["results"] = payload["results"].replace(
+        '<a href="/en/job/nashville/data-analyst-intern/1388/98222222222" '
+        'data-job-id="98222222222">',
+        '<a href="/search-jobs" data-job-id="98222222222">',
+    ).replace(
+        'data-total-results="2" data-total-job-results="2"',
+        'data-total-results="1" data-total-job-results="1"',
+    )
+    rows = TalentBrewSource(request_text=variant_detail_request).parse(
+        payload, premise_company()
+    )
+    assert [row["extra"]["source_id"] for row in rows] == ["98222222221"]
+
+    payload["results"] = payload["results"].replace(
+        '/en/job/brentwood/software-engineer-intern/1388/98222222221',
+        '/search-jobs',
+    )
+    with pytest.raises(SourceSchemaError, match="without valid listing records"):
+        TalentBrewSource(request_text=variant_detail_request).parse(
+            payload, premise_company()
+        )
+
+
+def test_live_zero_page_one_variant_is_a_successful_empty_board():
+    source = TalentBrewSource(
+        request_json=lambda *_: json_fixture("talentbrew_search_live_zero.json")
+    )
+    assert source.fetch(arm_company()) == []
+    assert source.last_diagnostics.detail_pages_requested == 0
+
+
+def test_heading_card_variant_paginates_to_the_declared_job_total():
+    first = json_fixture("talentbrew_search_heading_card.json")
+    first["results"] = first["results"].replace(
+        'data-total-results="2" data-total-job-results="2" data-total-pages="1"',
+        'data-total-results="3" data-total-job-results="3" data-total-pages="2"',
+    ).replace('data-records-per-page="16"', 'data-records-per-page="2"')
+    payloads = iter(
+        (first, json_fixture("talentbrew_search_heading_page_2.json"))
+    )
+    source = TalentBrewSource(
+        request_json=lambda *_: next(payloads),
+        request_text=variant_detail_request,
+        page_size=2,
+    )
+
+    rows = source.fetch(premise_company())
+
+    assert [row["extra"]["source_id"] for row in rows] == [
+        "98222222221",
+        "98222222222",
+        "98222222223",
+    ]
+    assert source.last_diagnostics.listing_pages_requested == 2
+    assert source.last_diagnostics.detail_pages_requested == 3
 
 
 def test_single_page_maps_official_fields_reference_and_scope():
@@ -285,3 +447,24 @@ def test_watchlist_registers_barclays_official_early_careers_scope():
     assert barclays.talentbrew_category_id == "8736272"
     assert barclays.talentbrew_category_name == "Early Careers"
     assert barclays.source_url == "https://search.jobs.barclays/search-jobs"
+
+
+def test_watchlist_registers_arm_and_premise_health_talentbrew_scopes():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    companies = {item.name: item for item in config.companies}
+
+    arm = companies["Arm"]
+    assert arm.ats == "talentbrew"
+    assert arm.talentbrew_host == "careers.arm.com"
+    assert arm.talentbrew_site_id == "33099"
+    assert arm.talentbrew_category_id == "8097056"
+    assert arm.talentbrew_category_name == "Graduate"
+    assert arm.source_url == "https://careers.arm.com/search-jobs"
+
+    premise = companies["Premise Health"]
+    assert premise.ats == "talentbrew"
+    assert premise.talentbrew_host == "jobs.premisehealth.com"
+    assert premise.talentbrew_site_id == "1388"
+    assert premise.talentbrew_category_id == "8343072"
+    assert premise.talentbrew_category_name == "Information Technology Jobs"
+    assert premise.source_url == "https://jobs.premisehealth.com/search-jobs"

@@ -1,0 +1,6 @@
+{
+  "filters": "<section id=\"search-filters\"></section>",
+  "results": "<section id=\"search-results\" data-total-results=\"3\" data-total-job-results=\"2\" data-total-pages=\"1\" data-current-page=\"1\" data-records-per-page=\"16\"><ul id=\"search-results-jobs\"><li class=\"job-card\"><a class=\"job-card__title\" href=\"/en/job/austin/graduate-software-engineer/33099/98111111111\" data-job-id=\"98111111111\"><strong>Graduate Software Engineer</strong></a><span class=\"location\">Austin, Texas</span></li><li class=\"job-card\"><a class=\"job-card__title\" href=\"/en/job/san-jose/graduate-hardware-engineer/33099/98111111112\" data-job-id=\"98111111112\">Graduate Hardware Engineer</a><span class=\"location\">San Jose, California</span></li></ul><ul id=\"search-results-content\"><li class=\"job-card job-card--content\"><a class=\"job-card__title\" href=\"/early-careers\">Explore early careers</a></li></ul></section>",
+  "hasJobs": true,
+  "hasContent": true
+}

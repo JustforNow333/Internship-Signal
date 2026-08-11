@@ -1,0 +1,6 @@
+{
+  "filters": "<section id=\"search-filters\"></section>",
+  "results": "<section id=\"search-results\" data-total-results=\"0\" data-total-job-results=\"0\" data-total-pages=\"1\" data-current-page=\"1\" data-records-per-page=\"16\"><div class=\"no-results\">No jobs found</div></section>",
+  "hasJobs": false,
+  "hasContent": false
+}

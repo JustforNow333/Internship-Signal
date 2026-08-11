@@ -169,7 +169,11 @@ class TalentBrewSource:
             payload = self._fetch_json(
                 self.search_endpoint(company, requested_page, self.page_size)
             )
-            page = self._search_page(payload, expected_page=requested_page)
+            page = self._search_page(
+                payload,
+                company,
+                expected_page=requested_page,
+            )
             if expected_total is None:
                 expected_total = page.total_results
             elif page.total_results != expected_total:
@@ -212,13 +216,14 @@ class TalentBrewSource:
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
         self._reset_diagnostics()
-        page = self._search_page(payload)
+        page = self._search_page(payload, company)
         self._raw_postings_seen = len(page.listings)
         return self._details(list(page.listings), company)
 
     def _search_page(
         self,
         payload: Any,
+        company: CompanyCfg,
         expected_page: int | None = None,
     ) -> _SearchPage:
         if not isinstance(payload, dict):
@@ -234,7 +239,8 @@ class TalentBrewSource:
             payload["hasContent"], bool
         ):
             raise SourceSchemaError("talentbrew search flags must be booleans")
-        parser = _SearchResultsParser()
+        host, site, _category_id, _category_name = _required_config(company)
+        parser = _SearchResultsParser(host=host, site=site)
         parser.feed(payload["results"])
         page = parser.page()
         if expected_page is not None and page.current_page != expected_page:
@@ -400,8 +406,10 @@ class TalentBrewSource:
 
 
 class _SearchResultsParser(HTMLParser):
-    def __init__(self) -> None:
+    def __init__(self, *, host: str, site: str) -> None:
         super().__init__(convert_charrefs=True)
+        self.host = host
+        self.site = site
         self.metadata: dict[str, str] = {}
         self.listings: list[_Listing] = []
         self.current: dict[str, str] | None = None
@@ -424,11 +432,21 @@ class _SearchResultsParser(HTMLParser):
             return
         if self.capture:
             self.capture_depth += 1
-        if tag == "a" and "job-title--link" in classes:
-            self.current["posting_id"] = values.get("data-job-id", "").strip()
-            self.current["href"] = values.get("href", "").strip()
+        posting_id = values.get("data-job-id", "").strip()
+        href = values.get("href", "").strip()
+        # Theme classes vary, but Radancy's stable job anchor carries both the
+        # posting ID and its tenant-specific detail route.
+        if (
+            tag == "a"
+            and posting_id
+            and _posting_href(href, self.host, self.site, posting_id)
+        ):
+            self.current["posting_id"] = posting_id
+            self.current["href"] = href
             self.capture, self.capture_depth = "title", 1
-        elif tag == "div" and "job-location" in classes:
+        elif tag in {"div", "span"} and classes.intersection(
+            {"job-location", "location"}
+        ):
             self.capture, self.capture_depth = "location", 1
         elif tag == "div" and "job-date" in classes:
             self.capture, self.capture_depth = "date_label", 1
@@ -452,25 +470,68 @@ class _SearchResultsParser(HTMLParser):
 
     def page(self) -> _SearchPage:
         if not self.metadata:
-            raise SourceSchemaError("talentbrew results lack search pagination metadata")
+            raise SourceSchemaError(
+                "talentbrew results lack search pagination metadata"
+            )
         try:
-            total_results = int(self.metadata["data-total-results"])
+            combined_results = int(self.metadata["data-total-results"])
+            # Some themes mix editorial cards into data-total-results. Their
+            # page count and job listings use the explicit job total instead.
+            total_results = int(
+                self.metadata.get("data-total-job-results", combined_results)
+            )
             total_pages = int(self.metadata["data-total-pages"])
             current_page = int(self.metadata["data-current-page"])
             records_per_page = int(self.metadata["data-records-per-page"])
         except (KeyError, TypeError, ValueError) as exc:
-            raise SourceSchemaError("talentbrew pagination metadata is malformed") from exc
+            raise SourceSchemaError(
+                "talentbrew pagination metadata is malformed"
+            ) from exc
         if (
-            min(total_results, total_pages, records_per_page) < 0
+            min(combined_results, total_results, total_pages, records_per_page) < 0
             or current_page < 1
             or records_per_page < 1
+            or total_results > combined_results
         ):
             raise SourceSchemaError("talentbrew pagination metadata is out of range")
-        if total_results == 0 and total_pages != 0:
-            raise SourceSchemaError("talentbrew zero results reported nonzero pages")
+        if total_results == 0 and (total_pages not in {0, 1} or current_page != 1):
+            raise SourceSchemaError(
+                "talentbrew zero-results pagination is inconsistent"
+            )
         if total_results > 0 and (total_pages < 1 or current_page > total_pages):
             raise SourceSchemaError("talentbrew pagination metadata is inconsistent")
-        return _SearchPage(tuple(self.listings), total_results, total_pages, current_page, records_per_page)
+        return _SearchPage(
+            tuple(self.listings),
+            total_results,
+            total_pages,
+            current_page,
+            records_per_page,
+        )
+
+
+def _posting_href(href: str, host: str, site: str, posting_id: str) -> bool:
+    try:
+        parsed = urlsplit(href)
+        parsed_port = parsed.port
+    except ValueError:
+        return False
+    if (
+        not href
+        or parsed.scheme.casefold() not in {"", "https"}
+        or (parsed.hostname and parsed.hostname.casefold() != host)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed_port is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return False
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    return (
+        len(segments) >= 2
+        and segments[-2] == site
+        and segments[-1] == posting_id
+    )
 
 
 class _DetailParser(HTMLParser):
