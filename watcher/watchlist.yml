@@ -498,13 +498,12 @@ companies:
     source_url: "https://intuitive.wd1.myworkdayjobs.com/irtc_careers"
 
   - name: "Whatnot"
-    ats: bespoke
-    module: "whatnot"
-    platform_family: "Ashby"
+    ats: ashby
+    token: "whatnot"
     aliases: ["WhatNot"]
     alumni_match: ["whatnot"]
     source_url: "https://jobs.ashbyhq.com/whatnot"
-    note: "Ashby-hosted careers page verified, but current Ashby posting API returns 404 for this board; adapter follow-up needed"
+    note: "Official Ashby hosted job board"
 
   - name: "Augury"
     ats: greenhouse
