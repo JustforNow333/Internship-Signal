@@ -119,6 +119,7 @@ from watcher.sources import (
     GitHubListingsSource,
     GitHubMarkdownTableSource,
     GreenhouseSource,
+    IcimsSource,
     LeverSource,
     OracleHcmSource,
     SmartRecruitersSource,
@@ -1145,6 +1146,7 @@ def _direct_collection_task(
             workday_shard=company.workday_shard,
             oracle_hcm_host=company.oracle_hcm_host,
             talentbrew_host=company.talentbrew_host,
+            icims_host=company.icims_host,
         ),
         provider=company.ats,
         run=run,
@@ -1882,6 +1884,7 @@ _DEFAULT_DIRECT_ADAPTERS = frozenset(
     {
         "ashby",
         "greenhouse",
+        "icims",
         "lever",
         "oracle_hcm",
         "smartrecruiters",
@@ -1899,6 +1902,7 @@ def _default_direct_sources(
     return {
         "ashby": AshbySource(),
         "greenhouse": GreenhouseSource(),
+        "icims": IcimsSource(),
         "lever": LeverSource(),
         "oracle_hcm": OracleHcmSource(),
         "smartrecruiters": SmartRecruitersSource(),

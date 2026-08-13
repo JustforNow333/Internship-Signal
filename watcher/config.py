@@ -127,6 +127,7 @@ SUPPORTED_ATS = {
     "workday",
     "oracle_hcm",
     "talentbrew",
+    "icims",
     "bespoke",
     "github_only",
 }
@@ -361,6 +362,9 @@ class CompanyCfg:
     talentbrew_site_id: str = ""
     talentbrew_category_id: str = ""
     talentbrew_category_name: str = ""
+    icims_variant: str = ""
+    icims_host: str = ""
+    icims_portals: Sequence[str] = field(default_factory=tuple)
     source_url: str = ""
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)
@@ -550,6 +554,18 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             category_name=talentbrew_category_name,
             source_url=source_url,
         )
+    icims_variant = str(entry.get("icims_variant") or "").strip().casefold()
+    icims_host = str(entry.get("icims_host") or "").strip().casefold()
+    icims_portals = _string_tuple(entry.get("icims_portals", ()))
+    icims_portals = tuple(portal.strip().casefold() for portal in icims_portals)
+    if ats == "icims":
+        _validate_icims_config(
+            name,
+            variant=icims_variant,
+            host=icims_host,
+            portals=icims_portals,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
@@ -568,6 +584,9 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         talentbrew_site_id=talentbrew_site_id,
         talentbrew_category_id=talentbrew_category_id,
         talentbrew_category_name=talentbrew_category_name,
+        icims_variant=icims_variant,
+        icims_host=icims_host,
+        icims_portals=icims_portals,
         source_url=source_url,
         module=str(entry.get("module") or "").strip(),
         aliases=aliases,
@@ -680,6 +699,71 @@ def _validate_talentbrew_config(
         raise ConfigError(
             f"{name}: talentbrew source_url must be a credential-free HTTPS URL on talentbrew_host"
         )
+
+
+def _validate_icims_config(
+    name: str,
+    *,
+    variant: str,
+    host: str,
+    portals: tuple[str, ...],
+    source_url: str,
+) -> None:
+    if variant not in {"jibe_json", "classic"}:
+        raise ConfigError(
+            f"{name}: icims_variant must be one of: classic, jibe_json"
+        )
+    if not _valid_config_hostname(host):
+        raise ConfigError(f"{name}: icims_host must be a hostname")
+    if portals:
+        if len(portals) != len(set(portals)):
+            raise ConfigError(f"{name}: icims_portals must contain unique hostnames")
+        if host not in portals:
+            raise ConfigError(f"{name}: icims_portals must include icims_host")
+        if any(not _valid_config_hostname(portal) for portal in portals):
+            raise ConfigError(f"{name}: icims_portals must contain only hostnames")
+    try:
+        parsed = urlsplit(source_url)
+    except ValueError as exc:
+        raise ConfigError(f"{name}: icims entries require a valid source_url") from exc
+    allowed_hosts = set(portals or (host,))
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() not in allowed_hosts
+        or parsed.netloc.casefold() not in allowed_hosts
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: icims source_url must be a credential-free HTTPS URL on a configured portal"
+        )
+
+
+def _valid_config_hostname(value: str) -> bool:
+    if (
+        not value
+        or len(value) > 253
+        or not re.fullmatch(r"[a-z0-9.-]+", value)
+        or value.startswith(".")
+        or value.endswith(".")
+        or ".." in value
+    ):
+        return False
+    try:
+        parsed = urlsplit(f"https://{value}")
+    except ValueError:
+        return False
+    return bool(
+        parsed.hostname == value
+        and parsed.netloc == value
+        and not parsed.username
+        and not parsed.password
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
 def _validate_unique_company_names(companies: Sequence[CompanyCfg]) -> None:

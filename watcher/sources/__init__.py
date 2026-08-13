@@ -12,6 +12,7 @@ from .ashby import AshbySource
 from .github_listings import GitHubListingsSource
 from .github_markdown_table import GitHubMarkdownTableSource
 from .greenhouse import GreenhouseSource
+from .icims import IcimsSource
 from .lever import LeverSource
 from .oracle_hcm import OracleHcmSource
 from .smartrecruiters import SmartRecruitersSource
@@ -25,6 +26,7 @@ __all__ = [
     "GitHubListingsSource",
     "GitHubMarkdownTableSource",
     "GreenhouseSource",
+    "IcimsSource",
     "LeverSource",
     "OracleHcmSource",
     "SmartRecruitersSource",

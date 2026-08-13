@@ -53,7 +53,7 @@ GitHub Actions cron (hourly)
         │
         ▼
 For each company in watchlist.yml:
-    ┌─ Tier 1: direct ATS adapter (Greenhouse/Lever/Ashby/SmartRecruiters/Workday/bespoke)
+    ┌─ Tier 1: direct ATS adapter (Greenhouse/Lever/Ashby/SmartRecruiters/iCIMS/Workday/bespoke)
     │     └─ success → canonical rows tagged source="direct"
     │     └─ fail/blocked → log, continue (do NOT abort the run)
     │
@@ -229,6 +229,22 @@ rather than looping. Page/feed-level schema validation remains strict.
 - **Ashby:** public posting API per board token
 - **SmartRecruiters:** `https://api.smartrecruiters.com/v1/companies/<token>/postings`
 - **Workable:** company subdomain jobs endpoint
+
+**iCIMS** uses one adapter with an explicit `icims_variant`. `jibe_json`
+enumerates `GET /api/jobs?limit=100&page=N`, requires a stable nonnegative
+`totalCount`, validates nested `jobs[].data`, and uses the portal-namespaced
+`req_id` plus the posting-specific same-host canonical URL. `classic` parses
+only `GET /jobs/search?ss=1&in_iframe=1&pr=N`, requires the iCIMS listing and
+current-page contracts, derives identity from the numeric `/jobs/{id}/.../job`
+path, and rejects the outer iframe shell. An exact Jibe zero requires both an
+empty `jobs` list and zero total; a classic zero requires the explicit listing
+page no-jobs message.
+
+Configuration requires `icims_variant` and `icims_host`. `icims_portals` is an
+optional complete ordered host list for reusable multi-portal sources; its
+hosts are enumerated independently and combined with portal-namespaced IDs.
+One failed/incomplete portal fails the company attempt, while an explicit empty
+portal may coexist with populated siblings. No per-job enrichment is used.
 
 These are clean and cover a large fraction of mid-size tech + funded startups.
 

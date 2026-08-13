@@ -1,0 +1,19 @@
+{
+  "jobs": [
+    {
+      "data": {
+        "req_id": "103",
+        "title": "Operations Analyst",
+        "full_location": "Chicago, Illinois, United States",
+        "description": "Support operations.",
+        "employment_type": "Full-time",
+        "posted_date": "2026-08-03",
+        "apply_url": "https://careers-example.icims.com/jobs/103/login",
+        "meta_data": {
+          "canonical_url": "https://jobs.example.test/jobs/103"
+        }
+      }
+    }
+  ],
+  "totalCount": 3
+}

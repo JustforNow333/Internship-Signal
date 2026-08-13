@@ -81,13 +81,12 @@ companies:
     source_url: "https://salesforce.wd12.myworkdayjobs.com/Futureforce_Internships/job/California---San-Francisco/Summer-2026-Intern---AI---Data-Science-Analyst_JR340354"
 
   - name: "JHU Applied Physics Laboratory"
-    ats: bespoke
-    module: "jhu_applied_physics_laboratory"
-    platform_family: "iCIMS"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "careers.jhuapl.edu"
     aliases: ["JHU Applied Physics", "JHU APL", "Applied Physics Laboratory"]
     alumni_match: ["jhu applied physics laboratory", "jhu applied physics", "jhu apl", "applied physics laboratory"]
     source_url: "https://careers.jhuapl.edu/jobs"
-    note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
 
   - name: "Morgan Stanley"
     ats: workday
@@ -444,12 +443,11 @@ companies:
     source_url: "https://iaziqy.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/UberCareers/jobs"
 
   - name: "ZS"
-    ats: bespoke
-    module: "zs"
-    platform_family: "iCIMS"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "jobs.zs.com"
     alumni_match: ["zs"]
     source_url: "https://jobs.zs.com/jobs"
-    note: "company-hosted iCIMS portal; unsupported by current watchlist schema"
 
   - name: "DoorDash"
     ats: greenhouse
@@ -638,13 +636,12 @@ companies:
     source_url: "https://brooksauto.wd1.myworkdayjobs.com/Brooks_External_Site"
 
   - name: "General Dynamics Electric Boat"
-    ats: bespoke
-    module: "general_dynamics_electric_boat"
-    platform_family: "iCIMS"
+    ats: icims
+    icims_variant: classic
+    icims_host: "careers-gdeb.icims.com"
     aliases: ["Electric Boat", "GDEB"]
     alumni_match: ["general dynamics electric boat", "electric boat", "gdeb"]
-    source_url: "https://careers-gdeb.icims.com/"
-    note: "iCIMS portal; unsupported by current watcher adapters"
+    source_url: "https://careers-gdeb.icims.com/jobs/search"
 
   - name: "Halo Industries"
     ats: bespoke
@@ -754,12 +751,12 @@ companies:
     source_url: "https://jobs.smartrecruiters.com/Vitol"
 
   - name: "Analysis Group"
-    ats: bespoke
-    module: "analysis_group"
-    platform_family: "iCIMS"
+    ats: icims
+    icims_variant: classic
+    icims_host: "professionalcareers-analysisgroup.icims.com"
+    icims_portals: ["professionalcareers-analysisgroup.icims.com", "datasciencecareers-analysisgroup.icims.com"]
     alumni_match: ["analysis group"]
-    source_url: "https://www.analysisgroup.com/careers/"
-    note: "iCIMS portal; unsupported by current watcher adapters"
+    source_url: "https://professionalcareers-analysisgroup.icims.com/jobs/search"
 
   - name: "Cornerstone Research"
     ats: workday
@@ -794,12 +791,11 @@ companies:
     note: "company-hosted careers portal; unsupported by current watcher adapters"
 
   - name: "Aon"
-    ats: bespoke
-    module: "aon"
-    platform_family: "iCIMS"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "jobs.aon.com"
     alumni_match: ["aon"]
     source_url: "https://jobs.aon.com/"
-    note: "company-hosted iCIMS portal; unsupported by current watcher adapters"
 
   - name: "WTW"
     ats: smartrecruiters

@@ -12,7 +12,8 @@ This file tracks completed watcher steps and the next handoff target.
   stays `degraded` with full diagnostics but is reported in one daily
   digest instead of an immediate email; actionable degradation is unchanged.
 - Watcher source layer is built: Greenhouse, Lever, Ashby, SmartRecruiters,
-  Workable, Workday, and SimplifyJobs GitHub listings.
+  Workable, Workday, Oracle HCM, TalentBrew, iCIMS, and SimplifyJobs GitHub
+  listings.
 - `watcher/detect.py` and the generated priority `watcher/watchlist.yml` are in
   place.
 - `watcher/alumni.py` is built and real-data verified against the private
@@ -1117,6 +1118,39 @@ This file tracks completed watcher steps and the next handoff target.
      warning` plus the pre-existing Windows-Git worktree-pointer-only ignore
      check failure; native WSL `git check-ignore` confirmed the invariant.
      Python compileall and `git diff --check` passed.
+
+49. Shared iCIMS adapter and five-company migration (2026-08-13):
+   - Added one `icims` adapter with explicit `jibe_json` and `classic`
+     variants. Jibe requires stable `totalCount`, nested `jobs[].data`, complete
+     page enumeration, same-host posting canonical URLs, and portal-namespaced
+     `req_id` identity. Classic parses only the iframe listing contract,
+     requires current/total pagination metadata, and derives identity from the
+     numeric posting-detail path; the outer shell and ambiguous empty pages
+     fail.
+   - Reusable multi-portal collection enumerates every ordered portal, permits
+     explicit empty siblings, namespaces IDs by portal, and fails the company
+     if any portal is incomplete. No detail enrichment or company-specific
+     parser was added.
+   - Aon, JHU Applied Physics Laboratory, and ZS use Jibe JSON. General Dynamics
+     Electric Boat uses classic iCIMS. Analysis Group combines its official
+     professional and data-science classic portals.
+   - Bounded Linux probes retained 1,026 / 349 / 267 / 165 / 13 rows
+     respectively, with unique IDs and URLs, zero malformed/schema-invalid
+     loss, complete enumeration, and healthy diagnostics.
+   - One isolated scheduled-limit (`4/1/2`) dry collection used temporary state,
+     disabled internship and health email, did not prime, left `seen` empty,
+     fetched 41,069 rows with zero collection errors, collected both GitHub
+     feeds, and completed all 30 Workday sources without retries. The exact-db
+     audit reported 75 `direct_verified`, 4 `direct_degraded`, 34
+     `backstop_only`, 16 `no_source_found`, 0 `needs_investigation`, and 58.1%
+     direct coverage. The same-db pre-iCIMS counterfactual is 70 verified, so
+     all five migrations contributed trustworthy direct coverage; the four
+     degraded sources are unrelated Workday tenants.
+   - Focused iCIMS validation passed (22 tests); the broader
+     config/health/concurrency/snapshot/run suite also passed. Full
+     backend/watcher validation passed with 1,474 tests, 100
+     skips, and one pre-existing dependency deprecation warning; Python
+     compileall also passed.
 
 ## Next
 

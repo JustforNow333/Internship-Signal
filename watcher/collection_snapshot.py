@@ -257,6 +257,9 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "talentbrew_site_id": company.talentbrew_site_id,
                 "talentbrew_category_id": company.talentbrew_category_id,
                 "talentbrew_category_name": company.talentbrew_category_name,
+                "icims_variant": company.icims_variant,
+                "icims_host": company.icims_host,
+                "icims_portals": list(company.icims_portals),
                 "module": company.module,
                 "terms": list(company.terms),
             }
