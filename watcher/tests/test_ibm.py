@@ -72,6 +72,20 @@ def set_attribute(item: dict, name: str, value: object) -> None:
     ]
 
 
+def pass_pages(*job_ids: str, page_size: int = 2) -> list[dict]:
+    documents = [document(job_id) for job_id in job_ids]
+    for result_number, item in enumerate(documents):
+        item["resultnum"] = result_number
+    return [
+        page(
+            *documents[start : start + page_size],
+            total=len(documents),
+            start=start,
+        )
+        for start in range(0, len(documents), page_size)
+    ]
+
+
 def test_single_page_maps_trustworthy_fields_and_native_identity():
     source = IbmSource(request_json=lambda *_: page(document("101")))
 
@@ -97,7 +111,8 @@ def test_single_page_maps_trustworthy_fields_and_native_identity():
 
 
 def test_fixture_pages_parse_without_network_and_preserve_optional_fields():
-    payloads = iter((fixture("ibm_page_1.json"), fixture("ibm_page_2.json")))
+    one_pass = [fixture("ibm_page_1.json"), fixture("ibm_page_2.json")]
+    payloads = iter(one_pass + one_pass)
     source = IbmSource(request_json=lambda *_: next(payloads), page_size=2)
 
     rows = source.fetch(company())
@@ -108,7 +123,8 @@ def test_fixture_pages_parse_without_network_and_preserve_optional_fields():
 
 
 def test_multi_page_uses_fr_nr_and_one_based_page_parameters():
-    payloads = iter((fixture("ibm_page_1.json"), fixture("ibm_page_2.json")))
+    one_pass = [fixture("ibm_page_1.json"), fixture("ibm_page_2.json")]
+    payloads = iter(one_pass + one_pass)
     urls = []
 
     def request_json(url: str, source_name: str):
@@ -120,13 +136,96 @@ def test_multi_page_uses_fr_nr_and_one_based_page_parameters():
     source.fetch(company())
 
     queries = [parse_qs(urlsplit(url).query, keep_blank_values=True) for url in urls]
-    assert [query["fr"] for query in queries] == [["0"], ["2"]]
-    assert [query["nr"] for query in queries] == [["2"], ["2"]]
-    assert [query["page"] for query in queries] == [["1"], ["2"]]
+    assert [query["fr"] for query in queries] == [["0"], ["2"], ["0"], ["2"]]
+    assert [query["nr"] for query in queries] == [["2"]] * 4
+    assert [query["page"] for query in queries] == [["1"], ["2"], ["1"], ["2"]]
     assert all(query["appid"] == ["careers"] for query in queries)
     assert all(query["scope"] == ["careers2"] for query in queries)
-    assert source.pages_requested == 2
-    assert source.documents_seen == 3
+    assert source.pages_requested == 4
+    assert source.documents_seen == 6
+    assert source.snapshot_passes_requested == 2
+
+
+def test_endpoint_uses_deterministic_posting_url_sort():
+    query = parse_qs(
+        urlsplit(IbmSource.endpoint(start=0, results=100, page=1)).query,
+        keep_blank_values=True,
+    )
+
+    assert query["sortby"] == ["url"]
+
+
+@pytest.mark.parametrize("max_snapshot_passes", [1, 4])
+def test_snapshot_pass_bound_is_strict(max_snapshot_passes):
+    with pytest.raises(ValueError, match="max_snapshot_passes"):
+        IbmSource(max_snapshot_passes=max_snapshot_passes)
+
+
+def test_one_unstable_pass_then_two_matching_passes_converges():
+    unstable = [
+        page(document("101"), document("102"), total=3, start=0),
+        page(document("103"), total=4, start=2),
+    ]
+    stable = pass_pages("101", "102", "103")
+    responses = iter(unstable + stable + stable)
+    source = IbmSource(
+        request_json=lambda *_: next(responses),
+        page_size=2,
+        max_snapshot_passes=3,
+    )
+
+    rows = source.fetch(company())
+
+    assert [row["extra"]["ibm_native_id"] for row in rows] == ["101", "102", "103"]
+    assert source.snapshot_passes_requested == 3
+
+
+def test_complete_job_set_change_then_consecutive_convergence_succeeds():
+    first = pass_pages("101", "102", "103")
+    stable = pass_pages("101", "102", "104")
+    responses = iter(first + stable + stable)
+    source = IbmSource(
+        request_json=lambda *_: next(responses),
+        page_size=2,
+        max_snapshot_passes=3,
+    )
+
+    rows = source.fetch(company())
+
+    assert [row["extra"]["ibm_native_id"] for row in rows] == ["101", "102", "104"]
+
+
+def test_persistent_complete_job_set_instability_fails():
+    responses = iter(
+        pass_pages("101", "102", "103")
+        + pass_pages("101", "102", "104")
+        + pass_pages("101", "102", "105")
+    )
+    source = IbmSource(
+        request_json=lambda *_: next(responses),
+        page_size=2,
+        max_snapshot_passes=3,
+    )
+
+    with pytest.raises(SourceSchemaError, match="did not stabilize"):
+        source.fetch(company())
+
+
+def test_page_boundary_movement_violating_url_order_fails():
+    ordered = pass_pages("101", "102", "103", "104")
+    moved = [
+        page(document("101"), document("103"), total=4, start=0),
+        page(document("102"), document("104"), total=4, start=2),
+    ]
+    responses = iter(ordered + moved)
+    source = IbmSource(
+        request_json=lambda *_: next(responses),
+        page_size=2,
+        max_snapshot_passes=3,
+    )
+
+    with pytest.raises(SourceSchemaError, match="URL ordering"):
+        source.fetch(company())
 
 
 def test_explicit_zero_result_is_successful_and_healthy():
@@ -204,36 +303,27 @@ def test_nonempty_all_malformed_response_fails():
 
 
 @pytest.mark.parametrize(
-    ("payloads", "message"),
+    "payloads",
     [
-        (
-            [
-                page(document("101"), document("102"), total=4, start=0),
-                page(document("101"), document("102"), total=4, start=2),
-            ],
-            "repeated",
-        ),
-        (
-            [
-                page(document("101"), document("102"), total=3, start=0),
-                page(total=3, start=2),
-            ],
-            "ended before",
-        ),
-        (
-            [
-                page(document("101"), document("102"), total=3, start=0),
-                page(document("103"), total=4, start=2),
-            ],
-            "changed",
-        ),
+        [
+            page(document("101"), document("102"), total=4, start=0),
+            page(document("101"), document("102"), total=4, start=2),
+        ],
+        [
+            page(document("101"), document("102"), total=3, start=0),
+            page(total=3, start=2),
+        ],
+        [
+            page(document("101"), document("102"), total=3, start=0),
+            page(document("103"), total=4, start=2),
+        ],
     ],
 )
-def test_repeated_premature_or_changing_pagination_fails(payloads, message):
-    responses = iter(payloads)
+def test_repeated_premature_or_changing_pagination_fails(payloads):
+    responses = iter(payloads * 3)
     source = IbmSource(request_json=lambda *_: next(responses), page_size=2)
 
-    with pytest.raises(SourceSchemaError, match=message):
+    with pytest.raises(SourceSchemaError, match="did not stabilize"):
         source.fetch(company())
 
 
@@ -243,7 +333,7 @@ def test_short_nonfinal_page_is_premature():
         page_size=2,
     )
 
-    with pytest.raises(SourceSchemaError, match="prematurely"):
+    with pytest.raises(SourceSchemaError, match="did not stabilize"):
         source.fetch(company())
 
 
@@ -310,7 +400,7 @@ def test_only_transient_fetch_errors_use_bounded_retries():
     )
 
     assert source.fetch(company()) == []
-    assert calls == 3
+    assert calls == 4
     assert source.last_health_diagnostics.failed_request_count == 2
     assert source.last_health_diagnostics.reason_codes == ("request_retry_recovered",)
 

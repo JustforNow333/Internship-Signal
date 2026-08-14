@@ -5,6 +5,8 @@ from __future__ import annotations
 import random
 import re
 import time
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
@@ -29,8 +31,9 @@ SEARCH_URL = (
     "careers/responseFormat/json"
 )
 DEFAULT_PAGE_SIZE = 100
-DEFAULT_MAX_PAGES = 1_000
+DEFAULT_MAX_PAGES = 100
 DEFAULT_MAX_ATTEMPTS = 3
+DEFAULT_MAX_SNAPSHOT_PASSES = 3
 _NATIVE_ID = re.compile(r"[1-9][0-9]*")
 _INDEX_ID = re.compile(r"[0-9a-f]{64}")
 _POSTING_PATH = "/careers/JobDetail"
@@ -48,6 +51,21 @@ _MAPPED_ATTRIBUTES = frozenset(
 )
 
 
+class _IbmSnapshotUnstable(SourceSchemaError):
+    """A complete IBM snapshot was not possible during this pass."""
+
+
+@dataclass(frozen=True)
+class _IbmSnapshot:
+    rows: tuple[dict, ...]
+    page_membership: tuple[str, ...]
+    total_documents: int
+    duplicate_count: int
+    malformed_rows: int
+    schema_error_rows: int
+    reason_codes: tuple[str, ...]
+
+
 class IbmSource(DirectDiagnosticsMixin):
     """Fully enumerate IBM's anonymous public careers search index."""
 
@@ -62,6 +80,7 @@ class IbmSource(DirectDiagnosticsMixin):
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         page_size: int = DEFAULT_PAGE_SIZE,
         max_pages: int = DEFAULT_MAX_PAGES,
+        max_snapshot_passes: int = DEFAULT_MAX_SNAPSHOT_PASSES,
     ) -> None:
         if not 1 <= max_attempts <= DEFAULT_MAX_ATTEMPTS:
             raise ValueError(
@@ -71,14 +90,21 @@ class IbmSource(DirectDiagnosticsMixin):
             raise ValueError(f"page_size must be between 1 and {DEFAULT_PAGE_SIZE}")
         if not 1 <= max_pages <= DEFAULT_MAX_PAGES:
             raise ValueError(f"max_pages must be between 1 and {DEFAULT_MAX_PAGES}")
+        if not 2 <= max_snapshot_passes <= DEFAULT_MAX_SNAPSHOT_PASSES:
+            raise ValueError(
+                "max_snapshot_passes must be between 2 and "
+                f"{DEFAULT_MAX_SNAPSHOT_PASSES}"
+            )
         self._request_json = request_json
         self._sleeper = sleeper
         self._jitter = jitter
         self._max_attempts = max_attempts
         self.page_size = page_size
         self.max_pages = max_pages
+        self.max_snapshot_passes = max_snapshot_passes
         self.pages_requested = 0
         self.documents_seen = 0
+        self.snapshot_passes_requested = 0
         self.request_attempts = 0
         self.retry_attempts = 0
         self.last_response_metadata: dict[str, object] = {}
@@ -91,7 +117,7 @@ class IbmSource(DirectDiagnosticsMixin):
                 ("scope", "careers2"),
                 ("rmdt", "ALL"),
                 ("appid", "careers"),
-                ("sortby", "-dcdate"),
+                ("sortby", "url"),
                 ("fr", start),
                 ("nr", results),
                 ("page", page),
@@ -104,15 +130,58 @@ class IbmSource(DirectDiagnosticsMixin):
         self._begin_direct_diagnostics()
         self.pages_requested = 0
         self.documents_seen = 0
+        self.snapshot_passes_requested = 0
         self.request_attempts = 0
         self.retry_attempts = 0
         self.last_response_metadata = {}
+        previous_snapshot: _IbmSnapshot | None = None
+        for pass_number in range(1, self.max_snapshot_passes + 1):
+            self.snapshot_passes_requested += 1
+            try:
+                snapshot = self._fetch_snapshot(company)
+            except _IbmSnapshotUnstable:
+                previous_snapshot = None
+                if pass_number == self.max_snapshot_passes:
+                    break
+                continue
+            if previous_snapshot is not None and snapshot == previous_snapshot:
+                self._record_parse_diagnostics(
+                    snapshot.malformed_rows,
+                    snapshot.schema_error_rows,
+                    snapshot.reason_codes,
+                )
+                return self._finish(list(snapshot.rows), snapshot.duplicate_count)
+            previous_snapshot = snapshot
+
+        raise SourceSchemaError(
+            "ibm snapshot did not stabilize within the bounded pass limit"
+        )
+
+    def _fetch_snapshot(self, company: CompanyCfg) -> _IbmSnapshot:
         expected_total: int | None = None
         seen_pages: set[str] = set()
+        page_membership: list[str] = []
         rows: list[dict] = []
         rows_by_job_id: dict[str, dict] = {}
         job_id_by_document_id: dict[str, str] = {}
         duplicate_count = 0
+        raw_seen = 0
+        ordered_urls: list[str] = []
+        malformed_rows = 0
+        schema_error_rows = 0
+        reason_codes: list[str] = []
+
+        def record_parse_diagnostics(
+            malformed: int,
+            schema_errors: int,
+            reasons: Iterable[str],
+        ) -> None:
+            nonlocal malformed_rows, schema_error_rows
+            malformed_rows += max(0, int(malformed))
+            schema_error_rows += max(0, int(schema_errors))
+            for reason in reasons:
+                if reason not in reason_codes:
+                    reason_codes.append(reason)
 
         for page_number in range(1, self.max_pages + 1):
             start = (page_number - 1) * self.page_size
@@ -132,33 +201,52 @@ class IbmSource(DirectDiagnosticsMixin):
             if expected_total is None:
                 expected_total = total
             elif total != expected_total:
-                raise SourceSchemaError("ibm totalresults changed during pagination")
+                raise _IbmSnapshotUnstable(
+                    "ibm totalresults changed during pagination"
+                )
 
             if total == 0:
                 if documents or page_number != 1:
                     raise SourceSchemaError("ibm zero-result response was inconsistent")
-                return self._finish(rows, duplicate_count)
+                return _IbmSnapshot(
+                    rows=(),
+                    page_membership=(_page_membership_fingerprint(documents),),
+                    total_documents=0,
+                    duplicate_count=0,
+                    malformed_rows=0,
+                    schema_error_rows=0,
+                    reason_codes=(),
+                )
             if not documents:
-                raise SourceSchemaError("ibm pagination ended before totalresults")
+                raise _IbmSnapshotUnstable(
+                    "ibm pagination ended before totalresults"
+                )
 
-            fingerprint = page_fingerprint(documents)
+            fingerprint = _page_membership_fingerprint(documents)
             if fingerprint in seen_pages:
-                raise SourceSchemaError("ibm returned a repeated pagination page")
+                raise _IbmSnapshotUnstable(
+                    "ibm returned a repeated pagination page"
+                )
             seen_pages.add(fingerprint)
+            page_membership.append(fingerprint)
             self.documents_seen += len(documents)
-            if self.documents_seen > total:
-                raise SourceSchemaError("ibm returned more documents than totalresults")
-            if self.documents_seen < total and len(documents) != self.page_size:
-                raise SourceSchemaError("ibm pagination ended prematurely")
+            raw_seen += len(documents)
+            if raw_seen > total:
+                raise _IbmSnapshotUnstable(
+                    "ibm returned more documents than totalresults"
+                )
+            if raw_seen < total and len(documents) != self.page_size:
+                raise _IbmSnapshotUnstable("ibm pagination ended prematurely")
 
             parsed = parse_records(
                 documents,
                 lambda document: _parse_document(document, company),
                 source_name=self.name,
                 company_name=company.name,
-                diagnostics=self._record_parse_diagnostics,
+                diagnostics=record_parse_diagnostics,
             )
             for row in parsed:
+                ordered_urls.append(row["source_url"])
                 job_id = row["extra"]["source_requisition_id"]
                 document_id = row["extra"]["ibm_index_document_id"]
                 document_job_id = job_id_by_document_id.get(document_id)
@@ -176,8 +264,20 @@ class IbmSource(DirectDiagnosticsMixin):
                 rows_by_job_id[job_id] = row
                 rows.append(row)
 
-            if self.documents_seen == total:
-                return self._finish(rows, duplicate_count)
+            if raw_seen == total:
+                if ordered_urls != sorted(ordered_urls):
+                    raise SourceSchemaError(
+                        "ibm response did not honor deterministic URL ordering"
+                    )
+                return _IbmSnapshot(
+                    rows=tuple(rows),
+                    page_membership=tuple(page_membership),
+                    total_documents=total,
+                    duplicate_count=duplicate_count,
+                    malformed_rows=malformed_rows,
+                    schema_error_rows=schema_error_rows,
+                    reason_codes=tuple(reason_codes),
+                )
             if page_number == self.max_pages:
                 raise SourceSchemaError(
                     "ibm reached the maximum page safeguard before completion"
@@ -314,6 +414,18 @@ def _document_fingerprint(document: dict) -> str:
         key: value for key, value in document.items() if key != "resultnum"
     }
     return page_fingerprint([stable_document])
+
+
+def _page_membership_fingerprint(documents: list) -> str:
+    """Hash page membership without retaining payloads or result positions."""
+
+    fingerprints = [
+        _document_fingerprint(document)
+        if isinstance(document, dict)
+        else page_fingerprint([document])
+        for document in documents
+    ]
+    return page_fingerprint(fingerprints)
 
 
 def _attributes(value: Any) -> dict[str, object]:

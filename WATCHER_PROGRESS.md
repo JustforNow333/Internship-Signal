@@ -1254,6 +1254,41 @@ This file tracks completed watcher steps and the next handoff target.
      Git/WSL worktree-pointer check failing; native WSL `git check-ignore`,
      compileall, frontend tests (76), and the frontend build passed.
 
+54. IBM search-index stability (2026-08-14):
+   - The old descending-date order was not a complete-enumeration contract:
+     two full passes with a stable 1,180 total retained only 1,165 and 1,158
+     unique IDs, repeated 15 and 22 exact documents, changed 15/22 IDs between
+     sets, and moved eight common IDs across pages. Large equal-date groups had
+     no deterministic secondary order. The earlier 1,174/1,175 total change is
+     consistent with a live index refresh, but the deliberately unretained old
+     payloads cannot prove its exact job delta.
+   - The official API accepts `sortby=url`. Three bounded URL-sorted passes
+     converged on the same 1,180-job set with monotonic posting URLs; the first
+     two also matched every sanitized page/record fingerprint, and an
+     independent `sortby=md5` pass returned the same ID set.
+   - IBM now succeeds only after two consecutive complete snapshots have equal
+     totals, sanitized page membership, canonical rows, duplicate counts, and
+     parse diagnostics. One changing pass may be discarded only when the next
+     two converge. The adapter never unions passes and fails after three passes;
+     each pass is capped at 100 pages and existing transport attempts stay at
+     three per page.
+   - Three live adapter probes and the isolated full watcher each returned
+     1,180 unique IDs and URLs with zero skips, duplicates, or retries. Normal
+     completion used two passes / 24 page requests, and persisted IBM health is
+     `healthy_with_listings`.
+   - The scheduled-limit (`4/1/2`) disposable run used isolated SQLite/cache
+     state, disabled email and priming, fetched 51,572 rows with zero source
+     errors, and left 87 dry-run matches pending. The exact-db audit reported
+     84 verified, 2 degraded, 27 backstop-only, and 16 no-source companies
+     (65.1%). Its IBM-failing counterfactual is 83/3/27/16 (64.3%), so IBM adds
+     one trustworthy direct company; unrelated IQVIA and Pfizer Workday skips
+     offset that gain in the chronological aggregate.
+   - Focused adapter/run/health/audit validation passed (241 tests). Full
+     backend/watcher validation reached 1,562 passed and 100 skipped with only
+     the known Windows Git/WSL worktree-pointer check failing; native WSL
+     `git check-ignore`, compileall, frontend tests (76), frontend build, and
+     `git diff --check` passed.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only

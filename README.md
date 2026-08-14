@@ -247,7 +247,8 @@ official referer-gated careers search API and uses Bain's numeric job IDs and
 posting-specific detail/program URLs without per-job enrichment.
 
 IBM uses the dedicated `ats: ibm` direct source. It fully enumerates IBM's
-anonymous `careers2` search index, preserves numeric job IDs, and accepts only
+anonymous `careers2` search index in posting-URL order, requires two matching
+complete bounded passes, preserves numeric job IDs, and accepts only
 posting-specific `careers.ibm.com` job URLs without detail enrichment.
 
 The Simplify JSON backstop likewise retains valid entries from a mixed

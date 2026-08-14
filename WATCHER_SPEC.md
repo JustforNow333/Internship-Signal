@@ -269,12 +269,18 @@ accepted. Missing optional listing fields do not trigger detail enrichment.
 
 **IBM** uses a dedicated direct source for the official anonymous search-index
 contract at `www-api.ibm.com`, with `appid=careers`, `scope=careers2`, and
-pagination through `fr`, `nr`, and one-based `page`. It requires stable result
-totals and exact page metadata, collapses only equivalent repeated index
-documents, and fails conflicting numeric `jobId` identities. Canonical URLs
-must be posting-specific `careers.ibm.com/careers/JobDetail?jobId=...` links;
-the legacy challenged Avature flow is never requested. Listing fields are
-sufficient, so the adapter performs no detail enrichment.
+pagination through `fr`, `nr`, and one-based `page`. `sortby=url` gives a
+deterministic order over posting-specific URLs; date sorting is not used
+because equal-date groups have unstable page membership. One result is trusted
+only after two consecutive complete passes have identical totals, sanitized
+page membership, canonical rows, duplicates, and parse diagnostics. At most
+three passes of at most 100 pages are attempted, so one drifting pass may be
+discarded only when the next two converge; passes are never unioned. The
+adapter collapses only equivalent repeated index documents and fails
+conflicting numeric `jobId` identities. Canonical URLs must be posting-specific
+`careers.ibm.com/careers/JobDetail?jobId=...` links; the legacy challenged
+Avature flow is never requested. Listing fields are sufficient, so the adapter
+performs no detail enrichment.
 
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
