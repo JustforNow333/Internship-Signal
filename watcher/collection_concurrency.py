@@ -51,6 +51,7 @@ UNKNOWN_ORIGIN = "unknown"
 DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "bain": "www.bain.com",
     "greenhouse": "boards-api.greenhouse.io",
+    "ibm": "www-api.ibm.com",
     "lever": "api.lever.co",
     "ashby": "api.ashbyhq.com",
     "smartrecruiters": "api.smartrecruiters.com",

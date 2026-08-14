@@ -51,8 +51,9 @@ from watcher.sources.base import (
     SourceFetchError,
     make_row,
 )
-from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.bain import BainSource
+from watcher.sources.greenhouse import GreenhouseSource
+from watcher.sources.ibm import IbmSource
 from watcher.sources.lever import LeverSource
 from watcher.sources.smartrecruiters import SmartRecruitersSource
 from watcher.sources.workable import WorkableSource
@@ -366,6 +367,7 @@ def test_scope_limits_cannot_exceed_the_global_worker_pool():
 def test_direct_origin_hosts_match_the_adapter_endpoints():
     endpoints = {
         "bain": BainSource.endpoint(page=0, results=100),
+        "ibm": IbmSource.endpoint(start=0, results=100, page=1),
         "greenhouse": GreenhouseSource.endpoint("token"),
         "lever": LeverSource.endpoint("token"),
         "ashby": AshbySource.endpoint("token"),

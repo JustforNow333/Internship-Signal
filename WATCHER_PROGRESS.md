@@ -1225,6 +1225,35 @@ This file tracks completed watcher steps and the next handoff target.
      worktree-pointer ignore check failing, and native compileall, frontend
      tests (76), frontend build, and the native ignore check passed.
 
+53. IBM direct source (2026-08-14):
+   - Added one IBM-specific anonymous JSON collector for the official current
+     `careers2` search index, not the challenged legacy Avature portal. It
+     requires stable totals and exact `fr`/`nr`/`page` metadata, namespaces
+     numeric `jobId` identity, and accepts only posting-specific IBM job URLs.
+   - Migrated only IBM from intentional bespoke/backstop coverage to
+     `ats: ibm`; alumni matching and inherited recruiting terms are unchanged.
+   - The official careers page and current embedded-search client still select
+     `appid=careers` and `scope=careers2` without authentication. A bounded
+     diagnostic enumeration observed 1,175 index documents, 1,162 unique jobs,
+     and 13 exact repeated documents; numeric IDs and posting URLs were sane,
+     with no malformed records or failed requests.
+   - IBM's live total currently changes between 1,174 and 1,175 while paging.
+     Repeated strict probes and the isolated full watcher therefore rejected
+     the response as incomplete and returned no partial canonical rows. The
+     persisted IBM status is `failed`, so it remains `direct_degraded` with its
+     GitHub backstop available rather than being promoted to verified coverage.
+   - The scheduled-limit (`4/1/2`) disposable run used isolated SQLite/cache
+     state, disabled email and priming, collected 50,393 rows, and left all 58
+     dry-run matches pending. Its exact-db audit reported 84 verified, 2
+     degraded, 27 backstop-only, and 16 no-source companies (65.1%). The
+     same-db pre-migration counterfactual is 84/1/28/16: IBM adds a responding
+     direct configuration but no trustworthy coverage; unrelated Morgan
+     Stanley degraded after a recovered Workday retry.
+   - IBM-focused/concurrency validation passed (71 tests). Full backend/watcher
+     validation reached 1,555 passed and 100 skipped with only the known Windows
+     Git/WSL worktree-pointer check failing; native WSL `git check-ignore`,
+     compileall, frontend tests (76), and the frontend build passed.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only

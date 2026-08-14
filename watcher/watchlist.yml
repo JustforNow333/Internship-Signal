@@ -243,11 +243,9 @@ companies:
     source_url: "https://www.hubspot.com/careers/jobs/7005836?gh_jid=7005836"
 
   - name: "IBM"
-    ats: bespoke
-    module: "ibm"
+    ats: ibm
     alumni_match: ["ibm"]
-    source_url: "https://www.ibm.com/careers"
-    note: "known company-hosted careers portal"
+    source_url: "https://www.ibm.com/careers/search"
 
   - name: "ICEYE"
     ats: workable

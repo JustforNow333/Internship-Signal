@@ -1,0 +1,55 @@
+{
+  "resultset": {
+    "version": "1",
+    "searchresults": {
+      "totalresults": 3,
+      "startindex": 0,
+      "numresults": 2,
+      "smresults": 0,
+      "searchresultlist": [
+        {
+          "resultnum": 0,
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "title": "IBM Consulting Software Developer Intern",
+          "description": "<p>Build reliable software with a global team.</p>",
+          "language": "en",
+          "summary": "",
+          "url": "https://careers.ibm.com/careers/JobDetail?jobId=101",
+          "docattributes": [
+            {"country": "us"},
+            {"dcdate": "2026-08-04"},
+            {"effectivedate": "2026-08-01"},
+            {"expiredate": "2030-08-01T00:00:00Z"},
+            {"field_keyword_05": "United States"},
+            {"field_keyword_08": "Software Engineering"},
+            {"field_keyword_17": "Hybrid"},
+            {"field_keyword_18": "Intern"},
+            {"field_keyword_19": "Austin, TX"},
+            {"field_text_01": "101"},
+            {"opaque_search_rank": "do-not-map"}
+          ],
+          "highlightedtext": {}
+        },
+        {
+          "resultnum": 1,
+          "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "title": "Data Science Co-op",
+          "description": "Analyze product data.",
+          "language": "en",
+          "summary": "",
+          "url": "https://careers.ibm.com/careers/JobDetail?jobId=102",
+          "docattributes": [
+            {"country": "ca"},
+            {"effectivedate": "2026-08-02"},
+            {"field_keyword_05": "Canada"},
+            {"field_keyword_17": "Remote"},
+            {"field_keyword_18": "Intern"},
+            {"field_keyword_19": "Toronto, ON"},
+            {"field_text_01": "102"}
+          ],
+          "highlightedtext": {}
+        }
+      ]
+    }
+  }
+}

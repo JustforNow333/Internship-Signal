@@ -129,6 +129,7 @@ SUPPORTED_ATS = {
     "oracle_hcm",
     "talentbrew",
     "icims",
+    "ibm",
     "successfactors",
     "bespoke",
     "github_only",

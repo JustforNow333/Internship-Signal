@@ -172,7 +172,7 @@ companies:
     ats: github_only               # no direct scrape; rely on Tier 2
 ```
 
-`ats` ∈ {bain, greenhouse, lever, ashby, smartrecruiters, workable, workday,
+`ats` ∈ {bain, ibm, greenhouse, lever, ashby, smartrecruiters, workable, workday,
 oracle_hcm, talentbrew, icims, successfactors, bespoke, github_only}.
 `config.py` validates every entry at startup and fails loudly on an unknown
 `ats` or a `bespoke` entry whose module is missing.
@@ -266,6 +266,15 @@ requires stable `totalResults`, and fully enumerates pages with bounded retry
 and completeness checks. Numeric `JobId` values are namespaced as native
 identity; only posting-specific Bain detail or internship-program URLs are
 accepted. Missing optional listing fields do not trigger detail enrichment.
+
+**IBM** uses a dedicated direct source for the official anonymous search-index
+contract at `www-api.ibm.com`, with `appid=careers`, `scope=careers2`, and
+pagination through `fr`, `nr`, and one-based `page`. It requires stable result
+totals and exact page metadata, collapses only equivalent repeated index
+documents, and fails conflicting numeric `jobId` identities. Canonical URLs
+must be posting-specific `careers.ibm.com/careers/JobDetail?jobId=...` links;
+the legacy challenged Avature flow is never requested. Listing fields are
+sufficient, so the adapter performs no detail enrichment.
 
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
