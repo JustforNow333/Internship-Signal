@@ -1152,6 +1152,28 @@ This file tracks completed watcher steps and the next handoff target.
      skips, and one pre-existing dependency deprecation warning; Python
      compileall also passed.
 
+50. Repository bug and redundancy audit (2026-08-13):
+   - Reproduced that iCIMS configuration accepted DNS-invalid portal labels
+     (leading/trailing hyphens or labels longer than 63 characters) and then
+     constructed a request URL from them. Regression coverage now verifies
+     both watchlist loading and direct runtime injection reject those hosts
+     before any request.
+   - Configuration and the iCIMS adapter now share one strict hostname helper;
+     the byte-for-byte adapter duplicate was removed. Existing valid hosts,
+     source identity, collection, pagination, health, and diagnostics are
+     unchanged. The supported-ATS list in this specification was also brought
+     back in sync with the loader.
+   - AST/static caller audits found no mutable literal defaults, duplicate
+     dictionary keys, repeated boolean operands, constant/self comparisons,
+     unreachable terminal code, or unreferenced private definitions. Repeated
+     migration and fixture helpers were retained because their local isolation
+     is intentional.
+   - Focused iCIMS/config/source-health validation passed (126 tests). Full
+     backend/watcher validation reached 1,479 passed and 100 skipped, with only
+     the known Windows Git/WSL worktree-pointer ignore check failing; native
+     WSL `git check-ignore` passed. Python compileall, frontend tests (76),
+     frontend production build, and `git diff --check` passed.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only

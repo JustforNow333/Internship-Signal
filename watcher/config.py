@@ -138,6 +138,7 @@ SUPPORTED_GITHUB_LISTING_FORMATS = {
 COVERAGE_STATUS_NO_SOURCE_FOUND = "no_source_found"
 SUPPORTED_COVERAGE_STATUSES = {COVERAGE_STATUS_NO_SOURCE_FOUND}
 MAX_PLATFORM_FAMILY_LENGTH = 80
+_HOSTNAME_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 
 class ConfigError(ValueError):
@@ -713,14 +714,14 @@ def _validate_icims_config(
         raise ConfigError(
             f"{name}: icims_variant must be one of: classic, jibe_json"
         )
-    if not _valid_config_hostname(host):
+    if not is_valid_hostname(host):
         raise ConfigError(f"{name}: icims_host must be a hostname")
     if portals:
         if len(portals) != len(set(portals)):
             raise ConfigError(f"{name}: icims_portals must contain unique hostnames")
         if host not in portals:
             raise ConfigError(f"{name}: icims_portals must include icims_host")
-        if any(not _valid_config_hostname(portal) for portal in portals):
+        if any(not is_valid_hostname(portal) for portal in portals):
             raise ConfigError(f"{name}: icims_portals must contain only hostnames")
     try:
         parsed = urlsplit(source_url)
@@ -741,7 +742,9 @@ def _validate_icims_config(
         )
 
 
-def _valid_config_hostname(value: str) -> bool:
+def is_valid_hostname(value: str) -> bool:
+    """Return whether value is a lower-case DNS hostname without URL syntax."""
+
     if (
         not value
         or len(value) > 253
@@ -749,6 +752,7 @@ def _valid_config_hostname(value: str) -> bool:
         or value.startswith(".")
         or value.endswith(".")
         or ".." in value
+        or any(not _HOSTNAME_LABEL.fullmatch(label) for label in value.split("."))
     ):
         return False
     try:

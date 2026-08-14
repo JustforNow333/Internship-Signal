@@ -8,7 +8,7 @@ from html.parser import HTMLParser
 from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
-from watcher.config import CompanyCfg
+from watcher.config import CompanyCfg, is_valid_hostname
 from watcher.sources.base import (
     DirectDiagnosticsMixin,
     JsonHttpResponse,
@@ -279,41 +279,16 @@ def _required_config(company: CompanyCfg) -> tuple[str, tuple[str, ...]]:
     )
     if variant not in SUPPORTED_VARIANTS:
         raise SourceError(f"icims requires a supported icims_variant for {company.name}")
-    if not _is_hostname(host):
+    if not is_valid_hostname(host):
         raise SourceError(f"icims requires a valid icims_host for {company.name}")
     if portals:
         if host not in portals or len(portals) != len(set(portals)):
             raise SourceError(f"icims portal scope is invalid for {company.name}")
-        if any(not _is_hostname(portal) for portal in portals):
+        if any(not is_valid_hostname(portal) for portal in portals):
             raise SourceError(f"icims portal scope is invalid for {company.name}")
     else:
         portals = (host,)
     return variant, portals
-
-
-def _is_hostname(value: str) -> bool:
-    if (
-        not value
-        or len(value) > 253
-        or not re.fullmatch(r"[a-z0-9.-]+", value)
-        or value.startswith(".")
-        or value.endswith(".")
-        or ".." in value
-    ):
-        return False
-    try:
-        parsed = urlsplit(f"https://{value}")
-    except ValueError:
-        return False
-    return bool(
-        parsed.hostname == value
-        and parsed.netloc == value
-        and not parsed.username
-        and not parsed.password
-        and parsed.path in {"", "/"}
-        and not parsed.query
-        and not parsed.fragment
-    )
 
 
 def _jibe_page(payload: Any, *, page_size: int) -> tuple[list, int]:

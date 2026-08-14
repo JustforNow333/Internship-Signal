@@ -172,9 +172,10 @@ companies:
     ats: github_only               # no direct scrape; rely on Tier 2
 ```
 
-`ats` ∈ {greenhouse, lever, ashby, smartrecruiters, workable, workday, bespoke,
-github_only}. `config.py` validates every entry at startup and fails loudly on
-an unknown `ats` or a `bespoke` entry whose module is missing.
+`ats` ∈ {greenhouse, lever, ashby, smartrecruiters, workable, workday,
+oracle_hcm, talentbrew, icims, bespoke, github_only}. `config.py` validates
+every entry at startup and fails loudly on an unknown `ats` or a `bespoke`
+entry whose module is missing.
 
 `defaults.terms` must be present and contain at least one nonblank term. A
 company inherits those terms unless it declares its own nonempty `terms` list;

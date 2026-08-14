@@ -17,11 +17,16 @@ from watcher.config import (
 from watcher.collection_concurrency import direct_origin_key
 from watcher.collection_snapshot import collection_config_fingerprint
 from watcher.run import CollectionStats, _default_direct_sources, collect_rows
-from watcher.sources import SourceFetchError, SourceSchemaError
+from watcher.sources import SourceError, SourceFetchError, SourceSchemaError
 from watcher.sources.icims import IcimsSource
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+INVALID_DNS_HOSTS = (
+    "-bad.example.test",
+    "bad-.example.test",
+    f"{'a' * 64}.example.test",
+)
 
 
 def json_fixture(name: str):
@@ -470,3 +475,30 @@ def test_icims_configuration_requires_an_explicit_safe_scope(tmp_path, config_li
 
     with pytest.raises(ConfigError, match=message):
         load_watchlist(path)
+
+
+@pytest.mark.parametrize("host", INVALID_DNS_HOSTS)
+def test_icims_configuration_rejects_invalid_dns_hostname_labels(tmp_path, host):
+    path = tmp_path / "watchlist.yml"
+    path.write_text(
+        'defaults:\n  terms: ["Summer 2027"]\ncompanies:\n'
+        '  - name: "iCIMS Example"\n    ats: icims\n'
+        '    icims_variant: jibe_json\n'
+        f'    icims_host: "{host}"\n'
+        f'    source_url: "https://{host}/jobs"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="icims_host must be a hostname"):
+        load_watchlist(path)
+
+
+@pytest.mark.parametrize("host", INVALID_DNS_HOSTS)
+def test_icims_runtime_rejects_invalid_dns_hostname_without_request(host):
+    requested = []
+    source = IcimsSource(request_json=lambda url, _source_name: requested.append(url))
+
+    with pytest.raises(SourceError, match="valid icims_host"):
+        source.fetch(jibe_company(host))
+
+    assert requested == []
