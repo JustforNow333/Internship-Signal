@@ -9,6 +9,7 @@ from .base import (
     make_row,
 )
 from .ashby import AshbySource
+from .bain import BainSource
 from .github_listings import GitHubListingsSource
 from .github_markdown_table import GitHubMarkdownTableSource
 from .greenhouse import GreenhouseSource
@@ -23,6 +24,7 @@ from .workday import WorkdaySource
 
 __all__ = [
     "AshbySource",
+    "BainSource",
     "DirectSourceDiagnostics",
     "GitHubListingsSource",
     "GitHubMarkdownTableSource",

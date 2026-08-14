@@ -779,12 +779,10 @@ companies:
     source_url: "https://fticonsulting.wd108.myworkdayjobs.com/FTIConsultingCareers"
 
   - name: "Bain & Company"
-    ats: bespoke
-    module: "bain_company"
+    ats: bain
     aliases: ["Bain"]
     alumni_match: ["bain & company", "bain"]
-    source_url: "https://www.bain.com/careers/"
-    note: "company-hosted careers portal; unsupported by current watcher adapters"
+    source_url: "https://www.bain.com/careers/find-a-role/"
 
   - name: "Aon"
     ats: icims

@@ -119,6 +119,7 @@ SUPPORTED_WORKDAY_DETAIL_POLICIES = frozenset(
     }
 )
 SUPPORTED_ATS = {
+    "bain",
     "greenhouse",
     "lever",
     "ashby",

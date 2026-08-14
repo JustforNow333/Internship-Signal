@@ -242,6 +242,10 @@ hostname-only `successfactors_host`, plus an optional one-segment
 fully enumerates explicit search-result pagination and uses same-host numeric
 posting-detail IDs without per-job enrichment.
 
+Bain & Company uses the dedicated `ats: bain` direct source. It enumerates the
+official referer-gated careers search API and uses Bain's numeric job IDs and
+posting-specific detail/program URLs without per-job enrichment.
+
 The Simplify JSON backstop likewise retains valid entries from a mixed
 malformed payload and emits one bounded warning. Its deliberately nonempty feed
 still fails when every entry is malformed.

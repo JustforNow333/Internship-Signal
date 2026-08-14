@@ -1206,6 +1206,25 @@ This file tracks completed watcher steps and the next handoff target.
      failing; native WSL `git check-ignore` passed. Python compileall, frontend
      tests (76), frontend production build, and `git diff --check` passed.
 
+52. Bain & Company direct source (2026-08-14):
+   - Added one Bain-specific anonymous JSON collector for the official
+     referer-gated careers search contract. It treats `start` as a zero-based
+     page number, requires a stable total, preserves numeric native IDs and
+     posting-specific Bain detail/program URLs, and performs no detail
+     enrichment.
+   - Migrated only Bain from intentional backstop coverage to `ats: bain`;
+     aliases, alumni matching, and inherited recruiting terms are unchanged.
+   - The bounded Linux probe and isolated full watcher both returned 279 Bain
+     rows over 3 pages with unique IDs/URLs and zero skips, duplicates, retries,
+     or failed requests. Persisted health classified Bain as healthy with
+     listings. The same-db audit moved the counterfactual 83 verified / 29
+     backstop split to 84 / 28 (65.1% direct); EY alone degraded because its
+     unrelated SuccessFactors total changed during pagination.
+   - Focused validation passed (222 tests), full backend/watcher validation
+     reached 1,526 passed and 100 skipped with only the known Windows Git/WSL
+     worktree-pointer ignore check failing, and native compileall, frontend
+     tests (76), frontend build, and the native ignore check passed.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only

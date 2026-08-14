@@ -369,13 +369,16 @@ def get_json_response(
     *,
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     include_preview: bool = False,
+    request_headers: Mapping[str, str] | None = None,
     opener: Callable[..., Any] = urlopen,
 ) -> JsonHttpResponse:
     """GET JSON once with the same bounded transport diagnostics as POST."""
 
+    headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
+    headers.update(request_headers or {})
     request = Request(
         url,
-        headers={"Accept": "application/json", "User-Agent": USER_AGENT},
+        headers=headers,
         method="GET",
     )
     try:

@@ -172,7 +172,7 @@ companies:
     ats: github_only               # no direct scrape; rely on Tier 2
 ```
 
-`ats` ∈ {greenhouse, lever, ashby, smartrecruiters, workable, workday,
+`ats` ∈ {bain, greenhouse, lever, ashby, smartrecruiters, workable, workday,
 oracle_hcm, talentbrew, icims, successfactors, bespoke, github_only}.
 `config.py` validates every entry at startup and fails loudly on an unknown
 `ats` or a `bespoke` entry whose module is missing.
@@ -258,6 +258,14 @@ links never become postings. `successfactors_host` is required;
 `successfactors_site_prefix` and `successfactors_locale` are optional. Search
 rows provide canonical title/location and any displayed posting date without
 per-job detail requests.
+
+**Bain & Company** uses a dedicated direct source for the official anonymous
+`GET /en/api/jobsearch/keyword/get` careers-search contract. It supplies the
+official careers-page Referer, treats `start` as a zero-based page number,
+requires stable `totalResults`, and fully enumerates pages with bounded retry
+and completeness checks. Numeric `JobId` values are namespaced as native
+identity; only posting-specific Bain detail or internship-program URLs are
+accepted. Missing optional listing fields do not trigger detail enrichment.
 
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
