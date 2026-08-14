@@ -1174,6 +1174,38 @@ This file tracks completed watcher steps and the next handoff target.
      WSL `git check-ignore` passed. Python compileall, frontend tests (76),
      frontend production build, and `git diff --check` passed.
 
+51. Shared SuccessFactors Career Site Builder adapter (2026-08-13):
+   - Added one anonymous `successfactors` adapter using the explicit
+     `/{optional-prefix}/search/?q=&locationsearch=&startrow=N` HTML contract.
+     It derives page size and completion from result/page metadata, rejects
+     repeated pages and changing/inconsistent totals, keeps mixed valid rows,
+     fails nonempty all-malformed pages, and requires same-host numeric posting
+     IDs from posting-specific detail URLs. No per-job enrichment is used.
+   - Root search sites may link through one same-host brand segment before
+     `/job`; this retained three verified ExxonMobil rows while a regression
+     keeps multi-segment and generic navigation paths invalid. Exact duplicate
+     rows are counted and collapsed; conflicting identities fail.
+   - EY (`/ey`), ExxonMobil (root), MIT Lincoln Laboratory (root), Nomura
+     (`/Nomura`), and Vaisala (root) now use the shared adapter. Their bounded
+     Linux probes returned 7,536/302, 618/25, 168/7, 527/6, and 13/1
+     rows/pages. All IDs and URLs were unique after one exact EY duplicate was
+     counted; no rows were malformed or schema-invalid and all five attempts
+     were complete.
+   - One isolated scheduled-limit (`4/1/2`) dry collection used temporary
+     SQLite/cache/report state, disabled internship and health email, did not
+     prime, collected both GitHub feeds, returned 50,111 rows with zero errors,
+     and left `seen` empty. Its exact-db audit reported 82 `direct_verified`, 2
+     `direct_degraded`, 29 `backstop_only`, 16 `no_source_found`, and 0
+     `needs_investigation` (63.6% direct coverage). The exact-db pre-migration
+     counterfactual is 77/2/34/16/0 (59.7%), so all five migrations contributed
+     trustworthy direct coverage; the two degraded sources are unrelated
+     Workday tenants.
+   - Focused adapter/config/concurrency/snapshot/health/run validation passed
+     (250 tests). Full backend/watcher validation reached 1,504 passed and 100
+     skipped, with only the known Windows Git/WSL worktree-pointer ignore check
+     failing; native WSL `git check-ignore` passed. Python compileall, frontend
+     tests (76), frontend production build, and `git diff --check` passed.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only

@@ -16,6 +16,7 @@ from .icims import IcimsSource
 from .lever import LeverSource
 from .oracle_hcm import OracleHcmSource
 from .smartrecruiters import SmartRecruitersSource
+from .successfactors import SuccessFactorsSource
 from .talentbrew import TalentBrewSource
 from .workable import WorkableSource
 from .workday import WorkdaySource
@@ -30,6 +31,7 @@ __all__ = [
     "LeverSource",
     "OracleHcmSource",
     "SmartRecruitersSource",
+    "SuccessFactorsSource",
     "TalentBrewSource",
     "Source",
     "SourceError",

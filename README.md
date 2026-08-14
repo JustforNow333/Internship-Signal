@@ -236,6 +236,12 @@ sources also list the complete ordered `icims_portals`; every portal must
 enumerate successfully. The adapter uses anonymous Jibe JSON or the classic
 iframe listing response, never the outer shell or per-job enrichment.
 
+SuccessFactors Career Site Builder entries use `ats: successfactors` with a
+hostname-only `successfactors_host`, plus an optional one-segment
+`successfactors_site_prefix` and optional `successfactors_locale`. The adapter
+fully enumerates explicit search-result pagination and uses same-host numeric
+posting-detail IDs without per-job enrichment.
+
 The Simplify JSON backstop likewise retains valid entries from a mixed
 malformed payload and emits one bounded warning. Its deliberately nonempty feed
 still fails when every entry is malformed.

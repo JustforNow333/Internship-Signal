@@ -53,7 +53,7 @@ GitHub Actions cron (hourly)
         │
         ▼
 For each company in watchlist.yml:
-    ┌─ Tier 1: direct ATS adapter (Greenhouse/Lever/Ashby/SmartRecruiters/iCIMS/Workday/bespoke)
+    ┌─ Tier 1: direct ATS adapter (Greenhouse/Lever/Ashby/SmartRecruiters/iCIMS/SuccessFactors/Workday/bespoke)
     │     └─ success → canonical rows tagged source="direct"
     │     └─ fail/blocked → log, continue (do NOT abort the run)
     │
@@ -173,9 +173,9 @@ companies:
 ```
 
 `ats` ∈ {greenhouse, lever, ashby, smartrecruiters, workable, workday,
-oracle_hcm, talentbrew, icims, bespoke, github_only}. `config.py` validates
-every entry at startup and fails loudly on an unknown `ats` or a `bespoke`
-entry whose module is missing.
+oracle_hcm, talentbrew, icims, successfactors, bespoke, github_only}.
+`config.py` validates every entry at startup and fails loudly on an unknown
+`ats` or a `bespoke` entry whose module is missing.
 
 `defaults.terms` must be present and contain at least one nonblank term. A
 company inherits those terms unless it declares its own nonempty `terms` list;
@@ -246,6 +246,18 @@ optional complete ordered host list for reusable multi-portal sources; its
 hosts are enumerated independently and combined with portal-namespaced IDs.
 One failed/incomplete portal fails the company attempt, while an explicit empty
 portal may coexist with populated siblings. No per-job enrichment is used.
+
+**SuccessFactors** uses the anonymous Career Site Builder HTML search contract,
+`GET /{optional-site-prefix}/search/?q=&locationsearch=&startrow=N`. The
+adapter derives the page size and complete range from explicit result and page
+metadata, rejects repeated pages and changing/inconsistent totals, and uses the
+same-host numeric ID in each posting-specific `/job/.../{id}` detail URL.
+Root search sites may link to one same-host brand segment before `/job`; sites
+with an explicit prefix require that exact prefix. Generic search/navigation
+links never become postings. `successfactors_host` is required;
+`successfactors_site_prefix` and `successfactors_locale` are optional. Search
+rows provide canonical title/location and any displayed posting date without
+per-job detail requests.
 
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
