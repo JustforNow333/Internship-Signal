@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
@@ -12,14 +12,30 @@ from watcher.sources.base import (
     html_to_text,
     iso_date,
     make_row,
+    page_fingerprint,
     parse_records,
     post_json,
     require_token,
 )
 
+DEFAULT_MAX_PAGES = 1_000
+
 
 class WorkableSource(DirectDiagnosticsMixin):
     name = "workable"
+
+    def __init__(
+        self,
+        *,
+        request_json: Callable[[str, dict, str], Any] | None = None,
+        max_pages: int = DEFAULT_MAX_PAGES,
+    ) -> None:
+        if not 1 <= max_pages <= DEFAULT_MAX_PAGES:
+            raise ValueError(f"max_pages must be between 1 and {DEFAULT_MAX_PAGES}")
+        self._request_json = request_json
+        self.max_pages = max_pages
+        self.pages_requested = 0
+        self._begin_direct_diagnostics()
 
     @staticmethod
     def endpoint(token: str) -> str:
@@ -27,7 +43,70 @@ class WorkableSource(DirectDiagnosticsMixin):
 
     def fetch(self, company: CompanyCfg) -> list[dict]:
         token = require_token(company, self.name)
-        return self.parse(post_json(self.endpoint(token), {}, self.name), company)
+        self._begin_direct_diagnostics()
+        self.pages_requested = 0
+        endpoint = self.endpoint(token)
+        request_json = self._request_json or post_json
+        expected_total: int | None = None
+        raw_seen = 0
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        seen_pages: set[str] = set()
+        rows: list[dict] = []
+
+        for page_number in range(1, self.max_pages + 1):
+            payload = {} if cursor is None else {"query": "", "token": cursor}
+            self.pages_requested += 1
+            response = request_json(endpoint, payload, self.name)
+            jobs, total, next_cursor = _strict_page(response)
+
+            if expected_total is None:
+                expected_total = total
+            elif total != expected_total:
+                raise SourceSchemaError("workable total changed during pagination")
+
+            if total == 0:
+                if page_number != 1 or jobs or next_cursor is not None:
+                    raise SourceSchemaError(
+                        "workable zero-result response was inconsistent"
+                    )
+                self._finish_direct_diagnostics(rows)
+                return rows
+            if not jobs:
+                raise SourceSchemaError("workable pagination ended before total")
+
+            fingerprint = page_fingerprint(jobs)
+            if fingerprint in seen_pages:
+                raise SourceSchemaError(
+                    "workable returned a repeated pagination page"
+                )
+            seen_pages.add(fingerprint)
+            raw_seen += len(jobs)
+            if raw_seen > total:
+                raise SourceSchemaError(
+                    "workable returned more records than the reported total"
+                )
+
+            rows.extend(self._parse_records(jobs, company))
+            if raw_seen == total:
+                if next_cursor is not None:
+                    raise SourceSchemaError(
+                        "workable returned a cursor after total completion"
+                    )
+                self._finish_direct_diagnostics(rows)
+                return rows
+            if next_cursor is None:
+                raise SourceSchemaError("workable pagination ended before total")
+            if next_cursor in seen_cursors:
+                raise SourceSchemaError("workable returned a repeated cursor")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+            if page_number == self.max_pages:
+                raise SourceSchemaError(
+                    "workable reached the maximum page safeguard before completion"
+                )
+
+        raise AssertionError("unreachable Workable pagination state")
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
         self._begin_direct_diagnostics()
@@ -37,13 +116,7 @@ class WorkableSource(DirectDiagnosticsMixin):
         if total is not None and not isinstance(total, int):
             raise SourceSchemaError("workable expected total to be an integer")
         jobs = ensure_list(payload.get("results"), self.name, "results")
-        rows = parse_records(
-            jobs,
-            lambda job: self._parse_job(job, company),
-            source_name=self.name,
-            company_name=company.name,
-            diagnostics=self._record_parse_diagnostics,
-        )
+        rows = self._parse_records(jobs, company)
         incomplete = total is not None and total > len(jobs)
         self._finish_direct_diagnostics(
             rows,
@@ -52,6 +125,15 @@ class WorkableSource(DirectDiagnosticsMixin):
             reason_codes=("reported_total_exceeds_response",) if incomplete else (),
         )
         return rows
+
+    def _parse_records(self, jobs: list, company: CompanyCfg) -> list[dict]:
+        return parse_records(
+            jobs,
+            lambda job: self._parse_job(job, company),
+            source_name=self.name,
+            company_name=company.name,
+            diagnostics=self._record_parse_diagnostics,
+        )
 
     def _parse_job(self, job: Any, company: CompanyCfg) -> dict:
         if not isinstance(job, dict):
@@ -85,6 +167,25 @@ class WorkableSource(DirectDiagnosticsMixin):
                 "locations": job.get("locations") or [job.get("location") or {}],
             },
         )
+
+
+def _strict_page(payload: Any) -> tuple[list, int, str | None]:
+    if not isinstance(payload, dict):
+        raise SourceSchemaError("workable expected a JSON object")
+    jobs = payload.get("results")
+    total = payload.get("total")
+    next_cursor = payload.get("nextPage")
+    if not isinstance(jobs, list):
+        raise SourceSchemaError("workable expected results to be a list")
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        raise SourceSchemaError("workable expected total to be a nonnegative integer")
+    if next_cursor is not None:
+        if not isinstance(next_cursor, str):
+            raise SourceSchemaError("workable expected nextPage to be a string")
+        next_cursor = next_cursor.strip()
+        if not next_cursor:
+            next_cursor = None
+    return jobs, total, next_cursor
 
 
 def _job_url(token: str, shortcode: str) -> str:

@@ -64,6 +64,7 @@ RECENT_DIRECT_ADAPTER_METADATA = {
     "Air Products": ("workday", "airproducts", "wd5", "AP0001"),
     "LevelTen Energy": ("greenhouse", "leveltenenergy", "", ""),
     "Convergent Energy and Power": ("workable", "convergent-careers", "", ""),
+    "Halo Industries": ("workable", "halo-industries", "", ""),
     "Merck": ("workday", "msd", "wd5", "SearchJobs"),
     "Pfizer": ("workday", "pfizer", "wd1", "PfizerCareers"),
     "Eli Lilly and Company": ("workday", "lilly", "wd115", "LLY"),
@@ -385,6 +386,23 @@ def test_recent_direct_watchlist_entries_keep_verified_adapter_metadata():
         assert company.token == token
         assert company.workday_shard == workday_shard
         assert company.workday_site == workday_site
+
+
+def test_halo_uses_verified_workable_configuration_without_stale_metadata():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    company = next(item for item in config.companies if item.name == "Halo Industries")
+    entry = next(
+        item for item in _default_watchlist_entries() if item["name"] == company.name
+    )
+
+    assert company.ats == "workable"
+    assert company.token == "halo-industries"
+    assert company.source_url == "https://halo-industries.workable.com/"
+    assert company.aliases == ("Halo",)
+    assert company.alumni_match == ("halo industries", "halo")
+    assert company.module == ""
+    assert company.coverage_status == ""
+    assert not ({"module", "coverage_status", "platform_family", "note"} & set(entry))
 
 
 def test_confirmed_direct_source_additions_use_exact_supported_configurations():

@@ -637,12 +637,11 @@ companies:
     source_url: "https://careers-gdeb.icims.com/jobs/search"
 
   - name: "Halo Industries"
-    ats: bespoke
-    module: "halo_industries"
+    ats: workable
+    token: "halo-industries"
     aliases: ["Halo"]
     alumni_match: ["halo industries", "halo"]
-    source_url: "https://halo.com/careers/"
-    note: "company-hosted careers portal"
+    source_url: "https://halo-industries.workable.com/"
 
   - name: "Proterra"
     ats: github_only
