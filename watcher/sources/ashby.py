@@ -10,7 +10,6 @@ from uuid import UUID
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
-    DirectDiagnosticsMixin,
     SourceFetchError,
     SourceSchemaError,
     ensure_list,
@@ -19,15 +18,15 @@ from watcher.sources.base import (
     html_to_text,
     iso_date,
     make_row,
-    parse_records,
     require_token,
 )
+from watcher.sources.direct import DirectRecordAdapter
 
 
 _APP_DATA_ASSIGNMENT = re.compile(r"window\.__appData\s*=\s*")
 
 
-class AshbySource(DirectDiagnosticsMixin):
+class AshbySource(DirectRecordAdapter):
     name = "ashby"
 
     @staticmethod
@@ -56,13 +55,11 @@ class AshbySource(DirectDiagnosticsMixin):
         if not isinstance(payload, dict):
             raise SourceSchemaError("ashby expected a JSON object")
         jobs = ensure_list(payload.get("jobs"), self.name, "jobs")
-        rows = parse_records(
+        rows = self._parse_direct_records(
             jobs,
+            company,
             lambda job: self._parse_job(job, company),
-            source_name=self.name,
-            company_name=company.name,
             include=_should_parse,
-            diagnostics=self._record_parse_diagnostics,
         )
         self._finish_direct_diagnostics(rows)
         return rows
@@ -86,12 +83,10 @@ class AshbySource(DirectDiagnosticsMixin):
             raise SourceSchemaError("ashby hosted board missing job board data")
         jobs = ensure_list(board.get("jobPostings"), self.name, "jobPostings")
         teams = _hosted_teams(board.get("teams"))
-        rows = parse_records(
+        rows = self._parse_direct_records(
             jobs,
+            company,
             lambda job: self._parse_hosted_job(job, company, token, teams),
-            source_name=self.name,
-            company_name=company.name,
-            diagnostics=self._record_parse_diagnostics,
         )
         rows, duplicate_count = _deduplicate_hosted_rows(rows)
         self._finish_direct_diagnostics(rows, duplicate_row_count=duplicate_count)

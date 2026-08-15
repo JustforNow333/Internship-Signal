@@ -13,7 +13,9 @@ from watcher.sources import (
     GitHubListingsSource,
     GitHubMarkdownTableSource,
     GreenhouseSource,
+    IcimsSource,
     LeverSource,
+    PaylocitySource,
     SourceError,
     SourceFetchError,
     SmartRecruitersSource,
@@ -68,8 +70,14 @@ def assert_canonical_row(row: dict) -> None:
 def test_direct_record_abstraction_stays_narrow():
     assert issubclass(GreenhouseSource, SinglePayloadDirectAdapter)
     assert issubclass(LeverSource, SinglePayloadDirectAdapter)
+    assert issubclass(AshbySource, DirectRecordAdapter)
+    assert issubclass(IcimsSource, DirectRecordAdapter)
+    assert issubclass(PaylocitySource, DirectRecordAdapter)
     assert issubclass(SmartRecruitersSource, DirectRecordAdapter)
     assert issubclass(WorkableSource, DirectRecordAdapter)
+    assert not issubclass(AshbySource, SinglePayloadDirectAdapter)
+    assert not issubclass(IcimsSource, SinglePayloadDirectAdapter)
+    assert not issubclass(PaylocitySource, SinglePayloadDirectAdapter)
     assert not issubclass(SmartRecruitersSource, SinglePayloadDirectAdapter)
     assert not issubclass(WorkableSource, SinglePayloadDirectAdapter)
 
