@@ -23,6 +23,38 @@
 - Coverage audits are offline and read-only. Trust persisted direct-source
   health, use explicit watchlist metadata for investigation/platform status,
   and never treat global GitHub-feed health as company listing evidence.
+- Publish coverage work only from the explicit `internal-tool` branch with
+  normal upstream tracking, then verify the remote full SHA; do not force-push
+  or open a PR unless separately requested.
+- Coverage execution may use the default or an explicit `--seen-db`; missing
+  persisted health must remain visible as `needs_investigation`, never inferred
+  from configured ATS metadata.
+- Fresh coverage baselines use one isolated real collection at scheduled
+  `4/1/2`, with internship and health email off, no priming, and the same
+  temporary seen database for collection and audit; remove runtime artifacts.
+- Coverage-recovery discovery audits diagnose Workday failures as a cluster
+  before tenant exceptions, verify official careers flows and live endpoints,
+  and keep bounded probes read-only without editing watchlist or state.
+- Confirmed direct-source recovery changes only watchlist configuration and
+  focused config tests; never widen adapter contracts or mark health verified.
+- Workday schema-skip audits compare sanitized field shapes across affected and
+  healthy tenants; accept variants only with a preserved posting URL contract.
+- Push approved `internal-tool` commits by explicit branch name with normal
+  upstream tracking, then verify the remote full SHA; never force-push.
+- TalentBrew contract audits require bounded sanitized structure comparisons,
+  posting-specific URLs/identity, and preserved all-malformed failure behavior.
+- New-ATS readiness audits verify every official tenant flow and compare
+  reusable contracts, enumeration, identity, anti-bot risk, and CI reliability.
+- iCIMS uses explicit Jibe JSON/classic iframe variants; multi-portal sources
+  succeed only when every portal enumerates completely.
+- SuccessFactors adapters require verified Career Site Builder pagination and
+  numeric posting identity from same-host posting-specific detail URLs.
+- IBM stability audits compare bounded complete passes, job-ID sets, and page
+  membership. Never tolerate changing totals or union partial passes; accept
+  only a hard-bounded rule that proves a stable complete set.
+- Watcher adapters currently include Greenhouse, Lever, Ashby, SmartRecruiters,
+  Workable, Workday, Oracle HCM, TalentBrew, iCIMS, SuccessFactors, Bain, and
+  the dedicated Epic and IBM sources.
 - `hosted_user_job_matches` holds one durable row per `(user_id, job_id)`.
   Reconciliation never deletes history: losing a match stamps
   `no_longer_matches_at`, a later rematch clears it, and `saved_at`/
@@ -228,6 +260,10 @@
 - Cleanup audits require an executable failure or a clearly demonstrated
   invariant violation before behavior changes. Remove code only after caller
   searches and regression tests prove it is redundant or unreachable.
+- Broad audits start with tests/static checks/caller searches; avoid
+  readability churn that changes public behavior.
+- Fix-only pushes stage proven code/tests and directly related documentation;
+  keep accumulated root-guide edits unstaged and verify the remote full SHA.
 - Parallel handoffs preserve dirty work on a unique branch without stashing,
   resetting, cleaning, or touching another worktree; stage only owned paths or
   hunks.
@@ -258,3 +294,17 @@
   leaving reusable benchmark scripts, tests, and fixtures trackable.
 - Keep rebuildable `analysis-cache.sqlite` transactionally independent from
   durable `seen.sqlite`; only the durable database belongs on `watcher-data`.
+- Avature work requires a shared verified anonymous contract with complete
+  pagination and stable posting-specific identity before implementation.
+- Bain uses its official referer-gated JSON proxy with page-number pagination
+  and stable numeric job identity; it is not a generic Avature adapter.
+- Push `internal-tool` explicitly and verify its remote SHA; keep dirty root
+  guide files outside scoped implementation commits.
+- IBM direct collection is limited to the anonymous `careers2` search index,
+  numeric job IDs, and posting URLs; do not use legacy Avature/WAF paths.
+- Publish both IBM commits via explicit `internal-tool`, leave root guides
+  unstaged, and verify the remote resolves to the exact local SHA.
+- Epic direct collection requires exact agreement between official Next.js
+  Flight and cached-search ID sets; preserve numeric IDs, posting URLs, and the
+  prohibition on the incomplete standard Avature board. Keep guidance-only
+  follow-ups separate from source behavior.

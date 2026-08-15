@@ -160,6 +160,29 @@ eligibility-demo*.json
 # Read-only posting/coverage audit and comparison exports may contain
 # operational source metadata.
 watcher-audit*.json
+watcher-coverage-audit*.json
+coverage-audit*.json
+watcher-coverage-audit*.txt
+coverage-audit*.txt
+coverage-baseline*.json
+coverage-baseline*.log
+coverage-recovery-audit*.json
+coverage-recovery-audit*.log
+ats-discovery-audit*.json
+ats-discovery-audit*.log
+direct-source-probe*.json
+direct-source-probe*.log
+workday-schema-audit*.json
+workday-schema-audit*.log
+push-verification*.log
+talentbrew-contract-audit*.json
+talentbrew-contract-audit*.log
+ats-readiness-audit*.json
+ats-readiness-audit*.log
+icims-adapter-probe*.json
+icims-adapter-probe*.log
+successfactors-adapter-probe*.json
+successfactors-adapter-probe*.log
 watcher-source-comparison*.json
 source-comparison*.json
 watcher/source-comparison-redesign*.json
@@ -172,6 +195,16 @@ code-audit*.json
 code-audit*.log
 repository-audit*.json
 repository-audit*.log
+readability-audit*.json
+readability-audit*.log
+redundancy-audit*.json
+redundancy-audit*.log
+cleanup-audit*.json
+cleanup-audit*.log
+code-readability-audit*.json
+code-readability-audit*.log
+push-scope-audit*.json
+push-scope-audit*.log
 # Local UI audit screenshots and accessibility captures are review scratch.
 ui-audit*.png
 ui-audit*.json
@@ -291,6 +324,36 @@ hosted-notification*.log
 hosted-notification*.json
 phase3a-notification-smoke*.log
 phase3a-notification-smoke*.json
+# Bounded Avature readiness/live-probe output is operational scratch.
+avature-adapter-probe*.log
+avature-adapter-probe*.json
+watcher/avature-adapter-probe*.log
+watcher/avature-adapter-probe*.json
+# Bounded Bain direct-source probe output is operational scratch.
+bain-direct-probe*.log
+bain-direct-probe*.json
+watcher/bain-direct-probe*.log
+watcher/bain-direct-probe*.json
+# Local branch-push verification captures are operational scratch.
+internal-tool-push-verification*.txt
+# Bounded IBM direct-source probe output is operational scratch.
+ibm-direct-probe*.log
+ibm-direct-probe*.json
+watcher/ibm-direct-probe*.log
+watcher/ibm-direct-probe*.json
+ibm-index-stability*.log
+ibm-index-stability*.json
+watcher/ibm-index-stability*.log
+watcher/ibm-index-stability*.json
+ibm-internal-tool-push-verification*.log
+epic-direct-audit*.log
+epic-direct-audit*.json
+watcher/epic-direct-probe*.log
+watcher/epic-direct-probe*.json
+guide-sync-audit*.log
+guide-sync-audit*.json
+epic-guide-sync*.log
+epic-guide-sync*.json
 !/.gitignore
 !/agents.md
 !/claude.md
