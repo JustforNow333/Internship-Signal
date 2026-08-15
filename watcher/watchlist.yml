@@ -48,11 +48,10 @@ companies:
     note: "known company-hosted careers portal"
 
   - name: "Epic"
-    ats: bespoke
-    module: "epic"
+    ats: epic
     alumni_match: ["epic"]
-    source_url: "https://careers.epic.com/"
-    note: "company-hosted careers portal"
+    source_url: "https://careers.epic.com/jobs/"
+    note: "official Next.js jobs data validated against the complete cached search ID set"
 
   - name: "Google"
     ats: bespoke

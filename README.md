@@ -246,6 +246,12 @@ Bain & Company uses the dedicated `ats: bain` direct source. It enumerates the
 official referer-gated careers search API and uses Bain's numeric job IDs and
 posting-specific detail/program URLs without per-job enrichment.
 
+Epic uses the dedicated `ats: epic` direct source. It requires exact ID-set
+agreement between the official server-rendered Next.js jobs data and Epic's
+complete cached search response, then uses native Avature IDs and
+posting-specific detail URLs without per-job enrichment. The incomplete
+standard Avature `SearchJobs` board is never used as collection input.
+
 IBM uses the dedicated `ats: ibm` direct source. It fully enumerates IBM's
 anonymous `careers2` search index in posting-URL order, requires two matching
 complete bounded passes, preserves numeric job IDs, and accepts only

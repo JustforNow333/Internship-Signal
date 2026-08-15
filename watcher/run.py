@@ -117,6 +117,7 @@ from watcher.sources import (
     AshbySource,
     BainSource,
     DirectSourceDiagnostics,
+    EpicSource,
     GitHubListingsSource,
     GitHubMarkdownTableSource,
     GreenhouseSource,
@@ -1888,6 +1889,7 @@ _DEFAULT_DIRECT_ADAPTERS = frozenset(
     {
         "ashby",
         "bain",
+        "epic",
         "greenhouse",
         "ibm",
         "icims",
@@ -1909,6 +1911,7 @@ def _default_direct_sources(
     return {
         "ashby": AshbySource(),
         "bain": BainSource(),
+        "epic": EpicSource(),
         "greenhouse": GreenhouseSource(),
         "ibm": IbmSource(),
         "icims": IcimsSource(),

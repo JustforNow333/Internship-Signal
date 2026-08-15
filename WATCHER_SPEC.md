@@ -172,7 +172,7 @@ companies:
     ats: github_only               # no direct scrape; rely on Tier 2
 ```
 
-`ats` ∈ {bain, ibm, greenhouse, lever, ashby, smartrecruiters, workable, workday,
+`ats` ∈ {bain, epic, ibm, greenhouse, lever, ashby, smartrecruiters, workable, workday,
 oracle_hcm, talentbrew, icims, successfactors, bespoke, github_only}.
 `config.py` validates every entry at startup and fails loudly on an unknown
 `ats` or a `bespoke` entry whose module is missing.
@@ -266,6 +266,17 @@ requires stable `totalResults`, and fully enumerates pages with bounded retry
 and completeness checks. Numeric `JobId` values are namespaced as native
 identity; only posting-specific Bain detail or internship-program URLs are
 accepted. Missing optional listing fields do not trigger detail enrichment.
+
+**Epic** uses a dedicated direct source for the official `careers.epic.com`
+Next.js jobs flow. One bounded HTML request extracts `allOpenJobs` and
+`avaturePositions` from the server-rendered Flight data, and one bounded
+`GET /cached-api/jobs/search/` request independently supplies the complete
+published ID list. Collection succeeds only when those normalized ID sets
+match exactly. Open/published metadata supplies title, summary, and background;
+the same stable numeric Avature ID used by Epic's client is namespaced for
+identity and placed in a posting-specific `epic.avature.net/Careers/FolderDetail`
+URL. No detail enrichment occurs. The standard Avature `Careers/SearchJobs`
+board is known to omit a published job and is never an authoritative fallback.
 
 **IBM** uses a dedicated direct source for the official anonymous search-index
 contract at `www-api.ibm.com`, with `appid=careers`, `scope=careers2`, and

@@ -1289,6 +1289,35 @@ This file tracks completed watcher steps and the next handoff target.
      `git check-ignore`, compileall, frontend tests (76), frontend build, and
      `git diff --check` passed.
 
+55. Epic direct source (2026-08-14):
+   - Re-verified Epic's official anonymous Next.js careers flow. The
+     server-rendered Flight `allOpenJobs` set and
+     `/cached-api/jobs/search/` each returned the same 50 unique published IDs
+     across repeated probes, with no auth, cookies, CSRF, or browser state.
+   - The standard Avature `Careers/SearchJobs` board still enumerated only 49
+     of those IDs and omitted published ID `30030`. The dedicated `epic`
+     source therefore requires exact agreement between both official custom
+     data contracts and never requests or falls back to the incomplete board.
+   - Migrated only Epic from bespoke/backstop coverage. Native numeric Avature
+     IDs remain source identity, the official client rule produces
+     posting-specific FolderDetail URLs, and listing summary/background fields
+     require no per-job enrichment.
+   - Three live adapter probes and the isolated full watcher each returned 50
+     unique IDs and URLs with two requests, zero skips, duplicates, retries, or
+     failures, and complete healthy diagnostics. Persisted Epic health is
+     `healthy_with_listings`.
+   - The scheduled-limit (`4/1/2`) disposable run used isolated SQLite/cache
+     state, disabled email, health email, and priming, fetched 48,356 rows, and
+     left 98 dry-run matches pending with zero seen rows. The exact-db audit
+     reported 85 verified, 2 degraded, 26 backstop-only, and 16 no-source
+     companies (65.9% direct). The pre-Epic counterfactual is 84/2/27/16
+     (65.1%); unrelated Oracle and Aon live failures remained degraded.
+   - Focused config/run/health/concurrency validation passed (228 tests). Full
+     backend/watcher validation reached 1,584 passed and 100 skipped with only
+     the known Windows Git/WSL worktree-pointer check failing; native WSL
+     `git check-ignore`, compileall, frontend tests (76), and frontend build
+     passed.
+
 ## Next
 
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only
