@@ -132,6 +132,7 @@ SUPPORTED_ATS = {
     "icims",
     "ibm",
     "successfactors",
+    "paylocity",
     "bespoke",
     "github_only",
 }
@@ -373,6 +374,9 @@ class CompanyCfg:
     successfactors_host: str = ""
     successfactors_site_prefix: str = ""
     successfactors_locale: str = ""
+    paylocity_company_id: str = ""
+    paylocity_module_id: str = ""
+    paylocity_slug: str = ""
     source_url: str = ""
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)
@@ -591,6 +595,19 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             locale=successfactors_locale,
             source_url=source_url,
         )
+    paylocity_company_id = str(
+        entry.get("paylocity_company_id") or ""
+    ).strip().casefold()
+    paylocity_module_id = str(entry.get("paylocity_module_id") or "").strip()
+    paylocity_slug = str(entry.get("paylocity_slug") or "").strip()
+    if ats == "paylocity":
+        _validate_paylocity_config(
+            name,
+            company_id=paylocity_company_id,
+            module_id=paylocity_module_id,
+            slug=paylocity_slug,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
@@ -615,6 +632,9 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         successfactors_host=successfactors_host,
         successfactors_site_prefix=successfactors_site_prefix,
         successfactors_locale=successfactors_locale,
+        paylocity_company_id=paylocity_company_id,
+        paylocity_module_id=paylocity_module_id,
+        paylocity_slug=paylocity_slug,
         source_url=source_url,
         module=str(entry.get("module") or "").strip(),
         aliases=aliases,
@@ -812,6 +832,51 @@ def _validate_successfactors_config(
     ):
         raise ConfigError(
             f"{name}: successfactors source_url must be a credential-free HTTPS URL at the configured site root"
+        )
+
+
+def _validate_paylocity_config(
+    name: str,
+    *,
+    company_id: str,
+    module_id: str,
+    slug: str,
+    source_url: str,
+) -> None:
+    if not re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        company_id,
+    ):
+        raise ConfigError(
+            f"{name}: paylocity_company_id must be a lower-case UUID"
+        )
+    if not re.fullmatch(r"[1-9][0-9]*", module_id):
+        raise ConfigError(f"{name}: paylocity_module_id must be a positive integer")
+    if not re.fullmatch(
+        r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?", slug
+    ):
+        raise ConfigError(f"{name}: paylocity_slug must be one safe path segment")
+    try:
+        parsed = urlsplit(source_url)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ConfigError(
+            f"{name}: paylocity entries require a valid source_url"
+        ) from exc
+    expected_path = f"/recruiting/jobs/All/{company_id}/{slug}"
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != "recruiting.paylocity.com"
+        or parsed.netloc.casefold() != "recruiting.paylocity.com"
+        or parsed.username
+        or parsed.password
+        or parsed_port is not None
+        or parsed.path != expected_path
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: paylocity source_url must exactly match its configured public board"
         )
 
 

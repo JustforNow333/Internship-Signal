@@ -1092,7 +1092,7 @@ def test_github_listings_match_canonical_and_legacy_procure_variants():
     procure = next(
         company
         for company in config.companies
-        if company.module in {"procure_analytics", "procutre_analytics"}
+        if company.name == "Procure Analytics"
     )
     company_names = [
         "Procure Analytics",

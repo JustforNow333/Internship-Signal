@@ -741,6 +741,30 @@ def test_oracle_hcm_host_and_site_change_collection_fingerprint():
     assert collection_config_fingerprint(site_changed) != collection_config_fingerprint(config)
 
 
+def test_paylocity_identity_changes_collection_fingerprint():
+    company = CompanyCfg(
+        name="Paylocity Example",
+        ats="paylocity",
+        paylocity_company_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        paylocity_module_id="1",
+        paylocity_slug="Example",
+    )
+    config = WatcherConfig(companies=(company,))
+
+    for field, value in (
+        ("paylocity_company_id", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        ("paylocity_module_id", "2"),
+        ("paylocity_slug", "Other"),
+    ):
+        changed = replace(
+            config,
+            companies=(replace(company, **{field: value}),),
+        )
+        assert collection_config_fingerprint(changed) != (
+            collection_config_fingerprint(config)
+        )
+
+
 def test_replay_defaults_to_snapshot_date_and_today_can_override(tmp_path):
     config = _config(cache_enabled=False)
     captured = datetime(2026, 6, 9, 23, 59, tzinfo=timezone.utc)

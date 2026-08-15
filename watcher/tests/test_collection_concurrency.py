@@ -56,6 +56,7 @@ from watcher.sources.epic import EpicSource
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.ibm import IbmSource
 from watcher.sources.lever import LeverSource
+from watcher.sources.paylocity import PaylocitySource
 from watcher.sources.smartrecruiters import SmartRecruitersSource
 from watcher.sources.workable import WorkableSource
 from watcher.sources.workday import (
@@ -374,6 +375,15 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "lever": LeverSource.endpoint("token"),
         "ashby": AshbySource.endpoint("token"),
         "smartrecruiters": SmartRecruitersSource.endpoint("token"),
+        "paylocity": PaylocitySource.endpoint(
+            CompanyCfg(
+                name="Example",
+                ats="paylocity",
+                paylocity_company_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                paylocity_module_id="1",
+                paylocity_slug="Example",
+            )
+        ),
         "workable": WorkableSource.endpoint("token"),
     }
 
@@ -387,6 +397,10 @@ def test_same_ats_host_shares_one_origin_key_across_companies():
     beta = direct_origin_key("greenhouse", token="beta")
 
     assert alpha == beta == "https://boards-api.greenhouse.io"
+
+
+def test_paylocity_tenants_share_the_public_recruiting_origin():
+    assert direct_origin_key("paylocity") == "https://recruiting.paylocity.com"
 
 
 def test_workday_tenants_use_their_own_host_origin():

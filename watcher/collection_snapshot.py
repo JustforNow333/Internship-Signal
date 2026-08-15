@@ -263,6 +263,9 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "successfactors_host": company.successfactors_host,
                 "successfactors_site_prefix": company.successfactors_site_prefix,
                 "successfactors_locale": company.successfactors_locale,
+                "paylocity_company_id": company.paylocity_company_id,
+                "paylocity_module_id": company.paylocity_module_id,
+                "paylocity_slug": company.paylocity_slug,
                 "module": company.module,
                 "terms": list(company.terms),
             }
