@@ -267,6 +267,41 @@ def test_negation_and_mixed_degree_diagnostics_are_explicit():
     assert mixed["student_eligibility"]["mixed_eligibility_detected"] is True
 
 
+@pytest.mark.parametrize(
+    "title",
+    (
+        "Software Engineering Undergraduate or Graduate Student Intern",
+        "Software Engineering Undergraduate and Graduate Student Internship",
+        "Software Engineering Undergraduate/Graduate Student Intern",
+    ),
+)
+def test_mixed_degree_titles_are_retained_like_mixed_requirements(title):
+    """A title naming undergraduates is not a graduate-only restriction.
+
+    ``_graduate_only`` short-circuits on graduate-intern title wording, so the
+    mixed-evidence check has to run first or a posting explicitly open to
+    undergraduates is dropped for the same wording that stays eligible in
+    requirements text.
+    """
+
+    posting = scored(title=title)
+
+    assert_retained(posting)
+    assert posting["student_eligibility"]["mixed_eligibility_detected"] is True
+
+
+@pytest.mark.parametrize(
+    "title",
+    (
+        "Graduate Student Intern",
+        "Graduate Research Intern",
+        "Software Engineering Graduate Student Intern",
+    ),
+)
+def test_graduate_titles_without_undergraduate_evidence_stay_excluded(title):
+    assert_excluded(scored(title=title), "graduate_only")
+
+
 def test_explicit_structured_eligibility_has_priority_over_title():
     posting = scored(
         title="Software Engineer Intern",

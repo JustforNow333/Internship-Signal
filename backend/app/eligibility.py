@@ -449,12 +449,17 @@ def _graduate_only(
     direct_structured: bool,
 ) -> str | None:
     match = re.search(rf"\b{_GRADUATE_TERM}\b", text)
+    # Mixed undergraduate/graduate evidence stays eligible, exactly as in
+    # `_phd_only`, so a title such as "Undergraduate or Graduate Student
+    # Intern" is never treated as a graduate-only restriction.
+    if _mixed_degree_eligibility(text):
+        return None
     if kind == "title" and re.search(
         r"\bgraduate(?: student| research)? intern(?:ship)?\b",
         text,
     ):
         return "graduate"
-    if match is None or _mixed_degree_eligibility(text):
+    if match is None:
         return None
     degree_level = _graduate_level(text)
     if kind == "title":
