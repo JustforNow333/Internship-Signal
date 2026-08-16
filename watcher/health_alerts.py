@@ -65,11 +65,25 @@ ALERT_FEED_STALE = "feed_stale"
 ALERT_RECOVERY = "recovery"
 ALERT_MINOR_DEGRADATION = "minor_degradation"
 ALERT_MINOR_RECOVERY = "minor_recovery"
+ALERT_BOTH_TIERS_UNAVAILABLE = "both_tiers_unavailable"
+ALERT_COVERAGE_REGRESSION = "coverage_regression"
+
+# Severity routes delivery. HIGH is the only severity that may send an
+# immediate email; MEDIUM and INFO are deferred to one daily digest. There is
+# no CRITICAL severity: conditions that once used it are HIGH.
+SEVERITY_HIGH = "high"
+SEVERITY_MEDIUM = "medium"
+SEVERITY_INFO = "info"
+DIGEST_SEVERITIES = (SEVERITY_MEDIUM, SEVERITY_INFO)
+# ``critical`` is retained here only so alert payloads persisted before
+# severity-based routing still sort predictably when they are replayed.
+SEVERITY_ORDER = {"critical": 0, SEVERITY_HIGH: 1, SEVERITY_MEDIUM: 2, SEVERITY_INFO: 3}
 
 # Reason codes that describe trustworthy, substantially complete collection.
 # Every other code the adapters emit - pagination loss, truncation, repeated
 # pages, enrichment failure, duplicate skipping - and every code this policy
-# does not recognize is actionable and keeps its immediate alert.
+# does not recognize is actionable, so it stays MEDIUM rather than dropping to
+# informational. Both severities report in the daily digest.
 MINOR_DEGRADATION_REASONS = frozenset(
     {
         "schema_invalid_records_skipped",
@@ -77,7 +91,6 @@ MINOR_DEGRADATION_REASONS = frozenset(
         "request_retry_recovered",
     }
 )
-MINOR_ALERT_TYPES = frozenset({ALERT_MINOR_DEGRADATION, ALERT_MINOR_RECOVERY})
 # Degradation alert types whose open incident a recovery closes.
 DEGRADATION_ALERT_TYPES = (
     ALERT_NEW_FAILURE,
@@ -93,8 +106,14 @@ DEGRADATION_ALERT_TYPES = (
 # relative to what the same attempt retained.
 MAX_MINOR_SKIPPED_ROWS = 5
 MIN_RETAINED_ROWS_PER_SKIPPED_ROW = 20
-MINOR_DIGEST_WINDOW_HOURS = 24
-MAX_MINOR_DIGEST_INCIDENTS = 25
+DIGEST_WINDOW_HOURS = 24
+MAX_DIGEST_INCIDENTS = 25
+# A digest that has not delivered for days still reports, but only back to this
+# bound. Events stay queryable for 30 days; the clamp keeps one catch-up email
+# finite and is reported as a warning when it engages.
+MAX_DIGEST_CATCHUP_DAYS = 7
+# Defensive bound on how many stored events one digest window may load.
+MAX_DIGEST_EVENTS = 20_000
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
@@ -134,11 +153,13 @@ class HealthAlertCandidate:
 
 
 @dataclass(frozen=True)
-class MinorDegradationIncident:
-    """One source's deduplicated minor degradations in a reporting window."""
+class DigestIncident:
+    """One source's collapsed MEDIUM/INFO lifecycle in a reporting window."""
 
     health_key: str
     source_label: str
+    severity: str
+    alert_types: tuple[str, ...]
     occurrences: int
     first_detected_at: str
     last_detected_at: str
@@ -146,6 +167,7 @@ class MinorDegradationIncident:
     reason_codes: tuple[str, ...]
     diagnostic_summary: str
     recovered: str
+    escalated: bool = False
 
 
 @dataclass(frozen=True)
@@ -158,8 +180,9 @@ class HealthAlertResult:
     subject: str
     error: str | None
     daily_summary_sent: bool
-    minor_digest_sent: bool = False
-    minor_incidents_reported: int = 0
+    daily_digest_sent: bool = False
+    digest_incidents_reported: int = 0
+    digest_catchup_clamped: bool = False
 
 
 def load_health_alert_policy(
@@ -317,7 +340,7 @@ def evaluate_and_send_health_alerts(
         )
         # The digest runs on every immediate outcome, including cooldown
         # suppression and delivery failure, and can never delay an alert.
-        digest_sent, digest_incidents = _maybe_send_minor_digest(
+        digest_sent, digest_incidents, clamped = _maybe_send_daily_digest(
             store=store,
             policy=policy,
             run_id=run_id,
@@ -327,8 +350,9 @@ def evaluate_and_send_health_alerts(
         )
         return replace(
             immediate,
-            minor_digest_sent=digest_sent,
-            minor_incidents_reported=digest_incidents,
+            daily_digest_sent=digest_sent,
+            digest_incidents_reported=digest_incidents,
+            digest_catchup_clamped=clamped,
         )
 
 
@@ -344,7 +368,11 @@ def _evaluate_immediate_alerts(
     comparison: SourceComparisonReport | None,
     sender: Callable[[str, str], bool],
 ) -> HealthAlertResult:
-    """Apply the unchanged immediate-alert and daily-summary policy."""
+    """Apply the immediate-alert and daily-summary policy.
+
+    Cooldown, fingerprinting, and daily-summary behavior are unchanged; only
+    which candidates arrive here changed, and severity decides that.
+    """
 
     candidates = tuple(candidates)
     if policy.mode == MODE_DAILY_SUMMARY:
@@ -380,10 +408,9 @@ def _evaluate_immediate_alerts(
             ),
         )
     else:
-        candidates = _merge_candidates(
-            candidates,
-            store.pending_unsent_recoveries(),
-        )
+        # Only HIGH candidates reach immediate delivery. MEDIUM and INFO are
+        # recorded above and reported by the daily digest instead, so there is
+        # no unsent-recovery retry path here any more.
         policy_candidates = [
             candidate
             for candidate in candidates
@@ -487,7 +514,7 @@ def build_alert_candidates(
                     alert_type=(
                         ALERT_MINOR_RECOVERY if minor else ALERT_RECOVERY
                     ),
-                    severity="info",
+                    severity=SEVERITY_INFO,
                     run_id=run_id,
                     coverage=company_coverage,
                     action=(
@@ -504,12 +531,14 @@ def build_alert_candidates(
                     state,
                     transition=transition,
                     alert_type=(
-                        "new_failure"
+                        ALERT_NEW_FAILURE
                         if transition
                         and transition.to_status in {STATUS_FAILING, DIRECT_STATUS_FAILED}
-                        else "continued_failure"
+                        else ALERT_CONTINUED_FAILURE
                     ),
-                    severity="high",
+                    # Phase 2A keeps the existing first-failure severity. The
+                    # fallback-aware downgrade waits for per-company evidence.
+                    severity=SEVERITY_HIGH,
                     run_id=run_id,
                     coverage=company_coverage,
                     action="Inspect the sanitized source-health report and adapter endpoint.",
@@ -520,8 +549,8 @@ def build_alert_candidates(
             and state.status == DIRECT_STATUS_DEGRADED
         ):
             # Degradation that left a trustworthy, substantially complete
-            # result is deferred to the daily digest. Everything else keeps the
-            # existing immediate medium alert.
+            # result stays informational. Everything else is medium. Both are
+            # reported by the daily digest rather than an immediate email.
             minor = is_minor_degradation(state)
             candidates.append(
                 _candidate(
@@ -532,11 +561,11 @@ def build_alert_candidates(
                         if minor
                         else ALERT_DIRECT_SOURCE_DEGRADED
                     ),
-                    severity="info" if minor else "medium",
+                    severity=SEVERITY_INFO if minor else SEVERITY_MEDIUM,
                     run_id=run_id,
                     coverage=company_coverage,
                     action=(
-                        "No immediate action; review the daily minor-degradation digest."
+                        "No immediate action; review the daily source-health digest."
                         if minor
                         else "Inspect the bounded adapter diagnostics for incomplete collection."
                     ),
@@ -550,8 +579,8 @@ def build_alert_candidates(
                 _candidate(
                     state,
                     transition=transition,
-                    alert_type="unknown_diagnostics",
-                    severity="medium",
+                    alert_type=ALERT_UNKNOWN_DIAGNOSTICS,
+                    severity=SEVERITY_MEDIUM,
                     run_id=run_id,
                     coverage=company_coverage,
                     action="Add or restore the adapter's shared collection diagnostics.",
@@ -569,8 +598,8 @@ def build_alert_candidates(
                 _candidate(
                     state,
                     transition=transition,
-                    alert_type="feed_stale",
-                    severity="medium",
+                    alert_type=ALERT_FEED_STALE,
+                    severity=SEVERITY_MEDIUM,
                     run_id=run_id,
                     coverage=None,
                     action="Verify the feed is still publishing postings for the configured season.",
@@ -583,8 +612,10 @@ def build_alert_candidates(
         candidates.append(
             HealthAlertCandidate(
                 fingerprint=f"both_tiers_unavailable|{_fingerprint_token(item.company)}",
-                alert_type="both_tiers_unavailable",
-                severity="critical",
+                alert_type=ALERT_BOTH_TIERS_UNAVAILABLE,
+                # Losing both tiers is the most urgent condition there is, but
+                # it is HIGH: this policy has no CRITICAL severity.
+                severity=SEVERITY_HIGH,
                 health_key=f"coverage:{_fingerprint_token(item.company)}",
                 source_kind="company_coverage",
                 company=sanitize_error(item.company),
@@ -631,8 +662,8 @@ def build_alert_candidates(
                         + _fingerprint_token(",".join(became_backstop))
                         + f"|{previous_direct}|{current_direct}"
                     ),
-                    alert_type="coverage_regression",
-                    severity="high",
+                    alert_type=ALERT_COVERAGE_REGRESSION,
+                    severity=SEVERITY_HIGH,
                     health_key="coverage:aggregate",
                     source_kind="company_coverage",
                     company=None,
@@ -739,74 +770,164 @@ def render_daily_summary(
     return subject, "\n".join(lines).rstrip() + "\n"
 
 
-def build_minor_degradation_incidents(
+RECOVERY_ALERT_TYPES = frozenset({ALERT_RECOVERY, ALERT_MINOR_RECOVERY})
+FAILURE_ALERT_TYPES = frozenset({ALERT_NEW_FAILURE, ALERT_CONTINUED_FAILURE})
+
+
+def build_digest_incidents(
     events: Sequence[tuple[datetime, HealthAlertCandidate]],
     states: Mapping[str, SourceHealthState] | None = None,
-) -> tuple[MinorDegradationIncident, ...]:
-    """Collapse repeated minor degradations into one incident per source."""
+) -> tuple[DigestIncident, ...]:
+    """Collapse one source's MEDIUM/INFO lifecycle into a single entry.
 
-    degradations: dict[str, list[tuple[datetime, HealthAlertCandidate]]] = {}
-    recoveries: dict[str, datetime] = {}
+    Every transition recorded for a health key inside the window folds into one
+    incident: repeated degradations become an occurrence count, and a later
+    recovery becomes the incident's outcome rather than a second entry.
+
+    Escalation is resolved by position. Events up to and including the last
+    HIGH for a key were already emailed immediately, so they are dropped; only
+    what happened *after* that HIGH can still be news. A key whose window ends
+    on the HIGH therefore leaves the digest entirely instead of reappearing as
+    an unresolved MEDIUM, while a recovery that followed the HIGH is reported.
+    """
+
+    by_key: dict[str, list[tuple[datetime, HealthAlertCandidate]]] = {}
     for detected_at, candidate in events:
-        if candidate.alert_type == ALERT_MINOR_DEGRADATION:
-            degradations.setdefault(candidate.health_key, []).append(
-                (detected_at, candidate)
-            )
-        elif candidate.alert_type == ALERT_MINOR_RECOVERY:
-            previous = recoveries.get(candidate.health_key)
-            if previous is None or detected_at > previous:
-                recoveries[candidate.health_key] = detected_at
+        by_key.setdefault(candidate.health_key, []).append((detected_at, candidate))
 
     incidents = []
-    for health_key, occurrences in degradations.items():
-        occurrences.sort(key=lambda item: item[0])
-        first_at, _ = occurrences[0]
-        last_at, latest = occurrences[-1]
-        reasons = sorted(
-            {
-                code
-                for _, candidate in occurrences
-                for code in candidate.reason_codes
-            }
+    for health_key, entries in by_key.items():
+        entries.sort(key=lambda item: item[0])
+        escalated_at = max(
+            (
+                detected_at
+                for detected_at, candidate in entries
+                if candidate.severity == SEVERITY_HIGH
+            ),
+            default=None,
+        )
+        reportable = [
+            (detected_at, candidate)
+            for detected_at, candidate in entries
+            if candidate.severity in DIGEST_SEVERITIES
+            and (escalated_at is None or detected_at > escalated_at)
+        ]
+        if not reportable:
+            continue
+        degradations = [
+            item
+            for item in reportable
+            if item[1].alert_type not in RECOVERY_ALERT_TYPES
+        ]
+        recovered_at = max(
+            (
+                detected_at
+                for detected_at, candidate in reportable
+                if candidate.alert_type in RECOVERY_ALERT_TYPES
+            ),
+            default=None,
+        )
+        # A recovery-only window still describes the degradation it ended, so
+        # detail falls back to the newest event when nothing degraded here.
+        detail_source = degradations or reportable
+        first_at = reportable[0][0]
+        last_at, _ = detail_source[-1]
+        latest = detail_source[-1][1]
+        severity = (
+            SEVERITY_MEDIUM
+            if any(
+                candidate.severity == SEVERITY_MEDIUM
+                for _, candidate in reportable
+            )
+            else SEVERITY_INFO
         )
         incidents.append(
-            MinorDegradationIncident(
+            DigestIncident(
                 health_key=health_key,
                 source_label=latest.source_label,
-                occurrences=len(occurrences),
+                severity=severity,
+                alert_types=tuple(
+                    sorted({candidate.alert_type for _, candidate in reportable})
+                ),
+                occurrences=len(degradations),
                 first_detected_at=iso_utc(first_at),
-                last_detected_at=iso_utc(last_at),
+                last_detected_at=iso_utc(reportable[-1][0]),
                 retained_rows=latest.rows_returned,
-                reason_codes=tuple(reasons),
+                reason_codes=tuple(
+                    sorted(
+                        {
+                            code
+                            for _, candidate in detail_source
+                            for code in candidate.reason_codes
+                        }
+                    )
+                ),
                 diagnostic_summary=latest.diagnostic_summary,
                 recovered=_recovery_state(
                     health_key,
                     last_degraded_at=last_at,
-                    recovered_at=recoveries.get(health_key),
+                    recovered_at=recovered_at,
                     states=states,
                 ),
+                escalated=escalated_at is not None,
             )
         )
     return tuple(
         sorted(
             incidents,
-            key=lambda item: (item.source_label.casefold(), item.health_key),
+            key=lambda item: (
+                SEVERITY_ORDER.get(item.severity, 9),
+                item.source_label.casefold(),
+                item.health_key,
+            ),
         )
     )
 
 
-def render_minor_degradation_digest(
+def summarize_digest_incident(incident: DigestIncident) -> str:
+    """Render one incident's collapsed lifecycle as a single sentence."""
+
+    label = sanitize_error(incident.source_label)
+    noun = (
+        "direct-source failure"
+        if any(item in FAILURE_ALERT_TYPES for item in incident.alert_types)
+        else "direct-source degradation"
+    )
+    if incident.occurrences == 0:
+        # Only a recovery landed in this window, so the degradation itself was
+        # reported earlier - immediately when it escalated, or in a prior digest.
+        return f"{label} — recovered; currently healthy."
+    runs = (
+        "run"
+        if incident.occurrences == 1
+        else "runs"
+    )
+    counted = (
+        f"{incident.occurrences} failed {runs}"
+        if noun.endswith("failure")
+        else f"{incident.occurrences} degraded {runs}"
+    )
+    if incident.recovered == "yes":
+        return f"{label} — transient {noun} recovered; {counted}, currently healthy."
+    if incident.recovered == "no":
+        return f"{label} — {noun} ongoing; {counted}, not yet recovered."
+    return f"{label} — {noun}; {counted}, current state unknown."
+
+
+def render_source_health_digest(
     *,
     run_id: str,
     observed_at: datetime,
     window_start: datetime,
-    incidents: Sequence[MinorDegradationIncident],
+    incidents: Sequence[DigestIncident],
+    catchup_clamped: bool = False,
 ) -> tuple[str, str]:
-    """Render the once-daily summary of deferred minor degradations."""
+    """Render the once-daily summary of deferred MEDIUM and INFO incidents."""
 
+    medium = sum(item.severity == SEVERITY_MEDIUM for item in incidents)
+    info = len(incidents) - medium
     subject = (
-        "Internship Watcher Minor Source Degradations: "
-        f"{len(incidents)} source{'' if len(incidents) == 1 else 's'}"
+        f"Internship Watcher Daily Source Health: {medium} medium, {info} info"
     )
     lines = [
         subject,
@@ -815,20 +936,31 @@ def render_minor_degradation_digest(
         f"Observed at: {iso_utc(observed_at)}",
         f"Reporting window: {iso_utc(window_start)} to {iso_utc(observed_at)}",
         "",
-        "These sources stayed substantially complete, so they were recorded as",
-        "degraded without an immediate alert. Actionable degradation still",
-        "alerts immediately and is not listed here.",
+        "These incidents did not warrant an immediate alert. High-severity",
+        "incidents are emailed as they happen and are not listed here.",
         "",
     ]
-    for incident in incidents[:MAX_MINOR_DIGEST_INCIDENTS]:
+    if catchup_clamped:
+        lines.extend(
+            [
+                "WARNING: no digest was delivered for more than "
+                f"{MAX_DIGEST_CATCHUP_DAYS} days, so this report starts at that",
+                "bound and older retained events are omitted.",
+                "",
+            ]
+        )
+    for incident in incidents[:MAX_DIGEST_INCIDENTS]:
         retained = (
             incident.retained_rows
             if incident.retained_rows is not None
             else "unknown"
         )
+        lines.append(
+            f"{incident.severity.upper()}: {summarize_digest_incident(incident)}"
+        )
         lines.extend(
             [
-                f"{sanitize_error(incident.source_label)}",
+                f"  types: {', '.join(incident.alert_types) or 'none'}",
                 f"  occurrences: {incident.occurrences}",
                 f"  reason codes: {', '.join(incident.reason_codes) or 'none'}",
                 f"  retained rows: {retained}",
@@ -836,17 +968,44 @@ def render_minor_degradation_digest(
                 f"  first seen: {incident.first_detected_at}",
                 f"  last seen: {incident.last_detected_at}",
                 f"  recovered later: {incident.recovered}",
-                "",
             ]
         )
-    if len(incidents) > MAX_MINOR_DIGEST_INCIDENTS:
+        if incident.escalated:
+            lines.append(
+                "  note: escalated earlier in this window and alerted immediately"
+            )
+        lines.append("")
+    if len(incidents) > MAX_DIGEST_INCIDENTS:
         lines.append(
-            f"... and {len(incidents) - MAX_MINOR_DIGEST_INCIDENTS} more source(s)"
+            f"... and {len(incidents) - MAX_DIGEST_INCIDENTS} more source(s)"
         )
     return subject, "\n".join(lines).rstrip() + "\n"
 
 
-def _maybe_send_minor_digest(
+def resolve_digest_window(
+    *,
+    now: datetime,
+    last_sent_at: datetime | None,
+) -> tuple[datetime, bool, bool]:
+    """Resolve the reporting window as ``(start, inclusive, clamped)``.
+
+    Catch-up resumes at the last successful digest so a delivery outage longer
+    than a day cannot silently drop still-retained events, and is clamped so a
+    long outage still produces one finite report. A window that starts at the
+    previous digest is exclusive, because the events recorded by that run share
+    its exact timestamp and were already reported.
+    """
+
+    default_start = now - timedelta(hours=DIGEST_WINDOW_HOURS)
+    if last_sent_at is None:
+        return default_start, True, False
+    clamp_start = now - timedelta(days=MAX_DIGEST_CATCHUP_DAYS)
+    if last_sent_at < clamp_start:
+        return clamp_start, True, True
+    return last_sent_at, False, False
+
+
+def _maybe_send_daily_digest(
     *,
     store: "HealthAlertStore",
     policy: HealthAlertPolicy,
@@ -854,49 +1013,55 @@ def _maybe_send_minor_digest(
     now: datetime,
     states: Mapping[str, SourceHealthState],
     sender: Callable[[str, str], bool],
-) -> tuple[bool, int]:
-    """Send at most one minor-degradation digest per UTC day."""
+) -> tuple[bool, int, bool]:
+    """Send at most one MEDIUM/INFO source-health digest per UTC day."""
 
     if now.hour < policy.hour_utc:
-        return False, 0
+        return False, 0, False
     digest_date = now.date().isoformat()
-    if store.minor_digest_sent(digest_date):
-        return False, 0
-    window_start = now - timedelta(hours=MINOR_DIGEST_WINDOW_HOURS)
-    last_sent_at = store.last_minor_digest_sent_at()
-    resumed = last_sent_at is not None and last_sent_at >= window_start
-    if resumed:
-        window_start = last_sent_at
-    incidents = build_minor_degradation_incidents(
-        store.recent_minor_events(since=window_start, inclusive=not resumed),
+    if store.digest_sent(digest_date):
+        return False, 0, False
+    window_start, inclusive, clamped = resolve_digest_window(
+        now=now,
+        last_sent_at=store.last_digest_sent_at(),
+    )
+    if clamped:
+        LOGGER.warning(
+            "Source-health digest catch-up clamped to %d days; older retained "
+            "events are omitted from this report.",
+            MAX_DIGEST_CATCHUP_DAYS,
+        )
+    incidents = build_digest_incidents(
+        store.recent_digest_events(since=window_start, inclusive=inclusive),
         states,
     )
     if not incidents:
         # Never send an empty digest, and never mark the day used, so a later
         # run today can still report a new incident.
-        return False, 0
-    subject, body = render_minor_degradation_digest(
+        return False, 0, clamped
+    subject, body = render_source_health_digest(
         run_id=run_id,
         observed_at=now,
         window_start=window_start,
         incidents=incidents,
+        catchup_clamped=clamped,
     )
     try:
         sent = bool(sender(subject, body))
     except Exception as exc:  # digest delivery must not affect the run
         LOGGER.error(
-            "Minor source-degradation digest email failed: %s",
+            "Daily source-health digest email failed: %s",
             sanitize_error(exc),
         )
-        return False, len(incidents)
+        return False, len(incidents), clamped
     if sent:
-        store.mark_minor_digest_sent(
+        store.mark_digest_sent(
             digest_date=digest_date,
             sent_at=now,
             run_id=run_id,
             incident_count=len(incidents),
         )
-    return sent, len(incidents)
+    return sent, len(incidents), clamped
 
 
 def _recovery_state(
@@ -1131,17 +1296,19 @@ class HealthAlertStore:
         ).fetchall()
         return frozenset(str(row["health_key"]) for row in rows)
 
-    def recent_minor_events(
+    def recent_digest_events(
         self,
         *,
         since: datetime,
         inclusive: bool = True,
     ) -> tuple[tuple[datetime, HealthAlertCandidate], ...]:
-        """Return detected minor degradations and recoveries in a window.
+        """Return every detected event in a window, newest last.
 
-        A window that starts at the previous digest is exclusive, because the
-        events recorded by that run share its exact timestamp and were already
-        reported.
+        HIGH events are returned alongside the digest-eligible ones because
+        collapsing needs them to tell an escalated incident from an open one.
+        Severity lives in the stored payload, so filtering happens in the
+        caller rather than in SQL; the window and a hard row bound keep the
+        read small.
         """
 
         rows = self._conn.execute(
@@ -1149,10 +1316,10 @@ class HealthAlertStore:
             select detected_at, payload_json
             from source_health_alert_events
             where detected_at {'>=' if inclusive else '>'} ?
-              and alert_type in (?, ?)
             order by detected_at, event_id
+            limit ?
             """,
-            (iso_utc(since), ALERT_MINOR_DEGRADATION, ALERT_MINOR_RECOVERY),
+            (iso_utc(since), MAX_DIGEST_EVENTS),
         ).fetchall()
         return tuple(
             (
@@ -1162,12 +1329,12 @@ class HealthAlertStore:
             for row in rows
         )
 
-    def minor_digest_sent(self, digest_date: str) -> bool:
+    def digest_sent(self, digest_date: str) -> bool:
         return (
             self._conn.execute(
                 """
                 select 1
-                from source_health_minor_digest
+                from source_health_digest
                 where digest_date = ?
                 """,
                 (digest_date,),
@@ -1175,11 +1342,11 @@ class HealthAlertStore:
             is not None
         )
 
-    def last_minor_digest_sent_at(self) -> datetime | None:
+    def last_digest_sent_at(self) -> datetime | None:
         row = self._conn.execute(
             """
             select sent_at
-            from source_health_minor_digest
+            from source_health_digest
             order by digest_date desc
             limit 1
             """
@@ -1188,7 +1355,7 @@ class HealthAlertStore:
             return None
         return _parse_datetime(row["sent_at"])
 
-    def mark_minor_digest_sent(
+    def mark_digest_sent(
         self,
         *,
         digest_date: str,
@@ -1199,7 +1366,7 @@ class HealthAlertStore:
         with self._conn:
             self._conn.execute(
                 """
-                insert into source_health_minor_digest(
+                insert into source_health_digest(
                   digest_date, sent_at, run_id, incident_count
                 ) values (?, ?, ?, ?)
                 on conflict(digest_date) do nothing
@@ -1270,40 +1437,6 @@ class HealthAlertStore:
             order by detected_at, run_id, fingerprint
             """,
             (iso_utc(since),),
-        ).fetchall()
-        return tuple(
-            _candidate_from_payload(row["payload_json"])
-            for row in rows
-        )
-
-    def pending_unsent_recoveries(
-        self,
-    ) -> tuple[HealthAlertCandidate, ...]:
-        """Return recovery notices whose latest delivery never succeeded."""
-
-        rows = self._conn.execute(
-            """
-            select events.payload_json
-            from source_health_alert_state as state
-            join source_health_alert_events as events
-              on events.event_id = (
-                select latest.event_id
-                from source_health_alert_events as latest
-                where latest.fingerprint = state.fingerprint
-                order by latest.detected_at desc, latest.event_id desc
-                limit 1
-              )
-            where state.alert_type = 'recovery'
-              and (
-                state.last_sent_at is null
-                or events.detected_at > state.last_sent_at
-              )
-              and (
-                state.resolved_at is null
-                or events.detected_at > state.resolved_at
-              )
-            order by events.detected_at, state.fingerprint
-            """
         ).fetchall()
         return tuple(
             _candidate_from_payload(row["payload_json"])
@@ -1392,6 +1525,20 @@ class HealthAlertStore:
               run_id text not null,
               incident_count integer not null
             );
+            create table if not exists source_health_digest(
+              digest_date text primary key,
+              sent_at text not null,
+              run_id text not null,
+              incident_count integer not null
+            );
+            -- The minor-degradation digest this one generalizes kept the same
+            -- shape, so carrying its ledger forward keeps "already sent today"
+            -- true across the upgrade. Idempotent: digest_date is the key.
+            insert or ignore into source_health_digest(
+              digest_date, sent_at, run_id, incident_count
+            )
+            select digest_date, sent_at, run_id, incident_count
+            from source_health_minor_digest;
             """
         )
         self._conn.commit()
@@ -1463,23 +1610,17 @@ def _allowed_by_mode(
     candidate: HealthAlertCandidate,
     mode: str,
 ) -> bool:
-    # Minor incidents are never emailed immediately in any mode; the daily
-    # minor-degradation digest reports them instead.
-    if candidate.alert_type in MINOR_ALERT_TYPES:
+    """Report whether a candidate may be emailed immediately.
+
+    Severity is the routing key: only HIGH sends immediately. MEDIUM and INFO
+    are always deferred to the daily digest, so ``failure_only`` still never
+    emails a recovery and no mode can make a MEDIUM incident interrupt.
+    ``alert_type`` remains the semantic label and no longer gates delivery.
+    """
+
+    if candidate.severity != SEVERITY_HIGH:
         return False
-    if mode == MODE_TRANSITIONS_ONLY:
-        return candidate.alert_type in {
-            "new_failure",
-            "recovery",
-            "direct_source_silence",
-            "direct_source_degraded",
-            "unknown_diagnostics",
-            "coverage_regression",
-            "both_tiers_unavailable",
-        }
-    if mode == MODE_FAILURE_ONLY:
-        return candidate.alert_type != "recovery"
-    return False
+    return mode in {MODE_TRANSITIONS_ONLY, MODE_FAILURE_ONLY}
 
 
 def _merge_candidates(
@@ -1494,10 +1635,7 @@ def _merge_candidates(
         sorted(
             by_fingerprint.values(),
             key=lambda item: (
-                {"critical": 0, "high": 1, "medium": 2, "info": 3}.get(
-                    item.severity,
-                    9,
-                ),
+                SEVERITY_ORDER.get(item.severity, 9),
                 item.source_label.casefold(),
                 item.alert_type,
             ),

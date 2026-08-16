@@ -8,14 +8,20 @@ import pytest
 from watcher.config import CompanyCfg
 from watcher.config import WatcherConfig
 from watcher.health_alerts import (
+    MAX_DIGEST_CATCHUP_DAYS,
     MODE_DAILY_SUMMARY,
     MODE_FAILURE_ONLY,
     MODE_OFF,
     MODE_TRANSITIONS_ONLY,
+    SEVERITY_HIGH,
+    SEVERITY_INFO,
+    SEVERITY_MEDIUM,
     HealthAlertPolicy,
+    build_alert_candidates,
     evaluate_and_send_health_alerts,
     is_minor_degradation,
     load_health_alert_policy,
+    resolve_digest_window,
 )
 from watcher.seen_store import SeenStore
 from watcher.run import RUN_MODE_LIVE, run_once
@@ -26,6 +32,7 @@ from watcher.source_health import (
     DIRECT_STATUS_DEGRADED,
     DIRECT_STATUS_FAILED,
     DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+    DIRECT_STATUS_UNKNOWN,
     SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
     STATUS_FAILING,
@@ -43,6 +50,10 @@ from watcher.sources.base import make_row
 
 
 NOW = datetime(2026, 7, 28, 12, tzinfo=timezone.utc)
+# An hour before the digest hour, so an incident is recorded without triggering
+# delivery. Every digest assertion then runs at NOW.
+BEFORE_DIGEST_HOUR = NOW.replace(hour=6)
+DIGEST_SUBJECT_MARKER = "Daily Source Health"
 
 
 def _state(
@@ -211,17 +222,20 @@ def test_continued_failure_respects_cooldown_and_resends_afterward(tmp_path):
     assert third.sent is True
 
 
-def test_recovery_sends_once_after_failure(tmp_path):
+def test_high_failure_then_recovery_reports_recovery_in_the_digest_only(tmp_path):
+    """HIGH keeps its immediate email; the recovery is INFO in the digest."""
+
     failing = _state(
         status=STATUS_FAILING,
         failures=3,
         rows=None,
         error="schema_failure",
     )
-    _evaluate(
+    alerted, alert_calls = _evaluate(
         tmp_path,
         state=failing,
         transition=(_transition("healthy", STATUS_FAILING),),
+        now=BEFORE_DIGEST_HOUR,
     )
     recovered = _state(
         status=STATUS_HEALTHY,
@@ -233,65 +247,25 @@ def test_recovery_sends_once_after_failure(tmp_path):
         tmp_path,
         state=recovered,
         transition=(_transition(STATUS_FAILING, STATUS_HEALTHY, recovery=True),),
-        now=NOW + timedelta(hours=1),
+        now=BEFORE_DIGEST_HOUR + timedelta(hours=1),
     )
-    assert result.sent is True
+    digest, digest_calls = _evaluate(
+        tmp_path,
+        state=replace(recovered, previous_status=STATUS_HEALTHY),
+        now=NOW,
+    )
+
+    assert alerted.sent is True
+    assert "HIGH" in alert_calls[0][1]
+    # The recovery itself never interrupts.
+    assert result.sent is False
     assert result.recovery_alerts == 1
-    assert "Source Recovery" in calls[0][0]
-    assert "rows returned: 142" in calls[0][1]
-
-
-def test_failed_recovery_delivery_retries_once_while_source_remains_healthy(
-    tmp_path,
-):
-    failing = _state(
-        status=STATUS_FAILING,
-        failures=3,
-        rows=None,
-        error="schema_failure",
-    )
-    _evaluate(
-        tmp_path,
-        state=failing,
-        transition=(_transition("healthy", STATUS_FAILING),),
-    )
-    recovered = _state(
-        status=STATUS_HEALTHY,
-        previous_status=STATUS_FAILING,
-        failures=0,
-        rows=142,
-    )
-
-    def fail_recovery_delivery(_subject, _body):
-        raise RuntimeError("temporary SMTP outage")
-
-    failed, _ = _evaluate(
-        tmp_path,
-        state=recovered,
-        transition=(
-            _transition(STATUS_FAILING, STATUS_HEALTHY, recovery=True),
-        ),
-        now=NOW + timedelta(hours=1),
-        sender=fail_recovery_delivery,
-    )
-    retried, retry_calls = _evaluate(
-        tmp_path,
-        state=replace(recovered, previous_status=STATUS_HEALTHY),
-        now=NOW + timedelta(hours=2),
-    )
-    settled, settled_calls = _evaluate(
-        tmp_path,
-        state=replace(recovered, previous_status=STATUS_HEALTHY),
-        now=NOW + timedelta(hours=3),
-    )
-
-    assert failed.sent is False
-    assert failed.error == "temporary SMTP outage"
-    assert retried.sent is True
-    assert retried.recovery_alerts == 1
-    assert "Source Recovery" in retry_calls[0][0]
-    assert settled.sent is False
-    assert settled_calls == []
+    assert calls == []
+    assert digest.daily_digest_sent is True
+    subject, body = digest_calls[0]
+    assert DIGEST_SUBJECT_MARKER in subject
+    assert "INFO" in body
+    assert "recovered" in body
 
 
 def test_backstop_only_daily_summary_does_not_spam_hourly(tmp_path):
@@ -344,8 +318,11 @@ def test_stale_feed_requires_prior_nonzero_activity(tmp_path):
         policy=policy,
         now=NOW + timedelta(hours=1),
     )
-    assert result.sent is True
+    # A stale feed is MEDIUM, so it reports in the digest rather than at once.
+    assert result.sent is False
+    assert result.daily_digest_sent is True
     assert "feed_stale" in calls[0][1]
+    assert "MEDIUM" in calls[0][1]
     assert second.sent is False
     assert second_calls == []
 
@@ -370,7 +347,7 @@ def test_valid_zero_role_feed_is_not_a_failure(tmp_path):
     assert calls == []
 
 
-def test_previously_productive_direct_source_silence_alerts(tmp_path):
+def test_previously_productive_direct_source_silence_reports_in_the_digest(tmp_path):
     silent = _state(
         status="degraded",
         previous_status="empty",
@@ -383,8 +360,10 @@ def test_previously_productive_direct_source_silence_alerts(tmp_path):
         state=silent,
         policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
     )
-    assert result.sent is True
+    assert result.sent is False
+    assert result.daily_digest_sent is True
     assert "direct_source_degraded" in calls[0][1]
+    assert "MEDIUM" in calls[0][1]
 
 
 def test_coverage_regression_and_both_tiers_unavailable_are_high_severity(tmp_path):
@@ -399,8 +378,60 @@ def test_coverage_regression_and_both_tiers_unavailable_are_high_severity(tmp_pa
     assert result.sent is True
     body = calls[0][1]
     assert "both_tiers_unavailable" in body
-    assert "CRITICAL" in body
+    # Losing both tiers is the most urgent condition, and it is HIGH: this
+    # policy has no CRITICAL severity.
+    assert "CRITICAL" not in body
+    assert body.count("HIGH:") == 2
     assert "coverage_regression" in body
+
+
+def test_no_active_candidate_uses_critical_severity(tmp_path):
+    """Every emitted candidate must carry high, medium, or info."""
+
+    seen_severities = set()
+
+    def collect(candidates):
+        seen_severities.update(candidate.severity for candidate in candidates)
+        return tuple(candidates)
+
+    states = (
+        _state(status=STATUS_FAILING, failures=3, rows=None, error="fetch_failure"),
+        _minor_state(),
+        _minor_state(reason_codes=("pagination_ended_early",), schema_errors=0),
+        _state(status=DIRECT_STATUS_UNKNOWN),
+        _state(
+            key="github_feed:abc",
+            company=None,
+            source_kind=SOURCE_KIND_GITHUB_FEED,
+            feed_label="Simplify",
+            last_nonzero=NOW - timedelta(hours=72),
+            rows=0,
+        ),
+        _state(status=STATUS_HEALTHY, previous_status=STATUS_FAILING),
+    )
+    for index, state in enumerate(states):
+        collect(
+            build_alert_candidates(
+                policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+                run_id=f"run-{index}",
+                observed_at=NOW,
+                states={state.health_key: state},
+                transitions=(
+                    (_transition(STATUS_FAILING, STATUS_HEALTHY, recovery=True),)
+                    if state.previous_status == STATUS_FAILING
+                    and state.status == STATUS_HEALTHY
+                    else ()
+                ),
+                coverage=(
+                    _coverage(COVERAGE_UNCOVERED, direct_status="failing", github=False),
+                ),
+                previous_coverage={"Test Co": COVERAGE_DIRECT},
+            )
+        )
+
+    assert seen_severities
+    assert "critical" not in seen_severities
+    assert seen_severities <= {SEVERITY_HIGH, SEVERITY_MEDIUM, SEVERITY_INFO}
 
 
 def test_health_smtp_failure_does_not_change_seen_state(tmp_path):
@@ -686,11 +717,8 @@ def test_policy_defaults_and_validation():
 
 
 # Minor-degradation policy. Small record-level noise and recovered retries stay
-# degraded and visible but are reported once a day; anything that could hide
-# missing postings keeps its existing immediate alert.
-
-BEFORE_DIGEST_HOUR = NOW.replace(hour=6)
-MINOR_SUBJECT_MARKER = "Minor Source Degradations"
+# degraded and visible, and are reported by the same daily digest that carries
+# every other MEDIUM and INFO incident.
 
 
 def _minor_state(
@@ -779,10 +807,10 @@ def test_tiny_schema_loss_is_degraded_without_an_immediate_email(tmp_path):
     assert quiet.sent is False
     assert quiet_calls == []
     assert digest.sent is False
-    assert digest.minor_digest_sent is True
-    assert digest.minor_incidents_reported == 1
+    assert digest.daily_digest_sent is True
+    assert digest.digest_incidents_reported == 1
     subject, body = digest_calls[0]
-    assert MINOR_SUBJECT_MARKER in subject
+    assert DIGEST_SUBJECT_MARKER in subject
     assert "Test Co" in body
     assert "schema_invalid_records_skipped" in body
     assert "retained rows: 412" in body
@@ -800,7 +828,7 @@ def test_tiny_malformed_loss_is_degraded_without_an_immediate_email(tmp_path):
 
     assert is_minor_degradation(state) is True
     assert quiet_calls == []
-    assert digest.minor_digest_sent is True
+    assert digest.daily_digest_sent is True
     body = digest_calls[0][1]
     assert "malformed_records_skipped" in body
     assert "malformed=1" in body
@@ -825,19 +853,24 @@ def test_recovered_retry_with_complete_collection_is_digest_only(tmp_path):
     assert quiet_calls == []
     assert recovery_calls == []
     assert recovered.recovery_alerts == 0
-    assert digest.minor_digest_sent is True
+    assert digest.daily_digest_sent is True
     body = digest_calls[0][1]
     assert "request_retry_recovered" in body
     assert "recovered later: yes" in body
 
 
-def test_recovered_retry_with_incomplete_collection_alerts_immediately(tmp_path):
+def test_recovered_retry_with_incomplete_collection_is_medium(tmp_path):
     state = _retry_state(incomplete=True, complete=False)
-    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+    quiet, quiet_calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+    digest, digest_calls = _evaluate(tmp_path, state=state, now=NOW)
 
     assert is_minor_degradation(state) is False
-    assert result.sent is True
-    assert "direct_source_degraded" in calls[0][1]
+    assert quiet.sent is False
+    assert quiet_calls == []
+    assert digest.daily_digest_sent is True
+    body = digest_calls[0][1]
+    assert "MEDIUM" in body
+    assert "direct_source_degraded" in body
 
 
 def test_minor_degradation_followed_by_healthy_sends_no_recovery_email(tmp_path):
@@ -875,7 +908,7 @@ def test_second_minor_cycle_still_sends_no_recovery_email(tmp_path):
     assert second_calls == []
     assert first_recovery.recovery_alerts == 0
     assert second_recovery.recovery_alerts == 0
-    assert digest.minor_incidents_reported == 1
+    assert digest.digest_incidents_reported == 1
     assert "occurrences: 2" in digest_calls[0][1]
 
 
@@ -886,7 +919,7 @@ def test_repeated_minor_incidents_are_summarized_once_per_source(tmp_path):
     digest, digest_calls = _evaluate(tmp_path, state=state, now=NOW)
 
     body = digest_calls[0][1]
-    assert digest.minor_incidents_reported == 1
+    assert digest.digest_incidents_reported == 1
     assert body.count("occurrences:") == 1
     assert "occurrences: 4" in body
     assert "recovered later: no" in body
@@ -902,35 +935,47 @@ def test_daily_minor_digest_is_sent_at_most_once_per_reporting_day(tmp_path):
         tmp_path, state=state, now=NOW + timedelta(days=1)
     )
 
-    assert first.minor_digest_sent is True
-    assert MINOR_SUBJECT_MARKER in first_calls[0][0]
-    assert second.minor_digest_sent is False
+    assert first.daily_digest_sent is True
+    assert DIGEST_SUBJECT_MARKER in first_calls[0][0]
+    assert second.daily_digest_sent is False
     assert second_calls == []
-    assert next_day.minor_digest_sent is True
-    assert MINOR_SUBJECT_MARKER in next_day_calls[0][0]
+    assert next_day.daily_digest_sent is True
+    assert DIGEST_SUBJECT_MARKER in next_day_calls[0][0]
 
 
 def test_digest_window_excludes_incidents_already_reported(tmp_path):
     """Events recorded during a digest run are not repeated the next day."""
 
-    first, _ = _evaluate(tmp_path, state=_minor_state(), now=NOW)
+    first, first_calls = _evaluate(tmp_path, state=_minor_state(), now=NOW)
     next_day, next_day_calls = _evaluate(
         tmp_path,
         state=_healthy_after_minor(),
         transition=(_minor_recovery_transition(),),
         now=NOW + timedelta(days=1),
     )
+    quiet_day, quiet_day_calls = _evaluate(
+        tmp_path,
+        state=_healthy_after_minor(),
+        now=NOW + timedelta(days=2),
+    )
 
-    assert first.minor_digest_sent is True
-    assert next_day.minor_digest_sent is False
-    assert next_day_calls == []
+    assert first.daily_digest_sent is True
+    assert "occurrences: 1" in first_calls[0][1]
+    # The recovery is new, so it reports; the degradation it ended was already
+    # reported yesterday and is not counted again.
+    assert next_day.daily_digest_sent is True
+    assert "occurrences: 0" in next_day_calls[0][1]
+    assert "recovered" in next_day_calls[0][1]
+    # With nothing new left, the window is empty and nothing is sent.
+    assert quiet_day.daily_digest_sent is False
+    assert quiet_day_calls == []
 
 
 def test_no_minor_incidents_sends_no_digest(tmp_path):
     result, calls = _evaluate(tmp_path, state=_state(), now=NOW)
 
-    assert result.minor_digest_sent is False
-    assert result.minor_incidents_reported == 0
+    assert result.daily_digest_sent is False
+    assert result.digest_incidents_reported == 0
     assert calls == []
 
 
@@ -945,67 +990,62 @@ def test_failed_digest_send_remains_retryable(tmp_path):
         tmp_path, state=state, now=NOW + timedelta(hours=1)
     )
 
-    assert failed.minor_digest_sent is False
-    assert retried.minor_digest_sent is True
-    assert MINOR_SUBJECT_MARKER in retried_calls[0][0]
+    assert failed.daily_digest_sent is False
+    assert retried.daily_digest_sent is True
+    assert DIGEST_SUBJECT_MARKER in retried_calls[0][0]
 
 
-def test_pagination_ended_early_still_alerts_immediately(tmp_path):
-    state = _minor_state(
-        reason_codes=("pagination_ended_early",),
-        schema_errors=0,
-        malformed=0,
-    )
-    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
-
-    assert is_minor_degradation(state) is False
-    assert result.sent is True
-    assert result.minor_digest_sent is False
-    assert "MEDIUM" in calls[0][1]
-    assert "direct_source_degraded" in calls[0][1]
-    assert "pagination_ended_early" in calls[0][1]
-
-
-def test_mixed_minor_and_actionable_reasons_alert_immediately(tmp_path):
-    state = _minor_state(
-        reason_codes=(
-            "schema_invalid_records_skipped",
+@pytest.mark.parametrize(
+    ("overrides", "expected_reason"),
+    (
+        (
+            {
+                "reason_codes": ("pagination_ended_early",),
+                "schema_errors": 0,
+                "malformed": 0,
+            },
             "pagination_ended_early",
         ),
-    )
-    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+        (
+            {
+                "reason_codes": (
+                    "schema_invalid_records_skipped",
+                    "pagination_ended_early",
+                )
+            },
+            "pagination_ended_early",
+        ),
+        ({"truncated": True}, "schema_invalid_records_skipped"),
+        ({"schema_errors": 9, "rows": 30}, "schema_invalid_records_skipped"),
+        (
+            {"reason_codes": ("unmapped_future_anomaly",)},
+            "unmapped_future_anomaly",
+        ),
+    ),
+)
+def test_actionable_degradation_is_medium_in_the_digest(
+    overrides,
+    expected_reason,
+    tmp_path,
+):
+    """Degradation that could hide postings stays MEDIUM, not minor INFO.
+
+    It no longer interrupts, because severity now routes every MEDIUM incident
+    to the daily digest, but it must never be reclassified as informational.
+    """
+
+    state = _minor_state(**overrides)
+    quiet, quiet_calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+    digest, digest_calls = _evaluate(tmp_path, state=state, now=NOW)
 
     assert is_minor_degradation(state) is False
-    assert result.sent is True
-    assert result.minor_incidents_reported == 0
-    assert "MEDIUM" in calls[0][1]
-
-
-def test_truncated_collection_with_minor_reasons_alerts_immediately(tmp_path):
-    state = _minor_state(truncated=True)
-    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
-
-    assert is_minor_degradation(state) is False
-    assert result.sent is True
-    assert "direct_source_degraded" in calls[0][1]
-
-
-def test_substantial_record_loss_alerts_immediately(tmp_path):
-    state = _minor_state(schema_errors=9, rows=30)
-    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
-
-    assert is_minor_degradation(state) is False
-    assert result.sent is True
-    assert "direct_source_degraded" in calls[0][1]
-
-
-def test_unrecognized_reason_code_is_actionable(tmp_path):
-    state = _minor_state(reason_codes=("unmapped_future_anomaly",))
-    result, calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
-
-    assert is_minor_degradation(state) is False
-    assert result.sent is True
-    assert "unmapped_future_anomaly" in calls[0][1]
+    assert quiet.sent is False
+    assert quiet_calls == []
+    assert digest.daily_digest_sent is True
+    body = digest_calls[0][1]
+    assert "MEDIUM" in body
+    assert "direct_source_degraded" in body
+    assert expected_reason in body
 
 
 def test_direct_source_failure_still_sends_a_high_alert(tmp_path):
@@ -1073,13 +1113,316 @@ def test_minor_digest_does_not_interfere_with_an_immediate_alert(tmp_path):
     )
 
     assert result.sent is True
-    assert result.minor_digest_sent is True
+    assert result.daily_digest_sent is True
     assert any("Source Alert" in subject for subject, _ in calls)
-    assert any(MINOR_SUBJECT_MARKER in subject for subject, _ in calls)
+    assert any(DIGEST_SUBJECT_MARKER in subject for subject, _ in calls)
     minor_body = next(
-        body for subject, body in calls if MINOR_SUBJECT_MARKER in subject
+        body for subject, body in calls if DIGEST_SUBJECT_MARKER in subject
     )
     assert "Other Co" not in minor_body
+
+
+def _evaluate_states(
+    tmp_path,
+    *,
+    states,
+    transitions=(),
+    now=NOW,
+    sender=None,
+    policy=None,
+):
+    """Evaluate several sources in one run, as a real run does."""
+
+    calls = []
+
+    def default_sender(subject, body):
+        calls.append((subject, body))
+        return True
+
+    result = evaluate_and_send_health_alerts(
+        db_path=tmp_path / "state.sqlite",
+        policy=policy or HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+        run_id=f"run-{now.hour}-{now.day}",
+        observed_at=now,
+        states={state.health_key: state for state in states},
+        transitions=tuple(transitions),
+        coverage=(_coverage(),),
+        summary=_summary(),
+        comparison=None,
+        sender=sender or default_sender,
+    )
+    return result, calls
+
+
+def _other_state(**overrides):
+    values = {
+        "key": "company:other:direct:lever",
+        "company": "Other Co",
+    }
+    values.update(overrides)
+    return _state(**values)
+
+
+def test_unknown_diagnostics_is_medium_in_the_digest(tmp_path):
+    state = _state(status=DIRECT_STATUS_UNKNOWN)
+    quiet, quiet_calls = _evaluate(tmp_path, state=state, now=BEFORE_DIGEST_HOUR)
+    digest, digest_calls = _evaluate(tmp_path, state=state, now=NOW)
+
+    assert quiet.sent is False
+    assert quiet_calls == []
+    assert digest.daily_digest_sent is True
+    body = digest_calls[0][1]
+    assert "MEDIUM" in body
+    assert "unknown_diagnostics" in body
+
+
+def test_medium_then_recovery_collapses_into_one_recovered_entry(tmp_path):
+    degraded = _minor_state(reason_codes=("pagination_ended_early",), schema_errors=0)
+    _evaluate(tmp_path, state=degraded, now=NOW.replace(hour=3))
+    _evaluate(
+        tmp_path,
+        state=_healthy_after_minor(),
+        transition=(_minor_recovery_transition(),),
+        now=NOW.replace(hour=4),
+    )
+    digest, digest_calls = _evaluate(
+        tmp_path,
+        state=_healthy_after_minor(),
+        now=NOW,
+    )
+
+    body = digest_calls[0][1]
+    assert digest.digest_incidents_reported == 1
+    # One entry, not a separate failure entry and recovery entry.
+    assert body.count("occurrences:") == 1
+    assert "recovered; 1 degraded run, currently healthy." in body
+    assert "recovered later: yes" in body
+
+
+def test_medium_then_high_escalation_leaves_no_unresolved_digest_entry(tmp_path):
+    degraded = _minor_state(reason_codes=("pagination_ended_early",), schema_errors=0)
+    quiet, quiet_calls = _evaluate(
+        tmp_path,
+        state=degraded,
+        now=NOW.replace(hour=3),
+    )
+    failed = _state(
+        status=DIRECT_STATUS_FAILED,
+        previous_status=DIRECT_STATUS_DEGRADED,
+        failures=1,
+        rows=None,
+        error="fetch_failure",
+    )
+    escalated, escalation_calls = _evaluate(
+        tmp_path,
+        state=failed,
+        transition=(
+            _transition(DIRECT_STATUS_DEGRADED, DIRECT_STATUS_FAILED),
+        ),
+        now=NOW.replace(hour=4),
+    )
+    digest, digest_calls = _evaluate(tmp_path, state=failed, now=NOW)
+
+    assert quiet.sent is False
+    assert quiet_calls == []
+    # The escalation is the immediate alert.
+    assert escalated.sent is True
+    assert "HIGH" in escalation_calls[0][1]
+    # The superseded MEDIUM must not resurface as an open incident.
+    assert digest.daily_digest_sent is False
+    assert digest.digest_incidents_reported == 0
+    assert digest_calls == []
+
+
+def test_repeated_medium_events_collapse_with_an_occurrence_count(tmp_path):
+    degraded = _minor_state(reason_codes=("pagination_ended_early",), schema_errors=0)
+    for hour in (3, 4, 5):
+        _evaluate(tmp_path, state=degraded, now=NOW.replace(hour=hour))
+    digest, digest_calls = _evaluate(tmp_path, state=degraded, now=NOW)
+
+    body = digest_calls[0][1]
+    assert digest.digest_incidents_reported == 1
+    assert body.count("occurrences:") == 1
+    assert "occurrences: 4" in body
+
+
+def test_one_digest_combines_every_source_with_medium_before_info(tmp_path):
+    medium = _minor_state(reason_codes=("pagination_ended_early",), schema_errors=0)
+    info = _other_state(
+        status=DIRECT_STATUS_DEGRADED,
+        previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        reason_codes=("schema_invalid_records_skipped",),
+        schema_errors=1,
+        malformed=0,
+        rows=412,
+        incomplete=True,
+        truncated=False,
+        degraded=True,
+        complete=False,
+    )
+    _evaluate_states(
+        tmp_path,
+        states=(medium, info),
+        now=BEFORE_DIGEST_HOUR,
+    )
+    digest, calls = _evaluate_states(tmp_path, states=(medium, info), now=NOW)
+
+    assert digest.digest_incidents_reported == 2
+    # One combined email, not one per source.
+    assert len(calls) == 1
+    subject, body = calls[0]
+    assert subject == (
+        "Internship Watcher Daily Source Health: 1 medium, 1 info"
+    )
+    assert body.index("MEDIUM:") < body.index("INFO:")
+    assert "Test Co" in body
+    assert "Other Co" in body
+
+
+def test_replaying_the_same_run_id_does_not_duplicate_digest_events(tmp_path):
+    degraded = _minor_state(reason_codes=("pagination_ended_early",), schema_errors=0)
+    replayed = NOW.replace(hour=3)
+    _evaluate(tmp_path, state=degraded, now=replayed)
+    _evaluate(tmp_path, state=degraded, now=replayed)
+    digest, digest_calls = _evaluate(tmp_path, state=degraded, now=NOW)
+
+    body = digest_calls[0][1]
+    assert digest.digest_incidents_reported == 1
+    # Two evaluations of one run plus the digest run itself is two events.
+    assert "occurrences: 2" in body
+
+
+def test_catchup_window_resumes_at_the_last_successful_digest(tmp_path):
+    """A multi-day delivery outage still reports its retained events."""
+
+    def broken(_subject, _body):
+        raise RuntimeError("temporary SMTP outage")
+
+    degraded = _minor_state(reason_codes=("pagination_ended_early",), schema_errors=0)
+    first, _ = _evaluate(tmp_path, state=degraded, now=NOW)
+    outage_day_one, _ = _evaluate(
+        tmp_path,
+        state=_other_state(
+            status=DIRECT_STATUS_DEGRADED,
+            previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+            reason_codes=("pagination_ended_early",),
+            malformed=0,
+            schema_errors=0,
+            rows=10,
+            incomplete=True,
+            truncated=False,
+            degraded=True,
+            complete=False,
+        ),
+        now=NOW + timedelta(days=1),
+        sender=broken,
+    )
+    outage_day_two, _ = _evaluate(
+        tmp_path,
+        state=_state(
+            key="company:third:direct:ashby",
+            company="Third Co",
+            status=DIRECT_STATUS_DEGRADED,
+            previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+            reason_codes=("pagination_ended_early",),
+            malformed=0,
+            schema_errors=0,
+            rows=10,
+            incomplete=True,
+            truncated=False,
+            degraded=True,
+            complete=False,
+        ),
+        now=NOW + timedelta(days=2),
+        sender=broken,
+    )
+    recovered, recovered_calls = _evaluate(
+        tmp_path,
+        state=_state(),
+        now=NOW + timedelta(days=3),
+    )
+
+    assert first.daily_digest_sent is True
+    assert outage_day_one.daily_digest_sent is False
+    assert outage_day_two.daily_digest_sent is False
+    assert recovered.daily_digest_sent is True
+    body = recovered_calls[0][1]
+    # Both outage days are older than 24 hours and still reported.
+    assert "Other Co" in body
+    assert "Third Co" in body
+    assert recovered.digest_catchup_clamped is False
+
+
+def test_catchup_is_clamped_to_seven_days(tmp_path):
+    def broken(_subject, _body):
+        raise RuntimeError("temporary SMTP outage")
+
+    def _degraded(key, company):
+        return _state(
+            key=key,
+            company=company,
+            status=DIRECT_STATUS_DEGRADED,
+            previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+            reason_codes=("pagination_ended_early",),
+            malformed=0,
+            schema_errors=0,
+            rows=10,
+            incomplete=True,
+            truncated=False,
+            degraded=True,
+            complete=False,
+        )
+
+    start = NOW - timedelta(days=10)
+    _evaluate(tmp_path, state=_degraded("company:a:direct:x", "Alpha Co"), now=start)
+    _evaluate(
+        tmp_path,
+        state=_degraded("company:b:direct:x", "Beta Co"),
+        now=start + timedelta(days=1),
+        sender=broken,
+    )
+    _evaluate(
+        tmp_path,
+        state=_degraded("company:c:direct:x", "Gamma Co"),
+        now=NOW - timedelta(days=2),
+        sender=broken,
+    )
+    clamped, clamped_calls = _evaluate(tmp_path, state=_state(), now=NOW)
+
+    assert clamped.daily_digest_sent is True
+    assert clamped.digest_catchup_clamped is True
+    body = clamped_calls[0][1]
+    assert f"more than {MAX_DIGEST_CATCHUP_DAYS} days" in body
+    # Inside the clamp is reported; older than the clamp is dropped.
+    assert "Gamma Co" in body
+    assert "Beta Co" not in body
+
+
+def test_resolve_digest_window_bounds():
+    default_start, inclusive, clamped = resolve_digest_window(
+        now=NOW,
+        last_sent_at=None,
+    )
+    assert default_start == NOW - timedelta(hours=24)
+    assert inclusive is True
+    assert clamped is False
+
+    resumed, inclusive, clamped = resolve_digest_window(
+        now=NOW,
+        last_sent_at=NOW - timedelta(days=3),
+    )
+    assert resumed == NOW - timedelta(days=3)
+    # Exclusive, because that digest already reported its own timestamp.
+    assert inclusive is False
+    assert clamped is False
+
+    bounded, inclusive, clamped = resolve_digest_window(
+        now=NOW,
+        last_sent_at=NOW - timedelta(days=30),
+    )
+    assert bounded == NOW - timedelta(days=MAX_DIGEST_CATCHUP_DAYS)
+    assert inclusive is True
+    assert clamped is True
 
 
 def test_live_greenhouse_run_defers_one_invalid_record_to_the_digest(
@@ -1166,13 +1509,13 @@ def test_live_greenhouse_run_defers_one_invalid_record_to_the_digest(
     assert is_minor_degradation(stored) is True
 
     assert quiet.health_alert_result.sent is False
-    assert quiet.health_alert_result.minor_digest_sent is False
+    assert quiet.health_alert_result.daily_digest_sent is False
     assert quiet_calls == []
 
     assert digested.health_alert_result.sent is False
-    assert digested.health_alert_result.minor_digest_sent is True
+    assert digested.health_alert_result.daily_digest_sent is True
     subject, body = calls[0]
-    assert MINOR_SUBJECT_MARKER in subject
+    assert DIGEST_SUBJECT_MARKER in subject
     assert "Test Co" in body
     assert "schema_invalid_records_skipped" in body
     assert "retained rows: 40" in body
