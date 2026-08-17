@@ -7,6 +7,7 @@ import logging
 import os
 import smtplib
 import sqlite3
+from collections import Counter
 from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime, timedelta
 from email.message import EmailMessage
@@ -17,6 +18,7 @@ from watcher.source_comparison import SourceComparisonReport
 from watcher.source_health import (
     COVERAGE_BACKSTOP_ONLY,
     COVERAGE_UNCOVERED,
+    SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
     STATUS_DEGRADED,
     STATUS_EMPTY,
@@ -115,6 +117,20 @@ MAX_DIGEST_CATCHUP_DAYS = 7
 # Defensive bound on how many stored events one digest window may load.
 MAX_DIGEST_EVENTS = 20_000
 
+# How far back persisted company-level GitHub evidence stays trustworthy.
+GITHUB_EVIDENCE_HORIZON_DAYS = 7
+# Coverage snapshots are the evidence store, so retention must outlast that
+# horizon. The scheduled watcher runs hourly, so seven days is 168 snapshots;
+# 200 keeps roughly a day of margin for extra manual dispatches.
+MAX_COVERAGE_SNAPSHOTS = 200
+
+# A shared platform incident is obvious only when it is both broad and
+# consistent: at least this many companies of one adapter family fail with the
+# same sanitized error kind, and that kind accounts for at least this share of
+# the family's failures on the run.
+SYSTEMIC_GROUP_MIN_COMPANIES = 5
+SYSTEMIC_GROUP_DOMINANCE_PERCENT = 60
+
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
 SMTP_TIMEOUT_SECONDS = 30
@@ -150,6 +166,15 @@ class HealthAlertCandidate:
     run_id: str
     diagnostic_summary: str = ""
     reason_codes: tuple[str, ...] = ()
+    # Adapter family this source belongs to, used only to group obvious shared
+    # platform incidents for presentation.
+    adapter: str = ""
+    # Whether a GitHub fallback was demonstrably usable *for this company* when
+    # severity was assigned. This is deliberately distinct from
+    # ``github_fallback_available``, which only reports that some GitHub feed
+    # succeeded somewhere on the run. ``None`` means the question was not
+    # evaluated for this alert type.
+    github_fallback_usable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -168,6 +193,21 @@ class DigestIncident:
     diagnostic_summary: str
     recovered: str
     escalated: bool = False
+
+
+@dataclass(frozen=True)
+class SystemicIncidentGroup:
+    """One run's shared same-family failure, for presentation only."""
+
+    adapter_family: str
+    error_kind: str
+    companies: tuple[str, ...]
+    run_id: str
+    recommended_action: str
+
+    @property
+    def affected_companies(self) -> int:
+        return len(self.companies)
 
 
 @dataclass(frozen=True)
@@ -258,6 +298,63 @@ def is_minor_degradation(state: SourceHealthState) -> bool:
     return not state.last_incomplete and state.last_complete is True
 
 
+def github_feed_fallback_usable(
+    states: Mapping[str, SourceHealthState],
+    *,
+    observed_at: datetime,
+    feed_stale_hours: int,
+) -> bool:
+    """Report whether any GitHub feed is currently a trustworthy fallback.
+
+    This is the run-wide half of the usable-fallback test: a feed counts only
+    when its most recent attempt succeeded and it published postings inside the
+    existing staleness window. A feed that has never returned a posting is
+    unproven rather than fresh, so it never qualifies.
+    """
+
+    stale_after = timedelta(hours=feed_stale_hours)
+    for state in states.values():
+        if state.source_kind != SOURCE_KIND_GITHUB_FEED:
+            continue
+        if state.status != STATUS_HEALTHY:
+            continue
+        if state.last_nonzero_at is None:
+            continue
+        if observed_at - state.last_nonzero_at >= stale_after:
+            continue
+        return True
+    return False
+
+
+def usable_github_fallback(
+    coverage: CompanyCoverage | None,
+    *,
+    feed_usable: bool,
+    historical_evidence: frozenset[str] = frozenset(),
+) -> bool:
+    """Report whether GitHub demonstrably protects one specific company.
+
+    All four conditions must hold: a GitHub feed succeeded on this run
+    (``github_fallback_configured``), that feed is not stale (``feed_usable``),
+    GitHub is a fallback rather than this company's primary source (also
+    ``github_fallback_configured``), and there is positive company-level row
+    evidence either on this run or inside the persisted evidence horizon.
+
+    Zero rows are never evidence, because a covered company may simply have no
+    current postings, and an absent count is unknown rather than zero. Both
+    cases leave the fallback unproven, which keeps a first failure HIGH.
+    """
+
+    if coverage is None or not coverage.github_fallback_configured:
+        return False
+    if not feed_usable:
+        return False
+    rows = coverage.github_rows_returned
+    if rows is not None and rows > 0:
+        return True
+    return sanitize_error(coverage.company) in historical_evidence
+
+
 def evaluate_and_send_health_alerts(
     *,
     db_path: str | Path,
@@ -293,8 +390,13 @@ def evaluate_and_send_health_alerts(
     with HealthAlertStore(db_path) as store:
         previous_coverage = store.latest_coverage_snapshot()
         # Read open incidents before recording, because recording a recovery
-        # resolves the incident it ends.
+        # resolves the incident it ends. The GitHub evidence read must also
+        # precede this run's snapshot write so it stays strictly historical;
+        # current-run evidence arrives through `coverage` instead.
         minor_incident_keys = store.open_minor_incident_keys()
+        github_evidence = store.companies_with_recent_github_rows(
+            since=now - timedelta(days=GITHUB_EVIDENCE_HORIZON_DAYS),
+        )
         candidates = build_alert_candidates(
             policy=policy,
             run_id=run_id,
@@ -304,6 +406,7 @@ def evaluate_and_send_health_alerts(
             coverage=coverage,
             previous_coverage=previous_coverage,
             minor_incident_keys=minor_incident_keys,
+            github_evidence_companies=github_evidence,
         )
         store.record_coverage_snapshot(
             run_id=run_id,
@@ -495,9 +598,15 @@ def build_alert_candidates(
     coverage: Sequence[CompanyCoverage],
     previous_coverage: Mapping[str, str] | None,
     minor_incident_keys: frozenset[str] = frozenset(),
+    github_evidence_companies: frozenset[str] = frozenset(),
 ) -> tuple[HealthAlertCandidate, ...]:
     transition_by_key = {transition.health_key: transition for transition in transitions}
     coverage_by_company = {item.company: item for item in coverage}
+    feed_usable = github_feed_fallback_usable(
+        states,
+        observed_at=observed_at,
+        feed_stale_hours=policy.feed_stale_hours,
+    )
     candidates: list[HealthAlertCandidate] = []
     for state in states.values():
         transition = transition_by_key.get(state.health_key)
@@ -526,6 +635,20 @@ def build_alert_candidates(
             )
             continue
         if state.status in {STATUS_FAILING, DIRECT_STATUS_FAILED}:
+            # A single direct-source failure is only deferrable while GitHub
+            # demonstrably covers that company. A second consecutive failure is
+            # HIGH regardless, so proven fallback can delay one alert but never
+            # suppress escalation.
+            first_failure = (
+                state.source_kind != SOURCE_KIND_GITHUB_FEED
+                and state.consecutive_failures == 1
+            )
+            fallback_usable = usable_github_fallback(
+                company_coverage,
+                feed_usable=feed_usable,
+                historical_evidence=github_evidence_companies,
+            )
+            deferrable = first_failure and fallback_usable
             candidates.append(
                 _candidate(
                     state,
@@ -536,12 +659,16 @@ def build_alert_candidates(
                         and transition.to_status in {STATUS_FAILING, DIRECT_STATUS_FAILED}
                         else ALERT_CONTINUED_FAILURE
                     ),
-                    # Phase 2A keeps the existing first-failure severity. The
-                    # fallback-aware downgrade waits for per-company evidence.
-                    severity=SEVERITY_HIGH,
+                    severity=SEVERITY_MEDIUM if deferrable else SEVERITY_HIGH,
                     run_id=run_id,
                     coverage=company_coverage,
-                    action="Inspect the sanitized source-health report and adapter endpoint.",
+                    action=(
+                        "A usable GitHub fallback currently covers this company; "
+                        "review the daily digest and escalate if it fails again."
+                        if deferrable
+                        else "Inspect the sanitized source-health report and adapter endpoint."
+                    ),
+                    fallback_usable=fallback_usable,
                 )
             )
         elif (
@@ -684,11 +811,90 @@ def build_alert_candidates(
     return _merge_candidates(candidates)
 
 
+def group_systemic_incidents(
+    candidates: Sequence[HealthAlertCandidate],
+) -> tuple[tuple["SystemicIncidentGroup", ...], tuple[HealthAlertCandidate, ...]]:
+    """Fold obvious same-family shared failures into one presentation group.
+
+    This is strictly a presentation and delivery operation performed after every
+    per-company incident has already been calculated and persisted. It reads
+    candidates, writes nothing, and invents no synthetic health record: each
+    affected company keeps its own state, counters, diagnostics, coverage, and
+    cooldown entry. Groups plus leftovers always cover exactly the input.
+
+    Only direct-source failures group, only within one adapter family, and only
+    on one dominant sanitized error kind. Anything short of that reports
+    independently, because two honest family alerts beat one invented shared
+    diagnosis.
+    """
+
+    groupable = [
+        candidate
+        for candidate in candidates
+        if candidate.severity == SEVERITY_HIGH
+        and candidate.alert_type in FAILURE_ALERT_TYPES
+        and candidate.source_kind == SOURCE_KIND_DIRECT
+        and candidate.adapter
+        and candidate.company
+    ]
+    by_family: dict[str, list[HealthAlertCandidate]] = {}
+    for candidate in groupable:
+        by_family.setdefault(candidate.adapter, []).append(candidate)
+
+    groups: list[SystemicIncidentGroup] = []
+    grouped: set[str] = set()
+    for family, members in sorted(by_family.items()):
+        if len(members) < SYSTEMIC_GROUP_MIN_COMPANIES:
+            continue
+        counts = Counter(_grouping_error_kind(item) for item in members)
+        error_kind, count = min(
+            counts.most_common(),
+            key=lambda item: (-item[1], item[0]),
+        )
+        if count < SYSTEMIC_GROUP_MIN_COMPANIES:
+            continue
+        if count * 100 < len(members) * SYSTEMIC_GROUP_DOMINANCE_PERCENT:
+            continue
+        affected = sorted(
+            (
+                item
+                for item in members
+                if _grouping_error_kind(item) == error_kind
+            ),
+            key=lambda item: (item.source_label.casefold(), item.fingerprint),
+        )
+        groups.append(
+            SystemicIncidentGroup(
+                adapter_family=family,
+                error_kind=error_kind,
+                companies=tuple(item.source_label for item in affected),
+                run_id=affected[0].run_id,
+                recommended_action=(
+                    f"Investigate the shared {family} platform or transport "
+                    "before treating these as independent company failures."
+                ),
+            )
+        )
+        grouped.update(item.fingerprint for item in affected)
+    remaining = tuple(
+        candidate
+        for candidate in candidates
+        if candidate.fingerprint not in grouped
+    )
+    return tuple(groups), remaining
+
+
 def render_alert_email(
     candidates: Sequence[HealthAlertCandidate],
 ) -> tuple[str, str]:
+    groups, remaining = group_systemic_incidents(candidates)
     first = candidates[0]
-    if len(candidates) == 1 and first.alert_type == "recovery":
+    if groups:
+        subject = (
+            f"Internship Watcher Source Alert: {len(groups)} shared source "
+            f"incident(s), {len(remaining)} other"
+        )
+    elif len(candidates) == 1 and first.alert_type == "recovery":
         subject = f"Internship Watcher Source Recovery: {first.source_label}"
     elif len(candidates) == 1:
         subject = (
@@ -698,7 +904,9 @@ def render_alert_email(
     else:
         subject = f"Internship Watcher Source Alert: {len(candidates)} source incidents"
     lines = [subject, ""]
-    for candidate in candidates:
+    for group in groups:
+        lines.extend(_group_lines(group))
+    for candidate in remaining:
         lines.extend(_candidate_lines(candidate))
     return subject, "\n".join(lines).rstrip() + "\n"
 
@@ -1086,6 +1294,52 @@ def _recovery_state(
     return "no"
 
 
+def _coverage_snapshot_value(coverage: CompanyCoverage) -> object:
+    """Serialize one company's snapshot entry.
+
+    A run that supplied no GitHub row count writes the legacy bare-string shape,
+    so an entry never claims evidence it does not have.
+    """
+
+    if coverage.github_rows_returned is None:
+        return coverage.state
+    return {
+        "state": coverage.state,
+        "github_rows": max(0, int(coverage.github_rows_returned)),
+    }
+
+
+def _coverage_snapshot_entries(payload: object) -> dict[str, tuple[str, int | None]]:
+    """Read a coverage snapshot in either the legacy or current shape.
+
+    Legacy snapshots map a company straight to its coverage state string and
+    carry no company-level GitHub evidence; current snapshots map it to an
+    object. Both are accepted, so an existing production database keeps working
+    and simply reports unknown evidence until new snapshots accumulate.
+    """
+
+    try:
+        data = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, Mapping):
+        return {}
+    entries: dict[str, tuple[str, int | None]] = {}
+    for company, value in data.items():
+        if isinstance(value, Mapping):
+            state = str(value.get("state") or "")
+            raw_rows = value.get("github_rows")
+            github_rows = (
+                max(0, int(raw_rows))
+                if isinstance(raw_rows, int) and not isinstance(raw_rows, bool)
+                else None
+            )
+        else:
+            state, github_rows = str(value), None
+        entries[str(company)] = (state, github_rows)
+    return entries
+
+
 def _candidate_from_payload(payload: str) -> HealthAlertCandidate:
     """Rebuild a stored candidate, tolerating payloads from older versions."""
 
@@ -1421,8 +1675,41 @@ class HealthAlertStore:
         ).fetchone()
         if row is None:
             return None
-        data = json.loads(row["coverage_json"])
-        return {str(key): str(value) for key, value in data.items()}
+        return {
+            company: state
+            for company, (state, _) in _coverage_snapshot_entries(
+                row["coverage_json"]
+            ).items()
+        }
+
+    def companies_with_recent_github_rows(
+        self,
+        *,
+        since: datetime,
+    ) -> frozenset[str]:
+        """Companies with persisted evidence of a GitHub row inside a window.
+
+        Only a positive count is evidence. Zero rows are ambiguous, because a
+        covered company may simply have no current postings, and a legacy
+        snapshot that recorded no count at all is unknown rather than zero.
+        """
+
+        rows = self._conn.execute(
+            """
+            select coverage_json
+            from source_health_coverage_snapshots
+            where observed_at >= ?
+            """,
+            (iso_utc(since),),
+        ).fetchall()
+        companies: set[str] = set()
+        for row in rows:
+            for company, (_, github_rows) in _coverage_snapshot_entries(
+                row["coverage_json"]
+            ).items():
+                if github_rows is not None and github_rows > 0:
+                    companies.add(company)
+        return frozenset(companies)
 
     def recent_candidates(
         self,
@@ -1450,8 +1737,11 @@ class HealthAlertStore:
         observed_at: datetime,
         coverage: Sequence[CompanyCoverage],
     ) -> None:
+        # Each company records its coverage state plus, when the run supplied
+        # one, its GitHub row count. Snapshots written before this field exist
+        # remain readable, so no production database needs wiping.
         data = {
-            sanitize_error(item.company): item.state
+            sanitize_error(item.company): _coverage_snapshot_value(item)
             for item in coverage
         }
         with self._conn:
@@ -1471,13 +1761,13 @@ class HealthAlertStore:
                 ),
             )
             self._conn.execute(
-                """
+                f"""
                 delete from source_health_coverage_snapshots
                 where run_id not in (
                   select run_id
                   from source_health_coverage_snapshots
                   order by observed_at desc, run_id desc
-                  limit 90
+                  limit {MAX_COVERAGE_SNAPSHOTS}
                 )
                 """
             )
@@ -1553,6 +1843,7 @@ def _candidate(
     run_id: str,
     coverage: CompanyCoverage | None,
     action: str,
+    fallback_usable: bool | None = None,
 ) -> HealthAlertCandidate:
     label = state.company or state.feed_label or state.adapter or state.health_key
     failure_family = (
@@ -1603,6 +1894,8 @@ def _candidate(
         reason_codes=tuple(
             safe_error_kind(code) for code in (state.last_reason_codes or ())
         )[:12],
+        adapter=safe_error_kind(state.adapter) if state.adapter else "",
+        github_fallback_usable=fallback_usable,
     )
 
 
@@ -1643,6 +1936,24 @@ def _merge_candidates(
     )
 
 
+def _grouping_error_kind(candidate: HealthAlertCandidate) -> str:
+    return safe_error_kind(candidate.error_kind) or "unknown"
+
+
+def _group_lines(group: SystemicIncidentGroup) -> list[str]:
+    return [
+        f"HIGH: likely shared {group.adapter_family} incident "
+        f"({group.affected_companies} companies)",
+        f"  source family: {group.adapter_family}",
+        f"  safe failure category: {group.error_kind}",
+        f"  affected companies: {group.affected_companies}",
+        *[f"    - {sanitize_error(company)}" for company in group.companies],
+        f"  recommended action: {group.recommended_action}",
+        f"  run ID: {group.run_id}",
+        "",
+    ]
+
+
 def _candidate_lines(candidate: HealthAlertCandidate) -> list[str]:
     return [
         f"{candidate.severity.upper()}: {candidate.source_label}",
@@ -1656,7 +1967,10 @@ def _candidate_lines(candidate: HealthAlertCandidate) -> list[str]:
         f"  safe error category: {candidate.error_kind or 'none'}",
         f"  bounded diagnostics: {candidate.diagnostic_summary or 'none'}",
         f"  direct fallback available: {_yes_no_unknown(candidate.direct_fallback_available)}",
-        f"  GitHub fallback available: {_yes_no_unknown(candidate.github_fallback_available)}",
+        # Two different questions, deliberately reported separately: a feed
+        # succeeding somewhere says nothing about this company.
+        f"  some GitHub feed succeeded on this run: {_yes_no_unknown(candidate.github_fallback_available)}",
+        f"  usable GitHub fallback for this company: {_yes_no_unknown(candidate.github_fallback_usable)}",
         f"  recommended action: {candidate.recommended_action}",
         f"  run ID: {candidate.run_id}",
         "",

@@ -17,6 +17,7 @@ from typing import Iterable, Mapping, Sequence, TextIO
 from urllib.parse import urlsplit, urlunsplit
 
 from backend.app.dedupe import norm_company
+from watcher.company_matching import company_matching_key
 from watcher.config import (
     COVERAGE_STATUS_NO_SOURCE_FOUND,
     CompanyCfg,
@@ -51,6 +52,11 @@ COVERAGE_DEGRADED_BACKSTOP = "direct_degraded_backstop_available"
 COVERAGE_FAILING_BACKSTOP = "direct_failing_backstop_available"
 COVERAGE_UNKNOWN_BACKSTOP = "direct_unknown_backstop_available"
 COVERAGE_UNCOVERED = "uncovered_for_run"
+
+# Companies whose configuration makes GitHub the primary source rather than a
+# fallback. A GitHub row for one of them is not evidence that anything backs up
+# a failed direct source, because there is no direct source to back up.
+GITHUB_PRIMARY_ATS = frozenset({"bespoke", "github_only"})
 
 COVERAGE_AUDIT_DIRECT_VERIFIED = "direct_verified"
 COVERAGE_AUDIT_DIRECT_DEGRADED = "direct_degraded"
@@ -154,7 +160,21 @@ class CompanyCoverage:
     direct_status: str
     direct_attempt_succeeded: bool | None
     direct_rows_returned: int | None
+    # ``github_backstop_available`` answers only "did some GitHub feed succeed
+    # somewhere on this run". It is a single global observation stamped onto
+    # every company, so it can never show that GitHub covers *this* company.
     github_backstop_available: bool
+    # GitHub rows that mapped onto this company on this run. ``None`` means the
+    # caller supplied no counts, which stays unknown and is never evidence; 0 is
+    # a real observation but is still ambiguous, because a covered company may
+    # simply have no current postings.
+    github_rows_returned: int | None = None
+    # GitHub is configured as a *fallback* for this company (not its primary
+    # source) and at least one GitHub feed succeeded on this run. This is a
+    # precondition for a fallback-aware severity downgrade, never the whole
+    # test: company-level row evidence and feed freshness are checked by the
+    # alert policy, which owns the staleness threshold.
+    github_fallback_configured: bool = False
 
 
 @dataclass(frozen=True)
@@ -560,10 +580,44 @@ def transition_for(
     )
 
 
+def count_github_rows_by_company(
+    rows: Iterable[Mapping[str, object]],
+    companies: Sequence[CompanyCfg],
+) -> dict[str, int]:
+    """Count GitHub-sourced collection rows that map onto each company.
+
+    This reads only rows produced by this run's adapters, where ``make_row``
+    always sets ``extra['source']``. Labels are resolved through the watchlist
+    matching key exactly once per row, and an ambiguous label that several
+    companies claim is attributed to none of them.
+    """
+
+    lookup: dict[str, str | None] = {}
+    for company in companies:
+        for label in (company.name, *tuple(company.aliases)):
+            key = company_matching_key(label)
+            if not key:
+                continue
+            if key in lookup and lookup[key] != company.name:
+                lookup[key] = None
+            else:
+                lookup.setdefault(key, company.name)
+    counts = {company.name: 0 for company in companies}
+    for row in rows:
+        extra = row.get("extra")
+        if not isinstance(extra, Mapping) or extra.get("source") != "github":
+            continue
+        matched = lookup.get(company_matching_key(row.get("company")))
+        if matched is not None:
+            counts[matched] += 1
+    return counts
+
+
 def calculate_company_coverage(
     companies: Sequence[CompanyCfg],
     attempts: Sequence[SourceAttempt],
     states: Mapping[str, SourceHealthState],
+    github_rows_by_company: Mapping[str, int] | None = None,
 ) -> tuple[CompanyCoverage, ...]:
     direct_attempts = {
         attempt.company: attempt
@@ -596,7 +650,7 @@ def calculate_company_coverage(
             )
         elif direct_status == DIRECT_STATUS_UNKNOWN and github_available:
             coverage_state = COVERAGE_UNKNOWN_BACKSTOP
-        elif company.ats in {"bespoke", "github_only"} and github_available:
+        elif company.ats in GITHUB_PRIMARY_ATS and github_available:
             coverage_state = COVERAGE_BACKSTOP_ONLY
         elif direct_status == DIRECT_STATUS_FAILED and github_available:
             coverage_state = COVERAGE_FAILING_BACKSTOP
@@ -611,6 +665,14 @@ def calculate_company_coverage(
                 direct_attempt_succeeded=succeeded,
                 direct_rows_returned=rows,
                 github_backstop_available=github_available,
+                github_rows_returned=(
+                    None
+                    if github_rows_by_company is None
+                    else max(0, int(github_rows_by_company.get(company.name, 0)))
+                ),
+                github_fallback_configured=(
+                    github_available and company.ats not in GITHUB_PRIMARY_ATS
+                ),
             )
         )
     return tuple(coverage)

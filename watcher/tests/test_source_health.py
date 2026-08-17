@@ -14,6 +14,7 @@ from watcher.source_health import (
     COVERAGE_FAILING_BACKSTOP,
     COVERAGE_UNCOVERED,
     ERROR_FETCH,
+    GITHUB_PRIMARY_ATS,
     MAX_ERROR_LENGTH,
     SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
@@ -34,6 +35,7 @@ from watcher.source_health import (
     SourceHealthStore,
     calculate_company_coverage,
     calculate_next_state,
+    count_github_rows_by_company,
     direct_health_key,
     github_feed_health_key,
     render_final_heartbeat,
@@ -44,6 +46,7 @@ from watcher.source_health import (
     transition_for,
     write_health_report,
 )
+from watcher.sources.base import make_row
 
 NOW = datetime(2026, 7, 16, 14, 30, tzinfo=timezone.utc)
 
@@ -462,6 +465,85 @@ def test_unsupported_coverage_uses_feed_availability_not_active_posting(adapter)
     state = calculate_next_state(None, unsupported)
     assert _coverage((company,), unsupported, state, True).state == COVERAGE_BACKSTOP_ONLY
     assert _coverage((company,), unsupported, state, False).state == COVERAGE_UNCOVERED
+
+
+def test_github_row_counts_map_labels_and_aliases_onto_configured_companies():
+    companies = (
+        CompanyCfg(name="Example Co", ats="greenhouse", aliases=("Example Corp",)),
+        CompanyCfg(name="Other Co", ats="workday"),
+    )
+    rows = [
+        make_row(source="github", source_adapter="simplify_json", company="Example Co"),
+        make_row(source="github", source_adapter="simplify_json", company="Example Corp"),
+        # Direct rows are this company's own source, never fallback evidence.
+        make_row(source="direct", source_adapter="greenhouse", company="Example Co"),
+        # An unconfigured company is attributed to nobody.
+        make_row(source="github", source_adapter="simplify_json", company="Unlisted Inc"),
+    ]
+    assert count_github_rows_by_company(rows, companies) == {
+        "Example Co": 2,
+        "Other Co": 0,
+    }
+
+
+def test_github_row_counts_ignore_rows_without_usable_source_metadata():
+    companies = (CompanyCfg(name="Example Co", ats="greenhouse"),)
+    rows = [
+        {"company": "Example Co", "extra": None},
+        {"company": "Example Co"},
+        {"company": "", "extra": {"source": "github"}},
+    ]
+    assert count_github_rows_by_company(rows, companies) == {"Example Co": 0}
+
+
+def test_coverage_reports_company_github_rows_and_fallback_configuration():
+    company = CompanyCfg(name="Example Co", ats="greenhouse")
+    failed = attempt(succeeded=False, rows=None)
+    state = calculate_next_state(None, failed)
+    github = attempt(source_kind=SOURCE_KIND_GITHUB_FEED, rows=7)
+    states = {state.health_key: state, github.health_key: calculate_next_state(None, github)}
+
+    covered = calculate_company_coverage(
+        (company,),
+        [failed, github],
+        states,
+        {"Example Co": 3},
+    )[0]
+    assert covered.github_rows_returned == 3
+    assert covered.github_fallback_configured is True
+    # The coarse global signal is untouched and still answers only "some feed
+    # succeeded somewhere".
+    assert covered.github_backstop_available is True
+
+    unthreaded = calculate_company_coverage((company,), [failed, github], states)[0]
+    assert unthreaded.github_rows_returned is None
+    assert unthreaded.github_fallback_configured is True
+
+
+@pytest.mark.parametrize("adapter", sorted(GITHUB_PRIMARY_ATS))
+def test_github_primary_companies_never_report_github_as_a_fallback(adapter):
+    company = CompanyCfg(name="Example Co", ats=adapter)
+    unsupported = attempt(
+        adapter=adapter,
+        attempted=False,
+        succeeded=None,
+        rows=None,
+        unsupported_reason=adapter,
+    )
+    state = calculate_next_state(None, unsupported)
+    github = attempt(source_kind=SOURCE_KIND_GITHUB_FEED, rows=9)
+    states = {
+        state.health_key: state,
+        github.health_key: calculate_next_state(None, github),
+    }
+    coverage = calculate_company_coverage(
+        (company,),
+        [unsupported, github],
+        states,
+        {"Example Co": 9},
+    )[0]
+    assert coverage.github_rows_returned == 9
+    assert coverage.github_fallback_configured is False
 
 
 def test_health_summary_counts_current_states_coverage_and_transitions():

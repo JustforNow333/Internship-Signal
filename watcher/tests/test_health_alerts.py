@@ -8,6 +8,9 @@ import pytest
 from watcher.config import CompanyCfg
 from watcher.config import WatcherConfig
 from watcher.health_alerts import (
+    DEFAULT_FEED_STALE_HOURS,
+    GITHUB_EVIDENCE_HORIZON_DAYS,
+    MAX_COVERAGE_SNAPSHOTS,
     MAX_DIGEST_CATCHUP_DAYS,
     MODE_DAILY_SUMMARY,
     MODE_FAILURE_ONLY,
@@ -16,11 +19,15 @@ from watcher.health_alerts import (
     SEVERITY_HIGH,
     SEVERITY_INFO,
     SEVERITY_MEDIUM,
+    SYSTEMIC_GROUP_MIN_COMPANIES,
     HealthAlertPolicy,
+    HealthAlertStore,
     build_alert_candidates,
     evaluate_and_send_health_alerts,
+    group_systemic_incidents,
     is_minor_degradation,
     load_health_alert_policy,
+    render_alert_email,
     resolve_digest_window,
 )
 from watcher.seen_store import SeenStore
@@ -28,6 +35,7 @@ from watcher.run import RUN_MODE_LIVE, run_once
 from watcher.source_health import (
     COVERAGE_BACKSTOP_ONLY,
     COVERAGE_DIRECT,
+    COVERAGE_FAILING_BACKSTOP,
     COVERAGE_UNCOVERED,
     DIRECT_STATUS_DEGRADED,
     DIRECT_STATUS_FAILED,
@@ -1520,3 +1528,612 @@ def test_live_greenhouse_run_defers_one_invalid_record_to_the_digest(
     assert "schema_invalid_records_skipped" in body
     assert "retained rows: 40" in body
     assert "schema=1" in body
+
+
+# --- Phase 2B: per-company fallback evidence and systemic grouping ---------
+
+GITHUB_FEED_KEY = "github_feed:0123456789abcdef"
+
+
+def _feed_state(*, last_nonzero=NOW, status=STATUS_HEALTHY):
+    return _state(
+        key=GITHUB_FEED_KEY,
+        company=None,
+        source_kind=SOURCE_KIND_GITHUB_FEED,
+        status=status,
+        last_nonzero=last_nonzero,
+        feed_label="simplify [https://example.com/listings.json]",
+    )
+
+
+def _failed_direct_state(*, company="Test Co", adapter="greenhouse", failures=1, error="fetch_failure"):
+    return replace(
+        _state(
+            key=direct_health_key(company, adapter),
+            company=company,
+            status=DIRECT_STATUS_FAILED,
+            previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+            failures=failures,
+            rows=None,
+            error=error,
+        ),
+        adapter=adapter,
+    )
+
+
+def _failed_transition(state):
+    return HealthTransition(
+        health_key=state.health_key,
+        source_kind=SOURCE_KIND_DIRECT,
+        company=state.company,
+        adapter=state.adapter,
+        feed_label=None,
+        from_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        to_status=DIRECT_STATUS_FAILED,
+        recovery=False,
+    )
+
+
+def _failed_coverage(
+    *,
+    company="Test Co",
+    adapter="greenhouse",
+    github_rows=None,
+    fallback_configured=True,
+):
+    return CompanyCoverage(
+        company=company,
+        adapter=adapter,
+        state=COVERAGE_FAILING_BACKSTOP,
+        direct_status=DIRECT_STATUS_FAILED,
+        direct_attempt_succeeded=False,
+        direct_rows_returned=None,
+        github_backstop_available=True,
+        github_rows_returned=github_rows,
+        github_fallback_configured=fallback_configured,
+    )
+
+
+def _failure_candidate(
+    *,
+    github_rows=None,
+    fallback_configured=True,
+    feed=None,
+    evidence=frozenset(),
+    failures=1,
+    now=NOW,
+):
+    """Build the direct-source failure candidate for one configured scenario."""
+
+    direct = _failed_direct_state(failures=failures)
+    states = {direct.health_key: direct}
+    feed_state = _feed_state() if feed is None else feed
+    if feed_state is not None:
+        states[feed_state.health_key] = feed_state
+    candidates = build_alert_candidates(
+        policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+        run_id="run-2b",
+        observed_at=now,
+        states=states,
+        transitions=(_failed_transition(direct),),
+        coverage=(
+            _failed_coverage(
+                github_rows=github_rows,
+                fallback_configured=fallback_configured,
+            ),
+        ),
+        previous_coverage=None,
+        github_evidence_companies=evidence,
+    )
+    return next(
+        item for item in candidates if item.health_key == direct.health_key
+    )
+
+
+def _evaluate_alert_run(
+    tmp_path,
+    *,
+    states,
+    coverage,
+    transitions=(),
+    policy=None,
+    now=NOW,
+    sender=None,
+    db_name="state.sqlite",
+    run_id=None,
+):
+    calls = []
+
+    def default_sender(subject, body):
+        calls.append((subject, body))
+        return True
+
+    result = evaluate_and_send_health_alerts(
+        db_path=tmp_path / db_name,
+        policy=policy or HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+        run_id=run_id or f"run-{now.day}-{now.hour}-{now.minute}",
+        observed_at=now,
+        states=states,
+        transitions=tuple(transitions),
+        coverage=tuple(coverage),
+        summary=_summary(),
+        comparison=None,
+        sender=sender or default_sender,
+    )
+    return result, calls
+
+
+def test_global_github_success_alone_keeps_a_first_failure_high():
+    """A feed succeeding somewhere is not evidence that it covers a company."""
+
+    candidate = _failure_candidate(github_rows=0)
+    assert candidate.github_fallback_available is True
+    assert candidate.github_fallback_usable is False
+    assert candidate.severity == SEVERITY_HIGH
+
+
+def test_current_run_github_rows_defer_a_first_failure():
+    candidate = _failure_candidate(github_rows=3)
+    assert candidate.github_fallback_usable is True
+    assert candidate.severity == SEVERITY_MEDIUM
+    assert "GitHub fallback" in candidate.recommended_action
+
+
+def test_recent_persisted_github_rows_defer_a_first_failure():
+    candidate = _failure_candidate(
+        github_rows=0,
+        evidence=frozenset({"Test Co"}),
+    )
+    assert candidate.severity == SEVERITY_MEDIUM
+
+
+def test_missing_company_evidence_keeps_a_first_failure_high():
+    """Cold start: no counts threaded yet is unknown, never proven fallback."""
+
+    assert _failure_candidate(github_rows=None).severity == SEVERITY_HIGH
+    assert _failure_candidate(github_rows=0).severity == SEVERITY_HIGH
+
+
+def test_stale_github_feed_keeps_a_first_failure_high():
+    stale = _feed_state(
+        last_nonzero=NOW - timedelta(hours=DEFAULT_FEED_STALE_HOURS + 1),
+    )
+    candidate = _failure_candidate(github_rows=8, feed=stale)
+    assert candidate.github_fallback_usable is False
+    assert candidate.severity == SEVERITY_HIGH
+
+
+def test_never_populated_github_feed_keeps_a_first_failure_high():
+    unproven = _feed_state(last_nonzero=None)
+    assert _failure_candidate(github_rows=8, feed=unproven).severity == SEVERITY_HIGH
+
+
+def test_failed_github_feed_keeps_a_first_failure_high():
+    failing = _feed_state(status=STATUS_FAILING)
+    assert _failure_candidate(github_rows=8, feed=failing).severity == SEVERITY_HIGH
+
+
+def test_github_primary_company_is_never_downgraded():
+    """GitHub is not a fallback where it is the company's primary source."""
+
+    candidate = _failure_candidate(github_rows=12, fallback_configured=False)
+    assert candidate.github_fallback_usable is False
+    assert candidate.severity == SEVERITY_HIGH
+
+
+def test_second_consecutive_failure_is_high_despite_proven_fallback():
+    candidate = _failure_candidate(github_rows=25, failures=2)
+    assert candidate.github_fallback_usable is True
+    assert candidate.severity == SEVERITY_HIGH
+
+
+def test_ibm_first_failure_defers_and_second_failure_escalates(tmp_path):
+    """The reported IBM incident: one covered failure waits, two do not."""
+
+    db = tmp_path / "state.sqlite"
+    coverage_with_rows = _failed_coverage(company="IBM", adapter="workday", github_rows=4)
+    with HealthAlertStore(db) as store:
+        store.record_coverage_snapshot(
+            run_id="seed-history",
+            observed_at=NOW - timedelta(days=2),
+            coverage=(coverage_with_rows,),
+        )
+
+    first = _failed_direct_state(company="IBM", adapter="workday", failures=1)
+    feed = _feed_state()
+    # No IBM rows on this run; only the persisted week-old evidence applies.
+    coverage = (_failed_coverage(company="IBM", adapter="workday", github_rows=0),)
+    deferred, deferred_calls = _evaluate_alert_run(
+        tmp_path,
+        states={first.health_key: first, feed.health_key: feed},
+        coverage=coverage,
+        transitions=(_failed_transition(first),),
+        now=BEFORE_DIGEST_HOUR,
+    )
+    assert deferred.sent is False
+    assert deferred_calls == []
+
+    second = _failed_direct_state(company="IBM", adapter="workday", failures=2)
+    escalated, escalated_calls = _evaluate_alert_run(
+        tmp_path,
+        states={second.health_key: second, feed.health_key: feed},
+        coverage=coverage,
+        now=BEFORE_DIGEST_HOUR + timedelta(hours=1),
+    )
+    assert escalated.sent is True
+    assert "IBM" in escalated_calls[0][1]
+
+    # Phase 2A lifecycle collapsing: the earlier MEDIUM must not resurface as
+    # an unresolved duplicate once the incident escalated.
+    third = _failed_direct_state(company="IBM", adapter="workday", failures=3)
+    digest, digest_calls = _evaluate_alert_run(
+        tmp_path,
+        states={third.health_key: third, feed.health_key: feed},
+        coverage=coverage,
+        now=NOW,
+    )
+    assert digest.daily_digest_sent is False
+    assert digest_calls == []
+
+
+def test_deferred_first_failure_is_reported_by_the_daily_digest(tmp_path):
+    db = tmp_path / "state.sqlite"
+    coverage = (_failed_coverage(company="IBM", adapter="workday", github_rows=6),)
+    failed = _failed_direct_state(company="IBM", adapter="workday", failures=1)
+    feed = _feed_state()
+    deferred, deferred_calls = _evaluate_alert_run(
+        tmp_path,
+        states={failed.health_key: failed, feed.health_key: feed},
+        coverage=coverage,
+        transitions=(_failed_transition(failed),),
+        now=BEFORE_DIGEST_HOUR,
+    )
+    assert deferred.sent is False
+    assert deferred_calls == []
+
+    recovered = replace(
+        _state(
+            key=failed.health_key,
+            company="IBM",
+            status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+            previous_status=DIRECT_STATUS_FAILED,
+        ),
+        adapter="workday",
+    )
+    result, calls = _evaluate_alert_run(
+        tmp_path,
+        states={recovered.health_key: recovered, feed.health_key: feed},
+        coverage=coverage,
+        transitions=(
+            HealthTransition(
+                health_key=failed.health_key,
+                source_kind=SOURCE_KIND_DIRECT,
+                company="IBM",
+                adapter="workday",
+                feed_label=None,
+                from_status=DIRECT_STATUS_FAILED,
+                to_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+                recovery=True,
+            ),
+        ),
+        now=NOW,
+    )
+    assert result.sent is False
+    assert result.daily_digest_sent is True
+    subject, body = calls[0]
+    assert DIGEST_SUBJECT_MARKER in subject
+    assert "IBM" in body
+    assert db.is_file()
+
+
+def test_legacy_coverage_snapshots_stay_readable(tmp_path):
+    """A pre-change production database keeps working without a wipe."""
+
+    db = tmp_path / "state.sqlite"
+    with HealthAlertStore(db) as store:
+        store._conn.execute(
+            """
+            insert into source_health_coverage_snapshots(
+              run_id, observed_at, coverage_json
+            ) values (?, ?, ?)
+            """,
+            (
+                "legacy-run",
+                (NOW - timedelta(hours=1)).isoformat(),
+                '{"Legacy Co": "direct_covered"}',
+            ),
+        )
+        store._conn.commit()
+        assert store.latest_coverage_snapshot() == {"Legacy Co": "direct_covered"}
+        # A legacy entry carries no company-level evidence, so it proves nothing.
+        assert store.companies_with_recent_github_rows(
+            since=NOW - timedelta(days=GITHUB_EVIDENCE_HORIZON_DAYS)
+        ) == frozenset()
+
+
+def test_new_snapshots_persist_company_github_evidence(tmp_path):
+    db = tmp_path / "state.sqlite"
+    with HealthAlertStore(db) as store:
+        store.record_coverage_snapshot(
+            run_id="run-1",
+            observed_at=NOW - timedelta(hours=2),
+            coverage=(
+                _failed_coverage(company="Covered Co", github_rows=3),
+                _failed_coverage(company="Quiet Co", github_rows=0),
+                _failed_coverage(company="Unknown Co", github_rows=None),
+            ),
+        )
+        # States still read back exactly as before.
+        assert store.latest_coverage_snapshot() == {
+            "Covered Co": COVERAGE_FAILING_BACKSTOP,
+            "Quiet Co": COVERAGE_FAILING_BACKSTOP,
+            "Unknown Co": COVERAGE_FAILING_BACKSTOP,
+        }
+        # Only a positive count is evidence.
+        assert store.companies_with_recent_github_rows(
+            since=NOW - timedelta(days=GITHUB_EVIDENCE_HORIZON_DAYS)
+        ) == frozenset({"Covered Co"})
+
+
+def test_snapshot_retention_covers_the_evidence_horizon(tmp_path):
+    """Hourly runs must not evict evidence inside the seven-day horizon."""
+
+    assert MAX_COVERAGE_SNAPSHOTS >= GITHUB_EVIDENCE_HORIZON_DAYS * 24
+    db = tmp_path / "state.sqlite"
+    with HealthAlertStore(db) as store:
+        oldest = NOW - timedelta(days=GITHUB_EVIDENCE_HORIZON_DAYS - 1)
+        store.record_coverage_snapshot(
+            run_id="oldest-run",
+            observed_at=oldest,
+            coverage=(_failed_coverage(company="Covered Co", github_rows=2),),
+        )
+        for index in range(GITHUB_EVIDENCE_HORIZON_DAYS * 24):
+            store.record_coverage_snapshot(
+                run_id=f"run-{index}",
+                observed_at=oldest + timedelta(hours=index + 1),
+                coverage=(_failed_coverage(company="Other Co", github_rows=0),),
+            )
+        retained = store._conn.execute(
+            "select count(*) from source_health_coverage_snapshots"
+        ).fetchone()[0]
+        assert retained == GITHUB_EVIDENCE_HORIZON_DAYS * 24 + 1
+        assert store.companies_with_recent_github_rows(
+            since=NOW - timedelta(days=GITHUB_EVIDENCE_HORIZON_DAYS)
+        ) == frozenset({"Covered Co"})
+
+
+def test_replaying_a_run_id_does_not_duplicate_or_corrupt_evidence(tmp_path):
+    db = tmp_path / "state.sqlite"
+    with HealthAlertStore(db) as store:
+        for github_rows in (5, 0):
+            store.record_coverage_snapshot(
+                run_id="repeated-run",
+                observed_at=NOW - timedelta(hours=1),
+                coverage=(_failed_coverage(company="Covered Co", github_rows=github_rows),),
+            )
+        stored = store._conn.execute(
+            "select count(*) from source_health_coverage_snapshots"
+        ).fetchone()[0]
+        assert stored == 1
+        # The replayed run replaced its own entry rather than adding one.
+        assert store.companies_with_recent_github_rows(
+            since=NOW - timedelta(days=GITHUB_EVIDENCE_HORIZON_DAYS)
+        ) == frozenset()
+
+
+def _family_candidates(adapter, error_kinds, *, start=0):
+    """Build one HIGH failure candidate per supplied error kind."""
+
+    states = {}
+    coverage = []
+    for index, error_kind in enumerate(error_kinds):
+        company = f"{adapter} co {start + index}"
+        state = _failed_direct_state(
+            company=company,
+            adapter=adapter,
+            failures=3,
+            error=error_kind,
+        )
+        states[state.health_key] = state
+        coverage.append(
+            _failed_coverage(
+                company=company,
+                adapter=adapter,
+                github_rows=0,
+                fallback_configured=False,
+            )
+        )
+    return states, tuple(coverage)
+
+
+def _candidates_for(*families):
+    states = {}
+    coverage = []
+    for adapter, error_kinds in families:
+        family_states, family_coverage = _family_candidates(adapter, error_kinds)
+        states.update(family_states)
+        coverage.extend(family_coverage)
+    return build_alert_candidates(
+        policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+        run_id="run-systemic",
+        observed_at=NOW,
+        states=states,
+        transitions=(),
+        coverage=tuple(coverage),
+        previous_coverage=None,
+    )
+
+
+def test_dominant_same_family_failures_group_into_one_high_section():
+    candidates = _candidates_for(
+        ("workday", ["fetch_failure/redirected_to_html"] * 20),
+    )
+    groups, remaining = group_systemic_incidents(candidates)
+    assert len(groups) == 1
+    assert groups[0].adapter_family == "workday"
+    assert groups[0].error_kind == "fetch_failure/redirected_to_html"
+    assert groups[0].affected_companies == 20
+    assert remaining == ()
+
+    subject, body = render_alert_email(candidates)
+    assert "shared source incident" in subject
+    assert body.count("HIGH:") == 1
+    # Every affected company is still named in full.
+    for candidate in candidates:
+        assert candidate.source_label in body
+
+
+def test_four_matching_failures_do_not_group():
+    candidates = _candidates_for(
+        ("workday", ["fetch_failure/redirected_to_html"] * (SYSTEMIC_GROUP_MIN_COMPANIES - 1)),
+    )
+    groups, remaining = group_systemic_incidents(candidates)
+    assert groups == ()
+    assert len(remaining) == SYSTEMIC_GROUP_MIN_COMPANIES - 1
+    assert render_alert_email(candidates)[1].count("HIGH:") == 4
+
+
+def test_failures_without_a_dominant_error_kind_do_not_group():
+    # Five failures split across unrelated kinds: nothing reaches the floor.
+    scattered = _candidates_for(
+        (
+            "workday",
+            [
+                "fetch_failure/redirected_to_html",
+                "fetch_failure/redirected_to_html",
+                "fetch_failure/timeout",
+                "schema_failure",
+                "unexpected_exception",
+            ],
+        ),
+    )
+    assert group_systemic_incidents(scattered)[0] == ()
+
+    # Nine failures where the leading kind clears the floor but only holds
+    # 5/9 = 55.6% of the family, below the dominance threshold.
+    diluted = _candidates_for(
+        (
+            "workday",
+            ["fetch_failure/redirected_to_html"] * 5 + ["schema_failure"] * 4,
+        ),
+    )
+    assert group_systemic_incidents(diluted)[0] == ()
+
+
+def test_same_error_across_families_groups_separately():
+    candidates = _candidates_for(
+        ("workday", ["fetch_failure/redirected_to_html"] * 6),
+        ("icims", ["fetch_failure/redirected_to_html"] * 5),
+    )
+    groups, remaining = group_systemic_incidents(candidates)
+    assert [group.adapter_family for group in groups] == ["icims", "workday"]
+    assert [group.affected_companies for group in groups] == [5, 6]
+    assert remaining == ()
+
+
+def test_grouping_leaves_untouched_candidates_reported_individually():
+    candidates = _candidates_for(
+        ("workday", ["fetch_failure/redirected_to_html"] * 6),
+        ("greenhouse", ["schema_failure"]),
+    )
+    groups, remaining = group_systemic_incidents(candidates)
+    assert len(groups) == 1
+    assert len(remaining) == 1
+    assert remaining[0].adapter == "greenhouse"
+    body = render_alert_email(candidates)[1]
+    assert body.count("HIGH:") == 2
+
+
+def test_grouping_does_not_alter_persisted_company_health_state(tmp_path):
+    db = tmp_path / "state.sqlite"
+    states, coverage = _family_candidates(
+        "workday",
+        ["fetch_failure/redirected_to_html"] * 6,
+    )
+    with SourceHealthStore(db) as health:
+        for state in states.values():
+            health.record_attempts(
+                [
+                    SourceAttempt(
+                        health_key=state.health_key,
+                        run_id="run-systemic",
+                        observed_at=NOW,
+                        source_kind=SOURCE_KIND_DIRECT,
+                        company=state.company,
+                        adapter="workday",
+                        attempted=True,
+                        succeeded=False,
+                        rows_returned=None,
+                        error_kind="fetch_failure",
+                        error_message="redirected to html",
+                    )
+                ]
+            )
+    result, calls = _evaluate_alert_run(
+        tmp_path,
+        states=states,
+        coverage=coverage,
+        now=NOW,
+    )
+    assert result.sent is True
+    assert "shared source incident" in calls[0][0]
+
+    with SourceHealthStore(db) as health:
+        stored = health.all_current_states()
+    assert len(stored) == len(states)
+    for state in states.values():
+        persisted = stored[state.health_key]
+        assert persisted.status == DIRECT_STATUS_FAILED
+        assert persisted.consecutive_failures == 1
+        assert persisted.company == state.company
+        assert persisted.last_error_kind == "fetch_failure"
+
+
+def test_recovery_after_a_grouped_outage_stays_company_specific(tmp_path):
+    states, coverage = _family_candidates(
+        "workday",
+        ["fetch_failure/redirected_to_html"] * 6,
+    )
+    grouped, grouped_calls = _evaluate_alert_run(
+        tmp_path,
+        states=states,
+        coverage=coverage,
+        now=BEFORE_DIGEST_HOUR,
+    )
+    assert grouped.sent is True
+    assert "shared source incident" in grouped_calls[0][0]
+
+    recovering = next(iter(states.values()))
+    recovered = replace(
+        recovering,
+        status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        previous_status=DIRECT_STATUS_FAILED,
+        consecutive_failures=0,
+        last_rows_returned=11,
+        last_error_kind=None,
+    )
+    result, calls = _evaluate_alert_run(
+        tmp_path,
+        states={**states, recovered.health_key: recovered},
+        coverage=coverage,
+        transitions=(
+            HealthTransition(
+                health_key=recovered.health_key,
+                source_kind=SOURCE_KIND_DIRECT,
+                company=recovered.company,
+                adapter="workday",
+                feed_label=None,
+                from_status=DIRECT_STATUS_FAILED,
+                to_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+                recovery=True,
+            ),
+        ),
+        now=NOW,
+    )
+    # The recovery is INFO and never interrupts; the remaining five companies
+    # stay suppressed by their own cooldowns.
+    assert result.sent is False
+    assert result.daily_digest_sent is True
+    subject, body = calls[0]
+    assert DIGEST_SUBJECT_MARKER in subject
+    assert recovered.company in body
