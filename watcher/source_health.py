@@ -624,12 +624,16 @@ def calculate_company_coverage(
         for attempt in attempts
         if attempt.source_kind == SOURCE_KIND_DIRECT and attempt.company is not None
     }
+    github_attempts = [
+        attempt for attempt in attempts if attempt.source_kind == SOURCE_KIND_GITHUB_FEED
+    ]
+    # A backstop is available only when the whole backstop answered. Per-company
+    # GitHub evidence is an aggregate row count that does not record which feed
+    # supplied it, so one failed feed leaves it unknown whether the surviving
+    # feeds still carry any given company. Ambiguity fails closed.
     github_available = any(
-        attempt.source_kind == SOURCE_KIND_GITHUB_FEED
-        and attempt.attempted
-        and attempt.succeeded is True
-        for attempt in attempts
-    )
+        attempt.attempted and attempt.succeeded is True for attempt in github_attempts
+    ) and not any(attempt.succeeded is False for attempt in github_attempts)
     coverage = []
     for company in companies:
         attempt = direct_attempts.get(company.name)

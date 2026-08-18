@@ -304,26 +304,37 @@ def github_feed_fallback_usable(
     observed_at: datetime,
     feed_stale_hours: int,
 ) -> bool:
-    """Report whether any GitHub feed is currently a trustworthy fallback.
+    """Report whether *every* GitHub feed attempted this run is trustworthy.
 
     This is the run-wide half of the usable-fallback test: a feed counts only
     when its most recent attempt succeeded and it published postings inside the
     existing staleness window. A feed that has never returned a posting is
     unproven rather than fresh, so it never qualifies.
+
+    Company-level evidence is stored as an aggregate row count that does not
+    record which feed supplied it, so a company that only ever appeared in one
+    feed is indistinguishable from one carried by all of them. One healthy feed
+    therefore proves nothing while another is failing or stale: that ambiguity
+    must fail closed, so every attempted feed has to qualify. With no feed
+    attempted at all there is no fallback to prove.
     """
 
     stale_after = timedelta(hours=feed_stale_hours)
-    for state in states.values():
-        if state.source_kind != SOURCE_KIND_GITHUB_FEED:
-            continue
+    feeds = [
+        state
+        for state in states.values()
+        if state.source_kind == SOURCE_KIND_GITHUB_FEED
+    ]
+    if not feeds:
+        return False
+    for state in feeds:
         if state.status != STATUS_HEALTHY:
-            continue
+            return False
         if state.last_nonzero_at is None:
-            continue
+            return False
         if observed_at - state.last_nonzero_at >= stale_after:
-            continue
-        return True
-    return False
+            return False
+    return True
 
 
 def usable_github_fallback(

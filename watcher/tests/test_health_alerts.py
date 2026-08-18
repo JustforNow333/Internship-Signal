@@ -1533,17 +1533,34 @@ def test_live_greenhouse_run_defers_one_invalid_record_to_the_digest(
 # --- Phase 2B: per-company fallback evidence and systemic grouping ---------
 
 GITHUB_FEED_KEY = "github_feed:0123456789abcdef"
+SECOND_GITHUB_FEED_KEY = "github_feed:fedcba9876543210"
 
 
-def _feed_state(*, last_nonzero=NOW, status=STATUS_HEALTHY):
+def _feed_state(
+    *,
+    last_nonzero=NOW,
+    status=STATUS_HEALTHY,
+    key=GITHUB_FEED_KEY,
+    feed_label="simplify [https://example.com/listings.json]",
+):
     return _state(
-        key=GITHUB_FEED_KEY,
+        key=key,
         company=None,
         source_kind=SOURCE_KIND_GITHUB_FEED,
         status=status,
         last_nonzero=last_nonzero,
-        feed_label="simplify [https://example.com/listings.json]",
+        feed_label=feed_label,
     )
+
+
+def _second_feed_state(**overrides):
+    """The other backstop feed, which never lists the test company."""
+
+    overrides.setdefault("key", SECOND_GITHUB_FEED_KEY)
+    overrides.setdefault(
+        "feed_label", "listings [https://example.com/other-listings.md]"
+    )
+    return _feed_state(**overrides)
 
 
 def _failed_direct_state(*, company="Test Co", adapter="greenhouse", failures=1, error="fetch_failure"):
@@ -1599,6 +1616,7 @@ def _failure_candidate(
     github_rows=None,
     fallback_configured=True,
     feed=None,
+    feeds=None,
     evidence=frozenset(),
     failures=1,
     now=NOW,
@@ -1607,9 +1625,11 @@ def _failure_candidate(
 
     direct = _failed_direct_state(failures=failures)
     states = {direct.health_key: direct}
-    feed_state = _feed_state() if feed is None else feed
-    if feed_state is not None:
-        states[feed_state.health_key] = feed_state
+    if feeds is None:
+        feeds = (_feed_state() if feed is None else feed,)
+    for feed_state in feeds:
+        if feed_state is not None:
+            states[feed_state.health_key] = feed_state
     candidates = build_alert_candidates(
         policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
         run_id="run-2b",
@@ -1725,6 +1745,89 @@ def test_second_consecutive_failure_is_high_despite_proven_fallback():
     candidate = _failure_candidate(github_rows=25, failures=2)
     assert candidate.github_fallback_usable is True
     assert candidate.severity == SEVERITY_HIGH
+
+
+@pytest.mark.parametrize(
+    "broken_feed",
+    [
+        pytest.param(_feed_state(status=STATUS_FAILING), id="failing"),
+        pytest.param(
+            _feed_state(last_nonzero=NOW - timedelta(hours=DEFAULT_FEED_STALE_HOURS + 1)),
+            id="stale",
+        ),
+    ],
+)
+def test_one_broken_github_feed_keeps_a_first_failure_high(broken_feed):
+    """D1: historical evidence does not record which feed supplied the rows.
+
+    Company X was only ever carried by feed A. Feed A is now broken, feed B is
+    healthy but lists nothing for the company on this run, and the company's
+    direct source just failed for the first time. Whether the fallback still
+    covers the company is unknown, so it must not be treated as proven.
+    """
+
+    candidate = _failure_candidate(
+        github_rows=0,
+        evidence=frozenset({"Test Co"}),
+        feeds=(broken_feed, _second_feed_state()),
+    )
+    assert candidate.github_fallback_usable is False
+    assert candidate.severity == SEVERITY_HIGH
+
+
+def test_all_healthy_github_feeds_still_defer_a_first_failure():
+    """Control: with the whole backstop intact, evidence still downgrades."""
+
+    candidate = _failure_candidate(
+        github_rows=0,
+        evidence=frozenset({"Test Co"}),
+        feeds=(_feed_state(), _second_feed_state()),
+    )
+    assert candidate.github_fallback_usable is True
+    assert candidate.severity == SEVERITY_MEDIUM
+
+
+def test_second_failure_is_high_with_every_github_feed_healthy():
+    """Control: escalation ignores fallback evidence entirely."""
+
+    candidate = _failure_candidate(
+        github_rows=25,
+        evidence=frozenset({"Test Co"}),
+        feeds=(_feed_state(), _second_feed_state()),
+        failures=2,
+    )
+    assert candidate.severity == SEVERITY_HIGH
+
+
+def test_first_failure_with_a_broken_feed_emails_immediately(tmp_path):
+    """The HIGH from a half-broken backstop is delivered, not deferred."""
+
+    company = "Company X"
+    coverage = (_failed_coverage(company=company, github_rows=0),)
+    with HealthAlertStore(tmp_path / "state.sqlite") as store:
+        store.record_coverage_snapshot(
+            run_id="seed-history",
+            observed_at=NOW - timedelta(days=2),
+            coverage=(_failed_coverage(company=company, github_rows=4),),
+        )
+
+    failed = _failed_direct_state(company=company, failures=1)
+    broken = _feed_state(status=STATUS_FAILING)
+    healthy = _second_feed_state()
+    result, calls = _evaluate_alert_run(
+        tmp_path,
+        states={
+            failed.health_key: failed,
+            broken.health_key: broken,
+            healthy.health_key: healthy,
+        },
+        coverage=coverage,
+        transitions=(_failed_transition(failed),),
+        now=BEFORE_DIGEST_HOUR,
+    )
+    assert result.sent is True
+    assert "HIGH" in calls[0][1]
+    assert company in calls[0][1]
 
 
 def test_ibm_first_failure_defers_and_second_failure_escalates(tmp_path):

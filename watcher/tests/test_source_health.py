@@ -520,6 +520,44 @@ def test_coverage_reports_company_github_rows_and_fallback_configuration():
     assert unthreaded.github_fallback_configured is True
 
 
+def test_one_failed_github_feed_withdraws_the_backstop_for_the_run():
+    """Aggregate evidence cannot say which feed covered a company.
+
+    With two backstop feeds, a surviving feed does not show that the company
+    the failed feed carried is still covered, so the run-level backstop signal
+    fails closed.
+    """
+
+    company = CompanyCfg(name="Example Co", ats="greenhouse")
+    failed = attempt(succeeded=False, rows=None)
+    feed_a = attempt(
+        source_kind=SOURCE_KIND_GITHUB_FEED,
+        feed_label="https://example.test/feed-a.json",
+        succeeded=False,
+        rows=None,
+        error_kind="fetch_failure",
+    )
+    feed_b = attempt(
+        source_kind=SOURCE_KIND_GITHUB_FEED,
+        feed_label="https://example.test/feed-b.json",
+        rows=5,
+    )
+    states = {
+        item.health_key: calculate_next_state(None, item)
+        for item in (failed, feed_a, feed_b)
+    }
+
+    partial = calculate_company_coverage((company,), [failed, feed_a, feed_b], states)[0]
+    assert partial.github_backstop_available is False
+    assert partial.github_fallback_configured is False
+    assert partial.state == COVERAGE_UNCOVERED
+
+    whole = calculate_company_coverage((company,), [failed, feed_b], states)[0]
+    assert whole.github_backstop_available is True
+    assert whole.github_fallback_configured is True
+    assert whole.state == COVERAGE_FAILING_BACKSTOP
+
+
 @pytest.mark.parametrize("adapter", sorted(GITHUB_PRIMARY_ATS))
 def test_github_primary_companies_never_report_github_as_a_fallback(adapter):
     company = CompanyCfg(name="Example Co", ats=adapter)
