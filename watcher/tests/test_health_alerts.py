@@ -9,6 +9,8 @@ from watcher.config import CompanyCfg
 from watcher.config import WatcherConfig
 from watcher.health_alerts import (
     DEFAULT_FEED_STALE_HOURS,
+    FLAP_LOOKBACK_HOURS,
+    FLAP_REPEAT_THRESHOLD,
     GITHUB_EVIDENCE_HORIZON_DAYS,
     MAX_COVERAGE_SNAPSHOTS,
     MAX_DIGEST_CATCHUP_DAYS,
@@ -28,6 +30,7 @@ from watcher.health_alerts import (
     is_minor_degradation,
     load_health_alert_policy,
     render_alert_email,
+    repeat_flap_deferrable,
     resolve_digest_window,
 )
 from watcher.seen_store import SeenStore
@@ -1597,6 +1600,7 @@ def _failed_coverage(
     adapter="greenhouse",
     github_rows=None,
     fallback_configured=True,
+    backstop_available=True,
 ):
     return CompanyCoverage(
         company=company,
@@ -1605,7 +1609,7 @@ def _failed_coverage(
         direct_status=DIRECT_STATUS_FAILED,
         direct_attempt_succeeded=False,
         direct_rows_returned=None,
-        github_backstop_available=True,
+        github_backstop_available=backstop_available,
         github_rows_returned=github_rows,
         github_fallback_configured=fallback_configured,
     )
@@ -1615,15 +1619,18 @@ def _failure_candidate(
     *,
     github_rows=None,
     fallback_configured=True,
+    backstop_available=True,
     feed=None,
     feeds=None,
     evidence=frozenset(),
     failures=1,
+    error="fetch_failure",
+    history=None,
     now=NOW,
 ):
     """Build the direct-source failure candidate for one configured scenario."""
 
-    direct = _failed_direct_state(failures=failures)
+    direct = _failed_direct_state(failures=failures, error=error)
     states = {direct.health_key: direct}
     if feeds is None:
         feeds = (_feed_state() if feed is None else feed,)
@@ -1640,10 +1647,12 @@ def _failure_candidate(
             _failed_coverage(
                 github_rows=github_rows,
                 fallback_configured=fallback_configured,
+                backstop_available=backstop_available,
             ),
         ),
         previous_coverage=None,
         github_evidence_companies=evidence,
+        failure_history=history or {},
     )
     return next(
         item for item in candidates if item.health_key == direct.health_key
@@ -2064,6 +2073,349 @@ def _candidates_for(*families):
         transitions=(),
         coverage=tuple(coverage),
         previous_coverage=None,
+    )
+
+
+def _prior_occurrences(
+    count,
+    *,
+    error_kind="fetch_failure",
+    fallback_available=True,
+    fallback_usable=False,
+):
+    """Build stored prior failure events for the default failing source."""
+
+    template = replace(
+        _failure_candidate(),
+        error_kind=error_kind,
+        github_fallback_available=fallback_available,
+        github_fallback_usable=fallback_usable,
+    )
+    return {
+        (template.health_key, error_kind): tuple(
+            replace(template, run_id=f"prior-{index}") for index in range(count)
+        )
+    }
+
+
+def test_a_first_failure_without_repeat_history_stays_high():
+    """DoorDash's case: nothing recurring to compare against, so it interrupts."""
+
+    candidate = _failure_candidate(github_rows=0, history={})
+
+    assert candidate.consecutive_failures == 1
+    assert candidate.github_fallback_usable is False
+    assert candidate.severity == SEVERITY_HIGH
+
+
+def test_repeated_isolated_failures_on_one_error_defer_to_the_digest():
+    candidate = _failure_candidate(
+        github_rows=0,
+        history=_prior_occurrences(FLAP_REPEAT_THRESHOLD),
+    )
+
+    assert candidate.severity == SEVERITY_MEDIUM
+    assert "keeps failing and recovering" in candidate.recommended_action
+    # Deferral is about repetition, not about coverage, so the unproven
+    # fallback verdict is reported exactly as it was calculated.
+    assert candidate.github_fallback_usable is False
+
+
+def test_one_occurrence_below_the_threshold_stays_high():
+    candidate = _failure_candidate(
+        github_rows=0,
+        history=_prior_occurrences(FLAP_REPEAT_THRESHOLD - 1),
+    )
+
+    assert candidate.severity == SEVERITY_HIGH
+
+
+def test_second_consecutive_failure_stays_high_despite_flap_history():
+    """A source that is down now is not a source that keeps bouncing back."""
+
+    candidate = _failure_candidate(
+        github_rows=0,
+        failures=2,
+        history=_prior_occurrences(FLAP_REPEAT_THRESHOLD * 3),
+    )
+
+    assert candidate.severity == SEVERITY_HIGH
+    assert "Inspect the sanitized source-health report" in candidate.recommended_action
+
+
+def test_a_new_error_kind_stays_high_despite_flap_history():
+    """The stored fingerprint omits the error kind, so the rule cannot use it."""
+
+    candidate = _failure_candidate(
+        github_rows=0,
+        error="unexpected_exception",
+        history=_prior_occurrences(
+            FLAP_REPEAT_THRESHOLD * 2,
+            error_kind="schema_failure",
+        ),
+    )
+
+    assert candidate.error_kind == "unexpected_exception"
+    assert candidate.severity == SEVERITY_HIGH
+
+
+@pytest.mark.parametrize(
+    "history_kwargs, candidate_kwargs",
+    [
+        ({"fallback_usable": True}, {"github_rows": 0}),
+        ({"fallback_available": True}, {"backstop_available": False}),
+    ],
+    ids=["usable", "available"],
+)
+def test_worse_fallback_posture_keeps_a_repeated_failure_high(
+    history_kwargs,
+    candidate_kwargs,
+):
+    candidate = _failure_candidate(
+        history=_prior_occurrences(
+            FLAP_REPEAT_THRESHOLD * 2,
+            **history_kwargs,
+        ),
+        **candidate_kwargs,
+    )
+
+    assert candidate.severity == SEVERITY_HIGH
+
+
+def test_unproven_fallback_posture_cannot_regress():
+    """Posture that was never proven has nothing to lose, so deferral holds."""
+
+    candidate = _failure_candidate(
+        github_rows=0,
+        history=_prior_occurrences(
+            FLAP_REPEAT_THRESHOLD,
+            fallback_available=None,
+            fallback_usable=None,
+        ),
+    )
+
+    assert candidate.severity == SEVERITY_MEDIUM
+
+
+def test_repeat_history_reads_only_the_bounded_window(tmp_path):
+    """Older occurrences fall out of the lookback and stop counting."""
+
+    db = tmp_path / "state.sqlite"
+    candidate = _failure_candidate(github_rows=0)
+    stale = NOW - timedelta(hours=FLAP_LOOKBACK_HOURS + 1)
+    with HealthAlertStore(db) as store:
+        for index in range(FLAP_REPEAT_THRESHOLD):
+            store.record_detected(
+                replace(candidate, run_id=f"stale-{index}"),
+                detected_at=stale + timedelta(minutes=index),
+            )
+        for index in range(FLAP_REPEAT_THRESHOLD - 1):
+            store.record_detected(
+                replace(candidate, run_id=f"fresh-{index}"),
+                detected_at=NOW - timedelta(hours=index + 1),
+            )
+        history = store.recent_failure_occurrences(
+            since=NOW - timedelta(hours=FLAP_LOOKBACK_HOURS),
+        )
+
+    occurrences = history[(candidate.health_key, "fetch_failure")]
+    assert len(occurrences) == FLAP_REPEAT_THRESHOLD - 1
+    assert _failure_candidate(github_rows=0, history=history).severity == SEVERITY_HIGH
+
+
+def test_repeat_history_ignores_recoveries_and_other_sources(tmp_path):
+    db = tmp_path / "state.sqlite"
+    failure = _failure_candidate(github_rows=0)
+    recovery = replace(
+        failure,
+        fingerprint=f"recovery|{failure.health_key}",
+        alert_type="recovery",
+        severity=SEVERITY_INFO,
+    )
+    other = replace(
+        failure,
+        fingerprint="source_failure|company:other:direct:greenhouse",
+        health_key="company:other:direct:greenhouse",
+    )
+    with HealthAlertStore(db) as store:
+        for index in range(FLAP_REPEAT_THRESHOLD):
+            store.record_detected(
+                replace(recovery, run_id=f"recovery-{index}"),
+                detected_at=NOW - timedelta(hours=index + 1),
+            )
+            store.record_detected(
+                replace(other, run_id=f"other-{index}"),
+                detected_at=NOW - timedelta(hours=index + 1),
+            )
+        history = store.recent_failure_occurrences(
+            since=NOW - timedelta(hours=FLAP_LOOKBACK_HOURS),
+        )
+
+    assert (failure.health_key, "fetch_failure") not in history
+    assert _failure_candidate(github_rows=0, history=history).severity == SEVERITY_HIGH
+
+
+def test_repeated_failures_escalate_then_defer_and_reach_the_digest(tmp_path):
+    """End to end: the mode alerts while it is news, then joins the digest."""
+
+    failing = _state(
+        status=DIRECT_STATUS_FAILED,
+        previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        failures=1,
+        rows=None,
+        error="schema_failure",
+    )
+    recovered = _state(
+        status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        previous_status=DIRECT_STATUS_FAILED,
+        failures=0,
+        rows=7,
+    )
+    recovery_transition = (
+        _transition(
+            DIRECT_STATUS_FAILED,
+            DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+            recovery=True,
+        ),
+    )
+    results = []
+    for hour in (1, 3, 5, 7):
+        results.append(_evaluate(tmp_path, state=failing, now=NOW.replace(hour=hour)))
+        _evaluate(
+            tmp_path,
+            state=recovered,
+            transition=recovery_transition,
+            now=NOW.replace(hour=hour + 1),
+        )
+    digest, digest_calls = _evaluate(tmp_path, state=recovered, now=NOW)
+
+    # Each recovery reopens the incident, so the first three occurrences still
+    # bypass the cooldown and interrupt. The fourth only repeats a mode already
+    # alerted three times inside the window.
+    assert [item[0].sent for item in results] == [True, True, True, False]
+    assert results[-1][0].candidates == 1
+    body = digest_calls[0][1]
+    assert digest.digest_incidents_reported == 1
+    assert body.count("occurrences:") == 1
+    assert "occurrences: 1" in body
+    assert "recovered later: yes" in body
+
+
+def test_recovery_lifecycle_is_unchanged_without_repeat_history(tmp_path):
+    """failure -> recovery -> failure still reopens and re-alerts on its own."""
+
+    failing = _state(
+        status=DIRECT_STATUS_FAILED,
+        previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        failures=1,
+        rows=None,
+        error="schema_failure",
+    )
+    recovered = _state(
+        status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        previous_status=DIRECT_STATUS_FAILED,
+        failures=0,
+        rows=7,
+    )
+    first, _ = _evaluate(tmp_path, state=failing, now=NOW.replace(hour=3))
+    recovery, recovery_calls = _evaluate(
+        tmp_path,
+        state=recovered,
+        transition=(
+            _transition(
+                DIRECT_STATUS_FAILED,
+                DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+                recovery=True,
+            ),
+        ),
+        now=NOW.replace(hour=4),
+    )
+    second, _ = _evaluate(tmp_path, state=failing, now=NOW.replace(hour=5))
+
+    assert first.sent is True
+    # The recovery stays INFO and is never an immediate email.
+    assert recovery.sent is False
+    assert recovery_calls == []
+    # One intervening recovery still reopens the incident inside the cooldown.
+    assert second.sent is True
+
+
+def test_repeat_deferral_never_fires_without_stored_history(tmp_path):
+    """Existing deployments with no retained events keep today's routing."""
+
+    failing = _state(
+        status=DIRECT_STATUS_FAILED,
+        previous_status=DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        failures=1,
+        rows=None,
+        error="schema_failure",
+    )
+    with HealthAlertStore(tmp_path / "state.sqlite") as store:
+        store.record_detected(
+            _failure_candidate(github_rows=0),
+            detected_at=NOW - timedelta(hours=FLAP_LOOKBACK_HOURS * 2),
+        )
+    result, calls = _evaluate(tmp_path, state=failing, now=NOW.replace(hour=3))
+
+    assert result.sent is True
+    assert "HIGH" in calls[0][1]
+
+
+def test_repeat_flap_rule_is_pure_and_source_agnostic():
+    occurrences = _prior_occurrences(FLAP_REPEAT_THRESHOLD)[
+        (direct_health_key("Test Co", "greenhouse"), "fetch_failure")
+    ]
+
+    assert (
+        repeat_flap_deferrable(
+            consecutive_failures=1,
+            error_kind="fetch_failure",
+            fallback_available=True,
+            fallback_usable=False,
+            occurrences=occurrences,
+        )
+        is True
+    )
+    # Every refusal path, independent of any company or adapter.
+    assert (
+        repeat_flap_deferrable(
+            consecutive_failures=2,
+            error_kind="fetch_failure",
+            fallback_available=True,
+            fallback_usable=False,
+            occurrences=occurrences,
+        )
+        is False
+    )
+    assert (
+        repeat_flap_deferrable(
+            consecutive_failures=1,
+            error_kind=None,
+            fallback_available=True,
+            fallback_usable=False,
+            occurrences=occurrences,
+        )
+        is False
+    )
+    assert (
+        repeat_flap_deferrable(
+            consecutive_failures=1,
+            error_kind="fetch_failure",
+            fallback_available=False,
+            fallback_usable=False,
+            occurrences=occurrences,
+        )
+        is False
+    )
+    assert (
+        repeat_flap_deferrable(
+            consecutive_failures=1,
+            error_kind="fetch_failure",
+            fallback_available=True,
+            fallback_usable=False,
+            occurrences=occurrences[:-1],
+        )
+        is False
     )
 
 
