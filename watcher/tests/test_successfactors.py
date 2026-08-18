@@ -13,8 +13,16 @@ from watcher.config import (
     WatcherConfig,
     load_watchlist,
 )
+from watcher.health_alerts import is_minor_degradation
 from watcher.run import CollectionStats, _default_direct_sources, collect_rows
-from watcher.sources import SourceError, SourceSchemaError, SuccessFactorsSource
+from watcher.source_health import DIRECT_STATUS_DEGRADED, calculate_next_state
+from watcher.sources import (
+    SourceError,
+    SourceFetchError,
+    SourceSchemaError,
+    SuccessFactorsSource,
+)
+from watcher.sources.successfactors import DEFAULT_MAX_CRAWL_RETRIES
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -406,3 +414,193 @@ def test_runtime_rejects_invalid_config_without_request():
         source.fetch(company(host="-bad.example.test"))
 
     assert requested == []
+
+
+# --- bounded transport retry ----------------------------------------------
+#
+# A very large board needs hundreds of sequential page requests, so a rare
+# transient transport failure otherwise fails the whole crawl. Retries re-fetch
+# the identical startrow and never relax a completeness check.
+
+
+def _retryable() -> SourceFetchError:
+    return SourceFetchError(
+        "successfactors GET failed: code=timeout endpoint=https://careers.example.test/",
+        error_code="timeout",
+        retryable=True,
+    )
+
+
+def _two_page_board() -> tuple[str, str]:
+    return (
+        page_html(first=1, last=2, total=4, page=1, pages=2, ids=(8001, 8002)),
+        page_html(first=3, last=4, total=4, page=2, pages=2, ids=(8003, 8004)),
+    )
+
+
+class _FlakyBoard:
+    """Serve fixed pages, raising injected errors on chosen attempt numbers."""
+
+    def __init__(
+        self,
+        pages: tuple[str, ...],
+        failures: dict[int, Exception] | None = None,
+    ) -> None:
+        self._pages = pages
+        self._failures = dict(failures or {})
+        self.attempts = 0
+
+    def __call__(self, url: str, _name: str) -> str:
+        self.attempts += 1
+        failure = self._failures.get(self.attempts)
+        if failure is not None:
+            raise failure
+        start = int(parse_qs(urlsplit(url).query)["startrow"][0])
+        return self._pages[start // 2]
+
+
+def test_transient_page_failure_is_retried_and_matches_a_clean_crawl():
+    expected = SuccessFactorsSource(
+        request_text=_FlakyBoard(_two_page_board())
+    ).fetch(company())
+
+    delays: list[float] = []
+    board = _FlakyBoard(_two_page_board(), {2: _retryable()})
+    source = SuccessFactorsSource(
+        request_text=board, sleeper=delays.append, jitter=lambda _a, _b: 0.0
+    )
+
+    rows = source.fetch(company())
+
+    assert rows == expected
+    assert source.retry_attempts == 1
+    # One extra HTTP attempt, but still only two pages of the board.
+    assert source.request_attempts == 3
+    assert source.request_count == 2
+    assert delays == [1.0]
+
+
+def test_recovered_retry_is_reported_as_minor_degradation():
+    board = _FlakyBoard(_two_page_board(), {2: _retryable()})
+    source = SuccessFactorsSource(
+        request_text=board, sleeper=lambda _delay: None, jitter=lambda _a, _b: 0.0
+    )
+    stats = CollectionStats()
+
+    rows, errors = collect_rows(
+        WatcherConfig(companies=(company(),)),
+        direct_sources={"successfactors": source},
+        stats=stats,
+    )
+
+    assert len(rows) == 4
+    assert errors == []
+    attempt = stats.source_attempts[0]
+    assert attempt.succeeded is True
+    assert attempt.failed_request_count == 1
+    assert attempt.reason_codes == ("request_retry_recovered",)
+    assert attempt.degraded is True
+    # The crawl still reached the exact expected total, so it stays whole.
+    assert attempt.complete is True
+    assert attempt.incomplete is False
+
+    state = calculate_next_state(None, attempt)
+    assert state.status == DIRECT_STATUS_DEGRADED
+    assert is_minor_degradation(state) is True
+
+
+def test_non_retryable_page_failure_is_not_retried():
+    delays: list[float] = []
+    board = _FlakyBoard(
+        _two_page_board(),
+        {2: SourceFetchError("successfactors GET failed: code=forbidden")},
+    )
+    source = SuccessFactorsSource(
+        request_text=board, sleeper=delays.append, jitter=lambda _a, _b: 0.0
+    )
+
+    with pytest.raises(SourceFetchError):
+        source.fetch(company())
+
+    assert board.attempts == 2
+    assert source.retry_attempts == 0
+    assert delays == []
+
+
+def test_exhausting_per_page_attempts_fails_the_whole_crawl():
+    delays: list[float] = []
+    board = _FlakyBoard(
+        _two_page_board(),
+        {2: _retryable(), 3: _retryable(), 4: _retryable()},
+    )
+    source = SuccessFactorsSource(
+        request_text=board, sleeper=delays.append, jitter=lambda _a, _b: 0.0
+    )
+
+    with pytest.raises(SourceFetchError):
+        source.fetch(company())
+
+    # One good page plus three attempts on the second page, then failure.
+    assert board.attempts == 4
+    assert source.retry_attempts == 2
+    assert delays == [1.0, 3.0]
+    # No partial result: success diagnostics were never published.
+    assert source.last_health_diagnostics.succeeded is None
+
+
+def test_crawl_wide_retry_budget_bounds_a_long_crawl_and_resets_per_fetch():
+    total = 8
+    delays: list[float] = []
+    flaky = {"enabled": True}
+    seen: dict[int, int] = {}
+
+    def request(url: str, _name: str) -> str:
+        start = int(parse_qs(urlsplit(url).query)["startrow"][0])
+        if flaky["enabled"]:
+            seen[start] = seen.get(start, 0) + 1
+            if seen[start] == 1:
+                raise _retryable()
+        return page_html(
+            first=start + 1,
+            last=start + 1,
+            total=total,
+            page=start + 1,
+            pages=total,
+            ids=(20_000 + start,),
+        )
+
+    source = SuccessFactorsSource(
+        request_text=request, sleeper=delays.append, jitter=lambda _a, _b: 0.0
+    )
+
+    with pytest.raises(SourceFetchError):
+        source.fetch(company())
+
+    # Every page failing once exhausts the crawl budget before the board ends.
+    assert source.retry_attempts == DEFAULT_MAX_CRAWL_RETRIES
+    assert len(delays) == DEFAULT_MAX_CRAWL_RETRIES
+    # Bounded runtime: no real sleeping, and each delay is capped.
+    assert max(delays) <= 5.0
+    assert source.last_health_diagnostics.succeeded is None
+
+    flaky["enabled"] = False
+    rows = source.fetch(company())
+
+    assert len(rows) == total
+    assert source.retry_attempts == 0
+    assert source.last_health_diagnostics.degraded is False
+
+
+def test_a_retried_page_returning_a_changed_total_still_fails_closed():
+    first_page, _ = _two_page_board()
+    changed = page_html(first=3, last=4, total=5, page=2, pages=3, ids=(8003, 8004))
+    board = _FlakyBoard((first_page, changed), {2: _retryable()})
+    source = SuccessFactorsSource(
+        request_text=board, sleeper=lambda _delay: None, jitter=lambda _a, _b: 0.0
+    )
+
+    with pytest.raises(SourceSchemaError, match="total changed during pagination"):
+        source.fetch(company())
+
+    # The retry happened; the total-stability check still rejected the crawl.
+    assert source.retry_attempts == 1
