@@ -118,24 +118,24 @@ SUPPORTED_WORKDAY_DETAIL_POLICIES = frozenset(
         WORKDAY_DETAIL_EARLY_CAREER,
     }
 )
-SUPPORTED_ATS = {
-    "bain",
-    "epic",
-    "greenhouse",
-    "lever",
-    "ashby",
-    "smartrecruiters",
-    "workable",
-    "workday",
-    "oracle_hcm",
-    "talentbrew",
-    "icims",
-    "ibm",
-    "successfactors",
-    "paylocity",
-    "bespoke",
-    "github_only",
-}
+# Configuration-only modes: no direct adapter is attempted for these entries.
+NON_DIRECT_ATS = frozenset({"bespoke", "github_only"})
+
+
+def supported_ats() -> frozenset[str]:
+    """Accepted watchlist `ats` values.
+
+    Every direct adapter registered in `watcher/sources/registry.py` plus the
+    non-direct configuration modes in `NON_DIRECT_ATS`. The registry import is
+    deferred because every source adapter imports this module, so importing it
+    at module scope here would be circular.
+    """
+
+    from watcher.sources.registry import DIRECT_ATS
+
+    return DIRECT_ATS | NON_DIRECT_ATS
+
+
 SUPPORTED_GITHUB_LISTING_FORMATS = {
     "simplify_json",
     "github_markdown_table",
@@ -498,7 +498,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
     token = str(entry.get("token") or "").strip()
     if not name:
         raise ConfigError("company entry missing name")
-    if ats not in SUPPORTED_ATS:
+    if ats not in supported_ats():
         raise ConfigError(f"{name}: unsupported ats '{ats}'")
     coverage_status = str(entry.get("coverage_status") or "").strip().casefold()
     if coverage_status and coverage_status not in SUPPORTED_COVERAGE_STATUSES:
@@ -506,12 +506,12 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             f"{name}: coverage_status must be one of: "
             + ", ".join(sorted(SUPPORTED_COVERAGE_STATUSES))
         )
-    if coverage_status and ats not in {"bespoke", "github_only"}:
+    if coverage_status and ats not in NON_DIRECT_ATS:
         raise ConfigError(
             f"{name}: coverage_status '{coverage_status}' requires bespoke or github_only ats"
         )
     platform_family = _platform_family(entry.get("platform_family"), name)
-    if platform_family and ats not in {"bespoke", "github_only"}:
+    if platform_family and ats not in NON_DIRECT_ATS:
         raise ConfigError(
             f"{name}: platform_family requires bespoke or github_only ats"
         )

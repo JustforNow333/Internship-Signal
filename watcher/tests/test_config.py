@@ -8,7 +8,6 @@ from watcher.config import (
     CompanyCfg,
     ConfigError,
     DEFAULT_WATCHLIST_PATH,
-    SUPPORTED_ATS,
     WORKDAY_DETAIL_EARLY_CAREER,
     WORKDAY_DETAIL_INTERNSHIP,
     WORKDAY_DETAIL_NONE,
@@ -19,6 +18,7 @@ from watcher.config import (
     load_dotenv,
     load_watchlist,
     resolve_analysis_cache_path,
+    supported_ats,
 )
 
 
@@ -252,7 +252,7 @@ def test_default_watchlist_loads_and_preserves_core_invariants():
     for company in config.companies:
         entry = entries_by_name[company.name]
         assert company.name == company.name.strip()
-        assert company.ats in SUPPORTED_ATS
+        assert company.ats in supported_ats()
         assert company.terms == ("Summer 2027",)
 
         if company.ats == "workday":

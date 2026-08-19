@@ -77,7 +77,8 @@ companies:
 - `defaults.terms` is required and cannot be blank. A company inherits it unless
   it declares its own nonempty `terms`; an explicitly empty override is an
   error. Terms are never inferred from the calendar.
-- Supported `ats` values (`watcher/config.py::SUPPORTED_ATS`): `bain`, `epic`,
+- Supported `ats` values (registered in `watcher/sources/registry.py`; see
+  [`watcher-sources.md`](watcher-sources.md)): `bain`, `epic`,
   `ibm`, `greenhouse`, `lever`, `ashby`, `smartrecruiters`, `workable`,
   `workday`, `oracle_hcm`, `talentbrew`, `icims`, `successfactors`,
   `paylocity`, `bespoke`, `github_only`. Workday requires tenant, shard, and

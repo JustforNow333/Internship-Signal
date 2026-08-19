@@ -24,7 +24,8 @@ cherry-pick shared fixes.
 | `backend/app/` | normalize, dedupe, salary, classify, signals, scoring, eligibility, ask, profile, config, store |
 | `backend/app/hosted/` | accounts, PostgreSQL job import, per-user matching, notification delivery |
 | `watcher/run.py` | collect → analyze → filter → seen partition → digest → health |
-| `watcher/config.py` | watchlist + env validation, `SUPPORTED_ATS` |
+| `watcher/config.py` | watchlist + env validation; `supported_ats()` derives from the registry |
+| `watcher/sources/registry.py` | **canonical direct-source registry** — register a new ATS adapter here only |
 | `watcher/sources/` | one adapter per ATS and per GitHub backstop format |
 | `watcher/eligibility.py` · `filters.py` | student/location/role gates · internship, open, min-score |
 | `watcher/seen_store.py` · `analysis_cache.py` | durable `seen.sqlite` · rebuildable cache + `STATIC_ANALYSIS_CACHE_VERSION` |
@@ -86,7 +87,7 @@ Docs referenced below: [`docs/watcher.md`](docs/watcher.md) (W),
 
 | Task | Read | Test |
 |---|---|---|
-| ATS adapter | `watcher-sources.md`, `sources/base.py` | `watcher/tests/test_<adapter>.py` |
+| ATS adapter | `watcher-sources.md`, `sources/registry.py`, `sources/base.py` | `watcher/tests/test_<adapter>.py`, `test_source_registry.py` |
 | Workday transport/retry/pacing | W §4 | `test_workday_*.py` |
 | Watchlist / env validation | W §2 | `test_config.py` |
 | Concurrency, snapshot, replay | W §11, §13 | `test_collection_concurrency.py`, `test_collection_snapshot.py` |

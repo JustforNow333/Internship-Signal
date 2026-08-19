@@ -115,27 +115,14 @@ from watcher.source_health import (
     write_health_report,
 )
 from watcher.sources import (
-    AshbySource,
-    BainSource,
     DirectSourceDiagnostics,
-    EpicSource,
     GitHubListingsSource,
     GitHubMarkdownTableSource,
-    GreenhouseSource,
-    IbmSource,
-    IcimsSource,
-    LeverSource,
-    OracleHcmSource,
-    PaylocitySource,
-    SmartRecruitersSource,
-    SuccessFactorsSource,
-    TalentBrewSource,
     SourceError,
     SourceFetchError,
     SourceSchemaError,
-    WorkableSource,
-    WorkdaySource,
 )
+from watcher.sources.registry import DIRECT_ATS, build_direct_sources
 from watcher.sources.workday import WorkdayPacer, WorkdayStartTelemetry
 
 LOGGER = logging.getLogger(__name__)
@@ -950,7 +937,7 @@ class _DirectSourceProvider:
         if direct_sources is None:
             if concurrent:
                 self._workday_pacer = WorkdayPacer(workday_min_interval_seconds())
-                self._supported = frozenset(_DEFAULT_DIRECT_ADAPTERS)
+                self._supported = DIRECT_ATS
             else:
                 self._shared = _default_direct_sources()
                 self._supported = frozenset(self._shared)
@@ -1891,46 +1878,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
 
-_DEFAULT_DIRECT_ADAPTERS = frozenset(
-    {
-        "ashby",
-        "bain",
-        "epic",
-        "greenhouse",
-        "ibm",
-        "icims",
-        "lever",
-        "oracle_hcm",
-        "paylocity",
-        "smartrecruiters",
-        "successfactors",
-        "talentbrew",
-        "workable",
-        "workday",
-    }
-)
-
-
 def _default_direct_sources(
     *,
     workday_pacer: WorkdayPacer | None = None,
 ) -> dict[str, object]:
-    return {
-        "ashby": AshbySource(),
-        "bain": BainSource(),
-        "epic": EpicSource(),
-        "greenhouse": GreenhouseSource(),
-        "ibm": IbmSource(),
-        "icims": IcimsSource(),
-        "lever": LeverSource(),
-        "oracle_hcm": OracleHcmSource(),
-        "paylocity": PaylocitySource(),
-        "smartrecruiters": SmartRecruitersSource(),
-        "successfactors": SuccessFactorsSource(),
-        "talentbrew": TalentBrewSource(),
-        "workable": WorkableSource(),
-        "workday": WorkdaySource(pacer=workday_pacer),
-    }
+    """Build the production adapter set from the canonical source registry.
+
+    Kept as a named seam so collection code and tests have one patchable entry
+    point for default adapter construction. Register new direct sources in
+    `watcher/sources/registry.py`, never here.
+    """
+
+    return build_direct_sources(workday_pacer=workday_pacer)
 
 
 def _build_github_source(config: GitHubListingSourceCfg) -> object:

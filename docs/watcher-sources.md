@@ -12,10 +12,20 @@ scoring, eligibility, health, or notification work.
 
 ## Supported `ats` values
 
-`watcher/config.py::SUPPORTED_ATS` is the authority: `bain`, `epic`, `ibm`,
-`greenhouse`, `lever`, `ashby`, `smartrecruiters`, `workable`, `workday`,
-`oracle_hcm`, `talentbrew`, `icims`, `successfactors`, `paylocity`, `bespoke`,
-`github_only`.
+`watcher/sources/registry.py` is the single source of truth for direct
+adapters. Its `DIRECT_SOURCE_SPECS` table names each adapter and how to build
+it, `DIRECT_ATS` exposes those names, and `build_direct_sources()` constructs
+the runtime set. `watcher/config.py::supported_ats()` returns `DIRECT_ATS`
+plus the non-direct configuration modes in `NON_DIRECT_ATS`.
+
+Direct: `bain`, `epic`, `ibm`, `greenhouse`, `lever`, `ashby`,
+`smartrecruiters`, `workable`, `workday`, `oracle_hcm`, `talentbrew`, `icims`,
+`successfactors`, `paylocity`. Non-direct modes: `bespoke`, `github_only`.
+
+**To add a direct source**, append one `DirectSourceSpec` to
+`DIRECT_SOURCE_SPECS`. Configuration validation and runtime construction both
+follow automatically; set `needs_workday_pacer=True` only for adapters whose
+constructor takes the shared `WorkdayPacer`.
 
 ---
 

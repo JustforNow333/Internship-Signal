@@ -29,6 +29,7 @@ code.
 | Change area | Run |
 |---|---|
 | A single source adapter | `watcher/tests/test_<adapter>.py` (e.g. `test_workday_*.py`, `test_icims.py`, `test_successfactors.py`, `test_paylocity.py`, `test_bain.py`, `test_epic.py`, `test_ibm.py`, `test_sources.py`) |
+| Direct-source registry | `watcher/tests/test_source_registry.py` |
 | Watchlist / env validation | `watcher/tests/test_config.py` |
 | Collection concurrency | `watcher/tests/test_collection_concurrency.py`, `test_canary_collection_concurrency.py` |
 | Snapshot capture/replay | `watcher/tests/test_collection_snapshot.py` |
