@@ -12,6 +12,7 @@ from urllib.parse import quote, urlencode
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
+    DirectDiagnosticsMixin,
     JsonHttpResponse,
     SourceError,
     SourceFetchError,
@@ -43,7 +44,7 @@ class OracleHcmDiagnostics:
     schema_error_postings_skipped: int = 0
 
 
-class OracleHcmSource:
+class OracleHcmSource(DirectDiagnosticsMixin):
     """Collect public Candidate Experience requisitions through Oracle REST."""
 
     name = "oracle_hcm"
@@ -298,10 +299,15 @@ class OracleHcmSource:
         self,
         malformed_rows: int,
         schema_error_rows: int,
-        _reason_codes,
+        reason_codes,
     ) -> None:
+        """Keep Oracle's own counters and the shared parse diagnostics in step."""
+
         self._malformed_postings_skipped += max(0, int(malformed_rows))
         self._schema_error_postings_skipped += max(0, int(schema_error_rows))
+        super()._record_parse_diagnostics(
+            malformed_rows, schema_error_rows, reason_codes
+        )
 
     def _parse_posting(
         self,
@@ -368,6 +374,7 @@ class OracleHcmSource:
         self._schema_error_postings_skipped = 0
         self.last_response_metadata = {}
         self.last_diagnostics = OracleHcmDiagnostics()
+        self._begin_direct_diagnostics()
 
     def _snapshot_diagnostics(self, *, valid_rows: int = 0) -> None:
         self.last_diagnostics = OracleHcmDiagnostics(
@@ -384,6 +391,30 @@ class OracleHcmSource:
 
     def _finish(self, rows: list[dict]) -> None:
         self._snapshot_diagnostics(valid_rows=len(rows))
+        self._publish_health_diagnostics(rows)
+
+    def _publish_health_diagnostics(self, rows: list[dict]) -> None:
+        """Publish the shared health contract from Oracle's own counters.
+
+        A skipped requisition -- unreadable or schema-invalid -- means this
+        board was not collected completely, while a recovered transport retry
+        is a degraded but complete collection.
+        """
+
+        incomplete = bool(
+            self._malformed_postings_skipped or self._schema_error_postings_skipped
+        )
+        self._finish_direct_diagnostics(
+            rows,
+            duplicate_row_count=self._duplicate_postings_skipped,
+            failed_request_count=self._retry_attempts,
+            incomplete=incomplete,
+            degraded=bool(incomplete or self._retry_attempts),
+            complete=not incomplete,
+            reason_codes=(
+                ("request_retry_recovered",) if self._retry_attempts else ()
+            ),
+        )
 
 
 def _get_json(url: str, source_name: str) -> JsonHttpResponse:

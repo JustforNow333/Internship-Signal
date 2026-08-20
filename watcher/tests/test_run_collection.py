@@ -1,10 +1,14 @@
 """Collection mechanics: adapter resolution, fetch outcomes, and counters."""
 
+import ast
+import inspect
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from watcher import collection as collection_module
 from watcher.collection import (
     CollectionStats,
     WorkdayTransportSummary,
@@ -16,15 +20,18 @@ from watcher.config import CompanyCfg, GitHubListingSourceCfg, WatcherConfig
 from watcher.source_health import (
     ERROR_MISSING_ADAPTER,
     ERROR_SCHEMA,
+    ERROR_SOURCE,
     ERROR_UNEXPECTED,
     SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
 )
 from watcher.sources.base import (
+    DirectSourceDiagnostics,
     SourceError,
     SourceFetchError,
     SourceSchemaError,
 )
+from watcher.sources.registry import DIRECT_ATS
 from watcher.tests.run_helpers import (
     CountingGithub,
     DiagnosticFakeSource,
@@ -33,31 +40,114 @@ from watcher.tests.run_helpers import (
     row,
 )
 
+# Provider-specific diagnostic members that belong to one adapter's own
+# dataclass. Collection must never read any of them: the adapter translates
+# them into `DirectSourceDiagnostics` itself.
+ADAPTER_DIAGNOSTIC_MEMBERS = frozenset(
+    {
+        "detail_enrichment_degraded",
+        "detail_failure_reasons",
+        "detail_failures",
+        "disappeared_postings",
+        "duplicate_postings_skipped",
+        "listing_incomplete",
+        "listing_incomplete_reasons",
+        "listing_request_failures",
+        "malformed_postings_skipped",
+        "schema_error_postings_skipped",
+        "skip_reasons",
+    }
+)
 
-@pytest.mark.parametrize("adapter", ["oracle_hcm", "talentbrew"])
-def test_recovered_direct_request_retry_is_degraded_but_complete(adapter):
+
+def test_direct_diagnostics_use_the_contract_the_adapter_published():
+    published = DirectSourceDiagnostics(
+        succeeded=True,
+        retained_row_count=4,
+        duplicate_row_count=1,
+        failed_request_count=2,
+        reason_codes=("request_retry_recovered",),
+        degraded=True,
+        complete=True,
+    )
     source = SimpleNamespace(
-        name=adapter,
+        name="workday",
+        last_health_diagnostics=published,
+        # An adapter-owned dataclass collection must not interpret.
+        last_diagnostics=SimpleNamespace(retry_attempts=9),
+    )
+
+    assert (
+        _direct_diagnostics_from_source(source, succeeded=True, error_kind="")
+        is published
+    )
+
+
+def test_direct_diagnostics_report_nothing_without_the_shared_contract():
+    """A legacy or injected source that publishes nothing reports nothing."""
+
+    source = SimpleNamespace(
+        name="talentbrew",
         last_diagnostics=SimpleNamespace(
             retry_attempts=1,
-            malformed_postings_skipped=0,
-            schema_error_postings_skipped=0,
-            duplicate_postings_skipped=0,
+            duplicate_postings_skipped=2,
         ),
     )
 
+    assert (
+        _direct_diagnostics_from_source(source, succeeded=True, error_kind="")
+        is None
+    )
+
+
+def test_failed_direct_fetch_reports_the_shared_failure_contract():
     diagnostics = _direct_diagnostics_from_source(
-        source,
-        rows=[{"title": "Intern"}],
-        succeeded=True,
+        FakeSource(),
+        succeeded=False,
+        error_kind=ERROR_SCHEMA,
+    )
+
+    assert diagnostics.succeeded is False
+    assert diagnostics.failed_request_count == 1
+    assert diagnostics.incomplete is True
+    assert diagnostics.complete is False
+    assert diagnostics.reason_codes == (ERROR_SCHEMA,)
+
+
+def test_unclassified_failure_still_reports_a_reason_code():
+    diagnostics = _direct_diagnostics_from_source(
+        FakeSource(),
+        succeeded=False,
         error_kind="",
     )
 
-    assert diagnostics.failed_request_count == 1
-    assert diagnostics.degraded is True
-    assert diagnostics.incomplete is False
-    assert diagnostics.complete is True
-    assert diagnostics.reason_codes == ("request_retry_recovered",)
+    assert diagnostics.reason_codes == (ERROR_SOURCE,)
+
+
+def test_collection_holds_no_adapter_specific_diagnostic_translation():
+    """The diagnostics seam must stay free of adapter names and internals."""
+
+    translation = inspect.getsource(_direct_diagnostics_from_source)
+    for ats in DIRECT_ATS:
+        assert f'"{ats}"' not in translation
+        assert f"'{ats}'" not in translation
+    for member in ADAPTER_DIAGNOSTIC_MEMBERS:
+        assert member not in translation
+
+    tree = ast.parse(
+        Path(collection_module.__file__).read_text(encoding="utf-8")
+    )
+    referenced = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            referenced.add(node.attr)
+        elif isinstance(node, ast.Name):
+            referenced.add(node.id)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            referenced.add(node.value)
+        elif isinstance(node, ast.Call):
+            referenced.update(keyword.arg for keyword in node.keywords)
+    assert not (referenced & ADAPTER_DIAGNOSTIC_MEMBERS)
 
 
 def test_collect_rows_logs_source_failure_and_keeps_going():

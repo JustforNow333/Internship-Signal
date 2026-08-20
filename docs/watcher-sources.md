@@ -124,3 +124,15 @@ provider-specific pagination visible in their own adapters. Adopt
 `DirectRecordAdapter` selectively — expand it only where it removes invariant
 parser plumbing, and never add hooks or obscure provider orchestration merely to
 increase inheritance coverage.
+
+## Shared health diagnostics
+
+Every direct adapter publishes its own `last_health_diagnostics:
+DirectSourceDiagnostics`. `watcher/collection.py` only reads that contract: it
+never inspects an adapter's own diagnostics dataclass and holds no adapter
+names. Adapters that use `DirectDiagnosticsMixin` publish through
+`_finish_direct_diagnostics`; Workday translates its listing-pagination and
+detail-enrichment state in `WorkdaySource._publish_health_diagnostics`, because
+only Workday knows that a lost continuation page or an enrichment outage means
+an incomplete, degraded collection. A source that publishes nothing reports no
+diagnostics rather than being interpreted from outside.

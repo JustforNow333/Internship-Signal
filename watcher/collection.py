@@ -587,7 +587,6 @@ def _fetch_direct_source(
         challenge_response=_challenge_response(error),
         diagnostics=_direct_diagnostics_from_source(
             source,
-            rows=rows if succeeded else [],
             succeeded=succeeded,
             error_kind=error_kind,
         ),
@@ -1037,11 +1036,18 @@ def _failed_direct_attempt(
 def _direct_diagnostics_from_source(
     source: object,
     *,
-    rows: list[dict],
     succeeded: bool,
     error_kind: str,
 ) -> DirectSourceDiagnostics | None:
-    """Map adapter-owned bounded counters into the shared attempt contract."""
+    """Read the shared health contract one direct adapter published.
+
+    Every registered direct adapter publishes `last_health_diagnostics` itself,
+    because only the adapter knows what its provider-specific counters mean.
+    This layer therefore stays free of adapter names: it records the failure
+    contract for a failed fetch, returns whatever the adapter published for a
+    successful one, and reports nothing for an injected or legacy source that
+    publishes no shared diagnostics.
+    """
 
     if not succeeded:
         return DirectSourceDiagnostics(
@@ -1052,120 +1058,7 @@ def _direct_diagnostics_from_source(
             complete=False,
         )
     shared = getattr(source, "last_health_diagnostics", None)
-    if isinstance(shared, DirectSourceDiagnostics):
-        return shared
-
-    diagnostics = getattr(source, "last_diagnostics", None)
-    adapter = str(getattr(source, "name", "") or "").casefold()
-    if diagnostics is None:
-        return None
-    if adapter == "workday":
-        skip_reasons = dict(getattr(diagnostics, "skip_reasons", ()) or ())
-        malformed = int(skip_reasons.get("posting_not_object", 0) or 0)
-        skipped = int(getattr(diagnostics, "malformed_postings_skipped", 0) or 0)
-        schema_errors = max(0, skipped - malformed)
-        recovered_retries = int(getattr(diagnostics, "retry_attempts", 0) or 0)
-        detail_failures = int(getattr(diagnostics, "detail_failures", 0) or 0)
-        failed_requests = recovered_retries
-        failed_requests += detail_failures
-        failed_requests += int(getattr(diagnostics, "disappeared_postings", 0) or 0)
-        # A continuation page that was lost after earlier pages succeeded is a
-        # failed request that the run still reports as a degraded success.
-        failed_requests += int(
-            getattr(diagnostics, "listing_request_failures", 0) or 0
-        )
-        listing_incomplete = bool(
-            getattr(diagnostics, "listing_incomplete", False)
-        )
-        degraded = bool(getattr(diagnostics, "detail_enrichment_degraded", False))
-        degraded = degraded or listing_incomplete
-        degraded = degraded or skipped > 0
-        degraded = degraded or recovered_retries > 0
-        incomplete = bool(
-            listing_incomplete
-            or skipped > 0
-            or getattr(diagnostics, "detail_enrichment_degraded", False)
-        )
-        reasons: list[str] = []
-        if malformed:
-            reasons.append("malformed_records_skipped")
-        if schema_errors:
-            reasons.append("schema_invalid_records_skipped")
-        if getattr(diagnostics, "detail_enrichment_degraded", False):
-            reasons.append("material_enrichment_failed")
-        elif detail_failures:
-            reasons.append("optional_enrichment_failed")
-        if recovered_retries:
-            reasons.append("request_retry_recovered")
-        reasons.extend(
-            str(code)
-            for code, _count in getattr(diagnostics, "detail_failure_reasons", ()) or ()
-        )
-        reasons.extend(
-            str(code)
-            for code in getattr(diagnostics, "listing_incomplete_reasons", ()) or ()
-        )
-        return DirectSourceDiagnostics(
-            succeeded=True,
-            retained_row_count=len(rows),
-            malformed_row_count=malformed,
-            schema_error_row_count=schema_errors,
-            failed_request_count=failed_requests,
-            incomplete=incomplete,
-            reason_codes=tuple(dict.fromkeys(reasons))[:12],
-            degraded=degraded,
-            complete=not incomplete,
-        )
-    if adapter == "oracle_hcm":
-        malformed = int(
-            getattr(diagnostics, "malformed_postings_skipped", 0) or 0
-        )
-        schema_errors = int(
-            getattr(diagnostics, "schema_error_postings_skipped", 0) or 0
-        )
-        reasons = []
-        if malformed:
-            reasons.append("malformed_records_skipped")
-        if schema_errors:
-            reasons.append("schema_invalid_records_skipped")
-        recovered_retries = int(
-            getattr(diagnostics, "retry_attempts", 0) or 0
-        )
-        if recovered_retries:
-            reasons.append("request_retry_recovered")
-        incomplete = bool(malformed or schema_errors)
-        degraded = bool(incomplete or recovered_retries)
-        return DirectSourceDiagnostics(
-            succeeded=True,
-            retained_row_count=len(rows),
-            malformed_row_count=malformed,
-            schema_error_row_count=schema_errors,
-            duplicate_row_count=int(
-                getattr(diagnostics, "duplicate_postings_skipped", 0) or 0
-            ),
-            failed_request_count=recovered_retries,
-            incomplete=incomplete,
-            reason_codes=tuple(reasons),
-            degraded=degraded,
-            complete=not incomplete,
-        )
-    if adapter == "talentbrew":
-        recovered_retries = int(
-            getattr(diagnostics, "retry_attempts", 0) or 0
-        )
-        return DirectSourceDiagnostics(
-            succeeded=True,
-            retained_row_count=len(rows),
-            duplicate_row_count=int(
-                getattr(diagnostics, "duplicate_postings_skipped", 0) or 0
-            ),
-            failed_request_count=recovered_retries,
-            incomplete=False,
-            reason_codes=("request_retry_recovered",) if recovered_retries else (),
-            degraded=bool(recovered_retries),
-            complete=True,
-        )
-    return None
+    return shared if isinstance(shared, DirectSourceDiagnostics) else None
 
 
 def _fetch_error_kind(error: SourceFetchError) -> str:
