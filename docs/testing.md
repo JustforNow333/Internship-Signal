@@ -42,7 +42,9 @@ code.
 | Digest rendering / email | `watcher/tests/test_notify.py` |
 | Alumni matching | `watcher/tests/test_alumni.py`, `test_build_watcher_alumni_map.py`, `test_company_matching.py` |
 | Season and rollover | `watcher/tests/test_season.py`, `test_season_terms.py` |
-| End-to-end watcher run | `watcher/tests/test_run.py` |
+| End-to-end watcher run | `watcher/tests/test_run.py` (pipeline), `test_run_digest.py` |
+| Collection, reporting, CLI | `test_run_collection.py`, `test_run_reporting.py`, `test_run_cli.py` |
+| Scheduled workflow contract | `test_watcher_workflow.py` |
 | Workflow diagnostics / heartbeat | `watcher/tests/test_workflow_diagnostics.py` |
 | Backend scoring/classification/signals | `backend/tests/test_scoring.py`, `test_classify.py`, `test_signals.py`, `test_salary.py`, `test_analysis_context.py` |
 | Backend ingest / dedupe / normalize | `backend/tests/test_normalize.py`, `test_dedupe.py`, `test_utf8_io.py` |

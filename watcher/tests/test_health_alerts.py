@@ -648,7 +648,7 @@ def test_observability_failures_do_not_undo_match_email_state(
         raise RuntimeError("comparison storage unavailable")
 
     monkeypatch.setattr(
-        "watcher.run.SourceComparisonStore.save",
+        "watcher.pipeline.SourceComparisonStore.save",
         fail_save,
     )
 
@@ -656,7 +656,7 @@ def test_observability_failures_do_not_undo_match_email_state(
         raise RuntimeError("health alert storage unavailable")
 
     monkeypatch.setattr(
-        "watcher.run.evaluate_and_send_health_alerts",
+        "watcher.pipeline.evaluate_and_send_health_alerts",
         fail_health_evaluation,
     )
     with SeenStore(db) as seen:

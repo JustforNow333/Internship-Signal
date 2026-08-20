@@ -29,7 +29,11 @@ internship-signal/
 │   │                       match_service.py (reconciliation), notification_*.py
 │   └── tests/             backend unit + hosted tests
 ├── watcher/               scheduled collector (see docs/watcher.md)
-│   ├── run.py             entry point: python -m watcher.run
+│   ├── run.py             entry point: python -m watcher.run (compatibility exports)
+│   ├── pipeline.py        run_once stage orchestration and RunResult
+│   ├── collection.py      adapter resolution, fetch outcomes, source attempts
+│   ├── reporting.py       console report, heartbeat, health JSON report
+│   ├── cli.py             argument parsing and process startup
 │   ├── config.py          watchlist + env validation
 │   ├── sources/           one module per ATS/backstop adapter
 │   ├── eligibility.py     watcher-side degree/location/target-role gate

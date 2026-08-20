@@ -35,7 +35,7 @@ GitHub Actions cron (hourly)
 ```
 
 Tier 2 is not a fallback that only fires on Tier-1 failure; it is a parallel net
-whose hits are lower priority. `watcher/run.py` fetches direct sources before
+whose hits are lower priority. `watcher/collection.py` fetches direct sources before
 GitHub so backend dedupe keeps direct provenance. `bespoke` and `github_only`
 companies skip direct fetching.
 

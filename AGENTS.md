@@ -23,7 +23,10 @@ cherry-pick shared fixes.
 | `backend/app/ingest.py` | `process_csv` (CSV cleaning) and `analyze_rows` (shared analysis seam) |
 | `backend/app/` | normalize, dedupe, salary, classify, signals, scoring, eligibility, ask, profile, config, store |
 | `backend/app/hosted/` | accounts, PostgreSQL job import, per-user matching, notification delivery |
-| `watcher/run.py` | collect → analyze → filter → seen partition → digest → health |
+| `watcher/run.py` | `python -m watcher.run` entry point and the `watcher.run` compatibility exports |
+| `watcher/pipeline.py` | `run_once`: collect → analyze → filter → seen partition → digest → health |
+| `watcher/collection.py` | direct/GitHub fetch planning, outcomes, source attempts, Workday counters |
+| `watcher/reporting.py` · `cli.py` | console report + heartbeat · argparse and startup |
 | `watcher/config.py` | watchlist + env validation; `supported_ats()` derives from the registry |
 | `watcher/sources/registry.py` | **canonical direct-source registry** — register a new ATS adapter here only |
 | `watcher/sources/` | one adapter per ATS and per GitHub backstop format |

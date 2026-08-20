@@ -28,7 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from backend.app import ingest as backend_ingest  # noqa: E402
 from watcher import analysis_cache as cache_module  # noqa: E402
-from watcher import run as run_module  # noqa: E402
+from watcher import pipeline as pipeline_module  # noqa: E402
 from watcher import source_comparison as comparison_module  # noqa: E402
 from watcher.collection_snapshot import load_collection_snapshot  # noqa: E402
 from watcher.config import DEFAULT_WATCHLIST_PATH, load_watchlist  # noqa: E402
@@ -229,7 +229,7 @@ class ReplayInstrumentation(AbstractContextManager):
         if _ACTIVE_NETWORK_RECORDER is not None:
             raise RuntimeError("nested replay instrumentation is not supported")
         _ACTIVE_NETWORK_RECORDER = self.recorder
-        self._patch(run_module, "collect_batch", self._forbidden_collection)
+        self._patch(pipeline_module, "collect_batch", self._forbidden_collection)
         self._patch(
             cache_module,
             "deduplicate_rows",
@@ -290,46 +290,46 @@ class ReplayInstrumentation(AbstractContextManager):
             ),
         )
         self._patch(
-            run_module,
+            pipeline_module,
             "enrich_duplicate_entries",
             self._timed_function(
                 "duplicate_report_enrichment",
-                run_module.enrich_duplicate_entries,
+                pipeline_module.enrich_duplicate_entries,
                 count_first_arg=True,
             ),
         )
         self._patch(
-            run_module,
+            pipeline_module,
             "_categorical_exclusion_audit",
             self._timed_function(
                 "categorical_eligibility_exclusion_audit",
-                run_module._categorical_exclusion_audit,
+                pipeline_module._categorical_exclusion_audit,
                 count_first_arg=True,
             ),
         )
         self._patch(
-            run_module,
+            pipeline_module,
             "filter_matches",
             self._timed_function(
                 "filter_matches",
-                run_module.filter_matches,
+                pipeline_module.filter_matches,
                 count_first_arg=True,
             ),
         )
         self._patch(
-            run_module,
+            pipeline_module,
             "load_default_alumni",
             self._timed_function(
                 "alumni_loading_attachment",
-                run_module.load_default_alumni,
+                pipeline_module.load_default_alumni,
             ),
         )
         self._patch(
-            run_module,
+            pipeline_module,
             "attach_alumni",
             self._timed_function(
                 "alumni_loading_attachment",
-                run_module.attach_alumni,
+                pipeline_module.attach_alumni,
                 count_first_arg=True,
             ),
         )
@@ -408,11 +408,11 @@ class ReplayInstrumentation(AbstractContextManager):
             self._omitted_comparison
             if self.omitted_comparison is not None
             else self._source_comparison_wrapper(
-                run_module.build_source_comparison
+                pipeline_module.build_source_comparison
             )
         )
         self._patch(
-            run_module,
+            pipeline_module,
             "build_source_comparison",
             comparison_function,
         )
@@ -568,11 +568,11 @@ def _run_core(
             batch.rows
         )
         with SeenStore(operational_db_path, read_only=True) as seen_store:
-            result = run_module.run_once(
+            result = pipeline_module.run_once(
                 effective_config,
                 seen_store=seen_store,
                 alumni_index=None,
-                notification_mode=run_module.RUN_MODE_DRY,
+                notification_mode=pipeline_module.RUN_MODE_DRY,
                 today=effective_date,
                 health_alert_policy=HealthAlertPolicy(mode=MODE_OFF),
                 collection_batch=batch,
