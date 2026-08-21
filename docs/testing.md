@@ -35,8 +35,13 @@ code.
 | Snapshot capture/replay | `watcher/tests/test_collection_snapshot.py` |
 | Static-analysis cache | `watcher/tests/test_analysis_cache.py`, `test_migrate_analysis_cache.py` |
 | Eligibility (student/location/role) | `watcher/tests/test_student_eligibility.py`, `test_filters.py` |
-| Source health | `watcher/tests/test_source_health.py`, `test_workday_health_state.py` |
-| Health alerts, severity, digest | `watcher/tests/test_health_alerts.py` |
+| Source health state and sanitizers | `watcher/tests/test_source_health.py`, `test_workday_health_state.py` |
+| Health coverage and persistence | `watcher/tests/test_health_coverage.py`, `test_health_store.py`, `test_coverage_audit.py` |
+| Health report, workflow output, heartbeat | `watcher/tests/test_health_report.py` |
+| Health alerts and orchestration | `watcher/tests/test_health_alerts.py` |
+| Health policy, fallback, flapping, grouping | `watcher/tests/test_health_policy.py` |
+| Health digest and alert rendering | `watcher/tests/test_health_digest.py` |
+| Health facade compatibility | `watcher/tests/test_health_module_exports.py` |
 | Audit and source comparison | `watcher/tests/test_audit.py`, `test_source_comparison.py`, `test_coverage_audit.py` |
 | Seen store, identity, notification | `watcher/tests/test_seen_store.py`, `test_workday_listing_identity.py`, `backend/tests/test_phase2a_job_identity.py` |
 | Digest rendering / email | `watcher/tests/test_notify.py` |

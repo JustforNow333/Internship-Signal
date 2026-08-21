@@ -648,10 +648,14 @@ be published as CI artifacts.
 
 ## 14. Source health
 
-`watcher/source_health.py` is pure and makes **no network requests**. It owns
-source attempts, deterministic state updates, transitions/recoveries, effective
-company coverage, sanitization, SQLite persistence, JSON output, and Actions
-summary rendering. `run.py` calls sources and creates one run ID and UTC
+Source health makes **no network requests**. `watcher/source_health.py` is the
+compatibility facade and the `python -m watcher.source_health` entry point; the
+implementation is split across `watcher/health/`: `models.py` (status names,
+coverage states, shared dataclasses), `sanitize.py` (the total sanitizers),
+`state.py` (attempts, deterministic state updates, transitions/recoveries),
+`coverage.py` (effective company coverage and the configuration audit),
+`store.py` (SQLite persistence), and `report.py` (JSON output and Actions
+summary rendering). `run.py` calls sources and creates one run ID and UTC
 observation timestamp shared by every attempt in an execution.
 
 Exactly one direct outcome per configured company and one outcome per configured
@@ -731,6 +735,12 @@ guarded: a malformed URL must never abort a run.
 ---
 
 ## 15. Health alert delivery
+
+`watcher/health_alerts.py` is the compatibility facade; the implementation lives
+in `watcher/health/policy.py` (severity, fallback evidence, flapping, grouping,
+digest collapsing), `rendering.py` (alert, daily-summary, and digest wording),
+`store.py` (`HealthAlertStore`), and `service.py`
+(`evaluate_and_send_health_alerts` and the SMTP boundary).
 
 Alert delivery splits `degraded` by impact **without** changing the state, its
 diagnostics, or its history. It is an alert-delivery policy over the existing

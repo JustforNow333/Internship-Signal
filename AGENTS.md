@@ -32,7 +32,8 @@ cherry-pick shared fixes.
 | `watcher/sources/` | one adapter per ATS and per GitHub backstop format |
 | `watcher/eligibility.py` · `filters.py` | student/location/role gates · internship, open, min-score |
 | `watcher/seen_store.py` · `analysis_cache.py` | durable `seen.sqlite` · rebuildable cache + `STATIC_ANALYSIS_CACHE_VERSION` |
-| `watcher/source_health.py` · `health_alerts.py` | health state · severity routing and daily digest |
+| `watcher/health/` | health models, state, coverage, policy, store, rendering, service, report |
+| `watcher/source_health.py` · `health_alerts.py` | the two `watcher.health` compatibility facades |
 | `watcher/audit*.py` · `source_comparison.py` | read-only observability |
 | `frontend/src/` · `scripts/` · `evaluation/` | local + hosted UI · probes, benchmarks, migrations · benchmark tooling |
 
@@ -96,7 +97,7 @@ Docs referenced below: [`docs/watcher.md`](docs/watcher.md) (W),
 | Concurrency, snapshot, replay | W §11, §13 | `test_collection_concurrency.py`, `test_collection_snapshot.py` |
 | Analysis cache | W §12 | `test_analysis_cache.py` |
 | Eligibility, dedupe, identity | W §7–§9 | `test_student_eligibility.py`, `test_filters.py`, `test_seen_store.py` |
-| Source health and alerts | W §14–§15 | `test_source_health.py`, `test_health_alerts.py` |
+| Source health and alerts | W §14–§15 | `test_source_health.py`, `test_health_*.py` |
 | Audit, coverage, comparison | W §16 | `test_audit.py`, `test_source_comparison.py`, `test_coverage_audit.py` |
 | Scoring, classification, signals, ask | `architecture.md` | `backend/tests/test_scoring.py`, `test_classify.py`, `test_signals.py`, `test_ask.py` |
 | Hosted backend and notifications | [`backend/HOSTED_BACKEND.md`](backend/HOSTED_BACKEND.md) | `backend/tests/test_hosted_*.py` |

@@ -40,8 +40,10 @@ internship-signal/
 │   ├── filters.py         internship/open/min-score filtering
 │   ├── seen_store.py      durable notification memory (seen.sqlite)
 │   ├── analysis_cache.py  rebuildable static-analysis cache
-│   ├── source_health.py   per-source health state and coverage
-│   ├── health_alerts.py   alert severity, cooldowns, daily digest
+│   ├── health/            models · sanitize · state · coverage · store
+│   │                       policy · rendering · service · report
+│   ├── source_health.py   watcher.health facade + health CLI entry point
+│   ├── health_alerts.py   watcher.health alert facade
 │   ├── source_comparison.py + audit_trace.py   bounded observability
 │   ├── collection_snapshot.py / collection_concurrency.py
 │   ├── notify.py          email digest rendering and send
