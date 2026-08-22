@@ -264,6 +264,7 @@ def test_optional_summary_background_and_reference_are_not_fabricated():
 
 def test_only_transient_fetch_failures_are_retried_with_a_bound():
     calls = 0
+    delays: list[float] = []
 
     def request_text(*_):
         nonlocal calls
@@ -275,27 +276,66 @@ def test_only_transient_fetch_failures_are_retried_with_a_bound():
     source = EpicSource(
         request_text=request_text,
         request_json=lambda *_: [],
-        sleeper=lambda _: None,
+        sleeper=delays.append,
         jitter=lambda _low, _high: 0,
     )
 
     assert source.fetch(company()) == []
     assert calls == 3
+    assert delays == [1.0, 3.0]
+    # The page request retried twice; the search request then succeeded once.
+    assert source.request_attempts == 4
+    assert source.retry_attempts == 2
     assert source.last_health_diagnostics.failed_request_count == 2
     assert source.last_health_diagnostics.reason_codes == ("request_retry_recovered",)
+    assert source.last_health_diagnostics.succeeded is True
+
+
+def test_exhausting_the_attempt_bound_fails_the_fetch():
+    calls = 0
+    delays: list[float] = []
+
+    def request_text(*_):
+        nonlocal calls
+        calls += 1
+        raise SourceFetchError("temporary", retryable=True)
+
+    source = EpicSource(
+        request_text=request_text,
+        request_json=lambda *_: [],
+        sleeper=delays.append,
+        jitter=lambda _low, _high: 0,
+    )
+
+    with pytest.raises(SourceFetchError) as raised:
+        source.fetch(company())
+
+    assert calls == 3
+    assert delays == [1.0, 3.0]
+    assert source.request_attempts == 3
+    assert source.retry_attempts == 2
+    assert raised.value.attempt_count == 3
+    assert raised.value.response_metadata["attempt"] == 3
+    assert raised.value.response_metadata["max_attempts"] == 3
+    assert source.last_health_diagnostics.succeeded is None
 
 
 def test_permanent_fetch_failure_is_not_retried():
     calls = 0
+    delays: list[float] = []
 
     def request_text(*_):
         nonlocal calls
         calls += 1
         raise SourceFetchError("forbidden", retryable=False)
 
-    with pytest.raises(SourceFetchError):
-        EpicSource(request_text=request_text, sleeper=lambda _: None).fetch(company())
+    source = EpicSource(request_text=request_text, sleeper=delays.append)
+    with pytest.raises(SourceFetchError) as raised:
+        source.fetch(company())
     assert calls == 1
+    assert delays == []
+    assert source.retry_attempts == 0
+    assert raised.value.attempt_count == 1
 
 
 def test_epic_watchlist_migration_and_runtime_registration():

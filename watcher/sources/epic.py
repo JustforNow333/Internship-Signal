@@ -15,7 +15,6 @@ from watcher.config import CompanyCfg
 from watcher.sources.base import (
     DirectDiagnosticsMixin,
     JsonHttpResponse,
-    SourceFetchError,
     SourceSchemaError,
     TextHttpResponse,
     get_json_response,
@@ -24,12 +23,16 @@ from watcher.sources.base import (
     make_row,
     parse_records,
 )
+from watcher.sources.retry import (
+    DEFAULT_MAX_ATTEMPTS,
+    RequestRetrier,
+    RetryPolicy,
+)
 
 CAREERS_HOST = "careers.epic.com"
 DETAIL_HOST = "epic.avature.net"
 JOBS_URL = f"https://{CAREERS_HOST}/jobs/"
 SEARCH_URL = f"https://{CAREERS_HOST}/cached-api/jobs/search/"
-DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_MAX_PAGE_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_SEARCH_BYTES = 1024 * 1024
 _NATIVE_ID = re.compile(r"[1-9][0-9]*")
@@ -89,22 +92,26 @@ class EpicSource(DirectDiagnosticsMixin):
         jitter: Callable[[float, float], float] = random.uniform,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     ) -> None:
-        if not 1 <= max_attempts <= DEFAULT_MAX_ATTEMPTS:
-            raise ValueError(
-                f"max_attempts must be between 1 and {DEFAULT_MAX_ATTEMPTS}"
-            )
         self._request_text = request_text
         self._request_json = request_json
-        self._sleeper = sleeper
-        self._jitter = jitter
-        self._max_attempts = max_attempts
-        self.request_attempts = 0
-        self.retry_attempts = 0
+        self._retrier = RequestRetrier(
+            policy=RetryPolicy(max_attempts=max_attempts),
+            sleeper=sleeper,
+            jitter=jitter,
+        )
         self.pages_requested = 0
         self.job_set_checks = 0
         self.page_response_metadata: dict[str, object] = {}
         self.search_response_metadata: dict[str, object] = {}
         self._begin_direct_diagnostics()
+
+    @property
+    def request_attempts(self) -> int:
+        return self._retrier.request_attempts
+
+    @property
+    def retry_attempts(self) -> int:
+        return self._retrier.retry_attempts
 
     @staticmethod
     def endpoint() -> str:
@@ -112,8 +119,7 @@ class EpicSource(DirectDiagnosticsMixin):
 
     def fetch(self, company: CompanyCfg) -> list[dict]:
         self._begin_direct_diagnostics()
-        self.request_attempts = 0
-        self.retry_attempts = 0
+        self._retrier.reset()
         self.pages_requested = 1
         self.job_set_checks = 1
         self.page_response_metadata = {}
@@ -183,20 +189,7 @@ class EpicSource(DirectDiagnosticsMixin):
         request: Callable[[str, str], Any],
         url: str,
     ) -> Any:
-        for attempt in range(1, self._max_attempts + 1):
-            self.request_attempts += 1
-            try:
-                return request(url, self.name)
-            except SourceFetchError as exc:
-                exc.attempt_count = attempt
-                exc.response_metadata.update(
-                    {"attempt": attempt, "max_attempts": self._max_attempts}
-                )
-                if not exc.retryable or attempt == self._max_attempts:
-                    raise
-                self.retry_attempts += 1
-                self._sleeper(_retry_delay(attempt, self._jitter))
-        raise AssertionError("unreachable Epic retry state")
+        return self._retrier.run(lambda: request(url, self.name))
 
 
 def _get_page(url: str, source_name: str) -> TextHttpResponse:
@@ -213,14 +206,6 @@ def _get_search(url: str, source_name: str) -> JsonHttpResponse:
         source_name,
         max_response_bytes=DEFAULT_MAX_SEARCH_BYTES,
     )
-
-
-def _retry_delay(
-    attempt: int,
-    jitter: Callable[[float, float], float],
-) -> float:
-    base = 1.0 if attempt == 1 else 3.0
-    return min(5.0, base + max(0.0, float(jitter(0.0, 1.0))))
 
 
 def _next_jobs_contract(html: object) -> tuple[list[object], Mapping[str, object]]:

@@ -385,6 +385,7 @@ def test_malformed_page_schema_fails(payload):
 
 def test_only_transient_fetch_errors_use_bounded_retries():
     calls = 0
+    delays: list[float] = []
 
     def request_json(*_):
         nonlocal calls
@@ -395,27 +396,66 @@ def test_only_transient_fetch_errors_use_bounded_retries():
 
     source = IbmSource(
         request_json=request_json,
-        sleeper=lambda _: None,
+        sleeper=delays.append,
         jitter=lambda _low, _high: 0,
     )
 
     assert source.fetch(company()) == []
     assert calls == 4
+    assert delays == [1.0, 3.0]
+    # Two retries on the first snapshot pass, then one clean page per pass.
+    assert source.request_attempts == 4
+    assert source.retry_attempts == 2
     assert source.last_health_diagnostics.failed_request_count == 2
     assert source.last_health_diagnostics.reason_codes == ("request_retry_recovered",)
+    assert source.last_health_diagnostics.degraded is True
+    assert source.last_health_diagnostics.succeeded is True
+
+
+def test_exhausting_the_attempt_bound_fails_the_fetch():
+    calls = 0
+    delays: list[float] = []
+
+    def request_json(*_):
+        nonlocal calls
+        calls += 1
+        raise SourceFetchError("temporary", retryable=True)
+
+    source = IbmSource(
+        request_json=request_json,
+        sleeper=delays.append,
+        jitter=lambda _low, _high: 0,
+    )
+
+    with pytest.raises(SourceFetchError) as raised:
+        source.fetch(company())
+
+    assert calls == 3
+    assert delays == [1.0, 3.0]
+    assert source.request_attempts == 3
+    assert source.retry_attempts == 2
+    assert raised.value.attempt_count == 3
+    assert raised.value.response_metadata["attempt"] == 3
+    assert raised.value.response_metadata["max_attempts"] == 3
+    assert source.last_health_diagnostics.succeeded is None
 
 
 def test_permanent_fetch_error_is_not_retried():
     calls = 0
+    delays: list[float] = []
 
     def request_json(*_):
         nonlocal calls
         calls += 1
         raise SourceFetchError("forbidden", retryable=False)
 
-    with pytest.raises(SourceFetchError):
-        IbmSource(request_json=request_json, sleeper=lambda _: None).fetch(company())
+    source = IbmSource(request_json=request_json, sleeper=delays.append)
+    with pytest.raises(SourceFetchError) as raised:
+        source.fetch(company())
     assert calls == 1
+    assert delays == []
+    assert source.retry_attempts == 0
+    assert raised.value.attempt_count == 1
 
 
 def test_ibm_watchlist_migration_and_runtime_registration():

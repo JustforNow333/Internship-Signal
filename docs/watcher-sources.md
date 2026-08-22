@@ -29,6 +29,27 @@ constructor takes the shared `WorkdayPacer`.
 
 ---
 
+## Shared transport retry
+
+`watcher/sources/retry.py` owns the bounded retry *mechanism* used by the
+adapters whose retry loops were identical — Bain, Epic, IBM, and
+SuccessFactors. An immutable `RetryPolicy` carries `max_attempts` and an
+optional crawl-wide `max_crawl_retries`; a per-adapter `RequestRetrier` runs one
+request, retrying only a `retryable` `SourceFetchError`, sleeping roughly
+`1 + jitter` before the first retry and `3 + jitter` before later ones, capped
+at five seconds, and exposing `request_attempts` / `retry_attempts` for
+diagnostics. The retrier is per-adapter-instance state that `reset()` clears at
+the start of each `fetch()`; there is no global retry state.
+
+It owns nothing else. Pagination, continuation tokens, page-completeness
+decisions, parsing, dedupe, request construction, enrichment, and reason codes
+stay in the adapter, which decides what to request and what a failed or
+recovered request means for that source. Workday, Oracle HCM, and TalentBrew
+keep their own loop: `workday_retry_delay` honors `Retry-After`, jitters over a
+wider range, and caps at ten seconds, so it is a different contract.
+
+---
+
 ## Contracts
 
 - **Greenhouse** — `boards-api.greenhouse.io/v1/boards/<token>/jobs?content=true`.

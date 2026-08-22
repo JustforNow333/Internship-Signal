@@ -16,7 +16,6 @@ from watcher.config import CompanyCfg, is_valid_hostname
 from watcher.sources.base import (
     DirectDiagnosticsMixin,
     SourceError,
-    SourceFetchError,
     SourceSchemaError,
     TextHttpResponse,
     get_text_response,
@@ -24,9 +23,13 @@ from watcher.sources.base import (
     page_fingerprint,
     parse_records,
 )
+from watcher.sources.retry import (
+    DEFAULT_MAX_ATTEMPTS,
+    RequestRetrier,
+    RetryPolicy,
+)
 
 DEFAULT_MAX_PAGES = 1_000
-DEFAULT_MAX_ATTEMPTS = 3
 # A completely enumerated board can need hundreds of sequential page requests,
 # so a per-page attempt limit alone does not bound how long one crawl may run.
 # This budget caps retries across the whole crawl; exhausting it fails the
@@ -188,27 +191,34 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
         max_crawl_retries: int = DEFAULT_MAX_CRAWL_RETRIES,
         max_pages: int = DEFAULT_MAX_PAGES,
     ) -> None:
-        if not 1 <= max_attempts <= DEFAULT_MAX_ATTEMPTS:
-            raise ValueError(
-                f"max_attempts must be between 1 and {DEFAULT_MAX_ATTEMPTS}"
-            )
         if not 0 <= max_crawl_retries <= DEFAULT_MAX_CRAWL_RETRIES:
             raise ValueError(
                 f"max_crawl_retries must be between 0 and {DEFAULT_MAX_CRAWL_RETRIES}"
             )
+        retrier = RequestRetrier(
+            policy=RetryPolicy(
+                max_attempts=max_attempts,
+                max_crawl_retries=max_crawl_retries,
+            ),
+            sleeper=sleeper,
+            jitter=jitter,
+        )
         if not 1 <= max_pages <= DEFAULT_MAX_PAGES:
             raise ValueError(f"max_pages must be between 1 and {DEFAULT_MAX_PAGES}")
         self._request_text = request_text
-        self._sleeper = sleeper
-        self._jitter = jitter
-        self._max_attempts = max_attempts
-        self._max_crawl_retries = max_crawl_retries
+        self._retrier = retrier
         self.max_pages = max_pages
         self.request_count = 0
-        self.request_attempts = 0
-        self.retry_attempts = 0
         self.last_response_metadata: dict[str, object] = {}
         self._begin_direct_diagnostics()
+
+    @property
+    def request_attempts(self) -> int:
+        return self._retrier.request_attempts
+
+    @property
+    def retry_attempts(self) -> int:
+        return self._retrier.retry_attempts
 
     @staticmethod
     def endpoint(
@@ -231,10 +241,9 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
     def fetch(self, company: CompanyCfg) -> list[dict]:
         self._begin_direct_diagnostics()
         self.request_count = 0
-        self.request_attempts = 0
         # The crawl-wide retry budget is spent per collection, so it resets
         # here rather than persisting across fetches.
-        self.retry_attempts = 0
+        self._retrier.reset()
         self.last_response_metadata = {}
         host, prefix, locale = _required_config(company)
         expected_total: int | None = None
@@ -335,27 +344,12 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
     def _request_page(self, url: str) -> str:
         self.request_count += 1
         request = self._request_text or _get_text
-        for attempt in range(1, self._max_attempts + 1):
-            self.request_attempts += 1
-            try:
-                response = request(url, self.name)
-            except SourceFetchError as exc:
-                exc.attempt_count = attempt
-                exc.response_metadata.update(
-                    {"attempt": attempt, "max_attempts": self._max_attempts}
-                )
-                # A retry re-requests the identical startrow, so every
-                # pagination and completeness check still applies to whatever
-                # the retry returns. Exhausting either bound fails the crawl.
-                if (
-                    not exc.retryable
-                    or attempt == self._max_attempts
-                    or self.retry_attempts >= self._max_crawl_retries
-                ):
-                    raise
-                self.retry_attempts += 1
-                self._sleeper(_retry_delay(attempt, self._jitter))
-                continue
+
+        # A retry re-requests the identical startrow, so every pagination and
+        # completeness check still applies to whatever the retry returns.
+        # Exhausting the per-page bound or the crawl budget fails the crawl.
+        def attempt() -> str:
+            response = request(url, self.name)
             if isinstance(response, TextHttpResponse):
                 self.last_response_metadata = dict(response.metadata)
                 return response.text
@@ -364,7 +358,8 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
                     "successfactors expected an HTML text response"
                 )
             return response
-        raise AssertionError("unreachable SuccessFactors retry state")
+
+        return self._retrier.run(attempt)
 
     def _finish(self, rows: list[dict], *, duplicate_count: int) -> list[dict]:
         """Publish diagnostics for a crawl that satisfied every check.
@@ -395,14 +390,6 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
 
 def _get_text(url: str, source_name: str) -> TextHttpResponse:
     return get_text_response(url, source_name)
-
-
-def _retry_delay(
-    attempt: int,
-    jitter: Callable[[float, float], float],
-) -> float:
-    base = 1.0 if attempt == 1 else 3.0
-    return min(5.0, base + max(0.0, float(jitter(0.0, 1.0))))
 
 
 def _required_config(company: CompanyCfg) -> tuple[str, str, str]:

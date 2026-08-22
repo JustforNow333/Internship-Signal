@@ -15,13 +15,17 @@ from watcher.config import CompanyCfg
 from watcher.sources.base import (
     DirectDiagnosticsMixin,
     JsonHttpResponse,
-    SourceFetchError,
     SourceSchemaError,
     get_json_response,
     html_to_text,
     make_row,
     page_fingerprint,
     parse_records,
+)
+from watcher.sources.retry import (
+    DEFAULT_MAX_ATTEMPTS,
+    RequestRetrier,
+    RetryPolicy,
 )
 
 API_HOST = "www-api.ibm.com"
@@ -32,7 +36,6 @@ SEARCH_URL = (
 )
 DEFAULT_PAGE_SIZE = 100
 DEFAULT_MAX_PAGES = 100
-DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_MAX_SNAPSHOT_PASSES = 3
 _NATIVE_ID = re.compile(r"[1-9][0-9]*")
 _INDEX_ID = re.compile(r"[0-9a-f]{64}")
@@ -82,10 +85,11 @@ class IbmSource(DirectDiagnosticsMixin):
         max_pages: int = DEFAULT_MAX_PAGES,
         max_snapshot_passes: int = DEFAULT_MAX_SNAPSHOT_PASSES,
     ) -> None:
-        if not 1 <= max_attempts <= DEFAULT_MAX_ATTEMPTS:
-            raise ValueError(
-                f"max_attempts must be between 1 and {DEFAULT_MAX_ATTEMPTS}"
-            )
+        retrier = RequestRetrier(
+            policy=RetryPolicy(max_attempts=max_attempts),
+            sleeper=sleeper,
+            jitter=jitter,
+        )
         if not 1 <= page_size <= DEFAULT_PAGE_SIZE:
             raise ValueError(f"page_size must be between 1 and {DEFAULT_PAGE_SIZE}")
         if not 1 <= max_pages <= DEFAULT_MAX_PAGES:
@@ -96,19 +100,23 @@ class IbmSource(DirectDiagnosticsMixin):
                 f"{DEFAULT_MAX_SNAPSHOT_PASSES}"
             )
         self._request_json = request_json
-        self._sleeper = sleeper
-        self._jitter = jitter
-        self._max_attempts = max_attempts
+        self._retrier = retrier
         self.page_size = page_size
         self.max_pages = max_pages
         self.max_snapshot_passes = max_snapshot_passes
         self.pages_requested = 0
         self.documents_seen = 0
         self.snapshot_passes_requested = 0
-        self.request_attempts = 0
-        self.retry_attempts = 0
         self.last_response_metadata: dict[str, object] = {}
         self._begin_direct_diagnostics()
+
+    @property
+    def request_attempts(self) -> int:
+        return self._retrier.request_attempts
+
+    @property
+    def retry_attempts(self) -> int:
+        return self._retrier.retry_attempts
 
     @staticmethod
     def endpoint(*, start: int, results: int, page: int) -> str:
@@ -131,8 +139,7 @@ class IbmSource(DirectDiagnosticsMixin):
         self.pages_requested = 0
         self.documents_seen = 0
         self.snapshot_passes_requested = 0
-        self.request_attempts = 0
-        self.retry_attempts = 0
+        self._retrier.reset()
         self.last_response_metadata = {}
         previous_snapshot: _IbmSnapshot | None = None
         for pass_number in range(1, self.max_snapshot_passes + 1):
@@ -287,25 +294,16 @@ class IbmSource(DirectDiagnosticsMixin):
 
     def _fetch_page(self, url: str) -> Any:
         request = self._request_json or _get_json
-        for attempt in range(1, self._max_attempts + 1):
-            self.request_attempts += 1
-            try:
-                response = request(url, self.name)
-                if isinstance(response, JsonHttpResponse):
-                    self.last_response_metadata = dict(response.metadata)
-                    return response.payload
-                self.last_response_metadata = {}
-                return response
-            except SourceFetchError as exc:
-                exc.attempt_count = attempt
-                exc.response_metadata.update(
-                    {"attempt": attempt, "max_attempts": self._max_attempts}
-                )
-                if not exc.retryable or attempt == self._max_attempts:
-                    raise
-                self.retry_attempts += 1
-                self._sleeper(_retry_delay(attempt, self._jitter))
-        raise AssertionError("unreachable IBM retry state")
+
+        def attempt() -> Any:
+            response = request(url, self.name)
+            if isinstance(response, JsonHttpResponse):
+                self.last_response_metadata = dict(response.metadata)
+                return response.payload
+            self.last_response_metadata = {}
+            return response
+
+        return self._retrier.run(attempt)
 
     def _finish(self, rows: list[dict], duplicate_count: int) -> list[dict]:
         reasons = ("request_retry_recovered",) if self.retry_attempts else ()
@@ -321,14 +319,6 @@ class IbmSource(DirectDiagnosticsMixin):
 
 def _get_json(url: str, source_name: str) -> JsonHttpResponse:
     return get_json_response(url, source_name)
-
-
-def _retry_delay(
-    attempt: int,
-    jitter: Callable[[float, float], float],
-) -> float:
-    base = 1.0 if attempt == 1 else 3.0
-    return min(5.0, base + max(0.0, float(jitter(0.0, 1.0))))
 
 
 def _page(
