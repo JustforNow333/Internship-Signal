@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, TypeVar
 
-from watcher.sources.base import SourceFetchError
+from watcher.sources.contracts import SourceFetchError
 
 DEFAULT_MAX_ATTEMPTS = 3
 FIRST_RETRY_DELAY_SECONDS = 1.0

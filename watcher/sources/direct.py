@@ -7,7 +7,8 @@ from collections.abc import Callable
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import DirectDiagnosticsMixin, parse_records
+from watcher.sources.diagnostics import DirectDiagnosticsMixin
+from watcher.sources.parsing import parse_records
 
 
 class DirectRecordAdapter(DirectDiagnosticsMixin):

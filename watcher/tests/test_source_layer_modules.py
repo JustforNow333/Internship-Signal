@@ -7,6 +7,7 @@ so an adapter importing from `watcher.sources.base` keeps working and the
 lower layers stay independent.
 """
 
+import ast
 import importlib
 import os
 import pathlib
@@ -19,7 +20,9 @@ from watcher.sources import (
     base,
     contracts,
     diagnostics,
+    direct,
     parsing,
+    retry,
     rows,
     sanitize,
     transport,
@@ -130,14 +133,20 @@ def test_the_split_modules_stay_layered():
     """Lower layers must not import the modules stacked on top of them."""
 
     def imports_of(module):
-        source = importlib.import_module(module.__name__).__file__
-        with open(source, encoding="utf-8") as handle:
-            text = handle.read()
-        return {
-            line.split("import")[0].replace("from", "").strip()
-            for line in text.splitlines()
-            if line.startswith("from watcher.sources")
-        }
+        source = pathlib.Path(importlib.import_module(module.__name__).__file__)
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        imports = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if (node.module or "").startswith("watcher.sources"):
+                    imports.add(node.module)
+            elif isinstance(node, ast.Import):
+                imports.update(
+                    alias.name
+                    for alias in node.names
+                    if alias.name.startswith("watcher.sources")
+                )
+        return imports
 
     assert imports_of(sanitize) == set()
     assert imports_of(rows) == set()
@@ -147,6 +156,11 @@ def test_the_split_modules_stay_layered():
     assert imports_of(transport) == {
         "watcher.sources.contracts",
         "watcher.sources.sanitize",
+    }
+    assert imports_of(retry) == {"watcher.sources.contracts"}
+    assert imports_of(direct) == {
+        "watcher.sources.diagnostics",
+        "watcher.sources.parsing",
     }
 
 
