@@ -484,11 +484,13 @@ def test_workday_invalid_total_still_raises():
     ],
 )
 def test_direct_adapters_retain_valid_rows_when_one_record_is_malformed(source, company, payload, caplog):
-    with caplog.at_level(logging.WARNING, logger="watcher.sources.base"):
+    with caplog.at_level(logging.WARNING, logger="watcher.sources.parsing"):
         rows = source.parse(payload, company)
 
     assert [row["title"] for row in rows] == ["Intern"]
     assert "Skipped 1 malformed" in caplog.text
+    # parse_records owns this warning, so it is logged by watcher.sources.parsing.
+    assert [record.name for record in caplog.records] == ["watcher.sources.parsing"]
     assert "Acme" in caplog.text
     assert "broken" not in caplog.text
     diagnostics = source.last_health_diagnostics

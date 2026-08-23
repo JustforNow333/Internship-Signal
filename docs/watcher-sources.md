@@ -29,6 +29,40 @@ constructor takes the shared `WorkdayPacer`.
 
 ---
 
+## The shared source layer
+
+`base.py` used to hold every shared concern in one module. It is now a
+re-export facade over modules split by responsibility, so a task only loads the
+part it needs:
+
+| Module | Owns |
+|---|---|
+| `sanitize.py` | total sanitizers — `_safe_url`, `_safe_error_code`, `_sanitize_fetch_message`, `_safe_body_preview`, and `html_to_text` |
+| `contracts.py` | the `Source` protocol, `SourceError`/`SourceFetchError`/`SourceSchemaError`, `JsonHttpResponse`/`TextHttpResponse`, `require_token` |
+| `diagnostics.py` | `DirectSourceDiagnostics` and `DirectDiagnosticsMixin` |
+| `transport.py` | request construction, decoding, decompression, charset handling, and HTTP/network failure classification |
+| `parsing.py` | `parse_records`, `ensure_list`, `page_fingerprint` |
+| `rows.py` | `make_row` canonical-column enforcement and `iso_date` |
+| `retry.py` | the bounded retry primitive described below |
+
+Import direction is strictly downward: `sanitize.py` and `rows.py` depend on no
+other source module, `contracts.py` and `diagnostics.py` depend only on
+`sanitize.py`, `parsing.py` only on `contracts.py`, and `transport.py` on
+`contracts.py` and `sanitize.py`. `test_source_layer_modules.py` pins that
+layering and the facade's re-exports.
+
+`html_to_text` sits in `sanitize.py` rather than `rows.py` because both an
+adapter normalizing a description and `_safe_body_preview` stripping markup out
+of a failure preview need it; keeping it low leaves `transport.py` independent
+of the canonical schema. `rows.py` still imports `CANONICAL_COLUMNS` from
+`backend.app.normalize` — moving that shared schema to a neutral package is a
+separate change.
+
+Existing `from watcher.sources.base import ...` imports still work. Prefer the
+specific module in new code.
+
+---
+
 ## Shared transport retry
 
 `watcher/sources/retry.py` owns the bounded retry *mechanism* used by the

@@ -30,6 +30,7 @@ cherry-pick shared fixes.
 | `watcher/config.py` | watchlist + env validation; `supported_ats()` derives from the registry |
 | `watcher/sources/registry.py` | **canonical direct-source registry** — register a new ATS adapter here only |
 | `watcher/sources/` | one adapter per ATS and per GitHub backstop format |
+| `watcher/sources/contracts.py` · `transport.py` · `parsing.py` · `rows.py` · `sanitize.py` · `diagnostics.py` · `retry.py` | the shared source layer, split by responsibility; `base.py` is a re-export facade |
 | `watcher/eligibility.py` · `filters.py` | student/location/role gates · internship, open, min-score |
 | `watcher/seen_store.py` · `analysis_cache.py` | durable `seen.sqlite` · rebuildable cache + `STATIC_ANALYSIS_CACHE_VERSION` |
 | `watcher/health/` | health models, state, coverage, policy, store, rendering, service, report |
@@ -91,7 +92,7 @@ Docs referenced below: [`docs/watcher.md`](docs/watcher.md) (W),
 
 | Task | Read | Test |
 |---|---|---|
-| ATS adapter | `watcher-sources.md`, `sources/registry.py`, `sources/base.py` | `watcher/tests/test_<adapter>.py`, `test_source_registry.py` |
+| ATS adapter | `watcher-sources.md`, `sources/registry.py`, the source-layer module you need | `watcher/tests/test_<adapter>.py`, `test_source_registry.py` |
 | Workday transport/retry/pacing | W §4 | `test_workday_*.py` |
 | Watchlist / env validation | W §2 | `test_config.py` |
 | Concurrency, snapshot, replay | W §11, §13 | `test_collection_concurrency.py`, `test_collection_snapshot.py` |
@@ -108,7 +109,7 @@ Docs referenced below: [`docs/watcher.md`](docs/watcher.md) (W),
 ## Tests
 
 Run the narrowest suite covering the change; run the full backend + watcher suite
-when touching `analyze_rows`, `sources/base.py`, `sources/direct.py`,
+when touching `analyze_rows`, any shared `watcher/sources/` layer module,
 `config.py`, posting identity, the seen store, eligibility, or scoring.
 
 ```bash
