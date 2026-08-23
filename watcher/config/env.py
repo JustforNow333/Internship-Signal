@@ -3,7 +3,8 @@
 Everything that reads, parses, or coerces a value out of the process
 environment lives here: dotenv loading, the `WATCHER_*` settings, the bounded
 coercion helpers those settings share, and the defaults they fall back to.
-YAML loading and watchlist validation stay in `_legacy.py`.
+YAML loading lives in `loader.py`; watchlist validation lives in
+`validation.py`.
 
 This is the lowest module in the config package. It imports nothing else from
 `watcher.config` at module scope, because `models.py` imports

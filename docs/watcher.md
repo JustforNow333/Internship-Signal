@@ -48,10 +48,11 @@ injected source list is preserved.
 
 `watcher/config/` owns a small dependency-free watchlist loader plus dotenv
 loading; process environment values win. Every entry is validated at startup and
-fails loudly. Import from `watcher.config`: the package is mid-decomposition,
-with the whole process-environment layer in `env.py`, the configuration
-dataclasses in `models.py`, watchlist file and YAML loading in `loader.py`, and
-only the validation rules left in the transitional `_legacy.py`.
+fails loudly. Import from `watcher.config`: the process-environment layer lives
+in `env.py`, configuration dataclasses in `models.py`, watchlist file and YAML
+loading in `loader.py`, and pure watchlist validation in `validation.py`.
+`_legacy.py` now contains compatibility imports only and remains until the
+final facade cleanup.
 
 `env.py` owns every `WATCHER_*` setting and runs `load_dotenv()` as an
 import-time side effect, before `DEFAULT_SEEN_DB_PATH` is evaluated, so a value

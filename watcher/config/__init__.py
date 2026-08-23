@@ -8,7 +8,8 @@ exposed before it became a package. The implementation is being decomposed:
 | `env.py` | dotenv loading, every `WATCHER_*` setting, and the coercion helpers |
 | `models.py` | the configuration dataclasses and the constants intrinsic to them |
 | `loader.py` | locating and reading the watchlist, YAML parsing, building the config objects |
-| `_legacy.py` | **transitional** — the validation rules `loader.py` calls, not yet extracted |
+| `validation.py` | pure watchlist and per-source configuration validation |
+| `_legacy.py` | **transitional** — compatibility imports only |
 
 `env.py` is imported first below because importing it runs `load_dotenv()`, and
 `models.py` reads its environment-derived default from it.
@@ -34,7 +35,7 @@ from watcher.config.env import (
     resolve_analysis_cache_path,
     workday_min_interval_seconds,
 )
-from watcher.config._legacy import (
+from watcher.config.validation import (
     COVERAGE_STATUS_NO_SOURCE_FOUND,
     MAX_PLATFORM_FAMILY_LENGTH,
     NON_DIRECT_ATS,

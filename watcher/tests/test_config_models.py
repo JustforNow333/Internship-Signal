@@ -14,7 +14,7 @@ import sys
 import pytest
 
 import watcher.config as config
-from watcher.config import _legacy, env, loader, models
+from watcher.config import _legacy, env, loader, models, validation
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -170,12 +170,12 @@ def test_every_previously_imported_symbol_still_resolves(name):
     assert hasattr(config, name), name
 
 
-def test_symbols_still_owned_by_legacy_are_the_same_objects():
-    # Validation is all that _legacy still owns; the next commit moves it.
+def test_validation_symbols_resolve_directly_from_their_owner():
     for name in ("supported_ats", "is_valid_hostname", "NON_DIRECT_ATS",
                  "SUPPORTED_COVERAGE_STATUSES", "SUPPORTED_GITHUB_LISTING_FORMATS",
                  "MAX_PLATFORM_FAMILY_LENGTH", "COVERAGE_STATUS_NO_SOURCE_FOUND"):
-        assert getattr(config, name) is getattr(_legacy, name)
+        assert getattr(config, name) is getattr(validation, name)
+        assert getattr(_legacy, name) is getattr(validation, name)
 
 
 def test_symbols_owned_by_the_loader_are_the_same_objects():
@@ -384,6 +384,7 @@ def test_source_adapters_still_import_company_cfg():
     [
         "watcher.config",
         "watcher.config.models",
+        "watcher.config.validation",
         "watcher.config._legacy",
         "watcher.sources.registry",
         "watcher.sources.greenhouse",
@@ -405,7 +406,7 @@ def test_no_import_cycle_whichever_module_loads_first(first):
 
 
 def test_constructing_models_works_when_models_is_imported_alone():
-    """The deferred _legacy imports must resolve at construction time."""
+    """Deferred in-package imports must resolve at construction time."""
 
     code = (
         "from watcher.config.models import CollectionConcurrencyCfg, WatcherConfig;"

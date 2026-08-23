@@ -371,6 +371,7 @@ def test_importing_env_alone_already_runs_load_dotenv():
         "watcher.config",
         "watcher.config.env",
         "watcher.config.models",
+        "watcher.config.validation",
         "watcher.config._legacy",
         "watcher.sources.registry",
         "watcher.sources.workday",

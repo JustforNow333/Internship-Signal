@@ -2,8 +2,8 @@
 
 These pin the accepted YAML shape, the configuration objects it produces, and
 the exact errors it raises, so the extraction cannot quietly change what a
-watchlist means. Validation rules stay in `_legacy.py` until the next commit;
-these tests assert the loader still calls them.
+watchlist means. Validation rules live in `validation.py`; these tests assert
+the loader calls that owner directly.
 """
 
 import ast
@@ -16,7 +16,7 @@ import sys
 import pytest
 
 import watcher.config as config
-from watcher.config import _legacy, loader, models
+from watcher.config import _legacy, loader, models, validation
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAD = 'defaults:\n  terms: ["Summer 2027"]\n'
@@ -43,11 +43,39 @@ def test_the_public_path_still_resolves_to_the_loader(name):
     assert getattr(config, name) is getattr(loader, name)
 
 
-def test_the_loader_still_calls_the_temporary_validation_module():
-    """Validation has not moved yet; loader.py must reuse it, not copy it."""
+def test_the_loader_calls_the_validation_owner_directly():
 
     for name in (
+        "_platform_family",
+        "_validate_aliases",
+        "_validate_company_entry",
+        "_validate_company_identity",
+        "_validate_coverage_status",
+        "_validate_default_terms_present",
+        "_validate_github_source_uniqueness",
+        "_validate_github_listing_sources_value",
+        "_validate_unique_company_names",
+        "_validate_oracle_hcm_config",
+        "_validate_icims_config",
+        "_validate_paylocity_config",
+        "_validate_platform_family_mode",
+        "_validate_successfactors_config",
+        "_validate_talentbrew_config",
+        "_validate_terms_tuple",
+        "_validate_token_config",
+        "_validate_watchlist_sections",
+        "_validate_workday_config",
+        "_validated_github_listing_urls",
+        "_validated_github_source_fields",
+        "_validated_min_score",
+    ):
+        assert getattr(loader, name) is getattr(validation, name), name
+
+
+def test_legacy_reexports_the_validation_objects_for_compatibility():
+    for name in (
         "supported_ats",
+        "is_valid_hostname",
         "_platform_family",
         "_validated_feed_url",
         "_validate_github_source_uniqueness",
@@ -58,11 +86,12 @@ def test_the_loader_still_calls_the_temporary_validation_module():
         "_validate_successfactors_config",
         "_validate_talentbrew_config",
     ):
-        assert getattr(loader, name) is getattr(_legacy, name), name
+        assert getattr(_legacy, name) is getattr(validation, name), name
 
 
 def test_validation_rules_are_not_duplicated_into_the_loader():
-    tree = ast.parse((ROOT / "watcher/config/loader.py").read_text(encoding="utf-8"))
+    source = (ROOT / "watcher/config/loader.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
     defined = {
         node.name for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.ClassDef))
@@ -70,6 +99,15 @@ def test_validation_rules_are_not_duplicated_into_the_loader():
     assert not [name for name in defined if name.startswith("_validate")]
     assert "is_valid_hostname" not in defined
     assert "supported_ats" not in defined
+    for validation_message in (
+        "entries require token",
+        "coverage_status must be one of",
+        "platform_family must be",
+        "defaults.min_score must be",
+        "aliases may not contain",
+        "duplicate feed identities",
+    ):
+        assert validation_message not in source
 
 
 # --------------------------------------------------------------------------
@@ -554,10 +592,10 @@ def test_the_real_watchlist_round_trips_through_dataclass_fields():
 # Import direction
 # --------------------------------------------------------------------------
 
-def test_legacy_does_not_import_the_loader():
-    """The temporary dependency runs one way: loader -> _legacy."""
+def test_validation_does_not_import_the_loader():
+    """Validation stays below loading and never creates config/source cycles."""
 
-    tree = ast.parse((ROOT / "watcher/config/_legacy.py").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / "watcher/config/validation.py").read_text(encoding="utf-8"))
     modules = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
@@ -567,11 +605,24 @@ def test_legacy_does_not_import_the_loader():
     assert "watcher.config.loader" not in modules, modules
 
 
+def test_legacy_contains_only_compatibility_imports():
+    tree = ast.parse((ROOT / "watcher/config/_legacy.py").read_text(encoding="utf-8"))
+
+    substantive = [
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    ]
+
+    assert substantive == []
+
+
 @pytest.mark.parametrize(
     "first",
     [
         "watcher.config",
         "watcher.config.loader",
+        "watcher.config.validation",
         "watcher.config._legacy",
         "watcher.config.models",
         "watcher.config.env",
