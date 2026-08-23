@@ -11,12 +11,14 @@ import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Mapping
 
-PHD_ONLY = "phd_only"
-GRADUATE_ONLY = "graduate_only"
-FRESHMAN_ONLY = "freshman_only"
-RETURNING_INTERN_ONLY = "returning_intern_only"
-CATEGORICAL_EXCLUSION_REASONS = frozenset(
-    {PHD_ONLY, GRADUATE_ONLY, FRESHMAN_ONLY, RETURNING_INTERN_ONLY}
+# Re-exported for existing callers; the shared reason codes are owned by the
+# neutral domain package the watcher gate also reads them from.
+from internship_signal.domain.eligibility import (
+    CATEGORICAL_EXCLUSION_REASONS,  # noqa: F401 - re-exported for existing callers
+    FRESHMAN_ONLY,
+    GRADUATE_ONLY,
+    PHD_ONLY,
+    RETURNING_INTERN_ONLY,
 )
 
 _PHD_TERM = r"(?:phd|doctoral|doctorate|post[- ]?doctoral|post[- ]?doc)"

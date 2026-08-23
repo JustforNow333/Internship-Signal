@@ -13,7 +13,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Iterable, Mapping, Sequence
 
-from backend.app.dedupe import norm_company
+from internship_signal.domain.identity import norm_company
 from watcher.config import CompanyCfg
 from watcher.health.models import (
     COVERAGE_BACKSTOP_ONLY,

@@ -13,7 +13,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
-from backend.app.normalize import CANONICAL_COLUMNS
+from internship_signal.domain.jobs import CANONICAL_COLUMNS
 from watcher.config import WatcherConfig
 from watcher.source_health import (
     SOURCE_KIND_DIRECT,

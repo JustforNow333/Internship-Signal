@@ -1,8 +1,8 @@
 """Canonical row construction and the field normalizers that feed it.
 
-`CANONICAL_COLUMNS` still comes from `backend.app.normalize`: the canonical
-schema is shared with the backend, and moving it to a neutral domain package is
-a separate change.
+`CANONICAL_COLUMNS` comes from `internship_signal.domain.jobs`, the neutral
+package both the watcher and the backend depend on. The watcher never reaches
+into `backend.app` for the shared schema.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.app.normalize import CANONICAL_COLUMNS
+from internship_signal.domain.jobs import CANONICAL_COLUMNS
 
 
 def make_row(*, source: str, source_adapter: str, extra: dict | None = None, **fields: Any) -> dict:

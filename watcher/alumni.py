@@ -13,7 +13,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from backend.app.dedupe import norm_company
+from internship_signal.domain.identity import norm_company
 
 LOGGER = logging.getLogger(__name__)
 

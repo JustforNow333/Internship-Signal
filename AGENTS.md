@@ -20,6 +20,7 @@ cherry-pick shared fixes.
 
 | Path | Owns |
 |---|---|
+| `internship_signal/domain/` | **neutral shared layer** — canonical job schema, identity normalizers, shared eligibility reason codes; depends on neither layer |
 | `backend/app/ingest.py` | `process_csv` (CSV cleaning) and `analyze_rows` (shared analysis seam) |
 | `backend/app/` | normalize, dedupe, salary, classify, signals, scoring, eligibility, ask, profile, config, store |
 | `backend/app/hosted/` | accounts, PostgreSQL job import, per-user matching, notification delivery |
@@ -44,8 +45,13 @@ cherry-pick shared fixes.
    pre-existing dirty hunk; never stash, reset, clean, or touch another worktree.
 2. **Backend owns analysis.** The watcher never computes scores, role tracks, or
    job IDs and never duplicates dedupe/classification/signals. Reuse
-   `analyze_rows`, `norm_company`, `norm_url` verbatim, and never treat the
-   content-hash `job["id"]` as an ATS requisition ID.
+   `analyze_rows` and the posting-identity keys from `backend/app/dedupe.py`
+   verbatim, and never treat the content-hash `job["id"]` as an ATS requisition
+   ID. Concepts genuinely shared by both layers — `CANONICAL_COLUMNS`,
+   `norm_company`/`norm_title`/`norm_url`, `CATEGORICAL_EXCLUSION_REASONS` —
+   are owned by `internship_signal/domain/`, which both layers import and which
+   imports neither. Watcher code must not reach into `backend.app` for those;
+   `backend.app` re-exports them for existing callers.
 3. **Adapters only fetch canonical rows.** Eligibility lives in
    `watcher/eligibility.py`; `filters.py` adds internship/open/min-score.
 4. **Bump `STATIC_ANALYSIS_CACHE_VERSION`** for any static-eligibility,
@@ -114,7 +120,7 @@ when touching `analyze_rows`, any shared `watcher/sources/` layer module,
 
 ```bash
 PYTHONPATH=.:backend backend/venv/Scripts/python.exe -m pytest backend/tests watcher/tests -q
-PYTHONPATH=.:backend python3 -m compileall -q backend watcher scripts
+PYTHONPATH=.:backend python3 -m compileall -q internship_signal backend watcher scripts
 cd frontend && npm test && npm run build
 git diff --check
 ```

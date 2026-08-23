@@ -81,7 +81,7 @@ The checked-in Windows virtualenv lives in the primary checkout at
 
 ```bash
 PYTHONPATH=.:backend backend/venv/Scripts/python.exe -m pytest backend/tests watcher/tests -q
-PYTHONPATH=.:backend python3 -m compileall -q backend watcher scripts
+PYTHONPATH=.:backend python3 -m compileall -q internship_signal backend watcher scripts
 ```
 
 WSL fallback when inline WSL env assignments do not cross into the Windows

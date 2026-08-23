@@ -10,6 +10,9 @@ Current component boundaries and data flow. Watcher-specific contracts live in
 
 ```
 internship-signal/
+├── internship_signal/     neutral shared layer both other layers may import
+│   └── domain/            jobs.py (canonical schema), identity.py (normalizers),
+│                          eligibility.py (categorical reason codes)
 ├── backend/
 │   ├── app/
 │   │   ├── main.py        FastAPI routes (ingest, jobs, summary, ask, profile)
@@ -67,7 +70,8 @@ internship-signal/
 ## The `analyze_rows` seam
 
 Everything after "rows exist" is one shared pipeline. A row is a dict keyed by
-`CANONICAL_COLUMNS` (defined in `normalize.py`):
+`CANONICAL_COLUMNS`, owned by `internship_signal/domain/jobs.py` and re-exported
+by `backend/app/normalize.py` for existing callers:
 
 ```python
 CANONICAL_COLUMNS = [
@@ -77,6 +81,15 @@ CANONICAL_COLUMNS = [
 ]
 ```
 
+- `internship_signal/domain/` owns the concepts both layers share: the canonical
+  job schema (`jobs.py`), the identity normalizers `norm_company`/`norm_title`/
+  `norm_url` (`identity.py`), and the categorical student-eligibility reason
+  codes (`eligibility.py`). Both `backend.app` and `watcher` may import it; it
+  imports neither, so the dependency direction stays one-way. `backend.app`
+  re-exports each moved symbol as the same object, so existing
+  `backend.app.normalize` / `dedupe` / `eligibility` imports keep working.
+  Everything layer-specific — dedupe orchestration, posting-identity keys,
+  scoring, the eligibility engine, persistence, APIs, adapters — stays put.
 - `backend/app/ingest.py::process_csv` owns CSV parsing, cleaning, and the
   cleaning report, then calls `analyze_rows`.
 - `backend/app/ingest.py::analyze_rows(rows, today=None)` owns dedupe, salary

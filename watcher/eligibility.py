@@ -7,7 +7,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Mapping
 
-from backend.app.eligibility import CATEGORICAL_EXCLUSION_REASONS
+from internship_signal.domain.eligibility import CATEGORICAL_EXCLUSION_REASONS
 
 DEFAULT_TARGET_ROLES = frozenset({"swe"})
 OUTSIDE_US = "outside_us"
