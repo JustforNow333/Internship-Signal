@@ -191,6 +191,10 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
         max_crawl_retries: int = DEFAULT_MAX_CRAWL_RETRIES,
         max_pages: int = DEFAULT_MAX_PAGES,
     ) -> None:
+        if not 1 <= max_attempts <= DEFAULT_MAX_ATTEMPTS:
+            raise ValueError(
+                f"max_attempts must be between 1 and {DEFAULT_MAX_ATTEMPTS}"
+            )
         if not 0 <= max_crawl_retries <= DEFAULT_MAX_CRAWL_RETRIES:
             raise ValueError(
                 f"max_crawl_retries must be between 0 and {DEFAULT_MAX_CRAWL_RETRIES}"

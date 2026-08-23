@@ -348,6 +348,13 @@ def test_registry_origin_and_snapshot_include_successfactors_without_replacing_a
         )
 
 
+def test_constructor_validates_attempt_limit_before_crawl_retry_limit():
+    with pytest.raises(ValueError) as raised:
+        SuccessFactorsSource(max_attempts=0, max_crawl_retries=-1)
+
+    assert str(raised.value) == "max_attempts must be between 1 and 3"
+
+
 def test_default_watchlist_uses_verified_successfactors_configuration():
     companies = {
         item.name: item for item in load_watchlist(DEFAULT_WATCHLIST_PATH).companies
