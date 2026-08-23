@@ -15,14 +15,15 @@ from __future__ import annotations
 
 import re
 from html import unescape
-from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+
+from watcher.text_safety import safe_text
 
 MAX_SAFE_PREVIEW_CHARS = 160
 
 
-def html_to_text(value: Any) -> str:
-    text = unescape(str(value or ""))
+def html_to_text(value: object) -> str:
+    text = unescape(safe_text(value))
     text = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", text)
     text = re.sub(r"(?i)</\s*(p|div|li|h[1-6])\s*>", "\n", text)
     text = re.sub(r"<[^>]+>", " ", text)
@@ -30,8 +31,8 @@ def html_to_text(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _safe_url(value: str) -> str:
-    raw = str(value or "").strip()
+def _safe_url(value: object) -> str:
+    raw = safe_text(value).strip()
     try:
         parsed = urlsplit(raw)
     except ValueError:
@@ -48,7 +49,11 @@ def _safe_url(value: str) -> str:
 
 
 def _sanitize_fetch_message(value: object) -> str:
-    message = re.sub(r"https?://[^\s]+", lambda match: _safe_url(match.group(0)), str(value or ""))
+    message = re.sub(
+        r"https?://[^\s]+",
+        lambda match: _safe_url(match.group(0)),
+        safe_text(value),
+    )
     message = re.sub(
         r"(?i)\b(?:password|passwd|token|secret|authorization|api[_-]?key|csrf)\s*[:=]\s*[^\s,;]+",
         "[secret-redacted]",
@@ -59,11 +64,18 @@ def _sanitize_fetch_message(value: object) -> str:
 
 
 def _safe_error_code(value: object) -> str:
-    return re.sub(r"[^a-z0-9_.-]+", "_", str(value or "fetch_failure").casefold()).strip("_") or "fetch_failure"
+    return (
+        re.sub(
+            r"[^a-z0-9_.-]+",
+            "_",
+            (safe_text(value) or "fetch_failure").casefold(),
+        ).strip("_")
+        or "fetch_failure"
+    )
 
 
-def _safe_body_preview(text: str) -> str:
-    preview = html_to_text(text[:4_096])
+def _safe_body_preview(text: object) -> str:
+    preview = html_to_text(safe_text(text)[:4_096])
     preview = re.sub(r"https?://[^\s]+", "[url-redacted]", preview, flags=re.IGNORECASE)
     preview = re.sub(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", "[email-redacted]", preview)
     preview = re.sub(

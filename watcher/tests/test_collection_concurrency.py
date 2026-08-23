@@ -515,6 +515,29 @@ def test_unexpected_task_result_is_converted_into_a_failed_direct_outcome():
     assert stats.unexpected_task_exceptions == 1
 
 
+def test_unprintable_worker_error_is_converted_without_escaping_diagnostics():
+    class UnprintableError(RuntimeError):
+        def __str__(self):
+            raise RuntimeError("broken text conversion")
+
+    stats = CollectionStats()
+    company = CompanyCfg(name="AlphaCo", ats="greenhouse", token="alpha")
+    task = CollectionTask(
+        key="direct", origin="o", provider="greenhouse", run=lambda: None
+    )
+    error = UnprintableError()
+
+    outcome = _direct_outcome_from_result(
+        company,
+        TaskResult(index=0, task=task, value=None, error=error),
+        stats,
+    )
+
+    assert outcome.error is error
+    assert outcome.error_kind == ERROR_UNEXPECTED
+    assert stats.unexpected_task_exceptions == 1
+
+
 # --- collection equivalence ---------------------------------------------
 
 

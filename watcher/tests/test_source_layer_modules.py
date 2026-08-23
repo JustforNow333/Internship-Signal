@@ -100,6 +100,23 @@ def test_private_transport_and_sanitizer_seams_remain_importable_from_base():
         assert getattr(base, name) is getattr(OWNERS[name], name)
 
 
+def test_source_sanitizers_are_total_for_unprintable_values():
+    class Unprintable:
+        def __bool__(self):
+            raise RuntimeError("broken truth conversion")
+
+        def __str__(self):
+            raise RuntimeError("broken text conversion")
+
+    value = Unprintable()
+
+    assert sanitize.html_to_text(value) == ""
+    assert sanitize._safe_url(value) == ""
+    assert sanitize._sanitize_fetch_message(value) == ""
+    assert sanitize._safe_error_code(value) == "fetch_failure"
+    assert sanitize._safe_body_preview(value) == ""
+
+
 def test_adapters_still_import_the_facade_surface_they_relied_on():
     from watcher.sources.greenhouse import GreenhouseSource  # noqa: F401
     from watcher.sources.workday import WorkdaySource  # noqa: F401

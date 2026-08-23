@@ -384,7 +384,7 @@ def _row_reason_codes(row: sqlite3.Row, keys: set[str]) -> tuple[str, ...]:
         return ()
     try:
         value = json.loads(str(raw))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return ()
     return _bounded_reason_codes(value if isinstance(value, list) else ())
 

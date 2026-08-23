@@ -67,6 +67,7 @@ from watcher.sources import (
 )
 from watcher.sources.registry import DIRECT_ATS, build_direct_sources
 from watcher.sources.workday import WorkdayPacer, WorkdayStartTelemetry
+from watcher.text_safety import exception_text, safe_text
 
 
 @dataclass
@@ -609,7 +610,7 @@ def _direct_outcome_from_result(
     LOGGER.error(
         "Collection task for %s failed unexpectedly: %s",
         company.name,
-        sanitize_error(f"{type(error).__name__}: {error}"),
+        sanitize_error(exception_text(error)),
     )
     return _DirectFetchOutcome(
         succeeded=False,
@@ -666,10 +667,10 @@ def _apply_direct_outcome(
     if outcome.error_kind == ERROR_UNEXPECTED:
         _record_error(
             errors,
-            f"{company.name}: unexpected {type(error).__name__}: {error}",
+            f"{company.name}: unexpected {exception_text(error)}",
         )
     else:
-        _record_error(errors, f"{company.name}: {error}")
+        _record_error(errors, f"{company.name}: {safe_text(error)}")
     stats.source_attempts.append(
         _failed_direct_attempt(
             company,
@@ -783,7 +784,7 @@ def _github_outcome_from_result(
     LOGGER.error(
         "GitHub backstop task %s failed unexpectedly: %s",
         plan.source_name,
-        sanitize_error(f"{type(error).__name__}: {error}"),
+        sanitize_error(exception_text(error)),
     )
     return _GithubFetchOutcome(
         succeeded=False,
@@ -827,12 +828,12 @@ def _apply_github_outcome(
         _record_error(
             errors,
             f"github listings ({plan.label}): unexpected "
-            f"{type(error).__name__}: {_sanitize_error(error)}",
+            + exception_text(error),
         )
     else:
         _record_error(
             errors,
-            f"github listings ({plan.label}): {_sanitize_error(error)}",
+            f"github listings ({plan.label}): {safe_text(error)}",
         )
     stats.source_attempts.append(
         _failed_attempt(
@@ -1000,7 +1001,7 @@ def _failed_attempt(
         succeeded=False,
         rows_returned=None,
         error_kind=error_kind,
-        error_message=sanitize_error(f"{type(error).__name__}: {error}"),
+        error_message=sanitize_error(exception_text(error)),
         feed_label=feed_label,
         malformed_row_count=0 if direct else None,
         schema_error_row_count=0 if direct else None,
@@ -1145,7 +1146,3 @@ def _github_source_adapter(source: object) -> str:
         or getattr(source, "name", "")
         or "github_listings"
     )
-
-
-def _sanitize_error(error: Exception) -> str:
-    return sanitize_error(error)

@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from typing import Iterable
 from urllib.parse import urlsplit, urlunsplit
 
+from watcher.text_safety import safe_text
+
 
 MAX_ERROR_LENGTH = 320
 MAX_FEED_LABEL_LENGTH = 180
@@ -19,7 +21,7 @@ MAX_REASON_CODES = 12
 
 
 def sanitize_feed_label(value: object) -> str:
-    raw = str(value or "").strip()
+    raw = safe_text(value).strip()
     if not raw:
         return "injected"
     # A malformed authority (bad IPv6 bracket, out-of-range port) must never
@@ -53,7 +55,7 @@ def _sanitize_url_match(match: re.Match) -> str:
 
 
 def sanitize_error(value: object) -> str:
-    message = str(value or "")
+    message = safe_text(value)
     message = re.sub(
         r"https?://[^\s]+",
         _sanitize_url_match,
@@ -70,22 +72,22 @@ def sanitize_error(value: object) -> str:
 
 
 def safe_token(value: object) -> str:
-    return re.sub(r"[^a-z0-9_.-]+", "_", str(value or "").strip().casefold()).strip("_")
+    return re.sub(r"[^a-z0-9_.-]+", "_", safe_text(value).strip().casefold()).strip("_")
 
 
 def safe_error_kind(value: object) -> str:
     """Normalize broad/subtype error kinds while preserving one slash."""
 
-    parts = [safe_token(part) for part in str(value or "").split("/", 1)]
+    parts = [safe_token(part) for part in safe_text(value).split("/", 1)]
     return "/".join(part for part in parts if part)[:96]
 
 
 def safe_run_id(value: object) -> str:
-    return re.sub(r"[^A-Za-z0-9_.:-]+", "-", str(value or "").strip())[:96] or "unknown"
+    return re.sub(r"[^A-Za-z0-9_.:-]+", "-", safe_text(value).strip())[:96] or "unknown"
 
 
 def sanitize_plain(value: object) -> str:
-    return re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or "")).strip()[:180]
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", safe_text(value)).strip()[:180]
 
 
 def utc_datetime(value: datetime) -> datetime:
