@@ -72,7 +72,7 @@ PYTHONPATH=.:backend backend/venv/Scripts/python.exe -m pytest \
 ## 3. Full suites
 
 Run the full backend + watcher suite when a change touches `analyze_rows`,
-`sources/base.py`, `sources/direct.py`, `config.py`, posting identity, the seen
+`sources/base.py`, `sources/direct.py`, `watcher/config/`, posting identity, the seen
 store, eligibility, scoring, or anything shared across adapters — and before any
 commit that will be pushed.
 

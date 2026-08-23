@@ -28,7 +28,7 @@ cherry-pick shared fixes.
 | `watcher/pipeline.py` | `run_once`: collect → analyze → filter → seen partition → digest → health |
 | `watcher/collection.py` | direct/GitHub fetch planning, outcomes, source attempts, Workday counters |
 | `watcher/reporting.py` · `cli.py` | console report + heartbeat · argparse and startup |
-| `watcher/config.py` | watchlist + env validation; `supported_ats()` derives from the registry |
+| `watcher/config/` | `models.py` (config dataclasses) + `_legacy.py` (transitional: dotenv, env, YAML, validation); `watcher.config` stays the import path and `supported_ats()` derives from the registry |
 | `watcher/sources/registry.py` | **canonical direct-source registry** — register a new ATS adapter here only |
 | `watcher/sources/` | one adapter per ATS and per GitHub backstop format |
 | `watcher/sources/contracts.py` · `transport.py` · `parsing.py` · `rows.py` · `sanitize.py` · `diagnostics.py` · `retry.py` | the shared source layer, split by responsibility; `base.py` is a re-export facade |
@@ -116,7 +116,7 @@ Docs referenced below: [`docs/watcher.md`](docs/watcher.md) (W),
 
 Run the narrowest suite covering the change; run the full backend + watcher suite
 when touching `analyze_rows`, any shared `watcher/sources/` layer module,
-`config.py`, posting identity, the seen store, eligibility, or scoring.
+`watcher/config/`, posting identity, the seen store, eligibility, or scoring.
 
 ```bash
 PYTHONPATH=.:backend backend/venv/Scripts/python.exe -m pytest backend/tests watcher/tests -q

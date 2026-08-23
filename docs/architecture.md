@@ -37,7 +37,8 @@ internship-signal/
 │   ├── collection.py      adapter resolution, fetch outcomes, source attempts
 │   ├── reporting.py       console report, heartbeat, health JSON report
 │   ├── cli.py             argument parsing and process startup
-│   ├── config.py          watchlist + env validation
+│   ├── config/            models.py (config dataclasses) + _legacy.py
+│   │                       (transitional: dotenv, env, YAML, validation)
 │   ├── sources/           one module per ATS/backstop adapter
 │   ├── eligibility.py     watcher-side degree/location/target-role gate
 │   ├── filters.py         internship/open/min-score filtering

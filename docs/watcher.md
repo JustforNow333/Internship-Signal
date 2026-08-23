@@ -46,9 +46,11 @@ injected source list is preserved.
 
 ## 2. Watchlist configuration
 
-`watcher/config.py` owns a small dependency-free watchlist loader plus dotenv
+`watcher/config/` owns a small dependency-free watchlist loader plus dotenv
 loading; process environment values win. Every entry is validated at startup and
-fails loudly.
+fails loudly. Import from `watcher.config`: the package is mid-decomposition,
+with the configuration dataclasses in `models.py` and everything not yet
+extracted in the transitional `_legacy.py`.
 
 ```yaml
 defaults:

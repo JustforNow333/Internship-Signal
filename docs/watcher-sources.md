@@ -15,7 +15,7 @@ scoring, eligibility, health, or notification work.
 `watcher/sources/registry.py` is the single source of truth for direct
 adapters. Its `DIRECT_SOURCE_SPECS` table names each adapter and how to build
 it, `DIRECT_ATS` exposes those names, and `build_direct_sources()` constructs
-the runtime set. `watcher/config.py::supported_ats()` returns `DIRECT_ATS`
+the runtime set. `watcher.config.supported_ats()` returns `DIRECT_ATS`
 plus the non-direct configuration modes in `NON_DIRECT_ATS`.
 
 Direct: `bain`, `epic`, `ibm`, `greenhouse`, `lever`, `ashby`,
