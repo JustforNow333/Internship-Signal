@@ -1,4 +1,4 @@
-"""The process-environment layer moved out of `_legacy.py` into `env.py`.
+"""Process-environment ownership and compatibility tests.
 
 These pin every `WATCHER_*` setting's name, default, accepted values, coercion,
 and invalid-value behaviour, the dotenv parser, environment precedence, and the
@@ -372,7 +372,6 @@ def test_importing_env_alone_already_runs_load_dotenv():
         "watcher.config.env",
         "watcher.config.models",
         "watcher.config.validation",
-        "watcher.config._legacy",
         "watcher.sources.registry",
         "watcher.sources.workday",
     ],

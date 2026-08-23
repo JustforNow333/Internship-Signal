@@ -13,8 +13,8 @@ from typing import Sequence
 from urllib.parse import urlsplit
 
 from watcher.company_matching import company_matching_key
-from watcher.config.env import ConfigError
-from watcher.config.models import (
+from .env import ConfigError
+from .models import (
     SUPPORTED_WORKDAY_DETAIL_POLICIES,
     CompanyCfg,
     GitHubListingSourceCfg,

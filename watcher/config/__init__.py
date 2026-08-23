@@ -1,25 +1,14 @@
-"""Watcher configuration: watchlist, environment, and validated limits.
+"""Stable public facade for watcher configuration.
 
-`watcher.config` is the stable public path and re-exports the whole surface it
-exposed before it became a package. The implementation is being decomposed:
-
-| Module | Owns |
-|---|---|
-| `env.py` | dotenv loading, every `WATCHER_*` setting, and the coercion helpers |
-| `models.py` | the configuration dataclasses and the constants intrinsic to them |
-| `loader.py` | locating and reading the watchlist, YAML parsing, building the config objects |
-| `validation.py` | pure watchlist and per-source configuration validation |
-| `_legacy.py` | **transitional** — compatibility imports only |
-
-`env.py` is imported first below because importing it runs `load_dotenv()`, and
-`models.py` reads its environment-derived default from it.
-
-Import from `watcher.config`; the split behind it is not stable yet.
+Environment handling lives in :mod:`.env`, dataclasses in :mod:`.models`,
+watchlist loading in :mod:`.loader`, and pure configuration validation in
+:mod:`.validation`. Importing the environment layer first preserves the
+load-bearing dotenv/default evaluation order.
 """
 
 from __future__ import annotations
 
-from watcher.config.env import (
+from .env import (
     DEFAULT_ANALYSIS_CACHE_FILENAME,
     DEFAULT_DOTENV_PATH,
     DEFAULT_SEEN_DB_PATH,
@@ -35,21 +24,7 @@ from watcher.config.env import (
     resolve_analysis_cache_path,
     workday_min_interval_seconds,
 )
-from watcher.config.validation import (
-    COVERAGE_STATUS_NO_SOURCE_FOUND,
-    MAX_PLATFORM_FAMILY_LENGTH,
-    NON_DIRECT_ATS,
-    SUPPORTED_COVERAGE_STATUSES,
-    SUPPORTED_GITHUB_LISTING_FORMATS,
-    is_valid_hostname,
-    supported_ats,
-)
-from watcher.config.loader import (
-    DEFAULT_WATCHLIST_PATH,
-    _parse_watchlist_yaml,
-    load_watchlist,
-)
-from watcher.config.models import (
+from .models import (
     COLLECTION_MODE_CONCURRENT,
     COLLECTION_MODE_SERIAL,
     DEFAULT_ANALYSIS_CACHE_ENABLED,
@@ -72,6 +47,20 @@ from watcher.config.models import (
     CompanyCfg,
     GitHubListingSourceCfg,
     WatcherConfig,
+)
+from .validation import (
+    COVERAGE_STATUS_NO_SOURCE_FOUND,
+    MAX_PLATFORM_FAMILY_LENGTH,
+    NON_DIRECT_ATS,
+    SUPPORTED_COVERAGE_STATUSES,
+    SUPPORTED_GITHUB_LISTING_FORMATS,
+    is_valid_hostname,
+    supported_ats,
+)
+from .loader import (
+    DEFAULT_WATCHLIST_PATH,
+    _parse_watchlist_yaml,
+    load_watchlist,
 )
 
 __all__ = [

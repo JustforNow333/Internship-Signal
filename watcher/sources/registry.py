@@ -4,8 +4,8 @@ This module is the single registration point for direct sources. To add one,
 append a :class:`DirectSourceSpec` to :data:`DIRECT_SOURCE_SPECS` and nothing
 else:
 
-* ``watcher/config.py`` derives the accepted direct watchlist ``ats`` values
-  from :data:`DIRECT_ATS`.
+* ``watcher.config.validation`` derives the accepted direct watchlist ``ats``
+  values from :data:`DIRECT_ATS`.
 * ``watcher/run.py`` builds runtime adapters with :func:`build_direct_sources`.
 
 GitHub backstop feeds are configured per watchlist entry rather than per ATS,

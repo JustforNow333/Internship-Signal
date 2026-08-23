@@ -128,7 +128,7 @@ def resolve_analysis_cache_path(
 def analysis_cache_enabled(value: str | bool | None = None) -> bool:
     """Return the validated watcher static-analysis cache switch."""
 
-    from watcher.config.models import DEFAULT_ANALYSIS_CACHE_ENABLED
+    from .models import DEFAULT_ANALYSIS_CACHE_ENABLED
 
     raw = (
         os.getenv("WATCHER_ANALYSIS_CACHE_ENABLED")
@@ -171,7 +171,7 @@ def workday_min_interval_seconds(value: str | float | int | None = None) -> floa
 
 
 def _collection_mode_value(value: object) -> str:
-    from watcher.config.models import (
+    from .models import (
         DEFAULT_COLLECTION_MODE,
         SUPPORTED_COLLECTION_MODES,
     )
@@ -220,7 +220,7 @@ def load_collection_concurrency(
     and is promoted only by a separate change after reviewed canary evidence.
     """
 
-    from watcher.config.models import (
+    from .models import (
         DEFAULT_COLLECTION_MAX_WORKERS,
         DEFAULT_COLLECTION_MODE,
         DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY,

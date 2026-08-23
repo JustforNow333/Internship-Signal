@@ -1,4 +1,4 @@
-"""`watcher/config.py` became a package; the data models moved to `models.py`.
+"""Configuration model and public-facade compatibility tests.
 
 These tests pin the moved models against their pre-refactor definitions, pin
 `watcher.config` as the unchanged public import path, and pin the import
@@ -14,7 +14,10 @@ import sys
 import pytest
 
 import watcher.config as config
-from watcher.config import _legacy, env, loader, models, validation
+import watcher.config.env as env
+import watcher.config.loader as loader
+import watcher.config.models as models
+import watcher.config.validation as validation
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -23,8 +26,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # Field-level parity with the pre-refactor definitions
 # --------------------------------------------------------------------------
 
-# Captured from watcher/config.py before it became a package: every field name,
-# in order, with its default. "<factory:tuple>" marks a default_factory.
+# Captured before the package extraction: every field name, in order, with its
+# default. "<factory:tuple>" marks a default_factory.
 EXPECTED_FIELDS = {
     "CompanyCfg": [
         ("name", "<required>"),
@@ -164,10 +167,84 @@ PREVIOUSLY_IMPORTED = [
     "workday_min_interval_seconds",
 ]
 
+CANONICAL_PUBLIC_EXPORTS = {
+    env: {
+        "DEFAULT_ANALYSIS_CACHE_FILENAME",
+        "DEFAULT_DOTENV_PATH",
+        "DEFAULT_SEEN_DB_PATH",
+        "DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS",
+        "MAX_WORKDAY_MIN_INTERVAL_SECONDS",
+        "REPO_ROOT",
+        "WATCHER_DIR",
+        "ConfigError",
+        "analysis_cache_enabled",
+        "load_collection_concurrency",
+        "load_dotenv",
+        "resolve_analysis_cache_path",
+        "workday_min_interval_seconds",
+    },
+    models: {
+        "COLLECTION_MODE_CONCURRENT",
+        "COLLECTION_MODE_SERIAL",
+        "DEFAULT_ANALYSIS_CACHE_ENABLED",
+        "DEFAULT_COLLECTION_MAX_WORKERS",
+        "DEFAULT_COLLECTION_MODE",
+        "DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY",
+        "DEFAULT_WORKDAY_MAX_CONCURRENCY",
+        "MAX_COLLECTION_MAX_WORKERS",
+        "MAX_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY",
+        "MAX_WORKDAY_MAX_CONCURRENCY",
+        "MIN_COLLECTION_MAX_WORKERS",
+        "MIN_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY",
+        "MIN_WORKDAY_MAX_CONCURRENCY",
+        "SUPPORTED_COLLECTION_MODES",
+        "SUPPORTED_WORKDAY_DETAIL_POLICIES",
+        "WORKDAY_DETAIL_EARLY_CAREER",
+        "WORKDAY_DETAIL_INTERNSHIP",
+        "WORKDAY_DETAIL_NONE",
+        "CollectionConcurrencyCfg",
+        "CompanyCfg",
+        "GitHubListingSourceCfg",
+        "WatcherConfig",
+    },
+    loader: {"DEFAULT_WATCHLIST_PATH", "load_watchlist"},
+    validation: {
+        "COVERAGE_STATUS_NO_SOURCE_FOUND",
+        "MAX_PLATFORM_FAMILY_LENGTH",
+        "NON_DIRECT_ATS",
+        "SUPPORTED_COVERAGE_STATUSES",
+        "SUPPORTED_GITHUB_LISTING_FORMATS",
+        "is_valid_hostname",
+        "supported_ats",
+    },
+}
+
+PRIVATE_COMPATIBILITY_EXPORTS = {
+    env: {"_parse_env_assignment"},
+    loader: {"_parse_watchlist_yaml"},
+}
+
 
 @pytest.mark.parametrize("name", PREVIOUSLY_IMPORTED)
 def test_every_previously_imported_symbol_still_resolves(name):
     assert hasattr(config, name), name
+
+
+def test_complete_public_facade_resolves_to_canonical_objects():
+    expected_all = set()
+    for owner, names in CANONICAL_PUBLIC_EXPORTS.items():
+        expected_all.update(names)
+        for name in names:
+            assert getattr(config, name) is getattr(owner, name), name
+
+    assert set(config.__all__) == expected_all
+
+
+def test_private_compatibility_seams_resolve_but_are_not_public_all():
+    for owner, names in PRIVATE_COMPATIBILITY_EXPORTS.items():
+        for name in names:
+            assert getattr(config, name) is getattr(owner, name), name
+            assert name not in config.__all__
 
 
 def test_validation_symbols_resolve_directly_from_their_owner():
@@ -175,7 +252,6 @@ def test_validation_symbols_resolve_directly_from_their_owner():
                  "SUPPORTED_COVERAGE_STATUSES", "SUPPORTED_GITHUB_LISTING_FORMATS",
                  "MAX_PLATFORM_FAMILY_LENGTH", "COVERAGE_STATUS_NO_SOURCE_FOUND"):
         assert getattr(config, name) is getattr(validation, name)
-        assert getattr(_legacy, name) is getattr(validation, name)
 
 
 def test_symbols_owned_by_the_loader_are_the_same_objects():
@@ -196,6 +272,24 @@ def test_public_all_lists_only_the_supported_surface():
     for name in config.__all__:
         assert hasattr(config, name), name
     assert not [name for name in config.__all__ if name.startswith("_")]
+
+
+def test_repository_callers_resolve_without_import_changes():
+    """Every named facade import in production, tests, and scripts still works."""
+
+    import ast
+
+    roots = (ROOT / "watcher", ROOT / "backend", ROOT / "scripts")
+    imported = set()
+    for root in roots:
+        for path in root.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module == "watcher.config":
+                    imported.update(alias.name for alias in node.names if alias.name != "*")
+
+    missing = sorted(name for name in imported if not hasattr(config, name))
+    assert missing == []
 
 
 # --------------------------------------------------------------------------
@@ -354,10 +448,8 @@ def test_models_module_imports_no_watcher_code_outside_the_config_package():
         if m.startswith("watcher") and not m.startswith("watcher.config.")
     ]
     assert outside == [], imports
-    # Its only in-package dependency is the environment layer.
-    assert [m for m in imports if m.startswith("watcher.config.")] == [
-        "watcher.config.env"
-    ]
+    # Its only module-scope in-package dependency is the environment layer.
+    assert [m for m in imports if m in {"env", "loader", "validation"}] == ["env"]
 
 
 def test_env_module_is_the_lowest_layer_of_the_config_package():
@@ -380,23 +472,53 @@ def test_source_adapters_still_import_company_cfg():
 
 
 @pytest.mark.parametrize(
-    "first",
+    "order",
     [
-        "watcher.config",
-        "watcher.config.models",
-        "watcher.config.validation",
-        "watcher.config._legacy",
-        "watcher.sources.registry",
-        "watcher.sources.greenhouse",
-        "watcher.sources.workday",
-        "watcher.sources",
+        (
+            "watcher.config",
+            "watcher.config.models",
+            "watcher.config.env",
+            "watcher.config.loader",
+            "watcher.config.validation",
+            "watcher.sources.registry",
+            "watcher.sources.greenhouse",
+            "watcher.sources.workday",
+        ),
+        (
+            "watcher.config.models",
+            "watcher.config.validation",
+            "watcher.sources.registry",
+            "watcher.config.loader",
+            "watcher.config.env",
+            "watcher.config",
+            "watcher.sources.workday",
+        ),
+        (
+            "watcher.sources.registry",
+            "watcher.sources.greenhouse",
+            "watcher.config.validation",
+            "watcher.config.loader",
+            "watcher.config.models",
+            "watcher.config.env",
+            "watcher.config",
+        ),
+        (
+            "watcher.sources.workday",
+            "watcher.config.env",
+            "watcher.config.models",
+            "watcher.config.validation",
+            "watcher.config.loader",
+            "watcher.config",
+            "watcher.sources.registry",
+        ),
     ],
 )
-def test_no_import_cycle_whichever_module_loads_first(first):
+def test_representative_clean_interpreter_import_orders_do_not_cycle(order):
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(ROOT), str(ROOT / "backend")])
+    code = ";".join(f"import {module}" for module in order)
     result = subprocess.run(
-        [sys.executable, "-c", f"import {first}"],
+        [sys.executable, "-c", code],
         capture_output=True,
         text=True,
         cwd=str(ROOT),

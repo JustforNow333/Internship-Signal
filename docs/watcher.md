@@ -51,8 +51,8 @@ loading; process environment values win. Every entry is validated at startup and
 fails loudly. Import from `watcher.config`: the process-environment layer lives
 in `env.py`, configuration dataclasses in `models.py`, watchlist file and YAML
 loading in `loader.py`, and pure watchlist validation in `validation.py`.
-`_legacy.py` now contains compatibility imports only and remains until the
-final facade cleanup.
+`watcher/config/__init__.py` directly re-exports the supported compatibility
+surface; implementation modules import their owners rather than the facade.
 
 `env.py` owns every `WATCHER_*` setting and runs `load_dotenv()` as an
 import-time side effect, before `DEFAULT_SEEN_DB_PATH` is evaluated, so a value

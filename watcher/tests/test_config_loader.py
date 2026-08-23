@@ -1,4 +1,4 @@
-"""Watchlist loading moved out of `_legacy.py` into `loader.py`.
+"""Watchlist loading and dependency-direction tests.
 
 These pin the accepted YAML shape, the configuration objects it produces, and
 the exact errors it raises, so the extraction cannot quietly change what a
@@ -16,7 +16,9 @@ import sys
 import pytest
 
 import watcher.config as config
-from watcher.config import _legacy, loader, models, validation
+import watcher.config.loader as loader
+import watcher.config.models as models
+import watcher.config.validation as validation
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAD = 'defaults:\n  terms: ["Summer 2027"]\n'
@@ -70,23 +72,6 @@ def test_the_loader_calls_the_validation_owner_directly():
         "_validated_min_score",
     ):
         assert getattr(loader, name) is getattr(validation, name), name
-
-
-def test_legacy_reexports_the_validation_objects_for_compatibility():
-    for name in (
-        "supported_ats",
-        "is_valid_hostname",
-        "_platform_family",
-        "_validated_feed_url",
-        "_validate_github_source_uniqueness",
-        "_validate_unique_company_names",
-        "_validate_oracle_hcm_config",
-        "_validate_icims_config",
-        "_validate_paylocity_config",
-        "_validate_successfactors_config",
-        "_validate_talentbrew_config",
-    ):
-        assert getattr(_legacy, name) is getattr(validation, name), name
 
 
 def test_validation_rules_are_not_duplicated_into_the_loader():
@@ -603,18 +588,55 @@ def test_validation_does_not_import_the_loader():
         elif isinstance(node, ast.Import):
             modules += [a.name for a in node.names]
     assert "watcher.config.loader" not in modules, modules
+    assert "loader" not in modules, modules
 
 
-def test_legacy_contains_only_compatibility_imports():
-    tree = ast.parse((ROOT / "watcher/config/_legacy.py").read_text(encoding="utf-8"))
+def test_transitional_config_module_is_removed_and_unreferenced():
+    transitional = "_" + "legacy"
+    assert not (ROOT / "watcher" / "config" / f"{transitional}.py").exists()
 
-    substantive = [
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    ]
+    for path in (ROOT / "watcher" / "config").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imports.append(node.module)
+            elif isinstance(node, ast.Import):
+                imports.extend(alias.name for alias in node.names)
+        assert f"watcher.config.{transitional}" not in imports, path
 
-    assert substantive == []
+
+def test_config_submodules_import_owners_without_using_the_facade():
+    expected_relative_dependencies = {
+        "env.py": {"models"},
+        "models.py": {"env", "loader"},
+        "validation.py": {"env", "models"},
+        "loader.py": {"env", "models", "validation"},
+    }
+
+    for filename, expected in expected_relative_dependencies.items():
+        tree = ast.parse(
+            (ROOT / "watcher" / "config" / filename).read_text(encoding="utf-8")
+        )
+        relative = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module
+        }
+        absolute_facade_imports = [
+            node
+            for node in ast.walk(tree)
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "watcher.config"
+            )
+            or (
+                isinstance(node, ast.Import)
+                and any(alias.name == "watcher.config" for alias in node.names)
+            )
+        ]
+        assert relative == expected, filename
+        assert absolute_facade_imports == [], filename
 
 
 @pytest.mark.parametrize(
@@ -623,7 +645,6 @@ def test_legacy_contains_only_compatibility_imports():
         "watcher.config",
         "watcher.config.loader",
         "watcher.config.validation",
-        "watcher.config._legacy",
         "watcher.config.models",
         "watcher.config.env",
         "watcher.sources.registry",

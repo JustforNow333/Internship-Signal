@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from watcher.config.env import ConfigError, DEFAULT_SEEN_DB_PATH
+from .env import ConfigError, DEFAULT_SEEN_DB_PATH
 
 DEFAULT_ANALYSIS_CACHE_ENABLED = True
 COLLECTION_MODE_SERIAL = "serial"
@@ -62,7 +62,7 @@ class CollectionConcurrencyCfg:
     per_origin_max_concurrency: int = DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY
 
     def __post_init__(self) -> None:
-        from watcher.config.env import _bounded_int, _collection_mode_value
+        from .env import _bounded_int, _collection_mode_value
 
         object.__setattr__(self, "mode", _collection_mode_value(self.mode))
         object.__setattr__(
@@ -189,7 +189,7 @@ class WatcherConfig:
     )
 
     def __post_init__(self) -> None:
-        from watcher.config.env import resolve_analysis_cache_path
+        from .env import resolve_analysis_cache_path
 
         seen_db_path = Path(self.seen_db_path)
         cache_path = (
@@ -203,7 +203,7 @@ class WatcherConfig:
     def effective_github_listing_sources(self) -> tuple[GitHubListingSourceCfg, ...]:
         """Return typed sources plus deterministic adapters for legacy URLs."""
 
-        from watcher.config.loader import (
+        from .loader import (
             _github_source_sort_key,
             _legacy_github_source,
         )

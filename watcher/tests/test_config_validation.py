@@ -1,8 +1,6 @@
 """Focused contract tests for watchlist configuration validation.
 
-The same accepted and rejected watchlists run before and after validation moves
-out of ``_legacy.py``. Exact messages pin observable ordering as well as the
-accepted values.
+Exact messages pin observable ordering as well as the accepted values.
 """
 
 from __future__ import annotations
@@ -13,8 +11,8 @@ import pathlib
 import pytest
 
 import watcher.config as config
+import watcher.config.validation as validation
 from watcher.config import ConfigError, load_watchlist, supported_ats
-from watcher.config import _legacy, validation
 
 
 HEAD = 'defaults:\n  terms: ["Summer 2027"]\n'
@@ -94,7 +92,6 @@ def _company(name: str, ats: str, fields: str = "") -> str:
 )
 def test_public_validation_symbols_are_direct_reexports(name):
     assert getattr(config, name) is getattr(validation, name)
-    assert getattr(_legacy, name) is getattr(validation, name)
 
 
 @pytest.mark.parametrize("ats", sorted(VALID_COMPANY_FIELDS))

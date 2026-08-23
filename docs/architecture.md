@@ -40,7 +40,7 @@ internship-signal/
 │   ├── config/            env.py (dotenv + WATCHER_* settings), models.py
 │   │                       (config dataclasses), loader.py (watchlist file +
 │   │                       YAML -> config objects), validation.py (pure
-│   │                       watchlist rules), _legacy.py (compatibility only)
+│   │                       watchlist rules), __init__.py (public facade)
 │   ├── sources/           one module per ATS/backstop adapter
 │   ├── eligibility.py     watcher-side degree/location/target-role gate
 │   ├── filters.py         internship/open/min-score filtering

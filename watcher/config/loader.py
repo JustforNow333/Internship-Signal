@@ -16,7 +16,7 @@ import hashlib
 from pathlib import Path
 from typing import Sequence
 
-from watcher.config.env import (
+from .env import (
     DEFAULT_SEEN_DB_PATH,
     WATCHER_DIR,
     ConfigError,
@@ -25,7 +25,7 @@ from watcher.config.env import (
     load_collection_concurrency,
     resolve_analysis_cache_path,
 )
-from watcher.config.models import (
+from .models import (
     WORKDAY_DETAIL_INTERNSHIP,
     WORKDAY_DETAIL_NONE,
     CompanyCfg,
@@ -33,7 +33,7 @@ from watcher.config.models import (
     WatcherConfig,
 )
 
-from watcher.config.validation import (
+from .validation import (
     _platform_family,
     _validate_aliases,
     _validate_company_entry,
