@@ -28,7 +28,7 @@ cherry-pick shared fixes.
 | `watcher/pipeline.py` | `run_once`: collect → analyze → filter → seen partition → digest → health |
 | `watcher/collection.py` | direct/GitHub fetch planning, outcomes, source attempts, Workday counters |
 | `watcher/reporting.py` · `cli.py` | console report + heartbeat · argparse and startup |
-| `watcher/config/` | `models.py` (config dataclasses) + `_legacy.py` (transitional: dotenv, env, YAML, validation); `watcher.config` stays the import path and `supported_ats()` derives from the registry |
+| `watcher/config/` | `env.py` (dotenv + every `WATCHER_*` setting) · `models.py` (config dataclasses) · `_legacy.py` (transitional: YAML + watchlist validation); `watcher.config` stays the import path and `supported_ats()` derives from the registry |
 | `watcher/sources/registry.py` | **canonical direct-source registry** — register a new ATS adapter here only |
 | `watcher/sources/` | one adapter per ATS and per GitHub backstop format |
 | `watcher/sources/contracts.py` · `transport.py` · `parsing.py` · `rows.py` · `sanitize.py` · `diagnostics.py` · `retry.py` | the shared source layer, split by responsibility; `base.py` is a re-export facade |

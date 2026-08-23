@@ -14,7 +14,7 @@ import sys
 import pytest
 
 import watcher.config as config
-from watcher.config import _legacy, models
+from watcher.config import _legacy, env, models
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -171,8 +171,19 @@ def test_every_previously_imported_symbol_still_resolves(name):
 
 
 def test_symbols_still_owned_by_legacy_are_the_same_objects():
-    for name in ("load_watchlist", "load_dotenv", "ConfigError", "supported_ats"):
+    # Everything the loader/validation layer still owns.
+    for name in ("load_watchlist", "supported_ats", "is_valid_hostname",
+                 "_parse_watchlist_yaml", "NON_DIRECT_ATS", "DEFAULT_WATCHLIST_PATH"):
         assert getattr(config, name) is getattr(_legacy, name)
+
+
+def test_symbols_owned_by_env_are_the_same_objects():
+    for name in ("load_dotenv", "ConfigError", "analysis_cache_enabled",
+                 "workday_min_interval_seconds", "resolve_analysis_cache_path",
+                 "load_collection_concurrency", "_parse_env_assignment",
+                 "DEFAULT_SEEN_DB_PATH", "WATCHER_DIR", "REPO_ROOT",
+                 "DEFAULT_DOTENV_PATH"):
+        assert getattr(config, name) is getattr(env, name)
 
 
 def test_public_all_lists_only_the_supported_surface():
@@ -293,7 +304,7 @@ def test_package_conversion_did_not_shift_the_resolved_directories():
     assert config.DEFAULT_WATCHLIST_PATH == ROOT / "watcher" / "watchlist.yml"
     assert config.DEFAULT_WATCHLIST_PATH.exists()
     assert config.DEFAULT_DOTENV_PATH == ROOT / ".env"
-    assert models.WATCHER_DIR is config.WATCHER_DIR
+    assert env.WATCHER_DIR is config.WATCHER_DIR
 
 
 def test_the_real_watchlist_still_loads():
@@ -315,19 +326,43 @@ def test_supported_ats_still_defers_to_the_registry():
     assert config.NON_DIRECT_ATS == frozenset({"bespoke", "github_only"})
 
 
-def test_models_module_imports_no_watcher_source_code_at_module_scope():
-    """models.py must stay importable without pulling in adapters."""
-
+def module_scope_imports(relative_path):
     import ast
 
-    tree = ast.parse((ROOT / "watcher/config/models.py").read_text(encoding="utf-8"))
-    module_level = []
+    tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
+    names = []
     for node in tree.body:
         if isinstance(node, ast.Import):
-            module_level += [a.name for a in node.names]
+            names += [a.name for a in node.names]
         elif isinstance(node, ast.ImportFrom) and node.module:
-            module_level.append(node.module)
-    assert not [m for m in module_level if m.startswith("watcher")], module_level
+            names.append(node.module)
+    return names
+
+
+def test_models_module_imports_no_watcher_code_outside_the_config_package():
+    """models.py must stay importable without pulling in adapters."""
+
+    imports = module_scope_imports("watcher/config/models.py")
+    outside = [
+        m for m in imports
+        if m.startswith("watcher") and not m.startswith("watcher.config.")
+    ]
+    assert outside == [], imports
+    # Its only in-package dependency is the environment layer.
+    assert [m for m in imports if m.startswith("watcher.config.")] == [
+        "watcher.config.env"
+    ]
+
+
+def test_env_module_is_the_lowest_layer_of_the_config_package():
+    """env.py must import nothing else from the package at module scope.
+
+    models.py reads DEFAULT_SEEN_DB_PATH from env.py while its class bodies
+    execute, so any module-scope import back into the package would cycle.
+    """
+
+    imports = module_scope_imports("watcher/config/env.py")
+    assert [m for m in imports if m.startswith("watcher")] == [], imports
 
 
 def test_source_adapters_still_import_company_cfg():

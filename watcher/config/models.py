@@ -3,25 +3,23 @@
 Only the configuration dataclasses live here, together with the constants that
 are intrinsically part of them: their field defaults, their validated bounds,
 and the small value enums those fields draw from. Environment parsing, dotenv
-handling, YAML loading, watchlist validation, and the coercion helpers stay in
-`_legacy.py` for now and are reached through narrow, deferred imports inside
-the two `__post_init__` hooks and `effective_github_listing_sources`, the same
-pattern `supported_ats()` uses to avoid an import cycle.
+handling, and the coercion helpers live in `env.py`; YAML loading and watchlist
+validation stay in `_legacy.py` for now and are reached through narrow,
+deferred imports, the same pattern `supported_ats()` uses to avoid a cycle.
 
-`WATCHER_DIR` is resolved here because `DEFAULT_SEEN_DB_PATH` is a field default
-and must exist when the class body executes. It points at `watcher/`, one level
-above this package.
+`DEFAULT_SEEN_DB_PATH` is a field default but is environment-derived, so it is
+owned by `env.py` and imported here: it must be evaluated after `load_dotenv()`
+runs, which `env.py` guarantees.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-WATCHER_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_SEEN_DB_PATH = Path(os.getenv("WATCHER_SEEN_DB", WATCHER_DIR / "seen.sqlite"))
+from watcher.config.env import ConfigError, DEFAULT_SEEN_DB_PATH
+
 DEFAULT_ANALYSIS_CACHE_ENABLED = True
 COLLECTION_MODE_SERIAL = "serial"
 COLLECTION_MODE_CONCURRENT = "concurrent"
@@ -64,11 +62,7 @@ class CollectionConcurrencyCfg:
     per_origin_max_concurrency: int = DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY
 
     def __post_init__(self) -> None:
-        from watcher.config._legacy import (
-            ConfigError,
-            _bounded_int,
-            _collection_mode_value,
-        )
+        from watcher.config.env import _bounded_int, _collection_mode_value
 
         object.__setattr__(self, "mode", _collection_mode_value(self.mode))
         object.__setattr__(
@@ -195,7 +189,7 @@ class WatcherConfig:
     )
 
     def __post_init__(self) -> None:
-        from watcher.config._legacy import resolve_analysis_cache_path
+        from watcher.config.env import resolve_analysis_cache_path
 
         seen_db_path = Path(self.seen_db_path)
         cache_path = (

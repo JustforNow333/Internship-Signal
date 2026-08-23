@@ -5,37 +5,45 @@ exposed before it became a package. The implementation is being decomposed:
 
 | Module | Owns |
 |---|---|
+| `env.py` | dotenv loading, every `WATCHER_*` setting, and the coercion helpers |
 | `models.py` | the configuration dataclasses and the constants intrinsic to them |
-| `_legacy.py` | **transitional** — dotenv, environment parsing, YAML loading, watchlist validation, and the coercion helpers, none of which have been extracted yet |
+| `_legacy.py` | **transitional** — YAML loading and watchlist validation, not yet extracted |
+
+`env.py` is imported first below because importing it runs `load_dotenv()`, and
+`models.py` reads its environment-derived default from it.
 
 Import from `watcher.config`; the split behind it is not stable yet.
 """
 
 from __future__ import annotations
 
-from watcher.config._legacy import (
-    COVERAGE_STATUS_NO_SOURCE_FOUND,
+from watcher.config.env import (
     DEFAULT_ANALYSIS_CACHE_FILENAME,
     DEFAULT_DOTENV_PATH,
-    DEFAULT_WATCHLIST_PATH,
+    DEFAULT_SEEN_DB_PATH,
     DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS,
-    MAX_PLATFORM_FAMILY_LENGTH,
     MAX_WORKDAY_MIN_INTERVAL_SECONDS,
-    NON_DIRECT_ATS,
     REPO_ROOT,
-    SUPPORTED_COVERAGE_STATUSES,
-    SUPPORTED_GITHUB_LISTING_FORMATS,
+    WATCHER_DIR,
     ConfigError,
     _parse_env_assignment,
-    _parse_watchlist_yaml,
     analysis_cache_enabled,
-    is_valid_hostname,
     load_collection_concurrency,
     load_dotenv,
-    load_watchlist,
     resolve_analysis_cache_path,
-    supported_ats,
     workday_min_interval_seconds,
+)
+from watcher.config._legacy import (
+    COVERAGE_STATUS_NO_SOURCE_FOUND,
+    DEFAULT_WATCHLIST_PATH,
+    MAX_PLATFORM_FAMILY_LENGTH,
+    NON_DIRECT_ATS,
+    SUPPORTED_COVERAGE_STATUSES,
+    SUPPORTED_GITHUB_LISTING_FORMATS,
+    _parse_watchlist_yaml,
+    is_valid_hostname,
+    load_watchlist,
+    supported_ats,
 )
 from watcher.config.models import (
     COLLECTION_MODE_CONCURRENT,
@@ -44,7 +52,6 @@ from watcher.config.models import (
     DEFAULT_COLLECTION_MAX_WORKERS,
     DEFAULT_COLLECTION_MODE,
     DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY,
-    DEFAULT_SEEN_DB_PATH,
     DEFAULT_WORKDAY_MAX_CONCURRENCY,
     MAX_COLLECTION_MAX_WORKERS,
     MAX_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY,
@@ -54,7 +61,6 @@ from watcher.config.models import (
     MIN_WORKDAY_MAX_CONCURRENCY,
     SUPPORTED_COLLECTION_MODES,
     SUPPORTED_WORKDAY_DETAIL_POLICIES,
-    WATCHER_DIR,
     WORKDAY_DETAIL_EARLY_CAREER,
     WORKDAY_DETAIL_INTERNSHIP,
     WORKDAY_DETAIL_NONE,
