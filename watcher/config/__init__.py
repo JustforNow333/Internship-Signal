@@ -7,7 +7,8 @@ exposed before it became a package. The implementation is being decomposed:
 |---|---|
 | `env.py` | dotenv loading, every `WATCHER_*` setting, and the coercion helpers |
 | `models.py` | the configuration dataclasses and the constants intrinsic to them |
-| `_legacy.py` | **transitional** — YAML loading and watchlist validation, not yet extracted |
+| `loader.py` | locating and reading the watchlist, YAML parsing, building the config objects |
+| `_legacy.py` | **transitional** — the validation rules `loader.py` calls, not yet extracted |
 
 `env.py` is imported first below because importing it runs `load_dotenv()`, and
 `models.py` reads its environment-derived default from it.
@@ -35,15 +36,17 @@ from watcher.config.env import (
 )
 from watcher.config._legacy import (
     COVERAGE_STATUS_NO_SOURCE_FOUND,
-    DEFAULT_WATCHLIST_PATH,
     MAX_PLATFORM_FAMILY_LENGTH,
     NON_DIRECT_ATS,
     SUPPORTED_COVERAGE_STATUSES,
     SUPPORTED_GITHUB_LISTING_FORMATS,
-    _parse_watchlist_yaml,
     is_valid_hostname,
-    load_watchlist,
     supported_ats,
+)
+from watcher.config.loader import (
+    DEFAULT_WATCHLIST_PATH,
+    _parse_watchlist_yaml,
+    load_watchlist,
 )
 from watcher.config.models import (
     COLLECTION_MODE_CONCURRENT,

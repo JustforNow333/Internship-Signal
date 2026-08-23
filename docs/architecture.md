@@ -38,8 +38,9 @@ internship-signal/
 │   ├── reporting.py       console report, heartbeat, health JSON report
 │   ├── cli.py             argument parsing and process startup
 │   ├── config/            env.py (dotenv + WATCHER_* settings), models.py
-│   │                       (config dataclasses), _legacy.py (transitional:
-│   │                       YAML loading + watchlist validation)
+│   │                       (config dataclasses), loader.py (watchlist file +
+│   │                       YAML -> config objects), _legacy.py (transitional:
+│   │                       validation rules)
 │   ├── sources/           one module per ATS/backstop adapter
 │   ├── eligibility.py     watcher-side degree/location/target-role gate
 │   ├── filters.py         internship/open/min-score filtering

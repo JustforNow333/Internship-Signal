@@ -3,9 +3,9 @@
 Only the configuration dataclasses live here, together with the constants that
 are intrinsically part of them: their field defaults, their validated bounds,
 and the small value enums those fields draw from. Environment parsing, dotenv
-handling, and the coercion helpers live in `env.py`; YAML loading and watchlist
-validation stay in `_legacy.py` for now and are reached through narrow,
-deferred imports, the same pattern `supported_ats()` uses to avoid a cycle.
+handling, and the coercion helpers live in `env.py`; watchlist loading lives in
+`loader.py`, which this module reaches through a narrow deferred import, the
+same pattern `supported_ats()` uses to avoid a cycle.
 
 `DEFAULT_SEEN_DB_PATH` is a field default but is environment-derived, so it is
 owned by `env.py` and imported here: it must be evaluated after `load_dotenv()`
@@ -203,7 +203,7 @@ class WatcherConfig:
     def effective_github_listing_sources(self) -> tuple[GitHubListingSourceCfg, ...]:
         """Return typed sources plus deterministic adapters for legacy URLs."""
 
-        from watcher.config._legacy import (
+        from watcher.config.loader import (
             _github_source_sort_key,
             _legacy_github_source,
         )

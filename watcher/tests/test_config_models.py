@@ -14,7 +14,7 @@ import sys
 import pytest
 
 import watcher.config as config
-from watcher.config import _legacy, env, models
+from watcher.config import _legacy, env, loader, models
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -171,10 +171,16 @@ def test_every_previously_imported_symbol_still_resolves(name):
 
 
 def test_symbols_still_owned_by_legacy_are_the_same_objects():
-    # Everything the loader/validation layer still owns.
-    for name in ("load_watchlist", "supported_ats", "is_valid_hostname",
-                 "_parse_watchlist_yaml", "NON_DIRECT_ATS", "DEFAULT_WATCHLIST_PATH"):
+    # Validation is all that _legacy still owns; the next commit moves it.
+    for name in ("supported_ats", "is_valid_hostname", "NON_DIRECT_ATS",
+                 "SUPPORTED_COVERAGE_STATUSES", "SUPPORTED_GITHUB_LISTING_FORMATS",
+                 "MAX_PLATFORM_FAMILY_LENGTH", "COVERAGE_STATUS_NO_SOURCE_FOUND"):
         assert getattr(config, name) is getattr(_legacy, name)
+
+
+def test_symbols_owned_by_the_loader_are_the_same_objects():
+    for name in ("load_watchlist", "DEFAULT_WATCHLIST_PATH", "_parse_watchlist_yaml"):
+        assert getattr(config, name) is getattr(loader, name)
 
 
 def test_symbols_owned_by_env_are_the_same_objects():
