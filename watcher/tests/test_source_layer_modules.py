@@ -77,10 +77,58 @@ OWNERS = {
     "_retry_after_seconds": transport,
 }
 
+CANONICAL_IMPLEMENTATION_MODULES = (
+    contracts,
+    diagnostics,
+    direct,
+    parsing,
+    retry,
+    rows,
+    sanitize,
+    transport,
+)
+
+
+def _base_facade_imports(module):
+    source = pathlib.Path(importlib.import_module(module.__name__).__file__)
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    imports = []
+    for node in ast.walk(tree):
+        imports_base = False
+        if isinstance(node, ast.Import):
+            imports_base = any(
+                alias.name == "watcher.sources.base" for alias in node.names
+            )
+        elif isinstance(node, ast.ImportFrom):
+            imports_base = (
+                node.level == 0
+                and node.module == "watcher.sources.base"
+            ) or (
+                node.level > 0
+                and (
+                    node.module == "base"
+                    or (
+                        node.module is None
+                        and any(alias.name == "base" for alias in node.names)
+                    )
+                )
+            ) or (
+                node.level == 0
+                and node.module == "watcher.sources"
+                and any(alias.name == "base" for alias in node.names)
+            )
+        if imports_base:
+            imports.append(node.lineno)
+    return imports
+
 
 @pytest.mark.parametrize("name", sorted(OWNERS))
 def test_base_reexports_the_same_object_as_its_owning_module(name):
     assert getattr(base, name) is getattr(OWNERS[name], name)
+
+
+def test_base_source_fetch_error_is_the_contracts_exception_class():
+    assert base.SourceFetchError is contracts.SourceFetchError
 
 
 def test_every_public_facade_export_is_declared_and_resolvable():
@@ -129,6 +177,15 @@ def test_adapters_still_import_the_facade_surface_they_relied_on():
     assert greenhouse.make_row is rows.make_row
 
 
+@pytest.mark.parametrize(
+    "module",
+    CANONICAL_IMPLEMENTATION_MODULES,
+    ids=lambda module: module.__name__.rsplit(".", 1)[-1],
+)
+def test_canonical_implementation_modules_do_not_import_base_facade(module):
+    assert _base_facade_imports(module) == []
+
+
 def test_the_split_modules_stay_layered():
     """Lower layers must not import the modules stacked on top of them."""
 
@@ -175,6 +232,8 @@ def test_the_split_modules_stay_layered():
         "watcher.sources.sanitize",
         "watcher.sources.transport",
         "watcher.sources.retry",
+        "watcher.sources.registry",
+        "watcher.sources.successfactors",
         "watcher.sources",
     ],
 )
