@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+import time
 from typing import Any, Callable
 
 from watcher.config import CompanyCfg
@@ -16,8 +18,16 @@ from watcher.sources.base import (
     require_token,
 )
 from watcher.sources.direct import DirectRecordAdapter
+from watcher.sources.retry import (
+    DEFAULT_MAX_ATTEMPTS,
+    RequestRetrier,
+    RetryPolicy,
+)
 
 DEFAULT_MAX_PAGES = 1_000
+# A large board can span many cursor requests, so per-page attempts alone do
+# not bound total retry latency. Exhausting this crawl-wide budget fails closed.
+DEFAULT_MAX_CRAWL_RETRIES = 5
 
 
 class WorkableSource(DirectRecordAdapter):
@@ -27,14 +37,39 @@ class WorkableSource(DirectRecordAdapter):
         self,
         *,
         request_json: Callable[[str, dict, str], Any] | None = None,
+        sleeper: Callable[[float], None] = time.sleep,
+        jitter: Callable[[float, float], float] = random.uniform,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        max_crawl_retries: int = DEFAULT_MAX_CRAWL_RETRIES,
         max_pages: int = DEFAULT_MAX_PAGES,
     ) -> None:
+        if not 0 <= max_crawl_retries <= DEFAULT_MAX_CRAWL_RETRIES:
+            raise ValueError(
+                "max_crawl_retries must be between 0 and "
+                f"{DEFAULT_MAX_CRAWL_RETRIES}"
+            )
+        self._retrier = RequestRetrier(
+            policy=RetryPolicy(
+                max_attempts=max_attempts,
+                max_crawl_retries=max_crawl_retries,
+            ),
+            sleeper=sleeper,
+            jitter=jitter,
+        )
         if not 1 <= max_pages <= DEFAULT_MAX_PAGES:
             raise ValueError(f"max_pages must be between 1 and {DEFAULT_MAX_PAGES}")
         self._request_json = request_json
         self.max_pages = max_pages
         self.pages_requested = 0
         self._begin_direct_diagnostics()
+
+    @property
+    def request_attempts(self) -> int:
+        return self._retrier.request_attempts
+
+    @property
+    def retry_attempts(self) -> int:
+        return self._retrier.retry_attempts
 
     @staticmethod
     def endpoint(token: str) -> str:
@@ -43,6 +78,7 @@ class WorkableSource(DirectRecordAdapter):
     def fetch(self, company: CompanyCfg) -> list[dict]:
         token = require_token(company, self.name)
         self._begin_direct_diagnostics()
+        self._retrier.reset()
         self.pages_requested = 0
         endpoint = self.endpoint(token)
         request_json = self._request_json or post_json
@@ -56,7 +92,10 @@ class WorkableSource(DirectRecordAdapter):
         for page_number in range(1, self.max_pages + 1):
             payload = {} if cursor is None else {"query": "", "token": cursor}
             self.pages_requested += 1
-            response = request_json(endpoint, payload, self.name)
+            # The cursor advances only after this exact request succeeds.
+            response = self._retrier.run(
+                lambda: request_json(endpoint, payload, self.name)
+            )
             jobs, total, next_cursor = _strict_page(response)
 
             if expected_total is None:
@@ -69,8 +108,7 @@ class WorkableSource(DirectRecordAdapter):
                     raise SourceSchemaError(
                         "workable zero-result response was inconsistent"
                     )
-                self._finish_direct_diagnostics(rows)
-                return rows
+                return self._finish(rows)
             if not jobs:
                 raise SourceSchemaError("workable pagination ended before total")
 
@@ -92,8 +130,7 @@ class WorkableSource(DirectRecordAdapter):
                     raise SourceSchemaError(
                         "workable returned a cursor after total completion"
                     )
-                self._finish_direct_diagnostics(rows)
-                return rows
+                return self._finish(rows)
             if next_cursor is None:
                 raise SourceSchemaError("workable pagination ended before total")
             if next_cursor in seen_cursors:
@@ -106,6 +143,20 @@ class WorkableSource(DirectRecordAdapter):
                 )
 
         raise AssertionError("unreachable Workable pagination state")
+
+    def _finish(self, rows: list[dict]) -> list[dict]:
+        parse_loss = bool(
+            self._diagnostic_malformed_rows or self._diagnostic_schema_rows
+        )
+        recovered = bool(self.retry_attempts) and not parse_loss
+        self._finish_direct_diagnostics(
+            rows,
+            failed_request_count=self.retry_attempts,
+            degraded=True if self.retry_attempts else None,
+            complete=True if recovered else None,
+            reason_codes=("request_retry_recovered",) if recovered else (),
+        )
+        return rows
 
     def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
         self._begin_direct_diagnostics()
