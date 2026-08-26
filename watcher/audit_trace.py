@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field, replace
-from typing import Iterable, Mapping, Sequence
+from typing import Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from backend.app.dedupe import (
