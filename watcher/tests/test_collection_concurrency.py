@@ -40,6 +40,7 @@ from watcher.run import (
 )
 from watcher.seen_store import SeenStore
 from watcher.source_health import (
+    ERROR_FETCH,
     ERROR_UNEXPECTED,
     SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
@@ -536,6 +537,78 @@ def test_unprintable_worker_error_is_converted_without_escaping_diagnostics():
     assert outcome.error is error
     assert outcome.error_kind == ERROR_UNEXPECTED
     assert stats.unexpected_task_exceptions == 1
+
+
+def test_worker_error_with_broken_truth_test_is_converted_without_escaping():
+    class UntruthableError(RuntimeError):
+        def __bool__(self):
+            raise RuntimeError("broken truth test")
+
+    stats = CollectionStats()
+    company = CompanyCfg(name="AlphaCo", ats="greenhouse", token="alpha")
+    task = CollectionTask(
+        key="direct", origin="o", provider="greenhouse", run=lambda: None
+    )
+    error = UntruthableError("worker failed")
+
+    outcome = _direct_outcome_from_result(
+        company,
+        TaskResult(index=0, task=task, value=None, error=error),
+        stats,
+    )
+
+    assert outcome.error is error
+    assert outcome.error_kind == ERROR_UNEXPECTED
+    assert stats.unexpected_task_exceptions == 1
+
+
+def test_source_error_with_broken_truth_test_does_not_abort_collection():
+    class UntruthableError(RuntimeError):
+        def __bool__(self):
+            raise RuntimeError("broken truth test")
+
+    company = CompanyCfg(name="AlphaCo", ats="greenhouse", token="alpha")
+    source = DelayedSource(
+        "greenhouse",
+        delay=0.0,
+        errors={company.name: UntruthableError("source failed")},
+    )
+
+    batch = collect_batch(
+        WatcherConfig(companies=(company,)),
+        direct_sources={"greenhouse": source},
+        github_source=[],
+    )
+
+    assert batch.rows == ()
+    assert batch.source_attempts[0].error_kind == ERROR_UNEXPECTED
+
+
+def test_unprintable_fetch_error_keeps_its_source_failure_classification():
+    class UnprintableFetchError(SourceFetchError):
+        def __str__(self):
+            raise RuntimeError("broken text conversion")
+
+    company = CompanyCfg(name="AlphaCo", ats="greenhouse", token="alpha")
+    source = DelayedSource(
+        "greenhouse",
+        delay=0.0,
+        errors={
+            company.name: UnprintableFetchError(
+                "source failed",
+                error_code="transport_failure",
+            )
+        },
+    )
+
+    batch = collect_batch(
+        WatcherConfig(companies=(company,)),
+        direct_sources={"greenhouse": source},
+        github_source=[],
+    )
+
+    assert batch.rows == ()
+    assert batch.source_attempts[0].error_kind == f"{ERROR_FETCH}/transport_failure"
 
 
 # --- collection equivalence ---------------------------------------------

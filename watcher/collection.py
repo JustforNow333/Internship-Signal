@@ -603,8 +603,10 @@ def _direct_outcome_from_result(
 
     if isinstance(result.value, _DirectFetchOutcome) and result.error is None:
         return result.value
-    error = result.error or RuntimeError(
-        f"collection task returned no outcome for {company.name}"
+    error = (
+        result.error
+        if result.error is not None
+        else RuntimeError(f"collection task returned no outcome for {company.name}")
     )
     stats.unexpected_task_exceptions += 1
     LOGGER.error(
@@ -614,7 +616,7 @@ def _direct_outcome_from_result(
     )
     return _DirectFetchOutcome(
         succeeded=False,
-        error=error if isinstance(error, Exception) else RuntimeError(str(error)),
+        error=error if isinstance(error, Exception) else RuntimeError(safe_text(error)),
         error_kind=ERROR_UNEXPECTED,
         workday_failure_code="unexpected_exception",
     )
@@ -656,7 +658,11 @@ def _apply_direct_outcome(
             stats.workday_request_attempts += outcome.request_count
             stats.workday_retry_attempts += outcome.retry_count
         return
-    error = outcome.error or RuntimeError("unknown direct source failure")
+    error = (
+        outcome.error
+        if outcome.error is not None
+        else RuntimeError("unknown direct source failure")
+    )
     if is_workday:
         _record_workday_failure(
             stats,
@@ -777,8 +783,12 @@ def _github_outcome_from_result(
 ) -> _GithubFetchOutcome:
     if isinstance(result.value, _GithubFetchOutcome) and result.error is None:
         return result.value
-    error = result.error or RuntimeError(
-        f"collection task returned no outcome for {plan.source_name}"
+    error = (
+        result.error
+        if result.error is not None
+        else RuntimeError(
+            f"collection task returned no outcome for {plan.source_name}"
+        )
     )
     stats.unexpected_task_exceptions += 1
     LOGGER.error(
@@ -788,7 +798,7 @@ def _github_outcome_from_result(
     )
     return _GithubFetchOutcome(
         succeeded=False,
-        error=error if isinstance(error, Exception) else RuntimeError(str(error)),
+        error=error if isinstance(error, Exception) else RuntimeError(safe_text(error)),
         error_kind=ERROR_UNEXPECTED,
     )
 
@@ -823,7 +833,11 @@ def _apply_github_outcome(
             )
         )
         return
-    error = outcome.error or RuntimeError("unknown GitHub backstop failure")
+    error = (
+        outcome.error
+        if outcome.error is not None
+        else RuntimeError("unknown GitHub backstop failure")
+    )
     if outcome.error_kind == ERROR_UNEXPECTED:
         _record_error(
             errors,
@@ -858,7 +872,7 @@ def _http_status_from_error(error: Exception | None) -> int | None:
     status = getattr(error, "status_code", None)
     if isinstance(status, int) and 100 <= status <= 599:
         return status
-    match = re.search(r"\bHTTP (\d{3})\b", str(error))
+    match = re.search(r"\bHTTP (\d{3})\b", safe_text(error))
     if match:
         value = int(match.group(1))
         if 100 <= value <= 599:
