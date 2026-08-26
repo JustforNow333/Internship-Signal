@@ -73,6 +73,30 @@ class _SearchPage:
         return page_fingerprint([dict(record) for record in self.records])
 
 
+class _ChangingTotalError(SourceSchemaError):
+    """Signal that offset pagination crossed two different board totals."""
+
+    def __init__(
+        self,
+        *,
+        expected_total: int,
+        observed_total: int,
+        page: int,
+        startrow: int,
+    ) -> None:
+        evidence = {
+            "expected": _bounded_diagnostic_number(expected_total),
+            "observed": _bounded_diagnostic_number(observed_total),
+            "page": _bounded_diagnostic_number(page),
+            "startrow": _bounded_diagnostic_number(startrow),
+        }
+        super().__init__(
+            "successfactors total changed during pagination "
+            f"(expected={evidence['expected']} observed={evidence['observed']} "
+            f"page={evidence['page']} startrow={evidence['startrow']})"
+        )
+
+
 @dataclass
 class _Capture:
     depth: int
@@ -212,17 +236,19 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
         self._request_text = request_text
         self._retrier = retrier
         self.max_pages = max_pages
+        self._completed_request_attempts = 0
+        self._completed_retry_attempts = 0
         self.request_count = 0
         self.last_response_metadata: dict[str, object] = {}
         self._begin_direct_diagnostics()
 
     @property
     def request_attempts(self) -> int:
-        return self._retrier.request_attempts
+        return self._completed_request_attempts + self._retrier.request_attempts
 
     @property
     def retry_attempts(self) -> int:
-        return self._retrier.retry_attempts
+        return self._completed_retry_attempts + self._retrier.retry_attempts
 
     @staticmethod
     def endpoint(
@@ -243,13 +269,45 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
         return f"https://{host}{root}search/?{urlencode(query)}"
 
     def fetch(self, company: CompanyCfg) -> list[dict]:
-        self._begin_direct_diagnostics()
         self.request_count = 0
-        # The crawl-wide retry budget is spent per collection, so it resets
-        # here rather than persisting across fetches.
+        self._completed_request_attempts = 0
+        self._completed_retry_attempts = 0
+        self._start_crawl_attempt()
+        host, prefix, locale = _required_config(company)
+        try:
+            return self._crawl(company, host, prefix, locale)
+        except _ChangingTotalError:
+            # Offset pages from the first board state cannot be mixed with the
+            # new total. Discard every crawl-local value and retry exactly once
+            # from offset zero with fresh diagnostics and transport budgets.
+            self._archive_crawl_request_counts()
+            self._start_crawl_attempt()
+            return self._crawl(
+                company,
+                host,
+                prefix,
+                locale,
+                restart_recovered=True,
+            )
+
+    def _start_crawl_attempt(self) -> None:
+        self._begin_direct_diagnostics()
         self._retrier.reset()
         self.last_response_metadata = {}
-        host, prefix, locale = _required_config(company)
+
+    def _archive_crawl_request_counts(self) -> None:
+        self._completed_request_attempts += self._retrier.request_attempts
+        self._completed_retry_attempts += self._retrier.retry_attempts
+
+    def _crawl(
+        self,
+        company: CompanyCfg,
+        host: str,
+        prefix: str,
+        locale: str,
+        *,
+        restart_recovered: bool = False,
+    ) -> list[dict]:
         expected_total: int | None = None
         expected_pages: int | None = None
         page_size: int | None = None
@@ -269,7 +327,11 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
                     raise SourceSchemaError(
                         "successfactors empty-board response was inconsistent"
                     )
-                return self._finish([], duplicate_count=0)
+                return self._finish(
+                    [],
+                    duplicate_count=0,
+                    restart_recovered=restart_recovered,
+                )
 
             if expected_total is None:
                 expected_total = page.total_results
@@ -285,8 +347,11 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
                         "successfactors pagination metadata is inconsistent"
                     )
             elif page.total_results != expected_total:
-                raise SourceSchemaError(
-                    "successfactors total changed during pagination"
+                raise _ChangingTotalError(
+                    expected_total=expected_total,
+                    observed_total=page.total_results,
+                    page=page.current_page,
+                    startrow=raw_seen,
                 )
             elif page.total_pages != expected_pages:
                 raise SourceSchemaError(
@@ -333,7 +398,11 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
                     raise SourceSchemaError(
                         "successfactors pagination completed before the final page"
                     )
-                return self._finish(rows, duplicate_count=duplicates)
+                return self._finish(
+                    rows,
+                    duplicate_count=duplicates,
+                    restart_recovered=restart_recovered,
+                )
             if page.current_page == page.total_pages:
                 raise SourceSchemaError(
                     "successfactors pagination ended before all results were collected"
@@ -365,7 +434,13 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
 
         return self._retrier.run(attempt)
 
-    def _finish(self, rows: list[dict], *, duplicate_count: int) -> list[dict]:
+    def _finish(
+        self,
+        rows: list[dict],
+        *,
+        duplicate_count: int,
+        restart_recovered: bool = False,
+    ) -> list[dict]:
         """Publish diagnostics for a crawl that satisfied every check.
 
         A recovered retry is real degradation and must stay visible, but the
@@ -378,16 +453,19 @@ class SuccessFactorsSource(DirectDiagnosticsMixin):
         parse_loss = bool(
             self._diagnostic_malformed_rows or self._diagnostic_schema_rows
         )
-        recovered = bool(self.retry_attempts) and not parse_loss
+        recovered = bool(self.retry_attempts or restart_recovered) and not parse_loss
+        reason_codes = []
+        if self.retry_attempts:
+            reason_codes.append("request_retry_recovered")
+        if restart_recovered:
+            reason_codes.append("pagination_restart_recovered")
         self._finish_direct_diagnostics(
             rows,
             duplicate_row_count=duplicate_count,
             failed_request_count=self.retry_attempts,
             degraded=True if recovered else None,
             complete=True if recovered else None,
-            reason_codes=(
-                ("request_retry_recovered",) if self.retry_attempts else ()
-            ),
+            reason_codes=reason_codes,
         )
         return rows
 
@@ -594,6 +672,10 @@ def _string_values(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item or "") for item in value]
+
+
+def _bounded_diagnostic_number(value: int) -> int:
+    return min(1_000_000_000, max(0, int(value)))
 
 
 def _clean_text(value: object) -> str:

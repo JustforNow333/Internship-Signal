@@ -116,6 +116,8 @@ def test_multi_page_board_maps_canonical_fields_and_identity():
     assert rows[2]["source_url"].endswith("/1003/www.blank.com")
     assert source.request_count == 2
     assert source.last_health_diagnostics.complete is True
+    assert source.last_health_diagnostics.degraded is False
+    assert source.last_health_diagnostics.reason_codes == ()
 
 
 def test_root_site_single_page_and_locale_query_are_supported():
@@ -219,9 +221,16 @@ def test_repeated_page_is_rejected():
         "Page 1 of 2", "Page 2 of 2"
     )
     pages = iter((first, repeated))
+    offsets = []
+
+    def request(url, _name):
+        offsets.append(int(parse_qs(urlsplit(url).query)["startrow"][0]))
+        return next(pages)
 
     with pytest.raises(SourceSchemaError, match="repeated"):
-        SuccessFactorsSource(request_text=lambda *_: next(pages)).fetch(company())
+        SuccessFactorsSource(request_text=request).fetch(company())
+
+    assert offsets == [0, 2]
 
 
 def test_premature_pagination_end_is_rejected():
@@ -231,16 +240,119 @@ def test_premature_pagination_end_is_rejected():
         SuccessFactorsSource(request_text=lambda *_: html).fetch(company())
 
 
-def test_inconsistent_total_is_rejected():
+def test_second_changing_total_fails_closed_after_only_one_restart():
+    offsets = []
     pages = iter(
         (
             page_html(first=1, last=2, total=4, page=1, pages=2, ids=(1, 2)),
             page_html(first=3, last=4, total=5, page=2, pages=3, ids=(3, 4)),
+            page_html(first=1, last=2, total=6, page=1, pages=3, ids=(11, 12)),
+            page_html(first=3, last=4, total=7, page=2, pages=4, ids=(13, 14)),
         )
     )
 
-    with pytest.raises(SourceSchemaError, match="total"):
-        SuccessFactorsSource(request_text=lambda *_: next(pages)).fetch(company())
+    def request(url, _name):
+        offsets.append(int(parse_qs(urlsplit(url).query)["startrow"][0]))
+        return next(pages)
+
+    source = SuccessFactorsSource(request_text=request)
+    with pytest.raises(
+        SourceSchemaError,
+        match=r"total changed.*expected=6 observed=7 page=2 startrow=2",
+    ):
+        source.fetch(company())
+
+    assert offsets == [0, 2, 0, 2]
+    assert source.request_count == 4
+    assert source.last_health_diagnostics.succeeded is None
+
+
+def test_second_changing_total_exposes_no_partial_rows_to_collection():
+    pages = iter(
+        (
+            page_html(first=1, last=2, total=4, page=1, pages=2, ids=(1, 2)),
+            page_html(first=3, last=4, total=5, page=2, pages=3, ids=(3, 4)),
+            page_html(first=1, last=2, total=6, page=1, pages=3, ids=(11, 12)),
+            page_html(first=3, last=4, total=7, page=2, pages=4, ids=(13, 14)),
+        )
+    )
+    source = SuccessFactorsSource(request_text=lambda *_: next(pages))
+    stats = CollectionStats()
+
+    rows, errors = collect_rows(
+        WatcherConfig(companies=(company(),)),
+        direct_sources={"successfactors": source},
+        github_source=[],
+        stats=stats,
+    )
+
+    assert rows == []
+    assert len(errors) == 1
+    assert "successfactors total changed during pagination" in errors[0]
+    attempt = stats.source_attempts[0]
+    assert attempt.succeeded is False
+    assert attempt.rows_returned is None
+    assert attempt.reason_codes == ("schema_failure",)
+    assert attempt.incomplete is True
+    assert attempt.complete is False
+
+
+def test_changing_total_restarts_whole_crawl_without_leaking_first_rows():
+    offsets = []
+    pages = iter(
+        (
+            page_html(first=1, last=2, total=4, page=1, pages=2, ids=(1, 2)),
+            page_html(first=3, last=4, total=5, page=2, pages=3, ids=(3, 4)),
+            page_html(first=1, last=2, total=4, page=1, pages=2, ids=(11, 12)),
+            page_html(first=3, last=4, total=4, page=2, pages=2, ids=(13, 14)),
+        )
+    )
+
+    def request(url, _name):
+        offsets.append(int(parse_qs(urlsplit(url).query)["startrow"][0]))
+        return next(pages)
+
+    source = SuccessFactorsSource(request_text=request)
+    rows = source.fetch(company())
+
+    assert offsets == [0, 2, 0, 2]
+    assert [row["extra"]["native_posting_id"] for row in rows] == [
+        "11",
+        "12",
+        "13",
+        "14",
+    ]
+    assert source.request_count == 4
+    assert source.request_attempts == 4
+    assert source.retry_attempts == 0
+    diagnostics = source.last_health_diagnostics
+    assert diagnostics.reason_codes == ("pagination_restart_recovered",)
+    assert diagnostics.degraded is True
+    assert diagnostics.complete is True
+    assert diagnostics.incomplete is False
+
+
+def test_restarted_crawl_keeps_the_existing_maximum_page_bound():
+    offsets = []
+    pages = iter(
+        (
+            page_html(first=1, last=1, total=2, page=1, pages=2, ids=(1,)),
+            page_html(first=2, last=2, total=3, page=2, pages=3, ids=(2,)),
+            page_html(first=1, last=1, total=3, page=1, pages=3, ids=(11,)),
+            page_html(first=2, last=2, total=3, page=2, pages=3, ids=(12,)),
+        )
+    )
+
+    def request(url, _name):
+        offsets.append(int(parse_qs(urlsplit(url).query)["startrow"][0]))
+        return next(pages)
+
+    source = SuccessFactorsSource(request_text=request, max_pages=2)
+    with pytest.raises(SourceSchemaError, match="maximum page safeguard"):
+        source.fetch(company())
+
+    assert offsets == [0, 1, 0, 1]
+    assert source.request_count == 4
 
 
 @pytest.mark.parametrize(
@@ -596,6 +708,61 @@ def test_crawl_wide_retry_budget_bounds_a_long_crawl_and_resets_per_fetch():
     assert len(rows) == total
     assert source.retry_attempts == 0
     assert source.last_health_diagnostics.degraded is False
+
+
+def test_whole_crawl_restart_gets_a_fresh_transport_retry_budget():
+    first_page, second_page = _two_page_board()
+    changed_page = page_html(
+        first=3,
+        last=4,
+        total=5,
+        page=2,
+        pages=3,
+        ids=(8003, 8004),
+    )
+    outcomes = iter(
+        (
+            first_page,
+            _retryable(),
+            changed_page,
+            first_page,
+            _retryable(),
+            second_page,
+        )
+    )
+    offsets = []
+    delays = []
+
+    def request(url, _name):
+        offsets.append(int(parse_qs(urlsplit(url).query)["startrow"][0]))
+        outcome = next(outcomes)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    source = SuccessFactorsSource(
+        request_text=request,
+        sleeper=delays.append,
+        jitter=lambda _a, _b: 0.0,
+        max_crawl_retries=1,
+    )
+
+    rows = source.fetch(company())
+
+    assert len(rows) == 4
+    assert offsets == [0, 2, 2, 0, 2, 2]
+    assert delays == [1.0, 1.0]
+    assert source.request_count == 4
+    assert source.request_attempts == 6
+    assert source.retry_attempts == 2
+    diagnostics = source.last_health_diagnostics
+    assert diagnostics.failed_request_count == 2
+    assert diagnostics.reason_codes == (
+        "request_retry_recovered",
+        "pagination_restart_recovered",
+    )
+    assert diagnostics.degraded is True
+    assert diagnostics.complete is True
 
 
 def test_a_retried_page_returning_a_changed_total_still_fails_closed():
