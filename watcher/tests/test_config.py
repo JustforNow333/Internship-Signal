@@ -64,6 +64,7 @@ RECENT_DIRECT_ADAPTER_METADATA = {
     "Air Products": ("workday", "airproducts", "wd5", "AP0001"),
     "LevelTen Energy": ("greenhouse", "leveltenenergy", "", ""),
     "Convergent Energy and Power": ("workable", "convergent-careers", "", ""),
+    "Halo Industries": ("workable", "halo-industries", "", ""),
     "Merck": ("workday", "msd", "wd5", "SearchJobs"),
     "Pfizer": ("workday", "pfizer", "wd1", "PfizerCareers"),
     "Eli Lilly and Company": ("workday", "lilly", "wd115", "LLY"),
@@ -71,6 +72,84 @@ RECENT_DIRECT_ADAPTER_METADATA = {
     "Warner Bros. Discovery": ("workday", "warnerbros", "wd5", "global"),
     "AT&T": ("workday", "att", "wd1", "ATTGeneral"),
     "Hospital for Special Surgery": ("workday", "hss", "wd1", "HSS_Careers"),
+}
+
+
+CONFIRMED_DIRECT_SOURCE_ADDITIONS = {
+    "BlackLine": {
+        "ats": "workday",
+        "token": "blackline",
+        "workday_shard": "wd108",
+        "workday_site": "BlackLineCareers",
+        "source_url": "https://blackline.wd108.myworkdayjobs.com/BlackLineCareers",
+    },
+    "Federal Reserve Bank of New York": {
+        "ats": "workday",
+        "token": "rb",
+        "workday_shard": "wd5",
+        "workday_site": "FRS",
+        "source_url": "https://rb.wd5.myworkdayjobs.com/FRS",
+    },
+    "Brookfield": {
+        "ats": "workday",
+        "token": "brookfield",
+        "workday_shard": "wd5",
+        "workday_site": "brookfield",
+        "source_url": "https://brookfield.wd5.myworkdayjobs.com/brookfield",
+    },
+    "The Carlyle Group": {
+        "ats": "workday",
+        "token": "carlyle",
+        "workday_shard": "wd1",
+        "workday_site": "Carlyle",
+        "source_url": "https://carlyle.wd1.myworkdayjobs.com/Carlyle",
+    },
+    "American Express": {
+        "ats": "oracle_hcm",
+        "oracle_hcm_host": "egug.fa.us2.oraclecloud.com",
+        "oracle_hcm_site": "CX_1",
+        "source_url": (
+            "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/"
+            "sites/CX_1/jobs"
+        ),
+    },
+    "Goldman Sachs": {
+        "ats": "oracle_hcm",
+        "oracle_hcm_host": "hdpc.fa.us2.oraclecloud.com",
+        "oracle_hcm_site": "CampusHiring",
+        "source_url": (
+            "https://hdpc.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/"
+            "sites/CampusHiring/jobs"
+        ),
+    },
+    "Oracle": {
+        "ats": "oracle_hcm",
+        "oracle_hcm_host": "eeho.fa.us2.oraclecloud.com",
+        "oracle_hcm_site": "CX_45001",
+        "source_url": (
+            "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/"
+            "sites/CX_45001/jobs"
+        ),
+    },
+    "Uber": {
+        "ats": "oracle_hcm",
+        "oracle_hcm_host": "iaziqy.fa.ocs.oraclecloud.com",
+        "oracle_hcm_site": "UberCareers",
+        "source_url": (
+            "https://iaziqy.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/"
+            "sites/UberCareers/jobs"
+        ),
+    },
+    "Compass": {
+        "ats": "greenhouse",
+        "token": "urbancompass",
+        "source_url": "https://job-boards.greenhouse.io/urbancompass",
+    },
+    "Sixth Street": {
+        "ats": "greenhouse",
+        "token": "sixthstreet",
+        "source_url": "https://job-boards.greenhouse.io/sixthstreet",
+    },
 }
 
 
@@ -283,6 +362,37 @@ def test_recent_direct_watchlist_entries_keep_verified_adapter_metadata():
         assert company.token == token
         assert company.workday_shard == workday_shard
         assert company.workday_site == workday_site
+
+
+def test_halo_uses_verified_workable_configuration_without_stale_metadata():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    company = next(item for item in config.companies if item.name == "Halo Industries")
+    entry = next(
+        item for item in _default_watchlist_entries() if item["name"] == company.name
+    )
+
+    assert company.ats == "workable"
+    assert company.token == "halo-industries"
+    assert company.source_url == "https://halo-industries.workable.com/"
+    assert company.aliases == ("Halo",)
+    assert company.alumni_match == ("halo industries", "halo")
+    assert company.module == ""
+    assert not ({"module", "coverage_status", "platform_family", "note"} & set(entry))
+
+
+def test_confirmed_direct_source_additions_use_exact_supported_configurations():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    companies_by_name = {company.name: company for company in config.companies}
+    entries_by_name = {entry["name"]: entry for entry in _default_watchlist_entries()}
+
+    for name, expected in CONFIRMED_DIRECT_SOURCE_ADDITIONS.items():
+        company = companies_by_name[name]
+        entry = entries_by_name[name]
+
+        for field, value in expected.items():
+            assert getattr(company, field) == value
+        assert company.module == ""
+        assert not ({"module", "coverage_status", "platform_family", "note"} & set(entry))
 
 
 def _write_watchlist(tmp_path, defaults: str, companies: str | None = None):

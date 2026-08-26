@@ -20,6 +20,7 @@ from watcher.config import CompanyCfg, WatcherConfig, load_watchlist
 DIRECT_ATS = {
     "greenhouse",
     "lever",
+    "oracle_hcm",
     "ashby",
     "smartrecruiters",
     "workable",
