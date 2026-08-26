@@ -24,11 +24,11 @@ cherry-pick shared fixes.
 | `backend/app/ingest.py` | `process_csv` (CSV cleaning) and `analyze_rows` (shared analysis seam) |
 | `backend/app/` | normalize, dedupe, salary, classify, signals, scoring, eligibility, ask, profile, config, store |
 | `backend/app/hosted/` | accounts, PostgreSQL job import, per-user matching, notification delivery |
-| `watcher/run.py` | `python -m watcher.run` entry point and the `watcher.run` compatibility exports |
-| `watcher/pipeline.py` | `run_once`: collect → analyze → filter → seen partition → digest → health |
-| `watcher/collection.py` | direct/GitHub fetch planning, outcomes, source attempts, Workday counters |
-| `watcher/reporting.py` · `cli.py` | console report + heartbeat · argparse and startup |
-| `watcher/config/` | `env.py` (dotenv + every `WATCHER_*` setting) · `models.py` (config dataclasses) · `loader.py` (watchlist file + YAML → config objects) · `_legacy.py` (transitional: validation rules); `watcher.config` stays the import path and `supported_ats()` derives from the registry |
+| `watcher/run.py` | stable entry point and compatibility facade; no new implementation |
+| `watcher/pipeline.py` · `collection.py` | `run_once` orchestration · source collection execution and outcomes |
+| `watcher/reporting.py` · `cli.py` · `run_logging.py` | reports/heartbeat · startup · stable logger/timing |
+| `watcher/config/` | `env.py` (dotenv + every `WATCHER_*` setting) · `models.py` (config dataclasses) · `loader.py` (watchlist file + YAML → config objects) · `validation.py` (pure watchlist rules) · `__init__.py` (stable facade); `supported_ats()` derives from the registry |
+| `watcher/text_safety.py` | dependency-free safe text/exception conversion for failure-path diagnostics |
 | `watcher/sources/registry.py` | **canonical direct-source registry** — register a new ATS adapter here only |
 | `watcher/sources/` | one adapter per ATS and per GitHub backstop format |
 | `watcher/sources/contracts.py` · `transport.py` · `parsing.py` · `rows.py` · `sanitize.py` · `diagnostics.py` · `retry.py` | the shared source layer, split by responsibility; `base.py` is a re-export facade |
@@ -38,6 +38,82 @@ cherry-pick shared fixes.
 | `watcher/source_health.py` · `health_alerts.py` | the two `watcher.health` compatibility facades |
 | `watcher/audit*.py` · `source_comparison.py` | read-only observability |
 | `frontend/src/` · `scripts/` · `evaluation/` | local + hosted UI · probes, benchmarks, migrations · benchmark tooling |
+
+## Architecture and ownership
+
+Detailed design lives in [`docs/architecture.md`](docs/architecture.md),
+[`docs/watcher.md`](docs/watcher.md), and
+[`docs/watcher-sources.md`](docs/watcher-sources.md). The rules below are the
+short ownership map; current code wins over historical documentation.
+
+### Neutral domain
+
+`internship_signal/domain/` is the dependency-neutral shared layer:
+
+- `jobs.py` owns the canonical shared job schema;
+- `identity.py` owns shared identity normalization primitives;
+- `eligibility.py` owns shared categorical eligibility definitions.
+
+Imports flow `watcher → domain ← backend`; the domain must never import either
+higher layer. Move only genuinely shared primitives there. Backend scoring,
+posting-identity policy, dedupe orchestration, APIs, persistence, and watcher
+operations stay with their current owners even when their code is pure.
+
+### Watcher configuration
+
+In `watcher/config/`, `models.py` owns dataclasses, `env.py` owns dotenv and
+environment coercion, `loader.py` owns YAML/watchlist loading and construction,
+and `validation.py` owns validation. `__init__.py` is the stable compatibility
+facade: put new behavior in its owning module, not in the facade.
+
+### Source layer
+
+In `watcher/sources/`, ownership is:
+
+- `contracts.py`: source/response contracts and source exceptions;
+- `diagnostics.py`: `DirectSourceDiagnostics` and shared machinery;
+- `transport.py`: HTTP transport, decoding, and response/error classification;
+- `parsing.py`, `rows.py`, `sanitize.py`: shared parsing, canonical row
+  construction, and total source diagnostic sanitization;
+- `retry.py`: the narrow shared bounded-retry primitive;
+- `registry.py`: the only direct-source adapter registry;
+- `base.py`: compatibility re-exports only;
+- provider modules: provider-specific fetch, pagination, parsing, completeness,
+  retry interpretation, and diagnostics.
+
+Canonical internal source modules must not import `base.py`, and `base.py` must
+not gain implementation logic. Adapters publish `DirectSourceDiagnostics`;
+collection consumes that contract and never provider-private fields. Extend a
+shared primitive only when semantics match: do not force Workday or another
+distinct retry contract into `retry.py`, and do not create a universal adapter
+framework without concrete need.
+
+`watcher/sources/__init__.py` is a lazy compatibility facade. Preserve its
+explicit exports and `__getattr__` resolution/caching; do not eagerly load all
+adapters or import `registry.py` to populate exports. Package-level additions
+need a real compatibility use case, and leaf imports such as `sanitize`,
+`contracts`, and `retry` must remain lightweight.
+
+### Watcher execution and health
+
+`collection.py` owns collection execution, provider handling, attempts, and
+collection diagnostics/stats; `pipeline.py` owns `run_once`; `reporting.py`
+owns console/heartbeat output; `cli.py` owns startup; `run_logging.py` owns the
+stable logger and timing helper. `run.py` is only the stable entry point and
+compatibility facade. Patch the module that owns and uses a binding, not a
+re-export in `run.py`.
+
+In `watcher/health/`, `models.py` owns records/constants, `sanitize.py` total
+sanitizers, `state.py` transitions, `coverage.py` coverage, `policy.py` alert
+policy, `store.py` persistence, `rendering.py` formatting, `service.py`
+orchestration/SMTP, and `report.py` CLI-facing reports. `source_health.py` and
+`health_alerts.py` are compatibility facades. New behavior belongs in the
+canonical `watcher.health.*` owner; preserve reason codes, schemas, alert
+semantics, and compatibility unless behavior change is explicitly in scope.
+
+`watcher/text_safety.py` owns small dependency-free conversion primitives for
+failure paths. Diagnostic code must tolerate hostile `__bool__` and `__str__`;
+keep this module narrow rather than making it a generic utility collection.
 
 ## Non-negotiable rules
 
@@ -88,29 +164,65 @@ cherry-pick shared fixes.
 16. When a rule changes, update this file, keep `claude.md` a short pointer to
     it, and keep `.gitignore` in sync for new generated artifacts.
 
-## Task routing
+## When adding or changing code
 
-Docs referenced below: [`docs/watcher.md`](docs/watcher.md) (W),
+1. Put implementation in its semantic owner; compatibility facades expose APIs
+   and do not own new behavior.
+2. Search for the canonical owner, registry, contract, or narrow abstraction
+   before creating one.
+3. Extend an abstraction only when semantics genuinely match. Keep distinct
+   provider behavior local instead of generalizing only to remove duplication.
+4. Maintain dependency direction: lower layers never depend on orchestration or
+   compatibility facades.
+5. Keep one authoritative schema, constant, registry, policy, or normalizer;
+   preserve old paths with re-exports rather than copies.
+6. Keep provider-specific behavior in adapters; collection and health consume
+   shared contracts.
+7. Keep these facades thin: `watcher.run`, `watcher.source_health`,
+   `watcher.health_alerts`, `watcher.sources.base`, `watcher.sources`, and
+   `watcher.config`.
+8. Preserve public/semi-public APIs and intentional test/script seams during
+   moves unless the task explicitly allows breakage.
+9. Split modules by semantic ownership when responsibilities diverge, not just
+   because a file is long.
+10. Refactor only with concrete evidence: duplicate logic, wrong dependency
+    direction, measured import/context cost, repeated bugs, or a feature need.
+11. Structural refactors preserve behavior, prove parity with focused tests,
+    and remain separate from unrelated changes.
+12. Add or extend a focused architectural guard test for dependency/ownership
+    rules important enough to preserve.
+13. Fit new code into the current architecture; parallel frameworks and second
+    sources of truth are exceptional.
+
+## Canonical routing
+
+| Change | Owner |
+| --- | --- |
+| shared watcher/backend primitive | `internship_signal/domain/` |
+| config model | `watcher/config/models.py` |
+| environment parsing | `watcher/config/env.py` |
+| config loading | `watcher/config/loader.py` |
+| config validation | `watcher/config/validation.py` |
+| source contract/error | `watcher/sources/contracts.py` |
+| HTTP source plumbing | `watcher/sources/transport.py` |
+| shared source parsing | `watcher/sources/parsing.py` |
+| direct adapter registration | `watcher/sources/registry.py` |
+| provider-specific behavior | provider adapter module |
+| collection execution | `watcher/collection.py` |
+| run orchestration | `watcher/pipeline.py` |
+| run logging/timing | `watcher/run_logging.py` |
+| health state/transition | `watcher/health/state.py` |
+| health policy | `watcher/health/policy.py` |
+| health persistence | `watcher/health/store.py` |
+| health rendering | `watcher/health/rendering.py` |
+
+For implementation detail, use [`docs/watcher.md`](docs/watcher.md),
 [`docs/watcher-sources.md`](docs/watcher-sources.md),
 [`docs/architecture.md`](docs/architecture.md),
-[`docs/operations.md`](docs/operations.md),
-[`docs/testing.md`](docs/testing.md).
-
-| Task | Read | Test |
-|---|---|---|
-| ATS adapter | `watcher-sources.md`, `sources/registry.py`, the source-layer module you need | `watcher/tests/test_<adapter>.py`, `test_source_registry.py` |
-| Workday transport/retry/pacing | W §4 | `test_workday_*.py` |
-| Watchlist / env validation | W §2 | `test_config.py` |
-| Concurrency, snapshot, replay | W §11, §13 | `test_collection_concurrency.py`, `test_collection_snapshot.py` |
-| Analysis cache | W §12 | `test_analysis_cache.py` |
-| Eligibility, dedupe, identity | W §7–§9 | `test_student_eligibility.py`, `test_filters.py`, `test_seen_store.py` |
-| Source health and alerts | W §14–§15 | `test_source_health.py`, `test_health_*.py` |
-| Audit, coverage, comparison | W §16 | `test_audit.py`, `test_source_comparison.py`, `test_coverage_audit.py` |
-| Scoring, classification, signals, ask | `architecture.md` | `backend/tests/test_scoring.py`, `test_classify.py`, `test_signals.py`, `test_ask.py` |
-| Hosted backend and notifications | [`backend/HOSTED_BACKEND.md`](backend/HOSTED_BACKEND.md) | `backend/tests/test_hosted_*.py` |
-| Frontend | [`frontend/HOSTED_API.md`](frontend/HOSTED_API.md) for hosted mode | `cd frontend && npm test && npm run build` |
-| Actions, env, state, probes, rollover | `operations.md` | — |
-| Scoring benchmarks | [`evaluation/README.md`](evaluation/README.md) | `test_scoring_benchmark.py`, `test_us_*_benchmark.py` |
+[`docs/operations.md`](docs/operations.md), and
+[`docs/testing.md`](docs/testing.md). Hosted behavior lives in the backend and
+frontend hosted guides; scoring benchmark rules live in
+[`evaluation/README.md`](evaluation/README.md).
 
 ## Tests
 
