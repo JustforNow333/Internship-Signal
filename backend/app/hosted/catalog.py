@@ -16,15 +16,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from backend.app.dedupe import norm_company
 from watcher.config import CompanyCfg, WatcherConfig, load_watchlist
+from watcher.sources.registry import DIRECT_ATS
 
-DIRECT_ATS = {
-    "greenhouse",
-    "lever",
-    "ashby",
-    "smartrecruiters",
-    "workable",
-    "workday",
-}
+# `DIRECT_ATS` is imported from the canonical source registry rather than
+# restated here. A second list silently went stale as adapters were added, so
+# companies the watcher collects directly were published as backstop-only.
 
 
 def company_slug(name: str) -> str:
