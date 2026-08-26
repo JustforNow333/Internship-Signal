@@ -359,6 +359,7 @@ def _failed_coverage(
 
 def _failure_candidate(
     *,
+    adapter="greenhouse",
     github_rows=None,
     fallback_configured=True,
     backstop_available=True,
@@ -372,7 +373,7 @@ def _failure_candidate(
 ):
     """Build the direct-source failure candidate for one configured scenario."""
 
-    direct = _failed_direct_state(failures=failures, error=error)
+    direct = _failed_direct_state(adapter=adapter, failures=failures, error=error)
     states = {direct.health_key: direct}
     if feeds is None:
         feeds = (_feed_state() if feed is None else feed,)
@@ -387,6 +388,7 @@ def _failure_candidate(
         transitions=(_failed_transition(direct),),
         coverage=(
             _failed_coverage(
+                adapter=adapter,
                 github_rows=github_rows,
                 fallback_configured=fallback_configured,
                 backstop_available=backstop_available,

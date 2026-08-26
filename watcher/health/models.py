@@ -114,6 +114,7 @@ MINOR_DEGRADATION_REASONS = frozenset(
         "schema_invalid_records_skipped",
         "malformed_records_skipped",
         "request_retry_recovered",
+        "pagination_restart_recovered",
     }
 )
 # Degradation alert types whose open incident a recovery closes.

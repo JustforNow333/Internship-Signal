@@ -162,7 +162,8 @@ def is_minor_degradation(state: SourceHealthState) -> bool:
             return False
         retained = max(0, int(state.last_rows_returned or 0))
         return retained >= skipped * MIN_RETAINED_ROWS_PER_SKIPPED_ROW
-    # A recovered retry is minor only when the final collection is whole.
+    # A recovered request or whole-crawl retry is minor only when the final
+    # collection is whole.
     return not state.last_incomplete and state.last_complete is True
 
 

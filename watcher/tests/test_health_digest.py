@@ -14,9 +14,14 @@ import pytest
 from watcher.config import CompanyCfg
 from watcher.config import WatcherConfig
 from watcher.health_alerts import (
+    ALERT_DIRECT_SOURCE_DEGRADED,
+    ALERT_MINOR_DEGRADATION,
     MAX_DIGEST_CATCHUP_DAYS,
     MODE_TRANSITIONS_ONLY,
+    SEVERITY_INFO,
+    SEVERITY_MEDIUM,
     HealthAlertPolicy,
+    build_alert_candidates,
     evaluate_and_send_health_alerts,
     is_minor_degradation,
     resolve_digest_window,
@@ -146,6 +151,64 @@ def test_recovered_retry_with_incomplete_collection_is_medium(tmp_path):
     body = digest_calls[0][1]
     assert "MEDIUM" in body
     assert "direct_source_degraded" in body
+
+
+def _pagination_restart_state(**overrides):
+    values = {
+        "status": DIRECT_STATUS_DEGRADED,
+        "previous_status": DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        "rows": 118,
+        "reason_codes": ("pagination_restart_recovered",),
+        "malformed": 0,
+        "schema_errors": 0,
+        "incomplete": False,
+        "truncated": False,
+        "degraded": True,
+        "complete": True,
+    }
+    values.update(overrides)
+    return _state(**values)
+
+
+def _degradation_candidate(state):
+    candidates = build_alert_candidates(
+        policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+        run_id="pagination-restart-policy",
+        observed_at=NOW,
+        states={state.health_key: state},
+        transitions=(),
+        coverage=(_coverage(),),
+        previous_coverage=None,
+    )
+    return next(item for item in candidates if item.health_key == state.health_key)
+
+
+def test_successful_pagination_restart_is_minor_info():
+    state = _pagination_restart_state()
+
+    candidate = _degradation_candidate(state)
+
+    assert is_minor_degradation(state) is True
+    assert candidate.alert_type == ALERT_MINOR_DEGRADATION
+    assert candidate.severity == SEVERITY_INFO
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"complete": False}, id="not-complete"),
+        pytest.param({"incomplete": True}, id="incomplete"),
+        pytest.param({"truncated": True}, id="truncated"),
+    ],
+)
+def test_untrustworthy_pagination_restart_is_not_minor(overrides):
+    state = _pagination_restart_state(**overrides)
+
+    candidate = _degradation_candidate(state)
+
+    assert is_minor_degradation(state) is False
+    assert candidate.alert_type == ALERT_DIRECT_SOURCE_DEGRADED
+    assert candidate.severity == SEVERITY_MEDIUM
 
 
 def test_minor_degradation_followed_by_healthy_sends_no_recovery_email(tmp_path):

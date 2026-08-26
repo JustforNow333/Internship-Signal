@@ -128,6 +128,26 @@ def test_second_consecutive_failure_is_high_despite_proven_fallback():
     assert candidate.severity == SEVERITY_HIGH
 
 
+def test_failed_successfactors_restart_keeps_schema_failure_escalation():
+    first = _failure_candidate(
+        adapter="successfactors",
+        github_rows=3,
+        error="schema_failure",
+    )
+    consecutive = _failure_candidate(
+        adapter="successfactors",
+        github_rows=3,
+        failures=2,
+        error="schema_failure",
+    )
+
+    assert first.health_key == direct_health_key("Test Co", "successfactors")
+    assert first.error_kind == "schema_failure"
+    assert first.severity == SEVERITY_MEDIUM
+    assert consecutive.error_kind == "schema_failure"
+    assert consecutive.severity == SEVERITY_HIGH
+
+
 @pytest.mark.parametrize(
     "broken_feed",
     [
