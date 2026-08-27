@@ -128,6 +128,7 @@ SUPPORTED_ATS = {
     "oracle_hcm",
     "talentbrew",
     "icims",
+    "successfactors",
     "bespoke",
     "github_only",
 }
@@ -363,6 +364,9 @@ class CompanyCfg:
     icims_variant: str = ""
     icims_host: str = ""
     icims_portals: Sequence[str] = field(default_factory=tuple)
+    successfactors_host: str = ""
+    successfactors_site_prefix: str = ""
+    successfactors_locale: str = ""
     source_url: str = ""
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)
@@ -547,6 +551,23 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             portals=icims_portals,
             source_url=source_url,
         )
+    successfactors_host = str(
+        entry.get("successfactors_host") or ""
+    ).strip().casefold()
+    successfactors_site_prefix = str(
+        entry.get("successfactors_site_prefix") or ""
+    ).strip()
+    successfactors_locale = str(
+        entry.get("successfactors_locale") or ""
+    ).strip()
+    if ats == "successfactors":
+        _validate_successfactors_config(
+            name,
+            host=successfactors_host,
+            site_prefix=successfactors_site_prefix,
+            locale=successfactors_locale,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
@@ -568,6 +589,9 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         icims_variant=icims_variant,
         icims_host=icims_host,
         icims_portals=icims_portals,
+        successfactors_host=successfactors_host,
+        successfactors_site_prefix=successfactors_site_prefix,
+        successfactors_locale=successfactors_locale,
         source_url=source_url,
         module=str(entry.get("module") or "").strip(),
         aliases=aliases,
@@ -702,6 +726,52 @@ def _validate_icims_config(
     ):
         raise ConfigError(
             f"{name}: icims source_url must be a credential-free HTTPS URL on a configured portal"
+        )
+
+
+def _validate_successfactors_config(
+    name: str,
+    *,
+    host: str,
+    site_prefix: str,
+    locale: str,
+    source_url: str,
+) -> None:
+    if not is_valid_hostname(host):
+        raise ConfigError(f"{name}: successfactors_host must be a hostname")
+    if site_prefix and not re.fullmatch(
+        r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,78}[A-Za-z0-9])?",
+        site_prefix,
+    ):
+        raise ConfigError(
+            f"{name}: successfactors_site_prefix must be one safe path segment"
+        )
+    if locale and not re.fullmatch(r"[a-z]{2}_[A-Z]{2}", locale):
+        raise ConfigError(
+            f"{name}: successfactors_locale must use language_COUNTRY format"
+        )
+    try:
+        parsed = urlsplit(source_url)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ConfigError(
+            f"{name}: successfactors entries require a valid source_url"
+        ) from exc
+    root_path = f"/{site_prefix}/" if site_prefix else "/"
+    allowed_paths = {root_path, f"{root_path}search/"}
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != host
+        or parsed.netloc.casefold() != host
+        or parsed.username
+        or parsed.password
+        or parsed_port is not None
+        or parsed.path not in allowed_paths
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: successfactors source_url must be a credential-free HTTPS URL at the configured site root"
         )
 
 

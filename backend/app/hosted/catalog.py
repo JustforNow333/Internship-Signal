@@ -24,6 +24,7 @@ DIRECT_ATS = {
     "oracle_hcm",
     "ashby",
     "smartrecruiters",
+    "successfactors",
     "workable",
     "workday",
 }

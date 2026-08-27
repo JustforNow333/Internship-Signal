@@ -260,6 +260,9 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "icims_variant": company.icims_variant,
                 "icims_host": company.icims_host,
                 "icims_portals": list(company.icims_portals),
+                "successfactors_host": company.successfactors_host,
+                "successfactors_site_prefix": company.successfactors_site_prefix,
+                "successfactors_locale": company.successfactors_locale,
                 "module": company.module,
                 "terms": list(company.terms),
             }

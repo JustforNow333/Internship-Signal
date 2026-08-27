@@ -296,12 +296,11 @@ companies:
     note: "no confident company careers page or supported ATS URL found"
 
   - name: "MIT Lincoln Laboratory"
-    ats: bespoke
-    module: "mit_lincoln_laboratory"
+    ats: successfactors
+    successfactors_host: "careers.ll.mit.edu"
     aliases: ["MIT Lincoln", "MIT Lincoln Lab"]
     alumni_match: ["mit lincoln laboratory", "mit lincoln", "mit lincoln lab"]
     source_url: "https://careers.ll.mit.edu/"
-    note: "SuccessFactors portal; unsupported by current watchlist schema"
 
   - name: "Morph Systems"
     ats: bespoke
@@ -526,12 +525,12 @@ companies:
     note: "Taleo-style early careers portal; unsupported by current watcher adapters"
 
   - name: "Nomura"
-    ats: bespoke
-    module: "nomura"
+    ats: successfactors
+    successfactors_host: "careers.nomura.com"
+    successfactors_site_prefix: "Nomura"
     aliases: ["Nomura Holdings"]
     alumni_match: ["nomura"]
-    source_url: "https://careers.nomura.com/Nomura/?locale=en_US"
-    note: "SuccessFactors portal; unsupported by current watcher adapters"
+    source_url: "https://careers.nomura.com/Nomura/"
 
   - name: "BlackRock"
     ats: workday
@@ -566,12 +565,12 @@ companies:
     note: "company-hosted careers portal; unsupported by current watcher adapters"
 
   - name: "EY"
-    ats: bespoke
-    module: "ey"
+    ats: successfactors
+    successfactors_host: "careers.ey.com"
+    successfactors_site_prefix: "ey"
     aliases: ["Ernst & Young"]
     alumni_match: ["ey", "ernst & young", "ernst and young"]
-    source_url: "https://careers.ey.com/"
-    note: "SuccessFactors portal; unsupported by current watcher adapters"
+    source_url: "https://careers.ey.com/ey/"
 
   - name: "TextQL"
     ats: bespoke
@@ -858,11 +857,10 @@ companies:
     note: "company-hosted careers/contact page; unsupported by current watcher adapters"
 
   - name: "Vaisala"
-    ats: bespoke
-    module: "vaisala"
+    ats: successfactors
+    successfactors_host: "careers.vaisala.com"
     alumni_match: ["vaisala"]
-    source_url: "https://www.vaisala.com/en/careers/open-jobs"
-    note: "company-hosted/Salesforce Experience careers portal; unsupported by current watcher adapters"
+    source_url: "https://careers.vaisala.com/"
 
   - name: "Merck"
     ats: workday
@@ -900,12 +898,11 @@ companies:
     source_url: "https://roche.wd3.myworkdayjobs.com/ROG-A2O-GENE"
 
   - name: "Exxon Mobil"
-    ats: bespoke
-    module: "exxon_mobil"
+    ats: successfactors
+    successfactors_host: "jobs.exxonmobil.com"
     aliases: ["ExxonMobil", "Exxon"]
     alumni_match: ["exxon mobil", "exxonmobil", "exxon"]
     source_url: "https://jobs.exxonmobil.com/"
-    note: "SuccessFactors/company-hosted careers portal; unsupported by current watcher adapters"
 
   - name: "Warner Bros. Discovery"
     ats: workday

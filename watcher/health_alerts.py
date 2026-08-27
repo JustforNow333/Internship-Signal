@@ -53,6 +53,9 @@ DEFAULT_MODE = MODE_TRANSITIONS_ONLY
 DEFAULT_HOUR_UTC = 12
 DEFAULT_COOLDOWN_HOURS = 24
 DEFAULT_FEED_STALE_HOURS = 48
+_SUCCESSFACTORS_MINOR_RECOVERY_REASONS = frozenset(
+    {"request_retry_recovered", "pagination_restart_recovered"}
+)
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
@@ -135,6 +138,26 @@ def load_health_alert_policy(
             maximum=24 * 90,
             name="WATCHER_FEED_STALE_HOURS",
         ),
+    )
+
+
+def is_minor_degradation(state: SourceHealthState) -> bool:
+    """Return whether SuccessFactors fully recovered within one collection."""
+
+    if (
+        state.source_kind == SOURCE_KIND_GITHUB_FEED
+        or state.status != DIRECT_STATUS_DEGRADED
+        or state.adapter != "successfactors"
+    ):
+        return False
+    reasons = frozenset(state.last_reason_codes or ())
+    if not reasons or not reasons <= _SUCCESSFACTORS_MINOR_RECOVERY_REASONS:
+        return False
+    return bool(
+        state.last_complete is True
+        and not state.last_incomplete
+        and not state.last_truncated
+        and not state.last_error_kind
     )
 
 
@@ -361,15 +384,22 @@ def build_alert_candidates(
             state.source_kind != SOURCE_KIND_GITHUB_FEED
             and state.status == DIRECT_STATUS_DEGRADED
         ):
+            minor = is_minor_degradation(state)
             candidates.append(
                 _candidate(
                     state,
                     transition=transition,
-                    alert_type="direct_source_degraded",
-                    severity="medium",
+                    alert_type=(
+                        "minor_degradation" if minor else "direct_source_degraded"
+                    ),
+                    severity="info" if minor else "medium",
                     run_id=run_id,
                     coverage=company_coverage,
-                    action="Inspect the bounded adapter diagnostics for incomplete collection.",
+                    action=(
+                        "No immediate action; collection recovered and completed."
+                        if minor
+                        else "Inspect the bounded adapter diagnostics for incomplete collection."
+                    ),
                 )
             )
         elif (
@@ -716,7 +746,7 @@ class HealthAlertStore:
                   and alert_type in (
                     'new_failure', 'continued_failure',
                     'direct_source_silence', 'direct_source_degraded',
-                    'unknown_diagnostics', 'feed_stale'
+                    'minor_degradation', 'unknown_diagnostics', 'feed_stale'
                   )
                   and resolved_at is null
                 """,
@@ -994,7 +1024,7 @@ def _allowed_by_mode(
             "both_tiers_unavailable",
         }
     if mode == MODE_FAILURE_ONLY:
-        return candidate.alert_type != "recovery"
+        return candidate.alert_type not in {"recovery", "minor_degradation"}
     return False
 
 

@@ -53,7 +53,7 @@ GitHub Actions cron (hourly)
         │
         ▼
 For each company in watchlist.yml:
-    ┌─ Tier 1: direct ATS adapter (Greenhouse/Lever/Ashby/SmartRecruiters/iCIMS/Workday/bespoke)
+    ┌─ Tier 1: direct ATS adapter (Greenhouse/Lever/Ashby/SmartRecruiters/iCIMS/SuccessFactors/Workday/bespoke)
     │     └─ success → canonical rows tagged source="direct"
     │     └─ fail/blocked → log, continue (do NOT abort the run)
     │
@@ -107,6 +107,7 @@ internship-signal/
     │   ├── smartrecruiters.py
     │   ├── workable.py
     │   ├── icims.py
+    │   ├── successfactors.py
     │   ├── workday.py           per-tenant; fussier (see §4)
     │   ├── bespoke/             one file per custom site (google.py, amazon.py…)
     │   ├── github_listings.py   Simplify JSON backstop
@@ -174,7 +175,7 @@ companies:
 ```
 
 `ats` ∈ {greenhouse, lever, ashby, smartrecruiters, workable, workday, icims,
-bespoke, github_only}. `config.py` validates every entry at startup and fails loudly on
+successfactors, bespoke, github_only}. `config.py` validates every entry at startup and fails loudly on
 an unknown `ats` or a `bespoke` entry whose module is missing.
 
 `defaults.terms` must be present and contain at least one nonblank term. A
@@ -247,6 +248,15 @@ hosts are enumerated independently and combined with portal-namespaced IDs.
 One failed or incomplete portal fails the company attempt, while an explicit
 empty portal may coexist with populated siblings. No per-job enrichment is
 used.
+
+**SuccessFactors** uses the anonymous Career Site Builder HTML search contract,
+`GET /{optional-site-prefix}/search/?q=&locationsearch=&startrow=N`. It derives
+page size and completion from explicit result/page metadata, rejects repeated
+or inconsistent pages, and uses same-host numeric posting-detail IDs. A
+retryable page fetch gets at most three attempts and each crawl gets at most
+five retries. If a credible total changes, all rows and pagination state are
+discarded and one fresh crawl starts at offset zero; only a fully consistent
+replacement crawl succeeds. The adapter never performs per-job enrichment.
 
 These are clean and cover a large fraction of mid-size tech + funded startups.
 

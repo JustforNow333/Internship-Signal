@@ -13,7 +13,9 @@ from watcher.health_alerts import (
     MODE_OFF,
     MODE_TRANSITIONS_ONLY,
     HealthAlertPolicy,
+    build_alert_candidates,
     evaluate_and_send_health_alerts,
+    is_minor_degradation,
     load_health_alert_policy,
 )
 from watcher.seen_store import SeenStore
@@ -24,6 +26,8 @@ from watcher.source_health import (
     COVERAGE_UNCOVERED,
     SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
+    DIRECT_STATUS_DEGRADED,
+    DIRECT_STATUS_FAILED,
     STATUS_FAILING,
     STATUS_HEALTHY,
     CompanyCoverage,
@@ -55,12 +59,21 @@ def _state(
     rows=10,
     error=None,
     feed_label=None,
+    adapter=None,
+    reason_codes=(),
+    incomplete=None,
+    truncated=None,
+    complete=None,
 ):
     return SourceHealthState(
         health_key=key,
         source_kind=source_kind,
         company=company,
-        adapter="greenhouse" if source_kind == SOURCE_KIND_DIRECT else "simplify_json",
+        adapter=adapter or (
+            "greenhouse"
+            if source_kind == SOURCE_KIND_DIRECT
+            else "simplify_json"
+        ),
         feed_label=feed_label,
         unsupported_reason=None,
         status=status,
@@ -77,6 +90,11 @@ def _state(
         last_error_message="token=secret https://user:pass@example.com?q=secret"
         if error
         else None,
+        last_incomplete=incomplete,
+        last_truncated=truncated,
+        last_reason_codes=tuple(reason_codes),
+        last_degraded=status == DIRECT_STATUS_DEGRADED,
+        last_complete=complete,
     )
 
 
@@ -367,6 +385,88 @@ def test_previously_productive_direct_source_silence_alerts(tmp_path):
     )
     assert result.sent is True
     assert "direct_source_degraded" in calls[0][1]
+
+
+def _successfactors_recovery_state(**overrides):
+    values = {
+        "key": "company:test:direct:successfactors",
+        "adapter": "successfactors",
+        "status": DIRECT_STATUS_DEGRADED,
+        "previous_status": "healthy_with_listings",
+        "rows": 118,
+        "reason_codes": ("pagination_restart_recovered",),
+        "incomplete": False,
+        "truncated": False,
+        "complete": True,
+    }
+    values.update(overrides)
+    return _state(**values)
+
+
+def _degradation_candidate(state):
+    candidates = build_alert_candidates(
+        policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+        run_id="pagination-restart-policy",
+        observed_at=NOW,
+        states={state.health_key: state},
+        transitions=(),
+        coverage=(_coverage(),),
+        previous_coverage=None,
+    )
+    return next(item for item in candidates if item.health_key == state.health_key)
+
+
+def test_successful_successfactors_pagination_restart_is_minor_info(tmp_path):
+    state = _successfactors_recovery_state()
+
+    candidate = _degradation_candidate(state)
+    result, calls = _evaluate(tmp_path, state=state)
+
+    assert is_minor_degradation(state) is True
+    assert candidate.alert_type == "minor_degradation"
+    assert candidate.severity == "info"
+    assert result.candidates == 1
+    assert result.sent is False
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"complete": False}, id="not-complete"),
+        pytest.param({"incomplete": True}, id="incomplete"),
+        pytest.param({"truncated": True}, id="truncated"),
+    ],
+)
+def test_untrustworthy_successfactors_restart_is_not_minor(overrides):
+    state = _successfactors_recovery_state(**overrides)
+
+    candidate = _degradation_candidate(state)
+
+    assert is_minor_degradation(state) is False
+    assert candidate.alert_type == "direct_source_degraded"
+    assert candidate.severity == "medium"
+
+
+def test_failed_successfactors_restart_keeps_failure_severity():
+    state = _state(
+        key="company:test:direct:successfactors",
+        adapter="successfactors",
+        status=DIRECT_STATUS_FAILED,
+        rows=None,
+        failures=2,
+        error="schema_failure",
+        reason_codes=("schema_failure",),
+        incomplete=True,
+        truncated=False,
+        complete=False,
+    )
+
+    candidate = _degradation_candidate(state)
+
+    assert is_minor_degradation(state) is False
+    assert candidate.error_kind == "schema_failure"
+    assert candidate.severity == "high"
 
 
 def test_coverage_regression_and_both_tiers_unavailable_are_high_severity(tmp_path):

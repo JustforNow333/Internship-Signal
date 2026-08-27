@@ -100,6 +100,7 @@ def direct_origin_key(
     oracle_hcm_host: str = "",
     talentbrew_host: str = "",
     icims_host: str = "",
+    successfactors_host: str = "",
 ) -> str:
     """Return the shared origin key for one direct adapter fetch.
 
@@ -128,6 +129,13 @@ def direct_origin_key(
         host = _safe_key(icims_host, limit=253)
         return _safe_key(
             f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:icims"
+        )
+    if adapter == "successfactors":
+        host = _safe_key(successfactors_host, limit=253)
+        return _safe_key(
+            f"https://{host}"
+            if host != UNKNOWN_ORIGIN
+            else "adapter:successfactors"
         )
     host = DIRECT_ORIGIN_HOSTS.get(adapter)
     if host:
