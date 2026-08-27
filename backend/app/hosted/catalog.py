@@ -16,22 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from backend.app.dedupe import norm_company
 from watcher.config import CompanyCfg, WatcherConfig, load_watchlist
-
-DIRECT_ATS = {
-    "bain",
-    "epic",
-    "greenhouse",
-    "ibm",
-    "icims",
-    "lever",
-    "oracle_hcm",
-    "paylocity",
-    "ashby",
-    "smartrecruiters",
-    "successfactors",
-    "workable",
-    "workday",
-}
+from watcher.sources.registry import DIRECT_ATS
 
 
 def company_slug(name: str) -> str:

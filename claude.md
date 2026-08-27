@@ -50,6 +50,8 @@
   Never duplicate backend scoring, classification, signals, dedupe, or IDs.
 - Source adapters only fetch canonical rows. Eligibility belongs in
   `watcher/eligibility.py`; filters add internship/open/min-score checks.
+- Register direct ATS adapters only in `watcher/sources/registry.py`; config,
+  runtime construction, and hosted direct coverage derive from `DIRECT_ATS`.
 - Student-status exclusions require clear mandatory evidence and use stable
   `phd_only`, `graduate_only`, `freshman_only`, or
   `returning_intern_only` reasons. Mixed, preferred, incidental, or ambiguous

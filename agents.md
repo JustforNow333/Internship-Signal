@@ -119,9 +119,10 @@
 - Source provenance keys off `extra.source_adapter`, which `make_row` always
   sets. CSV `extra` holds unmapped user columns (a `source` column collides with
   the `source_url` alias) and must never drive dedupe ordering or provenance.
-- Supported ATS values are `greenhouse`, `lever`, `ashby`,
-  `smartrecruiters`, `workable`, `workday`, `bespoke`, and `github_only`.
-  Workday requires tenant, shard, and site.
+- `watcher/sources/registry.py` is the single registration point for direct
+  ATS adapters and runtime construction. Config validation derives its direct
+  values from `DIRECT_ATS`; `bespoke` and `github_only` remain non-direct.
+  Workday's registry entry alone requests the shared pacer.
 - Adapters live in `watcher/sources/`, return canonical rows, and set
   `extra.source` plus `extra.source_adapter`. GitHub rows also keep safe
   `extra.feed_url`.

@@ -101,6 +101,7 @@ internship-signal/
     ├── alumni.csv               the fraternity list (see §6)
     ├── sources/
     │   ├── base.py              Source protocol + canonical-row helpers
+    │   ├── registry.py          canonical direct-ATS registration + construction
     │   ├── greenhouse.py        one adapter, all Greenhouse companies
     │   ├── lever.py
     │   ├── ashby.py

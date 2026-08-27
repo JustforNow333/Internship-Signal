@@ -1,6 +1,12 @@
 """Public company catalog coverage derived from watcher configuration."""
 
+from __future__ import annotations
+
+import pytest
 from app.hosted.catalog import CompanyCatalog
+
+from watcher.config import NON_DIRECT_ATS, CompanyCfg, WatcherConfig
+from watcher.sources.registry import DIRECT_ATS
 
 
 WAVE_ONE_DIRECT_COMPANIES = {
@@ -41,6 +47,67 @@ BAIN_IBM_EPIC_DIRECT_COMPANIES = {
 }
 
 PAYLOCITY_DIRECT_COMPANIES = {"Procure Analytics"}
+
+
+def _catalog(*companies: CompanyCfg, backstop: bool = True) -> CompanyCatalog:
+    return CompanyCatalog.from_watcher_config(
+        WatcherConfig(
+            companies=tuple(companies),
+            github_listing_urls=(
+                ("https://example.test/listings.json",) if backstop else ()
+            ),
+        )
+    )
+
+
+@pytest.mark.parametrize("ats", sorted(DIRECT_ATS))
+def test_every_registered_direct_adapter_reports_direct_coverage(ats: str) -> None:
+    catalog = _catalog(CompanyCfg(name="Example Co", ats=ats))
+
+    assert catalog.companies[0].coverage == "direct"
+    assert catalog.companies[0].selectable is True
+
+
+def test_talentbrew_reports_direct_coverage() -> None:
+    catalog = CompanyCatalog.from_watcher_config()
+    talentbrew = next(
+        company
+        for company in catalog.companies
+        if company.name == "Barclays"
+    )
+
+    assert talentbrew.coverage == "direct"
+    assert talentbrew.selectable is True
+
+
+@pytest.mark.parametrize("ats", sorted(NON_DIRECT_ATS))
+def test_configuration_only_modes_report_backstop_coverage(ats: str) -> None:
+    catalog = _catalog(CompanyCfg(name="Example Co", ats=ats))
+
+    assert catalog.companies[0].coverage == "backstop"
+    assert catalog.companies[0].selectable is True
+
+
+@pytest.mark.parametrize("ats", sorted(NON_DIRECT_ATS))
+def test_backstop_only_companies_are_unselectable_without_a_feed(ats: str) -> None:
+    catalog = _catalog(CompanyCfg(name="Example Co", ats=ats), backstop=False)
+
+    assert catalog.companies[0].selectable is False
+
+
+def test_direct_coverage_tracks_the_canonical_source_registry() -> None:
+    companies = tuple(
+        CompanyCfg(name=f"Company {ats}", ats=ats)
+        for ats in sorted(DIRECT_ATS | NON_DIRECT_ATS)
+    )
+    catalog = _catalog(*companies)
+    direct = {
+        company.name.removeprefix("Company ")
+        for company in catalog.companies
+        if company.coverage == "direct"
+    }
+
+    assert direct == set(DIRECT_ATS)
 
 
 def test_wave_one_sources_are_exposed_as_direct_hosted_catalog_coverage():

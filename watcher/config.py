@@ -118,24 +118,23 @@ SUPPORTED_WORKDAY_DETAIL_POLICIES = frozenset(
         WORKDAY_DETAIL_EARLY_CAREER,
     }
 )
-SUPPORTED_ATS = {
-    "bain",
-    "epic",
-    "greenhouse",
-    "ibm",
-    "lever",
-    "ashby",
-    "smartrecruiters",
-    "workable",
-    "workday",
-    "oracle_hcm",
-    "talentbrew",
-    "icims",
-    "successfactors",
-    "paylocity",
-    "bespoke",
-    "github_only",
-}
+# Configuration-only modes: no direct adapter is attempted for these entries.
+NON_DIRECT_ATS = frozenset({"bespoke", "github_only"})
+
+
+def supported_ats() -> frozenset[str]:
+    """Return every accepted watchlist ``ats`` value.
+
+    The registry import is deferred because source adapters import this module;
+    importing it here at module scope would create a cycle in the current MVP
+    architecture.
+    """
+
+    from watcher.sources.registry import DIRECT_ATS
+
+    return DIRECT_ATS | NON_DIRECT_ATS
+
+
 SUPPORTED_GITHUB_LISTING_FORMATS = {
     "simplify_json",
     "github_markdown_table",
@@ -493,7 +492,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
     token = str(entry.get("token") or "").strip()
     if not name:
         raise ConfigError("company entry missing name")
-    if ats not in SUPPORTED_ATS:
+    if ats not in supported_ats():
         raise ConfigError(f"{name}: unsupported ats '{ats}'")
     if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "workable"} and not token:
         raise ConfigError(f"{name}: {ats} entries require token")
