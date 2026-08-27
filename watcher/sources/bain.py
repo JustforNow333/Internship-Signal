@@ -12,7 +12,6 @@ from watcher.config import CompanyCfg
 from watcher.sources.base import (
     DirectDiagnosticsMixin,
     JsonHttpResponse,
-    SourceFetchError,
     SourceSchemaError,
     get_json_response,
     html_to_text,
@@ -20,13 +19,17 @@ from watcher.sources.base import (
     page_fingerprint,
     parse_records,
 )
+from watcher.sources.retry import (
+    DEFAULT_MAX_ATTEMPTS,
+    RequestRetrier,
+    RetryPolicy,
+)
 
 HOST = "www.bain.com"
 SEARCH_URL = f"https://{HOST}/en/api/jobsearch/keyword/get"
 CAREERS_REFERER = f"https://{HOST}/careers/find-a-role/"
 DEFAULT_PAGE_SIZE = 100
 DEFAULT_MAX_PAGES = 1_000
-DEFAULT_MAX_ATTEMPTS = 3
 _NATIVE_ID = re.compile(r"[1-9][0-9]*")
 _POSITION_PATH = "/careers/find-a-role/position/"
 _PROGRAM_PREFIX = "/careers/work-with-us/internships-programs/"
@@ -47,25 +50,30 @@ class BainSource(DirectDiagnosticsMixin):
         page_size: int = DEFAULT_PAGE_SIZE,
         max_pages: int = DEFAULT_MAX_PAGES,
     ) -> None:
-        if not 1 <= max_attempts <= DEFAULT_MAX_ATTEMPTS:
-            raise ValueError(
-                f"max_attempts must be between 1 and {DEFAULT_MAX_ATTEMPTS}"
-            )
+        retrier = RequestRetrier(
+            policy=RetryPolicy(max_attempts=max_attempts),
+            sleeper=sleeper,
+            jitter=jitter,
+        )
         if not 1 <= page_size <= DEFAULT_PAGE_SIZE:
             raise ValueError(f"page_size must be between 1 and {DEFAULT_PAGE_SIZE}")
         if not 1 <= max_pages <= DEFAULT_MAX_PAGES:
             raise ValueError(f"max_pages must be between 1 and {DEFAULT_MAX_PAGES}")
         self._request_json = request_json
-        self._sleeper = sleeper
-        self._jitter = jitter
-        self._max_attempts = max_attempts
+        self._retrier = retrier
         self.page_size = page_size
         self.max_pages = max_pages
         self.pages_requested = 0
-        self.request_attempts = 0
-        self.retry_attempts = 0
         self.last_response_metadata: dict[str, object] = {}
         self._begin_direct_diagnostics()
+
+    @property
+    def request_attempts(self) -> int:
+        return self._retrier.request_attempts
+
+    @property
+    def retry_attempts(self) -> int:
+        return self._retrier.retry_attempts
 
     @staticmethod
     def endpoint(*, page: int, results: int) -> str:
@@ -83,8 +91,7 @@ class BainSource(DirectDiagnosticsMixin):
     def fetch(self, company: CompanyCfg) -> list[dict]:
         self._begin_direct_diagnostics()
         self.pages_requested = 0
-        self.request_attempts = 0
-        self.retry_attempts = 0
+        self._retrier.reset()
         self.last_response_metadata = {}
         expected_total: int | None = None
         raw_seen = 0
@@ -159,25 +166,16 @@ class BainSource(DirectDiagnosticsMixin):
     def _fetch_page(self, url: str) -> Any:
         request = self._request_json or _get_json
         headers = {"Referer": CAREERS_REFERER}
-        for attempt in range(1, self._max_attempts + 1):
-            self.request_attempts += 1
-            try:
-                response = request(url, self.name, headers)
-                if isinstance(response, JsonHttpResponse):
-                    self.last_response_metadata = dict(response.metadata)
-                    return response.payload
-                self.last_response_metadata = {}
-                return response
-            except SourceFetchError as exc:
-                exc.attempt_count = attempt
-                exc.response_metadata.update(
-                    {"attempt": attempt, "max_attempts": self._max_attempts}
-                )
-                if not exc.retryable or attempt == self._max_attempts:
-                    raise
-                self.retry_attempts += 1
-                self._sleeper(_retry_delay(attempt, self._jitter))
-        raise AssertionError("unreachable Bain retry state")
+
+        def attempt() -> Any:
+            response = request(url, self.name, headers)
+            if isinstance(response, JsonHttpResponse):
+                self.last_response_metadata = dict(response.metadata)
+                return response.payload
+            self.last_response_metadata = {}
+            return response
+
+        return self._retrier.run(attempt)
 
     def _finish(self, rows: list[dict], duplicate_count: int) -> list[dict]:
         parse_loss = bool(
@@ -202,14 +200,6 @@ def _get_json(
     headers: Mapping[str, str],
 ) -> JsonHttpResponse:
     return get_json_response(url, source_name, request_headers=headers)
-
-
-def _retry_delay(
-    attempt: int,
-    jitter: Callable[[float, float], float],
-) -> float:
-    base = 1.0 if attempt == 1 else 3.0
-    return min(5.0, base + max(0.0, float(jitter(0.0, 1.0))))
 
 
 def _page(payload: Any, *, page_size: int) -> tuple[list, int]:
