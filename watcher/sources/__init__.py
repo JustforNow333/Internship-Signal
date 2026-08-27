@@ -18,6 +18,7 @@ from .icims import IcimsSource
 from .ibm import IbmSource
 from .lever import LeverSource
 from .oracle_hcm import OracleHcmSource
+from .paylocity import PaylocitySource
 from .smartrecruiters import SmartRecruitersSource
 from .successfactors import SuccessFactorsSource
 from .talentbrew import TalentBrewSource
@@ -36,6 +37,7 @@ __all__ = [
     "IbmSource",
     "LeverSource",
     "OracleHcmSource",
+    "PaylocitySource",
     "SmartRecruitersSource",
     "SuccessFactorsSource",
     "TalentBrewSource",

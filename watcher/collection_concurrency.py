@@ -56,6 +56,7 @@ DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "lever": "api.lever.co",
     "ashby": "api.ashbyhq.com",
     "smartrecruiters": "api.smartrecruiters.com",
+    "paylocity": "recruiting.paylocity.com",
     "workable": "apply.workable.com",
 }
 

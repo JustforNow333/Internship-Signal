@@ -341,13 +341,14 @@ companies:
     source_url: "https://jobs.premisehealth.com/"
     note: "company-hosted careers portal"
 
-  - name: "Procutre Analytics"
-    ats: bespoke
-    module: "procutre_analytics"
-    aliases: ["Procutre"]
-    alumni_match: ["procutre analytics", "procutre"]
-    source_url: "https://procureanalytics.com/careers-culture/"
-    note: "input appears to be Procure Analytics; Paylocity portal unsupported by current watchlist schema"
+  - name: "Procure Analytics"
+    ats: paylocity
+    paylocity_company_id: "37f1fc46-3c9a-4802-995e-eebd78e096d7"
+    paylocity_module_id: "11566"
+    paylocity_slug: "Procurement-Advisors-LLC"
+    aliases: ["Procure", "Procutre Analytics", "Procutre"]
+    alumni_match: ["procure analytics", "procure", "procutre analytics", "procutre"]
+    source_url: "https://recruiting.paylocity.com/recruiting/jobs/All/37f1fc46-3c9a-4802-995e-eebd78e096d7/Procurement-Advisors-LLC"
 
   - name: "Progenic Labs"
     ats: github_only

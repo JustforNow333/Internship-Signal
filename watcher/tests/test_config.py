@@ -265,6 +265,10 @@ def test_default_watchlist_loads_and_preserves_core_invariants():
             }
         elif company.ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "workable"}:
             assert company.token
+        elif company.ats == "paylocity":
+            assert company.paylocity_company_id
+            assert company.paylocity_module_id
+            assert company.paylocity_slug
         elif company.ats == "bespoke":
             assert company.module
 
@@ -272,6 +276,120 @@ def test_default_watchlist_loads_and_preserves_core_invariants():
             assert entry.get("source_url")
         if company.ats in {"bespoke", "github_only"}:
             assert entry.get("note")
+
+
+def test_default_watchlist_uses_canonical_procure_name_with_legacy_aliases():
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    entry = next(
+        item
+        for item in _default_watchlist_entries()
+        if item["name"] == "Procure Analytics"
+    )
+    procure = next(
+        company for company in config.companies if company.name == "Procure Analytics"
+    )
+
+    assert procure.ats == "paylocity"
+    assert procure.paylocity_company_id == "37f1fc46-3c9a-4802-995e-eebd78e096d7"
+    assert procure.paylocity_module_id == "11566"
+    assert procure.paylocity_slug == "Procurement-Advisors-LLC"
+    assert procure.source_url == (
+        "https://recruiting.paylocity.com/recruiting/jobs/All/"
+        "37f1fc46-3c9a-4802-995e-eebd78e096d7/Procurement-Advisors-LLC"
+    )
+    assert procure.module == ""
+    assert "note" not in entry
+    assert tuple(procure.aliases) == (
+        "Procure",
+        "Procutre Analytics",
+        "Procutre",
+    )
+    assert tuple(procure.alumni_match) == (
+        "procure analytics",
+        "procure",
+        "procutre analytics",
+        "procutre",
+    )
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        (
+            '    paylocity_company_id: "bad"\n'
+            '    paylocity_module_id: "11566"\n'
+            '    paylocity_slug: "Example"\n'
+            '    source_url: "https://recruiting.paylocity.com/recruiting/jobs/All/bad/Example"\n',
+            "paylocity_company_id",
+        ),
+        (
+            '    paylocity_company_id: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"\n'
+            '    paylocity_module_id: "1"\n'
+            '    paylocity_slug: "Example"\n'
+            '    source_url: "https://recruiting.paylocity.com/recruiting/jobs/All/AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA/Example"\n',
+            "lower-case UUID",
+        ),
+        (
+            '    paylocity_company_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"\n'
+            '    paylocity_module_id: "0"\n'
+            '    paylocity_slug: "Example"\n'
+            '    source_url: "https://recruiting.paylocity.com/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example"\n',
+            "paylocity_module_id",
+        ),
+        (
+            '    paylocity_company_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"\n'
+            '    paylocity_module_id: "1"\n'
+            '    paylocity_slug: "../Example"\n'
+            '    source_url: "https://recruiting.paylocity.com/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example"\n',
+            "paylocity_slug",
+        ),
+    ],
+)
+def test_paylocity_configuration_requires_valid_identity_fields(
+    tmp_path, fields, message
+):
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        '  - name: "Example"\n    ats: paylocity\n' + fields,
+    )
+
+    with pytest.raises(ConfigError, match=message):
+        load_watchlist(path)
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        "http://recruiting.paylocity.com/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example",
+        "https://evil.example/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example",
+        "https://user:secret@recruiting.paylocity.com/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example",
+        "https://recruiting.paylocity.com:443/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example",
+        "https://recruiting.paylocity.com/recruiting/jobs/All/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/Example",
+        "https://recruiting.paylocity.com/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Other",
+        "https://recruiting.paylocity.com/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example?all=true",
+        "https://recruiting.paylocity.com/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example#jobs",
+        "https://recruiting.paylocity.com/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example/",
+        "https://recruiting.paylocity.com:bad/recruiting/jobs/All/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example",
+    ],
+)
+def test_paylocity_configuration_requires_exact_public_board_url(
+    tmp_path, source_url
+):
+    fields = (
+        '    paylocity_company_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"\n'
+        '    paylocity_module_id: "1"\n'
+        '    paylocity_slug: "Example"\n'
+        f'    source_url: "{source_url}"\n'
+    )
+    path = _write_watchlist(
+        tmp_path,
+        '  terms: ["Summer 2027"]\n',
+        '  - name: "Example"\n    ats: paylocity\n' + fields,
+    )
+
+    with pytest.raises(ConfigError, match="source_url"):
+        load_watchlist(path)
 
 
 def test_default_watchlist_contains_recent_priority_companies():

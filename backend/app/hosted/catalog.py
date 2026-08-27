@@ -25,6 +25,7 @@ DIRECT_ATS = {
     "icims",
     "lever",
     "oracle_hcm",
+    "paylocity",
     "ashby",
     "smartrecruiters",
     "successfactors",

@@ -249,6 +249,10 @@ consecutive complete search-index snapshots agree. Epic uses `ats: epic` and
 requires exact ID-set agreement between its official Next.js jobs data and
 cached search response. None of the three performs per-job enrichment.
 
+Paylocity entries use `ats: paylocity` with a lower-case company UUID, positive
+module ID, safe board slug, and the exact public recruiting-board URL. The
+adapter validates the embedded board identity before accepting its job array.
+
 The Simplify JSON backstop likewise retains valid entries from a mixed
 malformed payload and emits one bounded warning. Its deliberately nonempty feed
 still fails when every entry is malformed.

@@ -40,6 +40,8 @@ BAIN_IBM_EPIC_DIRECT_COMPANIES = {
     "IBM",
 }
 
+PAYLOCITY_DIRECT_COMPANIES = {"Procure Analytics"}
+
 
 def test_wave_one_sources_are_exposed_as_direct_hosted_catalog_coverage():
     catalog = CompanyCatalog.from_watcher_config()
@@ -79,3 +81,15 @@ def test_bain_ibm_epic_sources_are_exposed_as_direct_hosted_catalog_coverage():
         company = companies_by_name[name]
         assert company.coverage == "direct"
         assert company.selectable is True
+
+
+def test_paylocity_sources_are_exposed_as_direct_hosted_catalog_coverage():
+    catalog = CompanyCatalog.from_watcher_config()
+    companies_by_name = {company.name: company for company in catalog.companies}
+
+    for name in PAYLOCITY_DIRECT_COMPANIES:
+        company = companies_by_name[name]
+        assert company.coverage == "direct"
+        assert company.selectable is True
+
+    assert catalog.resolve("procutre-analytics") == companies_by_name["Procure Analytics"]
