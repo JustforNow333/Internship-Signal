@@ -230,6 +230,12 @@ invalid pages still fail, as does any nonempty fetch that produces zero valid
 canonical rows; a genuinely empty Workday board remains a successful empty
 source.
 
+iCIMS entries use `ats: icims` with an explicit `icims_variant` of
+`jibe_json` or `classic` and a hostname-only `icims_host`. Multi-portal classic
+sources also list the complete ordered `icims_portals`; every portal must
+enumerate successfully. The adapter uses anonymous Jibe JSON or the classic
+iframe listing response, never the outer shell or per-job enrichment.
+
 The Simplify JSON backstop likewise retains valid entries from a mixed
 malformed payload and emits one bounded warning. Its deliberately nonempty feed
 still fails when every entry is malformed.

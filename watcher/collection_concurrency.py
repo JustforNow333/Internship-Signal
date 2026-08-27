@@ -99,6 +99,7 @@ def direct_origin_key(
     workday_shard: str = "",
     oracle_hcm_host: str = "",
     talentbrew_host: str = "",
+    icims_host: str = "",
 ) -> str:
     """Return the shared origin key for one direct adapter fetch.
 
@@ -122,6 +123,11 @@ def direct_origin_key(
         host = _safe_key(talentbrew_host, limit=253)
         return _safe_key(
             f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:talentbrew"
+        )
+    if adapter == "icims":
+        host = _safe_key(icims_host, limit=253)
+        return _safe_key(
+            f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:icims"
         )
     host = DIRECT_ORIGIN_HOSTS.get(adapter)
     if host:

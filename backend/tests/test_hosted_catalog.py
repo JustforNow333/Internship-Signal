@@ -18,12 +18,30 @@ WAVE_ONE_DIRECT_COMPANIES = {
     "Whatnot",
 }
 
+ICIMS_DIRECT_COMPANIES = {
+    "Aon",
+    "Analysis Group",
+    "General Dynamics Electric Boat",
+    "JHU Applied Physics Laboratory",
+    "ZS",
+}
+
 
 def test_wave_one_sources_are_exposed_as_direct_hosted_catalog_coverage():
     catalog = CompanyCatalog.from_watcher_config()
     companies_by_name = {company.name: company for company in catalog.companies}
 
     for name in WAVE_ONE_DIRECT_COMPANIES:
+        company = companies_by_name[name]
+        assert company.coverage == "direct"
+        assert company.selectable is True
+
+
+def test_icims_sources_are_exposed_as_direct_hosted_catalog_coverage():
+    catalog = CompanyCatalog.from_watcher_config()
+    companies_by_name = {company.name: company for company in catalog.companies}
+
+    for name in ICIMS_DIRECT_COMPANIES:
         company = companies_by_name[name]
         assert company.coverage == "direct"
         assert company.selectable is True

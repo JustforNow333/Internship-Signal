@@ -1,0 +1,40 @@
+{
+  "jobs": [
+    {
+      "data": {
+        "req_id": "101",
+        "title": "Software Engineer Intern",
+        "full_location": "New York, New York, United States",
+        "additional_locations": [
+          {
+            "location_name": "Boston, Massachusetts, United States"
+          }
+        ],
+        "description": "<p>Build reliable software.</p>",
+        "responsibilities": "<p>Design and test services.</p>",
+        "qualifications": "<p>Currently enrolled in a degree program.</p>",
+        "employment_type": "Intern",
+        "posted_date": "2026-08-01T12:00:00Z",
+        "apply_url": "https://careers-example.icims.com/jobs/101/login",
+        "meta_data": {
+          "canonical_url": "https://jobs.example.test/jobs/101"
+        }
+      }
+    },
+    {
+      "data": {
+        "req_id": "102",
+        "title": "Data Science Intern",
+        "location_name": "Remote - US",
+        "description": "Analyze product data.",
+        "employment_type": "Temporary",
+        "posted_date": "2026-08-02",
+        "apply_url": "jobs.example.test/prelogin/102",
+        "meta_data": {
+          "canonical_url": "https://jobs.example.test/jobs/102"
+        }
+      }
+    }
+  ],
+  "totalCount": 3
+}
