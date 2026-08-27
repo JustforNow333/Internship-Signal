@@ -49,7 +49,10 @@ UNKNOWN_ORIGIN = "unknown"
 # regression test derives the same hosts from the adapters so the two cannot
 # drift. Workday is per tenant because each tenant is its own host.
 DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
+    "bain": "www.bain.com",
+    "epic": "careers.epic.com",
     "greenhouse": "boards-api.greenhouse.io",
+    "ibm": "www-api.ibm.com",
     "lever": "api.lever.co",
     "ashby": "api.ashbyhq.com",
     "smartrecruiters": "api.smartrecruiters.com",

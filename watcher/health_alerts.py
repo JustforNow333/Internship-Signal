@@ -53,9 +53,14 @@ DEFAULT_MODE = MODE_TRANSITIONS_ONLY
 DEFAULT_HOUR_UTC = 12
 DEFAULT_COOLDOWN_HOURS = 24
 DEFAULT_FEED_STALE_HOURS = 48
-_SUCCESSFACTORS_MINOR_RECOVERY_REASONS = frozenset(
-    {"request_retry_recovered", "pagination_restart_recovered"}
-)
+_MINOR_RECOVERY_REASONS_BY_ADAPTER = {
+    "bain": frozenset({"request_retry_recovered"}),
+    "epic": frozenset({"request_retry_recovered"}),
+    "ibm": frozenset({"request_retry_recovered"}),
+    "successfactors": frozenset(
+        {"request_retry_recovered", "pagination_restart_recovered"}
+    ),
+}
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
@@ -142,16 +147,18 @@ def load_health_alert_policy(
 
 
 def is_minor_degradation(state: SourceHealthState) -> bool:
-    """Return whether SuccessFactors fully recovered within one collection."""
+    """Return whether a supported adapter fully recovered within collection."""
 
     if (
         state.source_kind == SOURCE_KIND_GITHUB_FEED
         or state.status != DIRECT_STATUS_DEGRADED
-        or state.adapter != "successfactors"
     ):
         return False
+    allowed_reasons = _MINOR_RECOVERY_REASONS_BY_ADAPTER.get(state.adapter)
+    if allowed_reasons is None:
+        return False
     reasons = frozenset(state.last_reason_codes or ())
-    if not reasons or not reasons <= _SUCCESSFACTORS_MINOR_RECOVERY_REASONS:
+    if not reasons or not reasons <= allowed_reasons:
         return False
     return bool(
         state.last_complete is True

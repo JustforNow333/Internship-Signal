@@ -174,8 +174,8 @@ companies:
     ats: github_only               # no direct scrape; rely on Tier 2
 ```
 
-`ats` ∈ {greenhouse, lever, ashby, smartrecruiters, workable, workday, icims,
-successfactors, bespoke, github_only}. `config.py` validates every entry at startup and fails loudly on
+`ats` ∈ {bain, epic, ibm, greenhouse, lever, ashby, smartrecruiters, workable,
+workday, icims, successfactors, bespoke, github_only}. `config.py` validates every entry at startup and fails loudly on
 an unknown `ats` or a `bespoke` entry whose module is missing.
 
 `defaults.terms` must be present and contain at least one nonblank term. A
@@ -257,6 +257,24 @@ retryable page fetch gets at most three attempts and each crawl gets at most
 five retries. If a credible total changes, all rows and pagination state are
 discarded and one fresh crawl starts at offset zero; only a fully consistent
 replacement crawl succeeds. The adapter never performs per-job enrichment.
+
+**Bain & Company** uses the official anonymous, referer-gated careers-search
+API. `start` is a zero-based page number; stable `totalResults`, full bounded
+enumeration, repeated-page checks, numeric `JobId`, and posting-specific Bain
+detail/program URLs are required.
+
+**IBM** uses the official anonymous `www-api.ibm.com` `careers2` search index
+with `appid=careers`, `sortby=url`, `fr`/`nr`, and one-based page metadata. A
+result is trusted only after two consecutive complete snapshots agree on the
+total, sanitized page membership, canonical rows, duplicates, and parse
+diagnostics. At most three complete passes are attempted and passes are never
+unioned. Only posting-specific `careers.ibm.com` URLs are accepted.
+
+**Epic** requires exact ID-set agreement between the official server-rendered
+Next.js Flight jobs contract and `/cached-api/jobs/search/`. Published listing
+metadata and the native numeric Avature ID produce posting-specific
+`epic.avature.net/Careers/FolderDetail` rows. The standard Avature SearchJobs
+board is not authoritative and is never used as collection input.
 
 These are clean and cover a large fraction of mid-size tech + funded startups.
 

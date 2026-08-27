@@ -1,0 +1,31 @@
+{
+  "resultset": {
+    "version": "1",
+    "searchresults": {
+      "totalresults": 3,
+      "startindex": 2,
+      "numresults": 1,
+      "smresults": 0,
+      "searchresultlist": [
+        {
+          "resultnum": 2,
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "title": "Research Intern",
+          "description": "Explore trustworthy AI.",
+          "language": "en",
+          "summary": "",
+          "url": "https://careers.ibm.com/careers/JobDetail?jobId=103",
+          "docattributes": [
+            {"country": "us"},
+            {"effectivedate": "2026-08-03"},
+            {"field_keyword_05": "United States"},
+            {"field_keyword_18": "Intern"},
+            {"field_keyword_19": "Yorktown Heights, NY"},
+            {"field_text_01": "103"}
+          ],
+          "highlightedtext": {}
+        }
+      ]
+    }
+  }
+}

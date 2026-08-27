@@ -45,11 +45,10 @@ companies:
     note: "known company-hosted careers portal"
 
   - name: "Epic"
-    ats: bespoke
-    module: "epic"
+    ats: epic
     alumni_match: ["epic"]
-    source_url: "https://careers.epic.com/"
-    note: "company-hosted careers portal"
+    source_url: "https://careers.epic.com/jobs/"
+    note: "official Next.js jobs data validated against the complete cached search ID set"
 
   - name: "Google"
     ats: bespoke
@@ -234,11 +233,9 @@ companies:
     source_url: "https://www.hubspot.com/careers/jobs/7005836?gh_jid=7005836"
 
   - name: "IBM"
-    ats: bespoke
-    module: "ibm"
+    ats: ibm
     alumni_match: ["ibm"]
-    source_url: "https://www.ibm.com/careers"
-    note: "known company-hosted careers portal"
+    source_url: "https://www.ibm.com/careers/search"
 
   - name: "ICEYE"
     ats: workable
@@ -754,12 +751,10 @@ companies:
     source_url: "https://fticonsulting.wd108.myworkdayjobs.com/FTIConsultingCareers"
 
   - name: "Bain & Company"
-    ats: bespoke
-    module: "bain_company"
+    ats: bain
     aliases: ["Bain"]
     alumni_match: ["bain & company", "bain"]
-    source_url: "https://www.bain.com/careers/"
-    note: "company-hosted careers portal; unsupported by current watcher adapters"
+    source_url: "https://www.bain.com/careers/find-a-role/"
 
   - name: "Aon"
     ats: icims

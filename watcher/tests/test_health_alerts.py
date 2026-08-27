@@ -430,6 +430,34 @@ def test_successful_successfactors_pagination_restart_is_minor_info(tmp_path):
     assert calls == []
 
 
+@pytest.mark.parametrize("adapter", ["bain", "epic", "ibm"])
+def test_complete_recovered_request_retry_is_minor_info(adapter):
+    state = _successfactors_recovery_state(
+        key=f"company:test:direct:{adapter}",
+        adapter=adapter,
+        reason_codes=("request_retry_recovered",),
+    )
+
+    candidate = _degradation_candidate(state)
+
+    assert is_minor_degradation(state) is True
+    assert candidate.alert_type == "minor_degradation"
+    assert candidate.severity == "info"
+
+
+@pytest.mark.parametrize("adapter", ["bain", "epic", "ibm"])
+def test_recovered_retry_with_any_untrusted_collection_signal_is_not_minor(adapter):
+    state = _successfactors_recovery_state(
+        key=f"company:test:direct:{adapter}",
+        adapter=adapter,
+        reason_codes=("request_retry_recovered",),
+        incomplete=True,
+    )
+
+    assert is_minor_degradation(state) is False
+    assert _degradation_candidate(state).severity == "medium"
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

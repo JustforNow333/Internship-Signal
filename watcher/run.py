@@ -112,10 +112,13 @@ from watcher.source_health import (
 )
 from watcher.sources import (
     AshbySource,
+    BainSource,
     DirectSourceDiagnostics,
+    EpicSource,
     GitHubListingsSource,
     GitHubMarkdownTableSource,
     GreenhouseSource,
+    IbmSource,
     IcimsSource,
     LeverSource,
     OracleHcmSource,
@@ -1845,7 +1848,10 @@ def main(argv: list[str] | None = None) -> int:
 _DEFAULT_DIRECT_ADAPTERS = frozenset(
     {
         "ashby",
+        "bain",
+        "epic",
         "greenhouse",
+        "ibm",
         "icims",
         "lever",
         "oracle_hcm",
@@ -1864,7 +1870,10 @@ def _default_direct_sources(
 ) -> dict[str, object]:
     return {
         "ashby": AshbySource(),
+        "bain": BainSource(),
+        "epic": EpicSource(),
         "greenhouse": GreenhouseSource(),
+        "ibm": IbmSource(),
         "icims": IcimsSource(),
         "lever": LeverSource(),
         "oracle_hcm": OracleHcmSource(),

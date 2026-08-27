@@ -34,6 +34,12 @@ SUCCESSFACTORS_DIRECT_COMPANIES = {
     "Vaisala",
 }
 
+BAIN_IBM_EPIC_DIRECT_COMPANIES = {
+    "Bain & Company",
+    "Epic",
+    "IBM",
+}
+
 
 def test_wave_one_sources_are_exposed_as_direct_hosted_catalog_coverage():
     catalog = CompanyCatalog.from_watcher_config()
@@ -60,6 +66,16 @@ def test_successfactors_sources_are_exposed_as_direct_hosted_catalog_coverage():
     companies_by_name = {company.name: company for company in catalog.companies}
 
     for name in SUCCESSFACTORS_DIRECT_COMPANIES:
+        company = companies_by_name[name]
+        assert company.coverage == "direct"
+        assert company.selectable is True
+
+
+def test_bain_ibm_epic_sources_are_exposed_as_direct_hosted_catalog_coverage():
+    catalog = CompanyCatalog.from_watcher_config()
+    companies_by_name = {company.name: company for company in catalog.companies}
+
+    for name in BAIN_IBM_EPIC_DIRECT_COMPANIES:
         company = companies_by_name[name]
         assert company.coverage == "direct"
         assert company.selectable is True

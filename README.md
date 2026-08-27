@@ -242,6 +242,13 @@ hostname-only `successfactors_host`, plus an optional one-segment
 is fully enumerated; retryable page failures have bounded page/crawl budgets,
 and one changing-total event restarts the entire crawl from offset zero.
 
+Bain & Company uses `ats: bain` and the official referer-gated careers search
+API with numeric job identity and complete zero-based pagination. IBM uses
+`ats: ibm`, deterministic posting-URL ordering, and accepts only after two
+consecutive complete search-index snapshots agree. Epic uses `ats: epic` and
+requires exact ID-set agreement between its official Next.js jobs data and
+cached search response. None of the three performs per-job enrichment.
+
 The Simplify JSON backstop likewise retains valid entries from a mixed
 malformed payload and emits one bounded warning. Its deliberately nonempty feed
 still fails when every entry is malformed.
