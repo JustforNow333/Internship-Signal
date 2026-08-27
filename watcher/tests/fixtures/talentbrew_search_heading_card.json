@@ -1,0 +1,6 @@
+{
+  "filters": "<section id=\"search-filters\"></section>",
+  "results": "<section id=\"search-results\" data-total-results=\"2\" data-total-job-results=\"2\" data-total-pages=\"1\" data-current-page=\"1\" data-records-per-page=\"16\"><ul><li><a href=\"/en/job/brentwood/software-engineer-intern/1388/98222222221\" data-job-id=\"98222222221\"><h2 class=\"result-job__title\">Software Engineer Intern</h2></a></li><li><a href=\"/en/job/nashville/data-analyst-intern/1388/98222222222\" data-job-id=\"98222222222\"><h2 class=\"result-job__title\">Data Analyst Intern</h2></a></li></ul></section>",
+  "hasJobs": true,
+  "hasContent": false
+}
