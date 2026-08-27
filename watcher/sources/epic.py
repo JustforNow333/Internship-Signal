@@ -333,7 +333,10 @@ def _parse_posting(record: object, company: CompanyCfg) -> dict:
     posting_id = str(record.get("_posting_id") or "").strip()
     if not _NATIVE_ID.fullmatch(posting_id):
         raise SourceSchemaError("epic posting ID is invalid")
-    title = html_to_text(record.get("externalName"))
+    title_value = record.get("externalName")
+    if not isinstance(title_value, str):
+        raise SourceSchemaError("epic posting title is blank or generic")
+    title = html_to_text(title_value)
     if not title or title.casefold() in _GENERIC_TITLES:
         raise SourceSchemaError("epic posting title is blank or generic")
     if record.get("isOpen") is not True or record.get("isPublished") is not True:

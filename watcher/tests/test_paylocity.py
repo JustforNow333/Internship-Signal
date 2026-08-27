@@ -341,6 +341,20 @@ def test_schema_invalid_jobs_are_never_fabricated(updates):
         PaylocitySource().parse(_html([posting]), PROCURE)
 
 
+@pytest.mark.parametrize("field", ["Name", "City", "State", "Country"])
+def test_non_string_location_metadata_is_not_fabricated(field):
+    posting = _job(101)
+    posting["LocationName"] = None
+    posting["JobLocation"] = {
+        **posting["JobLocation"],
+        "Name": "",
+        field: {"unexpected": "object"},
+    }
+
+    with pytest.raises(SourceSchemaError, match="none were valid"):
+        PaylocitySource().parse(_html([posting]), PROCURE)
+
+
 def test_distinct_native_ids_always_generate_distinct_posting_urls():
     rows = PaylocitySource().parse(_html([_job(101), _job(102)]), PROCURE)
 

@@ -159,6 +159,24 @@ def test_nonempty_all_malformed_response_fails():
         BainSource(request_json=lambda *_: page({"JobId": "2"})).fetch(company())
 
 
+@pytest.mark.parametrize("invalid_title", [123, True, [], {}])
+def test_non_string_required_title_is_not_fabricated(invalid_title):
+    record = posting("1")
+    record["JobTitle"] = invalid_title
+
+    with pytest.raises(SourceSchemaError, match="none were valid"):
+        BainSource(request_json=lambda *_: page(record)).fetch(company())
+
+
+@pytest.mark.parametrize("field", ["JobDescription", "EmployeeType"])
+def test_non_string_text_metadata_is_not_fabricated(field):
+    record = posting("1")
+    record[field] = {"unexpected": "object"}
+
+    with pytest.raises(SourceSchemaError, match="none were valid"):
+        BainSource(request_json=lambda *_: page(record)).fetch(company())
+
+
 @pytest.mark.parametrize(
     ("payloads", "message"),
     [

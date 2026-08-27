@@ -234,7 +234,10 @@ def _parse_posting(posting: Any, company: CompanyCfg) -> dict:
     if not isinstance(posting, dict):
         raise SourceSchemaError("bain expected each posting to be an object")
     native_id = str(posting.get("JobId") or "").strip()
-    title = str(posting.get("JobTitle") or "").strip()
+    title_value = posting.get("JobTitle")
+    if not isinstance(title_value, str):
+        raise SourceSchemaError("bain posting missing a numeric JobId or title")
+    title = title_value.strip()
     if not _NATIVE_ID.fullmatch(native_id) or not title:
         raise SourceSchemaError("bain posting missing a numeric JobId or title")
     source_url = _posting_url(posting.get("Link"), native_id=native_id)
@@ -245,9 +248,13 @@ def _parse_posting(posting: Any, company: CompanyCfg) -> dict:
         company=company.name,
         title=title,
         location=_locations(posting.get("Location")),
-        description=html_to_text(posting.get("JobDescription")),
+        description=html_to_text(
+            _optional_text(posting.get("JobDescription"), "JobDescription")
+        ),
         source_url=source_url,
-        internship_type=str(posting.get("EmployeeType") or "").strip(),
+        internship_type=_optional_text(
+            posting.get("EmployeeType"), "EmployeeType"
+        ),
         extra={
             "source_id": source_id,
             "source_requisition_id": source_id,
@@ -297,6 +304,14 @@ def _locations(value: Any) -> str:
     if not isinstance(value, list):
         raise SourceSchemaError("bain expected Location to be a list")
     return "; ".join(_text_values(value))
+
+
+def _optional_text(value: Any, field: str) -> str:
+    if value in (None, ""):
+        return ""
+    if not isinstance(value, str):
+        raise SourceSchemaError(f"bain expected {field} to be a string or null")
+    return value.strip()
 
 
 def _text_values(value: Any) -> list[str]:

@@ -212,6 +212,13 @@ def _parse_posting(
         location_data = {}
     if not isinstance(location_data, dict):
         raise SourceSchemaError("paylocity JobLocation must be an object or null")
+    for field in ("Name", "City", "State", "Country"):
+        if location_data.get(field) is not None and not isinstance(
+            location_data.get(field), str
+        ):
+            raise SourceSchemaError(
+                f"paylocity JobLocation.{field} must be a string or null"
+            )
     location_module = location_data.get("ModuleId")
     if location_module not in (None, "") and str(location_module) != module_id:
         raise SourceSchemaError(

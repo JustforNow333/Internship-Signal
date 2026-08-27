@@ -161,6 +161,19 @@ def test_nonempty_all_malformed_result_fails():
         source.fetch(company())
 
 
+@pytest.mark.parametrize("invalid_title", [123, True, [], {}])
+def test_non_string_required_title_is_not_fabricated(invalid_title):
+    record = posting()
+    record["externalName"] = invalid_title
+    source = source_for(
+        next_page([{"id": "1"}], {"1": record}),
+        search_ids("1"),
+    )
+
+    with pytest.raises(SourceSchemaError, match="none were valid"):
+        source.fetch(company())
+
+
 def test_exact_duplicate_ids_are_collapsed_and_counted():
     source = source_for(
         next_page([{"id": "1"}, {"id": "1"}], {"1": posting()}),
