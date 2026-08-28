@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import fields, replace
 from datetime import datetime, timedelta, timezone
 
@@ -8,15 +9,23 @@ import pytest
 from watcher.config import CompanyCfg
 from watcher.config import WatcherConfig
 from watcher.health_alerts import (
+    MAX_DIGEST_CATCHUP_DAYS,
     MODE_DAILY_SUMMARY,
     MODE_FAILURE_ONLY,
     MODE_OFF,
     MODE_TRANSITIONS_ONLY,
+    SEVERITY_HIGH,
+    SEVERITY_INFO,
+    SEVERITY_MEDIUM,
+    HealthAlertCandidate,
     HealthAlertPolicy,
+    HealthAlertStore,
+    _merge_candidates,
     build_alert_candidates,
     evaluate_and_send_health_alerts,
     is_minor_degradation,
     load_health_alert_policy,
+    resolve_digest_window,
 )
 from watcher.seen_store import SeenStore
 from watcher.run import RUN_MODE_LIVE, run_once
@@ -43,6 +52,8 @@ from watcher.sources.base import make_row
 
 
 NOW = datetime(2026, 7, 28, 12, tzinfo=timezone.utc)
+BEFORE_DIGEST_HOUR = NOW.replace(hour=6)
+DIGEST_SUBJECT_MARKER = "Daily Source Health"
 
 
 def _state(
@@ -60,9 +71,14 @@ def _state(
     error=None,
     feed_label=None,
     adapter=None,
+    malformed=None,
+    schema_errors=None,
+    duplicates=None,
+    failed_requests=None,
     reason_codes=(),
     incomplete=None,
     truncated=None,
+    degraded=None,
     complete=None,
 ):
     return SourceHealthState(
@@ -90,10 +106,18 @@ def _state(
         last_error_message="token=secret https://user:pass@example.com?q=secret"
         if error
         else None,
+        last_malformed_row_count=malformed,
+        last_schema_error_row_count=schema_errors,
+        last_duplicate_row_count=duplicates,
+        last_failed_request_count=failed_requests,
         last_incomplete=incomplete,
         last_truncated=truncated,
         last_reason_codes=tuple(reason_codes),
-        last_degraded=status == DIRECT_STATUS_DEGRADED,
+        last_degraded=(
+            status == DIRECT_STATUS_DEGRADED
+            if degraded is None
+            else degraded
+        ),
         last_complete=complete,
     )
 
@@ -165,6 +189,35 @@ def _evaluate(
     return result, calls
 
 
+def _evaluate_states(
+    tmp_path,
+    *,
+    states,
+    transitions=(),
+    now=NOW,
+    sender=None,
+):
+    calls = []
+
+    def default_sender(subject, body):
+        calls.append((subject, body))
+        return True
+
+    result = evaluate_and_send_health_alerts(
+        db_path=tmp_path / "state.sqlite",
+        policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+        run_id=f"run-{now.isoformat()}",
+        observed_at=now,
+        states={state.health_key: state for state in states},
+        transitions=tuple(transitions),
+        coverage=(_coverage(),),
+        summary=_summary(),
+        comparison=None,
+        sender=sender or default_sender,
+    )
+    return result, calls
+
+
 @pytest.mark.parametrize("from_status", ["healthy", "degraded"])
 def test_failure_transition_sends(from_status, tmp_path):
     state = _state(
@@ -211,7 +264,7 @@ def test_continued_failure_respects_cooldown_and_resends_afterward(tmp_path):
     assert third.sent is True
 
 
-def test_recovery_sends_once_after_failure(tmp_path):
+def test_high_failure_then_recovery_reports_recovery_in_digest_only(tmp_path):
     failing = _state(
         status=STATUS_FAILING,
         failures=3,
@@ -222,6 +275,7 @@ def test_recovery_sends_once_after_failure(tmp_path):
         tmp_path,
         state=failing,
         transition=(_transition("healthy", STATUS_FAILING),),
+        now=BEFORE_DIGEST_HOUR,
     )
     recovered = _state(
         status=STATUS_HEALTHY,
@@ -233,65 +287,43 @@ def test_recovery_sends_once_after_failure(tmp_path):
         tmp_path,
         state=recovered,
         transition=(_transition(STATUS_FAILING, STATUS_HEALTHY, recovery=True),),
-        now=NOW + timedelta(hours=1),
+        now=BEFORE_DIGEST_HOUR + timedelta(hours=1),
     )
-    assert result.sent is True
+    digest, digest_calls = _evaluate(
+        tmp_path,
+        state=replace(recovered, previous_status=STATUS_HEALTHY),
+        now=NOW,
+    )
+
+    assert result.sent is False
     assert result.recovery_alerts == 1
-    assert "Source Recovery" in calls[0][0]
-    assert "rows returned: 142" in calls[0][1]
+    assert calls == []
+    assert digest.daily_digest_sent is True
+    assert DIGEST_SUBJECT_MARKER in digest_calls[0][0]
+    assert "INFO" in digest_calls[0][1]
+    assert "recovered" in digest_calls[0][1]
 
 
-def test_failed_recovery_delivery_retries_once_while_source_remains_healthy(
-    tmp_path,
-):
-    failing = _state(
-        status=STATUS_FAILING,
-        failures=3,
-        rows=None,
-        error="schema_failure",
+def test_medium_and_info_incidents_are_digest_only(tmp_path):
+    medium = _state(
+        status=DIRECT_STATUS_DEGRADED,
+        rows=10,
+        incomplete=True,
+        complete=False,
+        reason_codes=("pagination_ended_early",),
     )
-    _evaluate(
-        tmp_path,
-        state=failing,
-        transition=(_transition("healthy", STATUS_FAILING),),
-    )
-    recovered = _state(
-        status=STATUS_HEALTHY,
-        previous_status=STATUS_FAILING,
-        failures=0,
-        rows=142,
-    )
+    info = _successfactors_recovery_state()
 
-    def fail_recovery_delivery(_subject, _body):
-        raise RuntimeError("temporary SMTP outage")
-
-    failed, _ = _evaluate(
-        tmp_path,
-        state=recovered,
-        transition=(
-            _transition(STATUS_FAILING, STATUS_HEALTHY, recovery=True),
-        ),
-        now=NOW + timedelta(hours=1),
-        sender=fail_recovery_delivery,
-    )
-    retried, retry_calls = _evaluate(
-        tmp_path,
-        state=replace(recovered, previous_status=STATUS_HEALTHY),
-        now=NOW + timedelta(hours=2),
-    )
-    settled, settled_calls = _evaluate(
-        tmp_path,
-        state=replace(recovered, previous_status=STATUS_HEALTHY),
-        now=NOW + timedelta(hours=3),
-    )
-
-    assert failed.sent is False
-    assert failed.error == "temporary SMTP outage"
-    assert retried.sent is True
-    assert retried.recovery_alerts == 1
-    assert "Source Recovery" in retry_calls[0][0]
-    assert settled.sent is False
-    assert settled_calls == []
+    for state, severity in ((medium, SEVERITY_MEDIUM), (info, SEVERITY_INFO)):
+        candidate = _degradation_candidate(state)
+        result, calls = _evaluate(
+            tmp_path / severity,
+            state=state,
+            now=BEFORE_DIGEST_HOUR,
+        )
+        assert candidate.severity == severity
+        assert result.sent is False
+        assert calls == []
 
 
 def test_backstop_only_daily_summary_does_not_spam_hourly(tmp_path):
@@ -344,8 +376,10 @@ def test_stale_feed_requires_prior_nonzero_activity(tmp_path):
         policy=policy,
         now=NOW + timedelta(hours=1),
     )
-    assert result.sent is True
+    assert result.sent is False
+    assert result.daily_digest_sent is True
     assert "feed_stale" in calls[0][1]
+    assert "MEDIUM" in calls[0][1]
     assert second.sent is False
     assert second_calls == []
 
@@ -370,7 +404,7 @@ def test_valid_zero_role_feed_is_not_a_failure(tmp_path):
     assert calls == []
 
 
-def test_previously_productive_direct_source_silence_alerts(tmp_path):
+def test_previously_productive_direct_source_silence_reaches_digest(tmp_path):
     silent = _state(
         status="degraded",
         previous_status="empty",
@@ -383,7 +417,8 @@ def test_previously_productive_direct_source_silence_alerts(tmp_path):
         state=silent,
         policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
     )
-    assert result.sent is True
+    assert result.sent is False
+    assert result.daily_digest_sent is True
     assert "direct_source_degraded" in calls[0][1]
 
 
@@ -427,7 +462,8 @@ def test_successful_successfactors_pagination_restart_is_minor_info(tmp_path):
     assert candidate.severity == "info"
     assert result.candidates == 1
     assert result.sent is False
-    assert calls == []
+    assert result.daily_digest_sent is True
+    assert "INFO" in calls[0][1]
 
 
 @pytest.mark.parametrize("adapter", ["bain", "epic", "ibm"])
@@ -497,6 +533,61 @@ def test_failed_successfactors_restart_keeps_failure_severity():
     assert candidate.severity == "high"
 
 
+def test_tiny_schema_loss_is_info_and_reaches_digest(tmp_path):
+    state = _state(
+        status=DIRECT_STATUS_DEGRADED,
+        previous_status="healthy_with_listings",
+        rows=412,
+        schema_errors=1,
+        malformed=0,
+        reason_codes=("schema_invalid_records_skipped",),
+        incomplete=True,
+        truncated=False,
+        complete=False,
+    )
+
+    quiet, quiet_calls = _evaluate(
+        tmp_path,
+        state=state,
+        now=BEFORE_DIGEST_HOUR,
+    )
+    digest, digest_calls = _evaluate(tmp_path, state=state, now=NOW)
+
+    assert is_minor_degradation(state) is True
+    assert quiet.sent is False
+    assert quiet_calls == []
+    assert digest.daily_digest_sent is True
+    assert "schema_invalid_records_skipped" in digest_calls[0][1]
+    assert "schema=1" in digest_calls[0][1]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"schema_errors": 6},
+        {"schema_errors": 1, "rows": 10},
+        {"schema_errors": 0},
+        {"reason_codes": ("unmapped_future_anomaly",)},
+    ],
+)
+def test_untrusted_record_loss_remains_medium(overrides):
+    values = {
+        "status": DIRECT_STATUS_DEGRADED,
+        "rows": 412,
+        "schema_errors": 1,
+        "malformed": 0,
+        "reason_codes": ("schema_invalid_records_skipped",),
+        "incomplete": True,
+        "truncated": False,
+        "complete": False,
+    }
+    values.update(overrides)
+    state = _state(**values)
+
+    assert is_minor_degradation(state) is False
+    assert _degradation_candidate(state).severity == SEVERITY_MEDIUM
+
+
 def test_coverage_regression_and_both_tiers_unavailable_are_high_severity(tmp_path):
     healthy = _state()
     _evaluate(tmp_path, state=healthy, coverage=(_coverage(),))
@@ -509,8 +600,44 @@ def test_coverage_regression_and_both_tiers_unavailable_are_high_severity(tmp_pa
     assert result.sent is True
     body = calls[0][1]
     assert "both_tiers_unavailable" in body
-    assert "CRITICAL" in body
+    assert "CRITICAL" not in body
+    assert body.count("HIGH:") == 2
     assert "coverage_regression" in body
+
+
+def test_no_active_candidate_uses_critical_severity():
+    candidates = build_alert_candidates(
+        policy=HealthAlertPolicy(mode=MODE_TRANSITIONS_ONLY),
+        run_id="severity-set",
+        observed_at=NOW,
+        states={
+            "failed": _state(
+                key="failed",
+                status=DIRECT_STATUS_FAILED,
+                rows=None,
+                error="fetch_failure",
+            ),
+            "medium": _state(
+                key="medium",
+                status=DIRECT_STATUS_DEGRADED,
+                incomplete=True,
+                complete=False,
+                reason_codes=("pagination_ended_early",),
+            ),
+            "info": _successfactors_recovery_state(key="info"),
+        },
+        transitions=(),
+        coverage=(
+            _coverage(COVERAGE_UNCOVERED, direct_status="failing", github=False),
+        ),
+        previous_coverage=None,
+    )
+
+    assert {candidate.severity for candidate in candidates} <= {
+        SEVERITY_HIGH,
+        SEVERITY_MEDIUM,
+        SEVERITY_INFO,
+    }
 
 
 def test_health_smtp_failure_does_not_change_seen_state(tmp_path):
@@ -787,3 +914,267 @@ def test_policy_defaults_and_validation():
     assert policy.cooldown_hours == 24
     with pytest.raises(ValueError):
         load_health_alert_policy({"WATCHER_HEALTH_EMAIL_MODE": "sometimes"})
+
+
+def _actionable_degradation(**overrides):
+    state = _state(
+        status=DIRECT_STATUS_DEGRADED,
+        previous_status="healthy_with_listings",
+        rows=10,
+        reason_codes=("pagination_ended_early",),
+        incomplete=True,
+        truncated=False,
+        complete=False,
+    )
+    return replace(state, **overrides)
+
+
+def test_repeated_medium_events_and_recovery_collapse_into_one_incident(tmp_path):
+    degraded = _actionable_degradation()
+    for hour in (3, 4, 5):
+        result, calls = _evaluate(tmp_path, state=degraded, now=NOW.replace(hour=hour))
+        assert result.sent is False
+        assert calls == []
+    recovered = _state(
+        status=STATUS_HEALTHY,
+        previous_status=DIRECT_STATUS_DEGRADED,
+        rows=142,
+    )
+    _evaluate(
+        tmp_path,
+        state=recovered,
+        transition=(_transition(DIRECT_STATUS_DEGRADED, STATUS_HEALTHY, recovery=True),),
+        now=NOW.replace(hour=6),
+    )
+
+    digest, calls = _evaluate(
+        tmp_path,
+        state=replace(recovered, previous_status=STATUS_HEALTHY),
+        now=NOW,
+    )
+
+    assert digest.daily_digest_sent is True
+    assert digest.digest_incidents_reported == 1
+    body = calls[0][1]
+    assert body.count("occurrences:") == 1
+    assert "occurrences: 3" in body
+    assert "recovered later: yes" in body
+
+
+def test_high_escalation_suppresses_prior_medium_digest_noise(tmp_path):
+    degraded = _actionable_degradation()
+    _evaluate(tmp_path, state=degraded, now=NOW.replace(hour=3))
+    failed = _state(
+        status=DIRECT_STATUS_FAILED,
+        previous_status=DIRECT_STATUS_DEGRADED,
+        rows=None,
+        failures=1,
+        error="fetch_failure",
+    )
+    escalated, calls = _evaluate(
+        tmp_path,
+        state=failed,
+        transition=(_transition(DIRECT_STATUS_DEGRADED, DIRECT_STATUS_FAILED),),
+        now=NOW.replace(hour=4),
+    )
+    digest, digest_calls = _evaluate(tmp_path, state=failed, now=NOW)
+
+    assert escalated.sent is True
+    assert "HIGH" in calls[0][1]
+    assert digest.daily_digest_sent is False
+    assert digest.digest_incidents_reported == 0
+    assert digest_calls == []
+
+
+def test_recovery_after_high_escalation_can_reach_digest(tmp_path):
+    failed = _state(
+        status=DIRECT_STATUS_FAILED,
+        previous_status=STATUS_HEALTHY,
+        rows=None,
+        failures=1,
+        error="fetch_failure",
+    )
+    _evaluate(
+        tmp_path,
+        state=failed,
+        transition=(_transition(STATUS_HEALTHY, DIRECT_STATUS_FAILED),),
+        now=NOW.replace(hour=3),
+    )
+    recovered = _state(
+        status=STATUS_HEALTHY,
+        previous_status=DIRECT_STATUS_FAILED,
+        rows=42,
+    )
+    quiet, quiet_calls = _evaluate(
+        tmp_path,
+        state=recovered,
+        transition=(_transition(DIRECT_STATUS_FAILED, STATUS_HEALTHY, recovery=True),),
+        now=NOW.replace(hour=4),
+    )
+    digest, calls = _evaluate(
+        tmp_path,
+        state=replace(recovered, previous_status=STATUS_HEALTHY),
+        now=NOW,
+    )
+
+    assert quiet.sent is False
+    assert quiet_calls == []
+    assert digest.daily_digest_sent is True
+    assert "recovered" in calls[0][1]
+
+
+def test_digest_failed_delivery_retries_and_catches_up(tmp_path):
+    first = _actionable_degradation()
+    initial, _ = _evaluate(tmp_path, state=first, now=NOW)
+    assert initial.daily_digest_sent is True
+
+    second = replace(first, health_key="company:other:direct:lever", company="Other Co")
+
+    def fail(_subject, _body):
+        return False
+
+    failed, _ = _evaluate(
+        tmp_path,
+        state=second,
+        now=NOW + timedelta(days=1),
+        sender=fail,
+    )
+    recovered, calls = _evaluate(
+        tmp_path,
+        state=_state(),
+        now=NOW + timedelta(days=3),
+    )
+
+    assert failed.daily_digest_sent is False
+    with HealthAlertStore(tmp_path / "state.sqlite") as store:
+        assert store.digest_sent((NOW + timedelta(days=1)).date().isoformat()) is False
+    assert recovered.daily_digest_sent is True
+    assert "Other Co" in calls[0][1]
+
+
+def test_digest_sends_at_most_once_per_utc_day_and_skips_empty_windows(tmp_path):
+    degraded = _actionable_degradation()
+    first, first_calls = _evaluate(tmp_path, state=degraded, now=NOW)
+    second, second_calls = _evaluate(
+        tmp_path,
+        state=degraded,
+        now=NOW + timedelta(hours=1),
+    )
+    empty, empty_calls = _evaluate(
+        tmp_path / "empty",
+        state=_state(),
+        now=NOW,
+    )
+
+    assert first.daily_digest_sent is True
+    assert len(first_calls) == 1
+    assert second.daily_digest_sent is False
+    assert second_calls == []
+    assert empty.daily_digest_sent is False
+    assert empty_calls == []
+
+
+def test_resolve_digest_window_resumes_and_clamps():
+    default_start, inclusive, clamped = resolve_digest_window(
+        now=NOW,
+        last_sent_at=None,
+    )
+    assert default_start == NOW - timedelta(hours=24)
+    assert inclusive is True
+    assert clamped is False
+
+    resumed, inclusive, clamped = resolve_digest_window(
+        now=NOW,
+        last_sent_at=NOW - timedelta(days=3),
+    )
+    assert resumed == NOW - timedelta(days=3)
+    assert inclusive is False
+    assert clamped is False
+
+    bounded, inclusive, clamped = resolve_digest_window(
+        now=NOW,
+        last_sent_at=NOW - timedelta(days=30),
+    )
+    assert bounded == NOW - timedelta(days=MAX_DIGEST_CATCHUP_DAYS)
+    assert inclusive is True
+    assert clamped is True
+
+
+def test_digest_catchup_clamp_reports_only_seven_retained_days(tmp_path):
+    def fail(_subject, _body):
+        return False
+
+    start = NOW - timedelta(days=10)
+    _evaluate(tmp_path, state=_actionable_degradation(), now=start)
+    old = replace(
+        _actionable_degradation(),
+        health_key="company:old:direct:lever",
+        company="Old Co",
+    )
+    recent = replace(
+        _actionable_degradation(),
+        health_key="company:recent:direct:ashby",
+        company="Recent Co",
+    )
+    _evaluate(tmp_path, state=old, now=start + timedelta(days=1), sender=fail)
+    _evaluate(
+        tmp_path,
+        state=recent,
+        now=NOW - timedelta(days=2),
+        sender=fail,
+    )
+    result, calls = _evaluate(tmp_path, state=_state(), now=NOW)
+
+    assert result.daily_digest_sent is True
+    assert result.digest_catchup_clamped is True
+    body = calls[0][1]
+    assert f"more than {MAX_DIGEST_CATCHUP_DAYS} days" in body
+    assert "Recent Co" in body
+    assert "Old Co" not in body
+
+
+def test_legacy_critical_payload_remains_sortable_and_readable(tmp_path):
+    high = _degradation_candidate(
+        _state(
+            status=DIRECT_STATUS_FAILED,
+            rows=None,
+            error="fetch_failure",
+        )
+    )
+    legacy = replace(high, severity="critical", fingerprint="legacy-critical")
+    assert _merge_candidates((high,), (legacy,))[0].severity == "critical"
+
+    db = tmp_path / "state.sqlite"
+    with HealthAlertStore(db) as store:
+        store.record_detected(legacy, detected_at=NOW)
+    with sqlite3.connect(db) as connection:
+        payload = connection.execute(
+            "select payload_json from source_health_alert_events"
+        ).fetchone()[0]
+        payload = payload.replace(',"reason_codes":[]', "")
+        connection.execute(
+            "update source_health_alert_events set payload_json = ?",
+            (payload,),
+        )
+    with HealthAlertStore(db) as store:
+        restored = store.recent_candidates(since=NOW - timedelta(hours=1))
+    assert restored[0].severity == "critical"
+    assert restored[0].reason_codes == ()
+
+
+def test_legacy_minor_digest_ledger_migrates_without_resending(tmp_path):
+    db = tmp_path / "state.sqlite"
+    digest_date = NOW.date().isoformat()
+    with HealthAlertStore(db):
+        pass
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            """
+            insert into source_health_minor_digest(
+              digest_date, sent_at, run_id, incident_count
+            ) values (?, ?, ?, ?)
+            """,
+            (digest_date, NOW.isoformat(), "legacy-run", 2),
+        )
+    with HealthAlertStore(db) as store:
+        assert store.digest_sent(digest_date) is True

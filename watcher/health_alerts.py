@@ -7,7 +7,7 @@ import logging
 import os
 import smtplib
 import sqlite3
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
@@ -19,10 +19,13 @@ from watcher.source_health import (
     COVERAGE_UNCOVERED,
     SOURCE_KIND_GITHUB_FEED,
     STATUS_DEGRADED,
+    STATUS_EMPTY,
     STATUS_FAILING,
     STATUS_HEALTHY,
     DIRECT_STATUS_DEGRADED,
     DIRECT_STATUS_FAILED,
+    DIRECT_STATUS_HEALTHY_EMPTY,
+    DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
     DIRECT_STATUS_UNKNOWN,
     CompanyCoverage,
     HealthSummary,
@@ -53,14 +56,56 @@ DEFAULT_MODE = MODE_TRANSITIONS_ONLY
 DEFAULT_HOUR_UTC = 12
 DEFAULT_COOLDOWN_HOURS = 24
 DEFAULT_FEED_STALE_HOURS = 48
-_MINOR_RECOVERY_REASONS_BY_ADAPTER = {
-    "bain": frozenset({"request_retry_recovered"}),
-    "epic": frozenset({"request_retry_recovered"}),
-    "ibm": frozenset({"request_retry_recovered"}),
-    "successfactors": frozenset(
-        {"request_retry_recovered", "pagination_restart_recovered"}
-    ),
+
+ALERT_NEW_FAILURE = "new_failure"
+ALERT_CONTINUED_FAILURE = "continued_failure"
+ALERT_DIRECT_SOURCE_DEGRADED = "direct_source_degraded"
+ALERT_UNKNOWN_DIAGNOSTICS = "unknown_diagnostics"
+ALERT_FEED_STALE = "feed_stale"
+ALERT_RECOVERY = "recovery"
+ALERT_MINOR_DEGRADATION = "minor_degradation"
+ALERT_MINOR_RECOVERY = "minor_recovery"
+ALERT_BOTH_TIERS_UNAVAILABLE = "both_tiers_unavailable"
+ALERT_COVERAGE_REGRESSION = "coverage_regression"
+
+SEVERITY_HIGH = "high"
+SEVERITY_MEDIUM = "medium"
+SEVERITY_INFO = "info"
+DIGEST_SEVERITIES = (SEVERITY_MEDIUM, SEVERITY_INFO)
+# Legacy persisted payloads may still contain ``critical``.
+SEVERITY_ORDER = {
+    "critical": 0,
+    SEVERITY_HIGH: 1,
+    SEVERITY_MEDIUM: 2,
+    SEVERITY_INFO: 3,
 }
+
+MINOR_DEGRADATION_REASONS = frozenset(
+    {
+        "schema_invalid_records_skipped",
+        "malformed_records_skipped",
+        "request_retry_recovered",
+        "pagination_restart_recovered",
+    }
+)
+DEGRADATION_ALERT_TYPES = (
+    ALERT_NEW_FAILURE,
+    ALERT_CONTINUED_FAILURE,
+    "direct_source_silence",
+    ALERT_DIRECT_SOURCE_DEGRADED,
+    ALERT_UNKNOWN_DIAGNOSTICS,
+    ALERT_FEED_STALE,
+    ALERT_MINOR_DEGRADATION,
+)
+RECOVERY_ALERT_TYPES = frozenset({ALERT_RECOVERY, ALERT_MINOR_RECOVERY})
+FAILURE_ALERT_TYPES = frozenset({ALERT_NEW_FAILURE, ALERT_CONTINUED_FAILURE})
+
+MAX_MINOR_SKIPPED_ROWS = 5
+MIN_RETAINED_ROWS_PER_SKIPPED_ROW = 20
+DIGEST_WINDOW_HOURS = 24
+MAX_DIGEST_INCIDENTS = 25
+MAX_DIGEST_CATCHUP_DAYS = 7
+MAX_DIGEST_EVENTS = 20_000
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
@@ -96,6 +141,25 @@ class HealthAlertCandidate:
     recommended_action: str
     run_id: str
     diagnostic_summary: str = ""
+    reason_codes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DigestIncident:
+    """One source's collapsed MEDIUM/INFO lifecycle in a reporting window."""
+
+    health_key: str
+    source_label: str
+    severity: str
+    alert_types: tuple[str, ...]
+    occurrences: int
+    first_detected_at: str
+    last_detected_at: str
+    retained_rows: int | None
+    reason_codes: tuple[str, ...]
+    diagnostic_summary: str
+    recovered: str
+    escalated: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +172,9 @@ class HealthAlertResult:
     subject: str
     error: str | None
     daily_summary_sent: bool
+    daily_digest_sent: bool = False
+    digest_incidents_reported: int = 0
+    digest_catchup_clamped: bool = False
 
 
 def load_health_alert_policy(
@@ -147,23 +214,29 @@ def load_health_alert_policy(
 
 
 def is_minor_degradation(state: SourceHealthState) -> bool:
-    """Return whether a supported adapter fully recovered within collection."""
+    """Return whether bounded diagnostics describe trustworthy degradation."""
 
-    if (
-        state.source_kind == SOURCE_KIND_GITHUB_FEED
-        or state.status != DIRECT_STATUS_DEGRADED
-    ):
+    if state.source_kind == SOURCE_KIND_GITHUB_FEED:
         return False
-    allowed_reasons = _MINOR_RECOVERY_REASONS_BY_ADAPTER.get(state.adapter)
-    if allowed_reasons is None:
+    if state.status != DIRECT_STATUS_DEGRADED:
         return False
-    reasons = frozenset(state.last_reason_codes or ())
-    if not reasons or not reasons <= allowed_reasons:
+    codes = tuple(state.last_reason_codes or ())
+    if not codes or not all(code in MINOR_DEGRADATION_REASONS for code in codes):
         return False
+    if state.last_truncated:
+        return False
+    skipped = max(0, int(state.last_malformed_row_count or 0)) + max(
+        0, int(state.last_schema_error_row_count or 0)
+    )
+    skip_claimed = any(code.endswith("_records_skipped") for code in codes)
+    if skip_claimed or skipped:
+        if skipped <= 0 or skipped > MAX_MINOR_SKIPPED_ROWS:
+            return False
+        retained = max(0, int(state.last_rows_returned or 0))
+        return retained >= skipped * MIN_RETAINED_ROWS_PER_SKIPPED_ROW
     return bool(
         state.last_complete is True
         and not state.last_incomplete
-        and not state.last_truncated
         and not state.last_error_kind
     )
 
@@ -202,6 +275,7 @@ def evaluate_and_send_health_alerts(
 
     with HealthAlertStore(db_path) as store:
         previous_coverage = store.latest_coverage_snapshot()
+        minor_incident_keys = store.open_minor_incident_keys()
         candidates = build_alert_candidates(
             policy=policy,
             run_id=run_id,
@@ -210,6 +284,7 @@ def evaluate_and_send_health_alerts(
             transitions=transitions,
             coverage=coverage,
             previous_coverage=previous_coverage,
+            minor_incident_keys=minor_incident_keys,
         )
         store.record_coverage_snapshot(
             run_id=run_id,
@@ -218,127 +293,166 @@ def evaluate_and_send_health_alerts(
         )
         for candidate in candidates:
             store.record_detected(candidate, detected_at=now)
-            if candidate.alert_type == "recovery":
+            if candidate.alert_type in {ALERT_RECOVERY, ALERT_MINOR_RECOVERY}:
                 store.resolve_source_failures(
                     candidate.health_key,
                     resolved_at=now,
                 )
-            elif candidate.alert_type == "new_failure":
+            elif candidate.alert_type in {
+                ALERT_NEW_FAILURE,
+                ALERT_MINOR_DEGRADATION,
+            }:
                 store.resolve_source_recoveries(
                     candidate.health_key,
                     resolved_at=now,
                 )
 
-        if policy.mode == MODE_DAILY_SUMMARY:
-            due = (
-                now.hour >= policy.hour_utc
-                and not store.daily_summary_sent(now.date().isoformat())
-            )
-            sendable: list[HealthAlertCandidate] = []
-            suppressed = 0
-            if not due:
-                return HealthAlertResult(
-                    mode=policy.mode,
-                    candidates=len(candidates),
-                    sent=False,
-                    suppressed_by_cooldown=0,
-                    recovery_alerts=sum(
-                        item.alert_type == "recovery" for item in candidates
-                    ),
-                    subject="",
-                    error=None,
-                    daily_summary_sent=False,
-                )
-            subject, body = render_daily_summary(
-                run_id=run_id,
-                observed_at=now,
-                policy=policy,
-                coverage=coverage,
-                summary=summary,
-                comparison=comparison,
-                candidates=candidates,
-                recent_candidates=store.recent_candidates(
-                    since=now - timedelta(days=1)
-                ),
-            )
-        else:
-            candidates = _merge_candidates(
-                candidates,
-                store.pending_unsent_recoveries(),
-            )
-            policy_candidates = [
-                candidate
-                for candidate in candidates
-                if _allowed_by_mode(candidate, policy.mode)
-            ]
-            sendable = []
-            suppressed = 0
-            cooldown = timedelta(hours=policy.cooldown_hours)
-            for candidate in policy_candidates:
-                if store.should_send(
-                    candidate,
-                    now=now,
-                    cooldown=cooldown,
-                ):
-                    sendable.append(candidate)
-                else:
-                    suppressed += 1
-            if not sendable:
-                return HealthAlertResult(
-                    mode=policy.mode,
-                    candidates=len(candidates),
-                    sent=False,
-                    suppressed_by_cooldown=suppressed,
-                    recovery_alerts=sum(
-                        item.alert_type == "recovery" for item in candidates
-                    ),
-                    subject="",
-                    error=None,
-                    daily_summary_sent=False,
-                )
-            subject, body = render_alert_email(sendable)
-
         active_sender = sender or send_health_email
-        try:
-            sent = bool(active_sender(subject, body))
-        except Exception as exc:  # SMTP must not affect internship state or run success
-            error = sanitize_error(exc)
-            LOGGER.error("Source-health email failed: %s", error)
-            return HealthAlertResult(
-                mode=policy.mode,
-                candidates=len(candidates),
-                sent=False,
-                suppressed_by_cooldown=suppressed,
-                recovery_alerts=sum(
-                    item.alert_type == "recovery" for item in candidates
-                ),
-                subject=subject,
-                error=error,
-                daily_summary_sent=False,
-            )
+        immediate = _evaluate_immediate_alerts(
+            store=store,
+            policy=policy,
+            run_id=run_id,
+            now=now,
+            candidates=candidates,
+            coverage=coverage,
+            summary=summary,
+            comparison=comparison,
+            sender=active_sender,
+        )
+        digest_sent, digest_incidents, clamped = _maybe_send_daily_digest(
+            store=store,
+            policy=policy,
+            run_id=run_id,
+            now=now,
+            states=states,
+            sender=active_sender,
+        )
+        return replace(
+            immediate,
+            daily_digest_sent=digest_sent,
+            digest_incidents_reported=digest_incidents,
+            digest_catchup_clamped=clamped,
+        )
 
-        if sent:
-            if policy.mode == MODE_DAILY_SUMMARY:
-                store.mark_daily_summary_sent(
-                    summary_date=now.date().isoformat(),
-                    sent_at=now,
-                    run_id=run_id,
-                )
+
+def _evaluate_immediate_alerts(
+    *,
+    store: "HealthAlertStore",
+    policy: HealthAlertPolicy,
+    run_id: str,
+    now: datetime,
+    candidates: Sequence[HealthAlertCandidate],
+    coverage: Sequence[CompanyCoverage],
+    summary: HealthSummary,
+    comparison: SourceComparisonReport | None,
+    sender: Callable[[str, str], bool],
+) -> HealthAlertResult:
+    """Apply daily-summary or severity-routed immediate-alert policy."""
+
+    candidates = tuple(candidates)
+    if policy.mode == MODE_DAILY_SUMMARY:
+        due = (
+            now.hour >= policy.hour_utc
+            and not store.daily_summary_sent(now.date().isoformat())
+        )
+        sendable: list[HealthAlertCandidate] = []
+        suppressed = 0
+        if not due:
+            return _empty_alert_result(policy.mode, candidates)
+        subject, body = render_daily_summary(
+            run_id=run_id,
+            observed_at=now,
+            policy=policy,
+            coverage=coverage,
+            summary=summary,
+            comparison=comparison,
+            candidates=candidates,
+            recent_candidates=store.recent_candidates(
+                since=now - timedelta(days=1)
+            ),
+        )
+    else:
+        policy_candidates = [
+            candidate
+            for candidate in candidates
+            if _allowed_by_mode(candidate, policy.mode)
+        ]
+        sendable = []
+        suppressed = 0
+        cooldown = timedelta(hours=policy.cooldown_hours)
+        for candidate in policy_candidates:
+            if store.should_send(candidate, now=now, cooldown=cooldown):
+                sendable.append(candidate)
             else:
-                for candidate in sendable:
-                    store.record_sent(candidate, sent_at=now)
+                suppressed += 1
+        if not sendable:
+            return _empty_alert_result(
+                policy.mode,
+                candidates,
+                suppressed=suppressed,
+            )
+        subject, body = render_alert_email(sendable)
+
+    try:
+        sent = bool(sender(subject, body))
+    except Exception as exc:  # SMTP must not affect internship state or run success
+        error = sanitize_error(exc)
+        LOGGER.error("Source-health email failed: %s", error)
         return HealthAlertResult(
             mode=policy.mode,
             candidates=len(candidates),
-            sent=sent,
+            sent=False,
             suppressed_by_cooldown=suppressed,
             recovery_alerts=sum(
-                item.alert_type == "recovery" for item in candidates
+                item.alert_type == ALERT_RECOVERY for item in candidates
             ),
             subject=subject,
-            error=None if sent else "health_sender_returned_false",
-            daily_summary_sent=bool(sent and policy.mode == MODE_DAILY_SUMMARY),
+            error=error,
+            daily_summary_sent=False,
         )
+
+    if sent:
+        if policy.mode == MODE_DAILY_SUMMARY:
+            store.mark_daily_summary_sent(
+                summary_date=now.date().isoformat(),
+                sent_at=now,
+                run_id=run_id,
+            )
+        else:
+            for candidate in sendable:
+                store.record_sent(candidate, sent_at=now)
+    return HealthAlertResult(
+        mode=policy.mode,
+        candidates=len(candidates),
+        sent=sent,
+        suppressed_by_cooldown=suppressed,
+        recovery_alerts=sum(
+            item.alert_type == ALERT_RECOVERY for item in candidates
+        ),
+        subject=subject,
+        error=None if sent else "health_sender_returned_false",
+        daily_summary_sent=bool(sent and policy.mode == MODE_DAILY_SUMMARY),
+    )
+
+
+def _empty_alert_result(
+    mode: str,
+    candidates: Sequence[HealthAlertCandidate],
+    *,
+    suppressed: int = 0,
+) -> HealthAlertResult:
+    return HealthAlertResult(
+        mode=mode,
+        candidates=len(candidates),
+        sent=False,
+        suppressed_by_cooldown=suppressed,
+        recovery_alerts=sum(
+            item.alert_type == ALERT_RECOVERY for item in candidates
+        ),
+        subject="",
+        error=None,
+        daily_summary_sent=False,
+    )
 
 
 def build_alert_candidates(
@@ -350,6 +464,7 @@ def build_alert_candidates(
     transitions: Sequence[HealthTransition],
     coverage: Sequence[CompanyCoverage],
     previous_coverage: Mapping[str, str] | None,
+    minor_incident_keys: frozenset[str] = frozenset(),
 ) -> tuple[HealthAlertCandidate, ...]:
     transition_by_key = {transition.health_key: transition for transition in transitions}
     coverage_by_company = {item.company: item for item in coverage}
@@ -358,15 +473,20 @@ def build_alert_candidates(
         transition = transition_by_key.get(state.health_key)
         company_coverage = coverage_by_company.get(state.company or "")
         if transition and transition.recovery:
+            minor = state.health_key in minor_incident_keys
             candidates.append(
                 _candidate(
                     state,
                     transition=transition,
-                    alert_type="recovery",
-                    severity="info",
+                    alert_type=ALERT_MINOR_RECOVERY if minor else ALERT_RECOVERY,
+                    severity=SEVERITY_INFO,
                     run_id=run_id,
                     coverage=company_coverage,
-                    action="No action required; verify the next scheduled run remains healthy.",
+                    action=(
+                        "No action required; the earlier minor anomaly cleared."
+                        if minor
+                        else "No action required; verify the next scheduled run remains healthy."
+                    ),
                 )
             )
             continue
@@ -376,12 +496,12 @@ def build_alert_candidates(
                     state,
                     transition=transition,
                     alert_type=(
-                        "new_failure"
+                        ALERT_NEW_FAILURE
                         if transition
                         and transition.to_status in {STATUS_FAILING, DIRECT_STATUS_FAILED}
-                        else "continued_failure"
+                        else ALERT_CONTINUED_FAILURE
                     ),
-                    severity="high",
+                    severity=SEVERITY_HIGH,
                     run_id=run_id,
                     coverage=company_coverage,
                     action="Inspect the sanitized source-health report and adapter endpoint.",
@@ -397,13 +517,15 @@ def build_alert_candidates(
                     state,
                     transition=transition,
                     alert_type=(
-                        "minor_degradation" if minor else "direct_source_degraded"
+                        ALERT_MINOR_DEGRADATION
+                        if minor
+                        else ALERT_DIRECT_SOURCE_DEGRADED
                     ),
-                    severity="info" if minor else "medium",
+                    severity=SEVERITY_INFO if minor else SEVERITY_MEDIUM,
                     run_id=run_id,
                     coverage=company_coverage,
                     action=(
-                        "No immediate action; collection recovered and completed."
+                        "No immediate action; review the daily source-health digest."
                         if minor
                         else "Inspect the bounded adapter diagnostics for incomplete collection."
                     ),
@@ -417,8 +539,8 @@ def build_alert_candidates(
                 _candidate(
                     state,
                     transition=transition,
-                    alert_type="unknown_diagnostics",
-                    severity="medium",
+                    alert_type=ALERT_UNKNOWN_DIAGNOSTICS,
+                    severity=SEVERITY_MEDIUM,
                     run_id=run_id,
                     coverage=company_coverage,
                     action="Add or restore the adapter's shared collection diagnostics.",
@@ -436,8 +558,8 @@ def build_alert_candidates(
                 _candidate(
                     state,
                     transition=transition,
-                    alert_type="feed_stale",
-                    severity="medium",
+                    alert_type=ALERT_FEED_STALE,
+                    severity=SEVERITY_MEDIUM,
                     run_id=run_id,
                     coverage=None,
                     action="Verify the feed is still publishing postings for the configured season.",
@@ -450,8 +572,8 @@ def build_alert_candidates(
         candidates.append(
             HealthAlertCandidate(
                 fingerprint=f"both_tiers_unavailable|{_fingerprint_token(item.company)}",
-                alert_type="both_tiers_unavailable",
-                severity="critical",
+                alert_type=ALERT_BOTH_TIERS_UNAVAILABLE,
+                severity=SEVERITY_HIGH,
                 health_key=f"coverage:{_fingerprint_token(item.company)}",
                 source_kind="company_coverage",
                 company=sanitize_error(item.company),
@@ -498,8 +620,8 @@ def build_alert_candidates(
                         + _fingerprint_token(",".join(became_backstop))
                         + f"|{previous_direct}|{current_direct}"
                     ),
-                    alert_type="coverage_regression",
-                    severity="high",
+                    alert_type=ALERT_COVERAGE_REGRESSION,
+                    severity=SEVERITY_HIGH,
                     health_key="coverage:aggregate",
                     source_kind="company_coverage",
                     company=None,
@@ -604,6 +726,294 @@ def render_daily_summary(
     _append_bounded(lines, "Backstop-only companies", backstop)
     _append_bounded(lines, "Uncovered companies", uncovered)
     return subject, "\n".join(lines).rstrip() + "\n"
+
+
+def build_digest_incidents(
+    events: Sequence[tuple[datetime, HealthAlertCandidate]],
+    states: Mapping[str, SourceHealthState] | None = None,
+) -> tuple[DigestIncident, ...]:
+    """Collapse each health key's MEDIUM/INFO lifecycle into one incident."""
+
+    by_key: dict[str, list[tuple[datetime, HealthAlertCandidate]]] = {}
+    for detected_at, candidate in events:
+        by_key.setdefault(candidate.health_key, []).append((detected_at, candidate))
+
+    incidents = []
+    for health_key, entries in by_key.items():
+        entries.sort(key=lambda item: item[0])
+        escalated_at = max(
+            (
+                detected_at
+                for detected_at, candidate in entries
+                if candidate.severity == SEVERITY_HIGH
+            ),
+            default=None,
+        )
+        reportable = [
+            (detected_at, candidate)
+            for detected_at, candidate in entries
+            if candidate.severity in DIGEST_SEVERITIES
+            and (escalated_at is None or detected_at > escalated_at)
+        ]
+        if not reportable:
+            continue
+        degradations = [
+            item
+            for item in reportable
+            if item[1].alert_type not in RECOVERY_ALERT_TYPES
+        ]
+        recovered_at = max(
+            (
+                detected_at
+                for detected_at, candidate in reportable
+                if candidate.alert_type in RECOVERY_ALERT_TYPES
+            ),
+            default=None,
+        )
+        detail_source = degradations or reportable
+        first_at = reportable[0][0]
+        last_at, _ = detail_source[-1]
+        latest = detail_source[-1][1]
+        severity = (
+            SEVERITY_MEDIUM
+            if any(
+                candidate.severity == SEVERITY_MEDIUM
+                for _, candidate in reportable
+            )
+            else SEVERITY_INFO
+        )
+        incidents.append(
+            DigestIncident(
+                health_key=health_key,
+                source_label=latest.source_label,
+                severity=severity,
+                alert_types=tuple(
+                    sorted({candidate.alert_type for _, candidate in reportable})
+                ),
+                occurrences=len(degradations),
+                first_detected_at=iso_utc(first_at),
+                last_detected_at=iso_utc(reportable[-1][0]),
+                retained_rows=latest.rows_returned,
+                reason_codes=tuple(
+                    sorted(
+                        {
+                            code
+                            for _, candidate in detail_source
+                            for code in candidate.reason_codes
+                        }
+                    )
+                ),
+                diagnostic_summary=latest.diagnostic_summary,
+                recovered=_recovery_state(
+                    health_key,
+                    last_degraded_at=last_at,
+                    recovered_at=recovered_at,
+                    states=states,
+                ),
+                escalated=escalated_at is not None,
+            )
+        )
+    return tuple(
+        sorted(
+            incidents,
+            key=lambda item: (
+                SEVERITY_ORDER.get(item.severity, 9),
+                item.source_label.casefold(),
+                item.health_key,
+            ),
+        )
+    )
+
+
+def summarize_digest_incident(incident: DigestIncident) -> str:
+    label = sanitize_error(incident.source_label)
+    noun = (
+        "direct-source failure"
+        if any(item in FAILURE_ALERT_TYPES for item in incident.alert_types)
+        else "direct-source degradation"
+    )
+    if incident.occurrences == 0:
+        return f"{label} — recovered; currently healthy."
+    runs = "run" if incident.occurrences == 1 else "runs"
+    counted = (
+        f"{incident.occurrences} failed {runs}"
+        if noun.endswith("failure")
+        else f"{incident.occurrences} degraded {runs}"
+    )
+    if incident.recovered == "yes":
+        return f"{label} — transient {noun} recovered; {counted}, currently healthy."
+    if incident.recovered == "no":
+        return f"{label} — {noun} ongoing; {counted}, not yet recovered."
+    return f"{label} — {noun}; {counted}, current state unknown."
+
+
+def render_source_health_digest(
+    *,
+    run_id: str,
+    observed_at: datetime,
+    window_start: datetime,
+    incidents: Sequence[DigestIncident],
+    catchup_clamped: bool = False,
+) -> tuple[str, str]:
+    """Render the daily summary of deferred MEDIUM and INFO incidents."""
+
+    medium = sum(item.severity == SEVERITY_MEDIUM for item in incidents)
+    info = len(incidents) - medium
+    subject = f"Internship Watcher Daily Source Health: {medium} medium, {info} info"
+    lines = [
+        subject,
+        "",
+        f"Run ID: {safe_run_id(run_id)}",
+        f"Observed at: {iso_utc(observed_at)}",
+        f"Reporting window: {iso_utc(window_start)} to {iso_utc(observed_at)}",
+        "",
+        "These incidents did not warrant an immediate alert. High-severity",
+        "incidents are emailed as they happen and are not listed here.",
+        "",
+    ]
+    if catchup_clamped:
+        lines.extend(
+            [
+                "WARNING: no digest was delivered for more than "
+                f"{MAX_DIGEST_CATCHUP_DAYS} days, so this report starts at that",
+                "bound and older retained events are omitted.",
+                "",
+            ]
+        )
+    for incident in incidents[:MAX_DIGEST_INCIDENTS]:
+        retained = (
+            incident.retained_rows
+            if incident.retained_rows is not None
+            else "unknown"
+        )
+        lines.append(
+            f"{incident.severity.upper()}: {summarize_digest_incident(incident)}"
+        )
+        lines.extend(
+            [
+                f"  types: {', '.join(incident.alert_types) or 'none'}",
+                f"  occurrences: {incident.occurrences}",
+                f"  reason codes: {', '.join(incident.reason_codes) or 'none'}",
+                f"  retained rows: {retained}",
+                f"  diagnostics: {incident.diagnostic_summary or 'none'}",
+                f"  first seen: {incident.first_detected_at}",
+                f"  last seen: {incident.last_detected_at}",
+                f"  recovered later: {incident.recovered}",
+            ]
+        )
+        if incident.escalated:
+            lines.append(
+                "  note: escalated earlier in this window and alerted immediately"
+            )
+        lines.append("")
+    if len(incidents) > MAX_DIGEST_INCIDENTS:
+        lines.append(
+            f"... and {len(incidents) - MAX_DIGEST_INCIDENTS} more source(s)"
+        )
+    return subject, "\n".join(lines).rstrip() + "\n"
+
+
+def resolve_digest_window(
+    *,
+    now: datetime,
+    last_sent_at: datetime | None,
+) -> tuple[datetime, bool, bool]:
+    """Resolve the digest start, boundary inclusion, and catch-up clamp."""
+
+    default_start = now - timedelta(hours=DIGEST_WINDOW_HOURS)
+    if last_sent_at is None:
+        return default_start, True, False
+    clamp_start = now - timedelta(days=MAX_DIGEST_CATCHUP_DAYS)
+    if last_sent_at < clamp_start:
+        return clamp_start, True, True
+    return last_sent_at, False, False
+
+
+def _maybe_send_daily_digest(
+    *,
+    store: "HealthAlertStore",
+    policy: HealthAlertPolicy,
+    run_id: str,
+    now: datetime,
+    states: Mapping[str, SourceHealthState],
+    sender: Callable[[str, str], bool],
+) -> tuple[bool, int, bool]:
+    if now.hour < policy.hour_utc:
+        return False, 0, False
+    digest_date = now.date().isoformat()
+    if store.digest_sent(digest_date):
+        return False, 0, False
+    window_start, inclusive, clamped = resolve_digest_window(
+        now=now,
+        last_sent_at=store.last_digest_sent_at(),
+    )
+    if clamped:
+        LOGGER.warning(
+            "Source-health digest catch-up clamped to %d days; older retained "
+            "events are omitted from this report.",
+            MAX_DIGEST_CATCHUP_DAYS,
+        )
+    incidents = build_digest_incidents(
+        store.recent_digest_events(since=window_start, inclusive=inclusive),
+        states,
+    )
+    if not incidents:
+        return False, 0, clamped
+    subject, body = render_source_health_digest(
+        run_id=run_id,
+        observed_at=now,
+        window_start=window_start,
+        incidents=incidents,
+        catchup_clamped=clamped,
+    )
+    try:
+        sent = bool(sender(subject, body))
+    except Exception as exc:  # digest delivery must not affect the run
+        LOGGER.error(
+            "Daily source-health digest email failed: %s",
+            sanitize_error(exc),
+        )
+        return False, len(incidents), clamped
+    if sent:
+        store.mark_digest_sent(
+            digest_date=digest_date,
+            sent_at=now,
+            run_id=run_id,
+            incident_count=len(incidents),
+        )
+    return sent, len(incidents), clamped
+
+
+def _recovery_state(
+    health_key: str,
+    *,
+    last_degraded_at: datetime,
+    recovered_at: datetime | None,
+    states: Mapping[str, SourceHealthState] | None,
+) -> str:
+    if recovered_at is not None and recovered_at >= last_degraded_at:
+        return "yes"
+    state = (states or {}).get(health_key)
+    if state is None:
+        return "unknown"
+    if state.status in {
+        STATUS_HEALTHY,
+        STATUS_EMPTY,
+        DIRECT_STATUS_HEALTHY_WITH_LISTINGS,
+        DIRECT_STATUS_HEALTHY_EMPTY,
+    }:
+        return "yes"
+    return "no"
+
+
+def _candidate_from_payload(payload: str) -> HealthAlertCandidate:
+    """Rebuild stored candidates while tolerating older payload fields."""
+
+    data = json.loads(payload)
+    known = {field.name for field in fields(HealthAlertCandidate)}
+    values = {key: value for key, value in data.items() if key in known}
+    values["reason_codes"] = tuple(values.get("reason_codes") or ())
+    return HealthAlertCandidate(**values)
 
 
 def send_health_email(subject: str, body: str) -> bool:
@@ -772,10 +1182,107 @@ class HealthAlertStore:
                 update source_health_alert_state
                 set resolved_at = ?
                 where health_key = ?
-                  and alert_type = 'recovery'
+                  and alert_type in (?, ?)
                   and resolved_at is null
                 """,
-                (iso_utc(resolved_at), health_key),
+                (
+                    iso_utc(resolved_at),
+                    health_key,
+                    ALERT_RECOVERY,
+                    ALERT_MINOR_RECOVERY,
+                ),
+            )
+
+    def open_minor_incident_keys(self) -> frozenset[str]:
+        """Return keys whose only unresolved degradation is minor."""
+
+        placeholders = ", ".join("?" * len(DEGRADATION_ALERT_TYPES))
+        rows = self._conn.execute(
+            f"""
+            select health_key,
+                   sum(case when alert_type = ? then 0 else 1 end) as actionable
+            from source_health_alert_state
+            where (resolved_at is null or last_detected_at > resolved_at)
+              and alert_type in ({placeholders})
+            group by health_key
+            having actionable = 0
+            """,
+            (ALERT_MINOR_DEGRADATION, *DEGRADATION_ALERT_TYPES),
+        ).fetchall()
+        return frozenset(str(row["health_key"]) for row in rows)
+
+    def recent_digest_events(
+        self,
+        *,
+        since: datetime,
+        inclusive: bool = True,
+    ) -> tuple[tuple[datetime, HealthAlertCandidate], ...]:
+        rows = self._conn.execute(
+            f"""
+            select detected_at, payload_json
+            from source_health_alert_events
+            where detected_at {'>=' if inclusive else '>'} ?
+            order by detected_at, event_id
+            limit ?
+            """,
+            (iso_utc(since), MAX_DIGEST_EVENTS),
+        ).fetchall()
+        return tuple(
+            (
+                _parse_datetime(row["detected_at"]),
+                _candidate_from_payload(row["payload_json"]),
+            )
+            for row in rows
+        )
+
+    def digest_sent(self, digest_date: str) -> bool:
+        return (
+            self._conn.execute(
+                """
+                select 1
+                from source_health_digest
+                where digest_date = ?
+                """,
+                (digest_date,),
+            ).fetchone()
+            is not None
+        )
+
+    def last_digest_sent_at(self) -> datetime | None:
+        row = self._conn.execute(
+            """
+            select sent_at
+            from source_health_digest
+            order by digest_date desc
+            limit 1
+            """
+        ).fetchone()
+        if row is None or not row["sent_at"]:
+            return None
+        return _parse_datetime(row["sent_at"])
+
+    def mark_digest_sent(
+        self,
+        *,
+        digest_date: str,
+        sent_at: datetime,
+        run_id: str,
+        incident_count: int,
+    ) -> None:
+        with self._conn:
+            self._conn.execute(
+                """
+                insert into source_health_digest(
+                  digest_date, sent_at, run_id, incident_count
+                ) values (?, ?, ?, ?)
+                on conflict(digest_date) do nothing
+                """,
+                (
+                    digest_date,
+                    iso_utc(sent_at),
+                    safe_run_id(run_id),
+                    max(0, int(incident_count)),
+                ),
             )
 
     def daily_summary_sent(self, summary_date: str) -> bool:
@@ -838,41 +1345,7 @@ class HealthAlertStore:
             (iso_utc(since),),
         ).fetchall()
         return tuple(
-            HealthAlertCandidate(**json.loads(row["payload_json"]))
-            for row in rows
-        )
-
-    def pending_unsent_recoveries(
-        self,
-    ) -> tuple[HealthAlertCandidate, ...]:
-        """Return recovery notices whose latest delivery never succeeded."""
-
-        rows = self._conn.execute(
-            """
-            select events.payload_json
-            from source_health_alert_state as state
-            join source_health_alert_events as events
-              on events.event_id = (
-                select latest.event_id
-                from source_health_alert_events as latest
-                where latest.fingerprint = state.fingerprint
-                order by latest.detected_at desc, latest.event_id desc
-                limit 1
-              )
-            where state.alert_type = 'recovery'
-              and (
-                state.last_sent_at is null
-                or events.detected_at > state.last_sent_at
-              )
-              and (
-                state.resolved_at is null
-                or events.detected_at > state.resolved_at
-              )
-            order by events.detected_at, state.fingerprint
-            """
-        ).fetchall()
-        return tuple(
-            HealthAlertCandidate(**json.loads(row["payload_json"]))
+            _candidate_from_payload(row["payload_json"])
             for row in rows
         )
 
@@ -952,6 +1425,23 @@ class HealthAlertStore:
               observed_at text not null,
               coverage_json text not null
             );
+            create table if not exists source_health_minor_digest(
+              digest_date text primary key,
+              sent_at text not null,
+              run_id text not null,
+              incident_count integer not null
+            );
+            create table if not exists source_health_digest(
+              digest_date text primary key,
+              sent_at text not null,
+              run_id text not null,
+              incident_count integer not null
+            );
+            insert or ignore into source_health_digest(
+              digest_date, sent_at, run_id, incident_count
+            )
+            select digest_date, sent_at, run_id, incident_count
+            from source_health_minor_digest;
             """
         )
         self._conn.commit()
@@ -1013,6 +1503,9 @@ def _candidate(
         recommended_action=action,
         run_id=safe_run_id(run_id),
         diagnostic_summary=_state_diagnostic_summary(state),
+        reason_codes=tuple(
+            safe_error_kind(code) for code in (state.last_reason_codes or ())
+        )[:12],
     )
 
 
@@ -1020,19 +1513,9 @@ def _allowed_by_mode(
     candidate: HealthAlertCandidate,
     mode: str,
 ) -> bool:
-    if mode == MODE_TRANSITIONS_ONLY:
-        return candidate.alert_type in {
-            "new_failure",
-            "recovery",
-            "direct_source_silence",
-            "direct_source_degraded",
-            "unknown_diagnostics",
-            "coverage_regression",
-            "both_tiers_unavailable",
-        }
-    if mode == MODE_FAILURE_ONLY:
-        return candidate.alert_type not in {"recovery", "minor_degradation"}
-    return False
+    if candidate.severity != SEVERITY_HIGH:
+        return False
+    return mode in {MODE_TRANSITIONS_ONLY, MODE_FAILURE_ONLY}
 
 
 def _merge_candidates(
@@ -1047,7 +1530,7 @@ def _merge_candidates(
         sorted(
             by_fingerprint.values(),
             key=lambda item: (
-                {"critical": 0, "high": 1, "medium": 2, "info": 3}.get(
+                SEVERITY_ORDER.get(
                     item.severity,
                     9,
                 ),
