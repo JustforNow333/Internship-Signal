@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
+from types import MappingProxyType
 from typing import Callable, Mapping, Sequence
 
 from watcher.source_comparison import SourceComparisonReport
@@ -111,6 +112,18 @@ MAX_DIGEST_EVENTS = 20_000
 
 GITHUB_EVIDENCE_HORIZON_DAYS = 7
 MAX_COVERAGE_SNAPSHOTS = 200
+
+# A source that keeps failing and recovering on one error restates a mode that
+# was already alerted. After this many prior occurrences of the *same* sanitized
+# error kind inside the lookback window, one more isolated failure is a repeat
+# rather than news, so it joins the daily digest instead of interrupting again.
+# The window spans seven days of hourly runs, matching the alert-event history
+# this reads; nothing new is persisted for it.
+FLAP_LOOKBACK_HOURS = 168
+FLAP_REPEAT_THRESHOLD = 3
+# Defensive bound on how many stored failure events one lookback may load.
+MAX_FLAP_HISTORY_EVENTS = 20_000
+
 SYSTEMIC_GROUP_MIN_COMPANIES = 5
 SYSTEMIC_GROUP_DOMINANCE_PERCENT = 60
 
@@ -309,6 +322,71 @@ def usable_github_fallback(
     return sanitize_error(coverage.company) in historical_evidence
 
 
+def repeat_flap_deferrable(
+    *,
+    consecutive_failures: int,
+    error_kind: str | None,
+    fallback_available: bool | None,
+    fallback_usable: bool | None,
+    occurrences: Sequence[HealthAlertCandidate],
+) -> bool:
+    """Report whether one failure only repeats an already-alerted mode.
+
+    ``occurrences`` are the prior failure events for this same health key and
+    the same sanitized error kind inside the lookback window, oldest first.
+    Keying on the error kind rather than the fingerprint is deliberate: the
+    fingerprint omits ``error_kind``, so a source that flaps on one error would
+    otherwise mask a genuinely different failure.
+
+    Deferral is refused whenever the incident could be worse than the ones
+    already reported: a second consecutive failure means the source is down
+    now rather than flapping, and weaker fallback posture means a repeat that
+    used to be covered no longer is.
+    """
+
+    if consecutive_failures != 1:
+        return False
+    if not error_kind:
+        return False
+    if len(occurrences) < FLAP_REPEAT_THRESHOLD:
+        return False
+    latest = occurrences[-1]
+    if _fallback_regressed(latest.github_fallback_available, fallback_available):
+        return False
+    return not _fallback_regressed(latest.github_fallback_usable, fallback_usable)
+
+
+def _failure_action(
+    *,
+    covered_first_failure: bool,
+    repeating_flap: bool,
+) -> str:
+    """Describe why one failure waits for the digest, or why it did not."""
+
+    if covered_first_failure:
+        return (
+            "A usable GitHub fallback currently covers this company; "
+            "review the daily digest and escalate if it fails again."
+        )
+    if repeating_flap:
+        return (
+            "This source keeps failing and recovering on the same error; "
+            "review the daily digest and escalate if the failure changes."
+        )
+    return "Inspect the sanitized source-health report and adapter endpoint."
+
+
+def _fallback_regressed(previous: bool | None, current: bool | None) -> bool:
+    """Report whether fallback posture is weaker than it was.
+
+    Tri-state, so unknown never counts as an improvement: losing a proven
+    ``True`` to either ``False`` or unknown is a regression, while posture that
+    was never proven has nothing to lose.
+    """
+
+    return previous is True and current is not True
+
+
 def evaluate_and_send_health_alerts(
     *,
     db_path: str | Path,
@@ -347,6 +425,11 @@ def evaluate_and_send_health_alerts(
         github_evidence = store.companies_with_recent_github_rows(
             since=now - timedelta(days=GITHUB_EVIDENCE_HORIZON_DAYS),
         )
+        # Repeat history must also stay strictly historical, so it is read
+        # before this run's own events are recorded below.
+        failure_history = store.recent_failure_occurrences(
+            since=now - timedelta(hours=FLAP_LOOKBACK_HOURS),
+        )
         candidates = build_alert_candidates(
             policy=policy,
             run_id=run_id,
@@ -357,6 +440,7 @@ def evaluate_and_send_health_alerts(
             previous_coverage=previous_coverage,
             minor_incident_keys=minor_incident_keys,
             github_evidence_companies=github_evidence,
+            failure_history=failure_history,
         )
         store.record_coverage_snapshot(
             run_id=run_id,
@@ -538,6 +622,9 @@ def build_alert_candidates(
     previous_coverage: Mapping[str, str] | None,
     minor_incident_keys: frozenset[str] = frozenset(),
     github_evidence_companies: frozenset[str] = frozenset(),
+    failure_history: Mapping[
+        tuple[str, str], Sequence[HealthAlertCandidate]
+    ] = MappingProxyType({}),
 ) -> tuple[HealthAlertCandidate, ...]:
     transition_by_key = {transition.health_key: transition for transition in transitions}
     coverage_by_company = {item.company: item for item in coverage}
@@ -578,7 +665,29 @@ def build_alert_candidates(
                 feed_usable=feed_usable,
                 historical_evidence=github_evidence_companies,
             )
-            deferrable = first_failure and fallback_usable
+            covered_first_failure = first_failure and fallback_usable
+            # An isolated failure that only repeats a mode already alerted
+            # several times is the other way to reach the digest. Both routes
+            # require an isolated failure, so neither can mute an escalation.
+            error_kind = (
+                safe_error_kind(state.last_error_kind)
+                if state.last_error_kind
+                else None
+            )
+            repeating_flap = repeat_flap_deferrable(
+                consecutive_failures=state.consecutive_failures,
+                error_kind=error_kind,
+                fallback_available=(
+                    company_coverage.github_backstop_available
+                    if company_coverage
+                    else None
+                ),
+                fallback_usable=fallback_usable,
+                occurrences=failure_history.get(
+                    (state.health_key, error_kind or ""), ()
+                ),
+            )
+            deferrable = covered_first_failure or repeating_flap
             candidates.append(
                 _candidate(
                     state,
@@ -592,11 +701,9 @@ def build_alert_candidates(
                     severity=SEVERITY_MEDIUM if deferrable else SEVERITY_HIGH,
                     run_id=run_id,
                     coverage=company_coverage,
-                    action=(
-                        "A usable GitHub fallback currently covers this company; "
-                        "review the daily digest and escalate if it fails again."
-                        if deferrable
-                        else "Inspect the sanitized source-health report and adapter endpoint."
+                    action=_failure_action(
+                        covered_first_failure=covered_first_failure,
+                        repeating_flap=repeating_flap,
                     ),
                     fallback_usable=fallback_usable,
                 )
@@ -1554,6 +1661,46 @@ class HealthAlertStore:
                 if github_rows is not None and github_rows > 0:
                     companies.add(company)
         return frozenset(companies)
+
+    def recent_failure_occurrences(
+        self,
+        *,
+        since: datetime,
+    ) -> dict[tuple[str, str], tuple[HealthAlertCandidate, ...]]:
+        """Group recent failure events by health key and sanitized error kind.
+
+        Only the failure family is read, because a repeat is evidence about one
+        recurring failure mode; recoveries and degradations never count toward
+        it. Groups arrive oldest first, so the last entry of each is the most
+        recent qualifying occurrence. Events without an error kind cannot be
+        matched to a mode and are skipped rather than grouped together.
+        """
+
+        rows = self._conn.execute(
+            """
+            select payload_json
+            from source_health_alert_events
+            where detected_at >= ?
+              and alert_type in (?, ?)
+            order by detected_at, event_id
+            limit ?
+            """,
+            (
+                iso_utc(since),
+                ALERT_NEW_FAILURE,
+                ALERT_CONTINUED_FAILURE,
+                MAX_FLAP_HISTORY_EVENTS,
+            ),
+        ).fetchall()
+        grouped: dict[tuple[str, str], list[HealthAlertCandidate]] = {}
+        for row in rows:
+            candidate = _candidate_from_payload(row["payload_json"])
+            if not candidate.error_kind:
+                continue
+            grouped.setdefault(
+                (candidate.health_key, candidate.error_kind), []
+            ).append(candidate)
+        return {key: tuple(items) for key, items in grouped.items()}
 
     def recent_candidates(
         self,
