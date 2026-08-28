@@ -20,7 +20,14 @@ from watcher.sources import (
     WorkableSource,
     WorkdaySource,
 )
-from watcher.sources.base import iso_date
+from watcher.sources.base import (
+    _safe_body_preview,
+    _safe_error_code,
+    _safe_url,
+    _sanitize_fetch_message,
+    html_to_text,
+    iso_date,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TEST_GITHUB_FEED_URL = "https://fixtures.example.test/internships/listings.json"
@@ -79,6 +86,23 @@ def test_fixture_json_round_trips_utf8_non_ascii(tmp_path):
     assert json.loads(output.read_text(encoding="utf-8")) == expected
     assert b"\xe2\x80\x99" in output.read_bytes()
     assert b"\xc2\xae" in output.read_bytes()
+
+
+def test_source_sanitizers_are_total_for_unprintable_values():
+    class Unprintable:
+        def __bool__(self):
+            raise RuntimeError("broken truth conversion")
+
+        def __str__(self):
+            raise RuntimeError("broken text conversion")
+
+    value = Unprintable()
+
+    assert html_to_text(value) == ""
+    assert _safe_url(value) == ""
+    assert _sanitize_fetch_message(value) == ""
+    assert _safe_error_code(value) == "fetch_failure"
+    assert _safe_body_preview(value) == ""
 
 
 @pytest.mark.parametrize(

@@ -35,11 +35,13 @@ from watcher.run import (
     CollectionStats,
     _DirectFetchOutcome,
     _direct_outcome_from_result,
+    _http_status_from_error,
     collect_batch,
     run_once,
 )
 from watcher.seen_store import SeenStore
 from watcher.source_health import (
+    ERROR_FETCH,
     ERROR_UNEXPECTED,
     SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
@@ -513,6 +515,164 @@ def test_unexpected_task_result_is_converted_into_a_failed_direct_outcome():
     assert outcome.error_kind == ERROR_UNEXPECTED
     assert isinstance(outcome.error, TypeError)
     assert stats.unexpected_task_exceptions == 1
+
+
+def test_unprintable_worker_error_is_converted_without_escaping_diagnostics():
+    class UnprintableError(RuntimeError):
+        def __str__(self):
+            raise RuntimeError("broken text conversion")
+
+    stats = CollectionStats()
+    company = CompanyCfg(name="AlphaCo", ats="greenhouse", token="alpha")
+    task = CollectionTask(
+        key="direct", origin="o", provider="greenhouse", run=lambda: None
+    )
+    error = UnprintableError()
+
+    outcome = _direct_outcome_from_result(
+        company,
+        TaskResult(index=0, task=task, value=None, error=error),
+        stats,
+    )
+
+    assert outcome.error is error
+    assert outcome.error_kind == ERROR_UNEXPECTED
+    assert stats.unexpected_task_exceptions == 1
+
+
+def test_worker_error_with_broken_truth_test_is_converted_without_escaping():
+    class UntruthableError(RuntimeError):
+        def __bool__(self):
+            raise RuntimeError("broken truth test")
+
+    stats = CollectionStats()
+    company = CompanyCfg(name="AlphaCo", ats="greenhouse", token="alpha")
+    task = CollectionTask(
+        key="direct", origin="o", provider="greenhouse", run=lambda: None
+    )
+    error = UntruthableError("worker failed")
+
+    outcome = _direct_outcome_from_result(
+        company,
+        TaskResult(index=0, task=task, value=None, error=error),
+        stats,
+    )
+
+    assert outcome.error is error
+    assert outcome.error_kind == ERROR_UNEXPECTED
+    assert stats.unexpected_task_exceptions == 1
+
+
+def test_non_exception_worker_value_with_broken_text_is_wrapped_safely():
+    class Unprintable:
+        def __bool__(self):
+            raise RuntimeError("broken truth test")
+
+        def __str__(self):
+            raise RuntimeError("broken text conversion")
+
+    stats = CollectionStats()
+    company = CompanyCfg(name="AlphaCo", ats="greenhouse", token="alpha")
+    task = CollectionTask(
+        key="direct", origin="o", provider="greenhouse", run=lambda: None
+    )
+
+    outcome = _direct_outcome_from_result(
+        company,
+        TaskResult(index=0, task=task, value=None, error=Unprintable()),
+        stats,
+    )
+
+    assert isinstance(outcome.error, RuntimeError)
+    assert str(outcome.error) == ""
+    assert outcome.error_kind == ERROR_UNEXPECTED
+    assert stats.unexpected_task_exceptions == 1
+
+
+def test_source_error_with_broken_truth_test_does_not_abort_collection():
+    class UntruthableError(RuntimeError):
+        def __bool__(self):
+            raise RuntimeError("broken truth test")
+
+    company = CompanyCfg(name="AlphaCo", ats="greenhouse", token="alpha")
+    source = DelayedSource(
+        "greenhouse",
+        delay=0.0,
+        errors={company.name: UntruthableError("source failed")},
+    )
+
+    batch = collect_batch(
+        WatcherConfig(companies=(company,)),
+        direct_sources={"greenhouse": source},
+        github_source=[],
+    )
+
+    assert batch.rows == ()
+    assert batch.source_attempts[0].succeeded is False
+    assert batch.source_attempts[0].error_kind == ERROR_UNEXPECTED
+
+
+def test_unprintable_fetch_error_keeps_its_source_failure_classification():
+    class UnprintableFetchError(SourceFetchError):
+        def __str__(self):
+            raise RuntimeError("broken text conversion")
+
+    company = CompanyCfg(name="AlphaCo", ats="greenhouse", token="alpha")
+    source = DelayedSource(
+        "greenhouse",
+        delay=0.0,
+        errors={
+            company.name: UnprintableFetchError(
+                "source failed",
+                error_code="transport_failure",
+            )
+        },
+    )
+
+    batch = collect_batch(
+        WatcherConfig(companies=(company,)),
+        direct_sources={"greenhouse": source},
+        github_source=[],
+    )
+
+    assert batch.rows == ()
+    assert batch.source_attempts[0].succeeded is False
+    assert batch.source_attempts[0].error_kind == f"{ERROR_FETCH}/transport_failure"
+
+
+def test_unprintable_github_fetch_error_remains_a_failed_feed_attempt():
+    class UnprintableFetchError(SourceFetchError):
+        def __str__(self):
+            raise RuntimeError("broken text conversion")
+
+    company = CompanyCfg(name="BackstopCo", ats="github_only")
+    source = DelayedGithub(
+        "https://example.test/listings.json",
+        error=UnprintableFetchError(
+            "feed failed",
+            error_code="transport_failure",
+        ),
+        delay=0.0,
+    )
+
+    batch = collect_batch(
+        WatcherConfig(companies=(company,)),
+        direct_sources={},
+        github_source=[source],
+    )
+
+    feed_attempt = next(
+        attempt
+        for attempt in batch.source_attempts
+        if attempt.source_kind == SOURCE_KIND_GITHUB_FEED
+    )
+    assert batch.rows == ()
+    assert feed_attempt.succeeded is False
+    assert feed_attempt.error_kind == ERROR_FETCH
+
+
+def test_http_status_extraction_keeps_normal_text_fallback_behavior():
+    assert _http_status_from_error(RuntimeError("request failed with HTTP 503")) == 503
 
 
 # --- collection equivalence ---------------------------------------------

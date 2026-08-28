@@ -38,8 +38,12 @@ from watcher.source_health import (
     github_feed_health_key,
     render_final_heartbeat,
     render_github_actions_report,
+    safe_error_kind,
+    safe_run_id,
+    safe_token,
     sanitize_error,
     sanitize_feed_label,
+    sanitize_plain,
     summarize_health,
     transition_for,
     write_health_report,
@@ -302,6 +306,24 @@ def test_feed_labels_sanitize_malformed_authorities_without_raising(raw, expecte
 def test_sanitize_error_survives_a_malformed_url_in_failure_text():
     message = sanitize_error("workday POST failed: https://tenant.test:99999/wday/cxs/jobs?q=1")
     assert message == "workday POST failed: https://tenant.test/wday/cxs/jobs"
+
+
+def test_health_sanitizers_are_total_for_unprintable_failure_values():
+    class Unprintable:
+        def __bool__(self):
+            raise RuntimeError("broken truth conversion")
+
+        def __str__(self):
+            raise RuntimeError("broken text conversion")
+
+    value = Unprintable()
+
+    assert sanitize_error(value) == ""
+    assert sanitize_feed_label(value) == "injected"
+    assert safe_token(value) == ""
+    assert safe_error_kind(value) == ""
+    assert safe_run_id(value) == "unknown"
+    assert sanitize_plain(value) == ""
 
 
 def test_transaction_failure_rolls_back_attempt_and_current_state(tmp_path):

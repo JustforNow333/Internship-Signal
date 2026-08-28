@@ -22,6 +22,7 @@ from urllib.request import Request, urlopen
 
 from backend.app.normalize import CANONICAL_COLUMNS
 from watcher.config import CompanyCfg
+from watcher.text_safety import safe_text
 
 USER_AGENT = "internship-signal-watcher/0.1"
 DEFAULT_TIMEOUT_SECONDS = 20
@@ -869,8 +870,8 @@ def _retry_after_seconds(value: str) -> float | None:
             return None
 
 
-def _safe_body_preview(text: str) -> str:
-    preview = html_to_text(text[:4_096])
+def _safe_body_preview(text: object) -> str:
+    preview = html_to_text(safe_text(text)[:4_096])
     preview = re.sub(r"https?://[^\s]+", "[url-redacted]", preview, flags=re.IGNORECASE)
     preview = re.sub(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", "[email-redacted]", preview)
     preview = re.sub(
@@ -910,8 +911,8 @@ def _json_content_type(content_type: str) -> bool:
     return media_type == "application/json" or media_type.endswith("+json")
 
 
-def _safe_url(value: str) -> str:
-    raw = str(value or "").strip()
+def _safe_url(value: object) -> str:
+    raw = safe_text(value).strip()
     try:
         parsed = urlsplit(raw)
     except ValueError:
@@ -928,7 +929,11 @@ def _safe_url(value: str) -> str:
 
 
 def _sanitize_fetch_message(value: object) -> str:
-    message = re.sub(r"https?://[^\s]+", lambda match: _safe_url(match.group(0)), str(value or ""))
+    message = re.sub(
+        r"https?://[^\s]+",
+        lambda match: _safe_url(match.group(0)),
+        safe_text(value),
+    )
     message = re.sub(
         r"(?i)\b(?:password|passwd|token|secret|authorization|api[_-]?key|csrf)\s*[:=]\s*[^\s,;]+",
         "[secret-redacted]",
@@ -939,11 +944,18 @@ def _sanitize_fetch_message(value: object) -> str:
 
 
 def _safe_error_code(value: object) -> str:
-    return re.sub(r"[^a-z0-9_.-]+", "_", str(value or "fetch_failure").casefold()).strip("_") or "fetch_failure"
+    return (
+        re.sub(
+            r"[^a-z0-9_.-]+",
+            "_",
+            (safe_text(value) or "fetch_failure").casefold(),
+        ).strip("_")
+        or "fetch_failure"
+    )
 
 
-def html_to_text(value: Any) -> str:
-    text = unescape(str(value or ""))
+def html_to_text(value: object) -> str:
+    text = unescape(safe_text(value))
     text = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", text)
     text = re.sub(r"(?i)</\s*(p|div|li|h[1-6])\s*>", "\n", text)
     text = re.sub(r"<[^>]+>", " ", text)
