@@ -7,6 +7,7 @@ import logging
 import os
 import smtplib
 import sqlite3
+from collections import Counter
 from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime, timedelta
 from email.message import EmailMessage
@@ -17,6 +18,7 @@ from watcher.source_comparison import SourceComparisonReport
 from watcher.source_health import (
     COVERAGE_BACKSTOP_ONLY,
     COVERAGE_UNCOVERED,
+    SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
     STATUS_DEGRADED,
     STATUS_EMPTY,
@@ -107,6 +109,11 @@ MAX_DIGEST_INCIDENTS = 25
 MAX_DIGEST_CATCHUP_DAYS = 7
 MAX_DIGEST_EVENTS = 20_000
 
+GITHUB_EVIDENCE_HORIZON_DAYS = 7
+MAX_COVERAGE_SNAPSHOTS = 200
+SYSTEMIC_GROUP_MIN_COMPANIES = 5
+SYSTEMIC_GROUP_DOMINANCE_PERCENT = 60
+
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
 SMTP_TIMEOUT_SECONDS = 30
@@ -142,6 +149,8 @@ class HealthAlertCandidate:
     run_id: str
     diagnostic_summary: str = ""
     reason_codes: tuple[str, ...] = ()
+    adapter: str = ""
+    github_fallback_usable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -160,6 +169,21 @@ class DigestIncident:
     diagnostic_summary: str
     recovered: str
     escalated: bool = False
+
+
+@dataclass(frozen=True)
+class SystemicIncidentGroup:
+    """One run's shared same-family failure, for presentation only."""
+
+    adapter_family: str
+    error_kind: str
+    companies: tuple[str, ...]
+    run_id: str
+    recommended_action: str
+
+    @property
+    def affected_companies(self) -> int:
+        return len(self.companies)
 
 
 @dataclass(frozen=True)
@@ -241,6 +265,50 @@ def is_minor_degradation(state: SourceHealthState) -> bool:
     )
 
 
+def github_feed_fallback_usable(
+    states: Mapping[str, SourceHealthState],
+    *,
+    observed_at: datetime,
+    feed_stale_hours: int,
+) -> bool:
+    """Return whether every GitHub feed attempted this run is trustworthy."""
+
+    feeds = [
+        state
+        for state in states.values()
+        if state.source_kind == SOURCE_KIND_GITHUB_FEED
+    ]
+    if not feeds:
+        return False
+    stale_after = timedelta(hours=feed_stale_hours)
+    for state in feeds:
+        if state.status != STATUS_HEALTHY:
+            return False
+        if state.last_nonzero_at is None:
+            return False
+        if observed_at - state.last_nonzero_at >= stale_after:
+            return False
+    return True
+
+
+def usable_github_fallback(
+    coverage: CompanyCoverage | None,
+    *,
+    feed_usable: bool,
+    historical_evidence: frozenset[str] = frozenset(),
+) -> bool:
+    """Return whether GitHub demonstrably protects one specific company."""
+
+    if coverage is None or not coverage.github_fallback_configured:
+        return False
+    if not feed_usable:
+        return False
+    rows = coverage.github_rows_returned
+    if rows is not None and rows > 0:
+        return True
+    return sanitize_error(coverage.company) in historical_evidence
+
+
 def evaluate_and_send_health_alerts(
     *,
     db_path: str | Path,
@@ -276,6 +344,9 @@ def evaluate_and_send_health_alerts(
     with HealthAlertStore(db_path) as store:
         previous_coverage = store.latest_coverage_snapshot()
         minor_incident_keys = store.open_minor_incident_keys()
+        github_evidence = store.companies_with_recent_github_rows(
+            since=now - timedelta(days=GITHUB_EVIDENCE_HORIZON_DAYS),
+        )
         candidates = build_alert_candidates(
             policy=policy,
             run_id=run_id,
@@ -285,6 +356,7 @@ def evaluate_and_send_health_alerts(
             coverage=coverage,
             previous_coverage=previous_coverage,
             minor_incident_keys=minor_incident_keys,
+            github_evidence_companies=github_evidence,
         )
         store.record_coverage_snapshot(
             run_id=run_id,
@@ -465,9 +537,15 @@ def build_alert_candidates(
     coverage: Sequence[CompanyCoverage],
     previous_coverage: Mapping[str, str] | None,
     minor_incident_keys: frozenset[str] = frozenset(),
+    github_evidence_companies: frozenset[str] = frozenset(),
 ) -> tuple[HealthAlertCandidate, ...]:
     transition_by_key = {transition.health_key: transition for transition in transitions}
     coverage_by_company = {item.company: item for item in coverage}
+    feed_usable = github_feed_fallback_usable(
+        states,
+        observed_at=observed_at,
+        feed_stale_hours=policy.feed_stale_hours,
+    )
     candidates: list[HealthAlertCandidate] = []
     for state in states.values():
         transition = transition_by_key.get(state.health_key)
@@ -491,6 +569,16 @@ def build_alert_candidates(
             )
             continue
         if state.status in {STATUS_FAILING, DIRECT_STATUS_FAILED}:
+            first_failure = (
+                state.source_kind != SOURCE_KIND_GITHUB_FEED
+                and state.consecutive_failures == 1
+            )
+            fallback_usable = usable_github_fallback(
+                company_coverage,
+                feed_usable=feed_usable,
+                historical_evidence=github_evidence_companies,
+            )
+            deferrable = first_failure and fallback_usable
             candidates.append(
                 _candidate(
                     state,
@@ -501,10 +589,16 @@ def build_alert_candidates(
                         and transition.to_status in {STATUS_FAILING, DIRECT_STATUS_FAILED}
                         else ALERT_CONTINUED_FAILURE
                     ),
-                    severity=SEVERITY_HIGH,
+                    severity=SEVERITY_MEDIUM if deferrable else SEVERITY_HIGH,
                     run_id=run_id,
                     coverage=company_coverage,
-                    action="Inspect the sanitized source-health report and adapter endpoint.",
+                    action=(
+                        "A usable GitHub fallback currently covers this company; "
+                        "review the daily digest and escalate if it fails again."
+                        if deferrable
+                        else "Inspect the sanitized source-health report and adapter endpoint."
+                    ),
+                    fallback_usable=fallback_usable,
                 )
             )
         elif (
@@ -642,11 +736,78 @@ def build_alert_candidates(
     return _merge_candidates(candidates)
 
 
+def group_systemic_incidents(
+    candidates: Sequence[HealthAlertCandidate],
+) -> tuple[tuple[SystemicIncidentGroup, ...], tuple[HealthAlertCandidate, ...]]:
+    """Group obvious same-family failures for presentation only."""
+
+    groupable = [
+        candidate
+        for candidate in candidates
+        if candidate.severity == SEVERITY_HIGH
+        and candidate.alert_type in FAILURE_ALERT_TYPES
+        and candidate.source_kind == SOURCE_KIND_DIRECT
+        and candidate.adapter
+        and candidate.company
+    ]
+    by_family: dict[str, list[HealthAlertCandidate]] = {}
+    for candidate in groupable:
+        by_family.setdefault(candidate.adapter, []).append(candidate)
+
+    groups: list[SystemicIncidentGroup] = []
+    grouped: set[str] = set()
+    for family, members in sorted(by_family.items()):
+        if len(members) < SYSTEMIC_GROUP_MIN_COMPANIES:
+            continue
+        counts = Counter(_grouping_error_kind(item) for item in members)
+        error_kind, count = min(
+            counts.most_common(),
+            key=lambda item: (-item[1], item[0]),
+        )
+        if count < SYSTEMIC_GROUP_MIN_COMPANIES:
+            continue
+        if count * 100 < len(members) * SYSTEMIC_GROUP_DOMINANCE_PERCENT:
+            continue
+        affected = sorted(
+            (
+                item
+                for item in members
+                if _grouping_error_kind(item) == error_kind
+            ),
+            key=lambda item: (item.source_label.casefold(), item.fingerprint),
+        )
+        groups.append(
+            SystemicIncidentGroup(
+                adapter_family=family,
+                error_kind=error_kind,
+                companies=tuple(item.source_label for item in affected),
+                run_id=affected[0].run_id,
+                recommended_action=(
+                    f"Investigate the shared {family} platform or transport "
+                    "before treating these as independent company failures."
+                ),
+            )
+        )
+        grouped.update(item.fingerprint for item in affected)
+    remaining = tuple(
+        candidate
+        for candidate in candidates
+        if candidate.fingerprint not in grouped
+    )
+    return tuple(groups), remaining
+
+
 def render_alert_email(
     candidates: Sequence[HealthAlertCandidate],
 ) -> tuple[str, str]:
+    groups, remaining = group_systemic_incidents(candidates)
     first = candidates[0]
-    if len(candidates) == 1 and first.alert_type == "recovery":
+    if groups:
+        subject = (
+            f"Internship Watcher Source Alert: {len(groups)} shared source "
+            f"incident(s), {len(remaining)} other"
+        )
+    elif len(candidates) == 1 and first.alert_type == "recovery":
         subject = f"Internship Watcher Source Recovery: {first.source_label}"
     elif len(candidates) == 1:
         subject = (
@@ -656,7 +817,9 @@ def render_alert_email(
     else:
         subject = f"Internship Watcher Source Alert: {len(candidates)} source incidents"
     lines = [subject, ""]
-    for candidate in candidates:
+    for group in groups:
+        lines.extend(_group_lines(group))
+    for candidate in remaining:
         lines.extend(_candidate_lines(candidate))
     return subject, "\n".join(lines).rstrip() + "\n"
 
@@ -1006,6 +1169,42 @@ def _recovery_state(
     return "no"
 
 
+def _coverage_snapshot_value(coverage: CompanyCoverage) -> object:
+    if coverage.github_rows_returned is None:
+        return coverage.state
+    return {
+        "state": coverage.state,
+        "github_rows": max(0, int(coverage.github_rows_returned)),
+    }
+
+
+def _coverage_snapshot_entries(
+    payload: object,
+) -> dict[str, tuple[str, int | None]]:
+    """Read legacy state strings and current evidence-bearing snapshots."""
+
+    try:
+        data = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, Mapping):
+        return {}
+    entries: dict[str, tuple[str, int | None]] = {}
+    for company, value in data.items():
+        if isinstance(value, Mapping):
+            state = str(value.get("state") or "")
+            raw_rows = value.get("github_rows")
+            github_rows = (
+                max(0, int(raw_rows))
+                if isinstance(raw_rows, int) and not isinstance(raw_rows, bool)
+                else None
+            )
+        else:
+            state, github_rows = str(value), None
+        entries[str(company)] = (state, github_rows)
+    return entries
+
+
 def _candidate_from_payload(payload: str) -> HealthAlertCandidate:
     """Rebuild stored candidates while tolerating older payload fields."""
 
@@ -1327,8 +1526,34 @@ class HealthAlertStore:
         ).fetchone()
         if row is None:
             return None
-        data = json.loads(row["coverage_json"])
-        return {str(key): str(value) for key, value in data.items()}
+        return {
+            company: state
+            for company, (state, _) in _coverage_snapshot_entries(
+                row["coverage_json"]
+            ).items()
+        }
+
+    def companies_with_recent_github_rows(
+        self,
+        *,
+        since: datetime,
+    ) -> frozenset[str]:
+        rows = self._conn.execute(
+            """
+            select coverage_json
+            from source_health_coverage_snapshots
+            where observed_at >= ?
+            """,
+            (iso_utc(since),),
+        ).fetchall()
+        companies: set[str] = set()
+        for row in rows:
+            for company, (_, github_rows) in _coverage_snapshot_entries(
+                row["coverage_json"]
+            ).items():
+                if github_rows is not None and github_rows > 0:
+                    companies.add(company)
+        return frozenset(companies)
 
     def recent_candidates(
         self,
@@ -1357,7 +1582,7 @@ class HealthAlertStore:
         coverage: Sequence[CompanyCoverage],
     ) -> None:
         data = {
-            sanitize_error(item.company): item.state
+            sanitize_error(item.company): _coverage_snapshot_value(item)
             for item in coverage
         }
         with self._conn:
@@ -1377,13 +1602,13 @@ class HealthAlertStore:
                 ),
             )
             self._conn.execute(
-                """
+                f"""
                 delete from source_health_coverage_snapshots
                 where run_id not in (
                   select run_id
                   from source_health_coverage_snapshots
                   order by observed_at desc, run_id desc
-                  limit 90
+                  limit {MAX_COVERAGE_SNAPSHOTS}
                 )
                 """
             )
@@ -1456,6 +1681,7 @@ def _candidate(
     run_id: str,
     coverage: CompanyCoverage | None,
     action: str,
+    fallback_usable: bool | None = None,
 ) -> HealthAlertCandidate:
     label = state.company or state.feed_label or state.adapter or state.health_key
     failure_family = (
@@ -1506,6 +1732,8 @@ def _candidate(
         reason_codes=tuple(
             safe_error_kind(code) for code in (state.last_reason_codes or ())
         )[:12],
+        adapter=safe_error_kind(state.adapter) if state.adapter else "",
+        github_fallback_usable=fallback_usable,
     )
 
 
@@ -1541,6 +1769,24 @@ def _merge_candidates(
     )
 
 
+def _grouping_error_kind(candidate: HealthAlertCandidate) -> str:
+    return safe_error_kind(candidate.error_kind) or "unknown"
+
+
+def _group_lines(group: SystemicIncidentGroup) -> list[str]:
+    return [
+        f"HIGH: likely shared {group.adapter_family} incident "
+        f"({group.affected_companies} companies)",
+        f"  source family: {group.adapter_family}",
+        f"  safe failure category: {group.error_kind}",
+        f"  affected companies: {group.affected_companies}",
+        *[f"    - {sanitize_error(company)}" for company in group.companies],
+        f"  recommended action: {group.recommended_action}",
+        f"  run ID: {group.run_id}",
+        "",
+    ]
+
+
 def _candidate_lines(candidate: HealthAlertCandidate) -> list[str]:
     return [
         f"{candidate.severity.upper()}: {candidate.source_label}",
@@ -1554,7 +1800,8 @@ def _candidate_lines(candidate: HealthAlertCandidate) -> list[str]:
         f"  safe error category: {candidate.error_kind or 'none'}",
         f"  bounded diagnostics: {candidate.diagnostic_summary or 'none'}",
         f"  direct fallback available: {_yes_no_unknown(candidate.direct_fallback_available)}",
-        f"  GitHub fallback available: {_yes_no_unknown(candidate.github_fallback_available)}",
+        f"  some GitHub feed succeeded on this run: {_yes_no_unknown(candidate.github_fallback_available)}",
+        f"  usable GitHub fallback for this company: {_yes_no_unknown(candidate.github_fallback_usable)}",
         f"  recommended action: {candidate.recommended_action}",
         f"  run ID: {candidate.run_id}",
         "",

@@ -252,6 +252,11 @@ def test_run_once_filters_marks_seen_and_second_run_is_empty(tmp_path):
     assert second.analysis_cache_stats.misses == 0
     assert first.digest_sent is True
     assert first.seen_marked == 2
+    coverage = {item.company: item for item in first.company_coverage}
+    assert coverage["DirectCo"].github_rows_returned == 1
+    assert coverage["DirectCo"].github_fallback_configured is True
+    assert coverage["GitHub"].github_rows_returned == 1
+    assert coverage["GitHub"].github_fallback_configured is False
     assert [len(call) for call in digest_sender.calls] == [2, 0]
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute("select emailed_at from seen order by job_id").fetchall()

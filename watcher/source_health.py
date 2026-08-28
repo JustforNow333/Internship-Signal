@@ -17,6 +17,7 @@ from typing import Iterable, Mapping, Sequence, TextIO
 from urllib.parse import urlsplit, urlunsplit
 
 from backend.app.dedupe import norm_company
+from watcher.company_matching import company_matching_key
 from watcher.config import CompanyCfg
 from watcher.text_safety import safe_text
 
@@ -48,6 +49,8 @@ COVERAGE_DEGRADED_BACKSTOP = "direct_degraded_backstop_available"
 COVERAGE_FAILING_BACKSTOP = "direct_failing_backstop_available"
 COVERAGE_UNKNOWN_BACKSTOP = "direct_unknown_backstop_available"
 COVERAGE_UNCOVERED = "uncovered_for_run"
+
+GITHUB_PRIMARY_ATS = frozenset({"bespoke", "github_only"})
 
 ERROR_FETCH = "fetch_failure"
 ERROR_SCHEMA = "schema_failure"
@@ -139,6 +142,8 @@ class CompanyCoverage:
     direct_attempt_succeeded: bool | None
     direct_rows_returned: int | None
     github_backstop_available: bool
+    github_rows_returned: int | None = None
+    github_fallback_configured: bool = False
 
 
 @dataclass(frozen=True)
@@ -423,22 +428,53 @@ def transition_for(
     )
 
 
+def count_github_rows_by_company(
+    rows: Iterable[Mapping[str, object]],
+    companies: Sequence[CompanyCfg],
+) -> dict[str, int]:
+    """Count trusted GitHub rows that map unambiguously to each company."""
+
+    lookup: dict[str, str | None] = {}
+    for company in companies:
+        for label in (company.name, *tuple(company.aliases)):
+            key = company_matching_key(label)
+            if not key:
+                continue
+            if key in lookup and lookup[key] != company.name:
+                lookup[key] = None
+            else:
+                lookup.setdefault(key, company.name)
+    counts = {company.name: 0 for company in companies}
+    for row in rows:
+        extra = row.get("extra")
+        if not isinstance(extra, Mapping) or extra.get("source") != "github":
+            continue
+        matched = lookup.get(company_matching_key(row.get("company")))
+        if matched is not None:
+            counts[matched] += 1
+    return counts
+
+
 def calculate_company_coverage(
     companies: Sequence[CompanyCfg],
     attempts: Sequence[SourceAttempt],
     states: Mapping[str, SourceHealthState],
+    github_rows_by_company: Mapping[str, int] | None = None,
 ) -> tuple[CompanyCoverage, ...]:
     direct_attempts = {
         attempt.company: attempt
         for attempt in attempts
         if attempt.source_kind == SOURCE_KIND_DIRECT and attempt.company is not None
     }
-    github_available = any(
-        attempt.source_kind == SOURCE_KIND_GITHUB_FEED
-        and attempt.attempted
-        and attempt.succeeded is True
+    github_attempts = [
+        attempt
         for attempt in attempts
-    )
+        if attempt.source_kind == SOURCE_KIND_GITHUB_FEED
+    ]
+    github_available = any(
+        attempt.attempted and attempt.succeeded is True
+        for attempt in github_attempts
+    ) and not any(attempt.succeeded is False for attempt in github_attempts)
     coverage = []
     for company in companies:
         attempt = direct_attempts.get(company.name)
@@ -459,7 +495,7 @@ def calculate_company_coverage(
             )
         elif direct_status == DIRECT_STATUS_UNKNOWN and github_available:
             coverage_state = COVERAGE_UNKNOWN_BACKSTOP
-        elif company.ats in {"bespoke", "github_only"} and github_available:
+        elif company.ats in GITHUB_PRIMARY_ATS and github_available:
             coverage_state = COVERAGE_BACKSTOP_ONLY
         elif direct_status == DIRECT_STATUS_FAILED and github_available:
             coverage_state = COVERAGE_FAILING_BACKSTOP
@@ -474,6 +510,14 @@ def calculate_company_coverage(
                 direct_attempt_succeeded=succeeded,
                 direct_rows_returned=rows,
                 github_backstop_available=github_available,
+                github_rows_returned=(
+                    None
+                    if github_rows_by_company is None
+                    else max(0, int(github_rows_by_company.get(company.name, 0)))
+                ),
+                github_fallback_configured=(
+                    github_available and company.ats not in GITHUB_PRIMARY_ATS
+                ),
             )
         )
     return tuple(coverage)

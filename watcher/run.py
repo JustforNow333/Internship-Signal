@@ -99,6 +99,7 @@ from watcher.source_health import (
     SourceHealthStore,
     calculate_next_state,
     calculate_company_coverage,
+    count_github_rows_by_company,
     direct_health_key,
     github_feed_health_key,
     new_run_id,
@@ -484,6 +485,7 @@ def run_once(
         config.companies,
         collection_stats.source_attempts,
         health_states,
+        count_github_rows_by_company(rows, config.companies),
     )
     health_summary = summarize_health(
         config.companies,
