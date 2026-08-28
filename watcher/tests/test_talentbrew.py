@@ -11,7 +11,11 @@ from watcher.collection_snapshot import collection_config_fingerprint
 from watcher.config import DEFAULT_WATCHLIST_PATH, CompanyCfg, WatcherConfig, load_watchlist
 from watcher.run import CollectionStats, _default_direct_sources, collect_rows
 from watcher.sources import SourceFetchError, SourceSchemaError, TalentBrewSource
-from watcher.sources.base import get_text_response, make_row
+from watcher.sources.base import (
+    DirectSourceDiagnostics,
+    get_text_response,
+    make_row,
+)
 from watcher.sources.talentbrew import _posting_href
 
 
@@ -283,6 +287,12 @@ def test_multi_page_final_partial_page_and_cross_page_duplicate_are_complete():
     assert source.last_diagnostics.listing_pages_requested == 2
     assert source.last_diagnostics.detail_pages_requested == 3
     assert source.last_diagnostics.duplicate_postings_skipped == 1
+    # Duplicate listings across pages are expected and never degrade the board.
+    health = source.last_health_diagnostics
+    assert health.duplicate_row_count == 1
+    assert health.degraded is False
+    assert health.incomplete is False
+    assert health.complete is True
 
 
 def test_reference_falls_back_to_stable_platform_posting_id_and_optional_fields_can_be_missing():
@@ -367,6 +377,13 @@ def test_transient_search_and_detail_failures_use_bounded_retries(status):
     assert calls == 3
     assert delays == [1.0, 3.0]
     assert source.last_diagnostics.retry_attempts == 2
+    health = source.last_health_diagnostics
+    assert isinstance(health, DirectSourceDiagnostics)
+    assert health.failed_request_count == 2
+    assert health.reason_codes == ("request_retry_recovered",)
+    assert health.degraded is True
+    assert health.incomplete is False
+    assert health.complete is True
 
 
 def test_permanent_4xx_fails_without_retry():

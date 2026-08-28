@@ -18,7 +18,7 @@ from watcher.sources import (
     WorkableSource,
     WorkdaySource,
 )
-from watcher.sources.base import get_json_response
+from watcher.sources.base import DirectSourceDiagnostics, get_json_response
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -111,6 +111,10 @@ def test_multi_page_fetch_collects_unique_postings_and_advances_offsets():
     assert source.last_diagnostics.pages_requested == 2
     assert source.last_diagnostics.raw_postings_seen == 4
     assert source.last_diagnostics.duplicate_postings_skipped == 1
+    health = source.last_health_diagnostics
+    assert health.duplicate_row_count == 1
+    assert health.degraded is False
+    assert health.complete is True
 
 
 def test_non_advancing_pagination_raises_schema_error():
@@ -156,6 +160,13 @@ def test_valid_rows_survive_a_malformed_record_on_another_page(caplog):
     assert [row["extra"]["source_requisition_id"] for row in rows] == ["GOOD-1"]
     assert "Skipped 1 malformed oracle_hcm record" in caplog.text
     assert source.last_diagnostics.schema_error_postings_skipped == 1
+    health = source.last_health_diagnostics
+    assert health.schema_error_row_count == 1
+    assert health.malformed_row_count == 0
+    assert health.reason_codes == ("schema_invalid_records_skipped",)
+    assert health.incomplete is True
+    assert health.degraded is True
+    assert health.complete is False
 
 
 @pytest.mark.parametrize(
@@ -226,6 +237,15 @@ def test_transient_http_failures_use_bounded_retries(status):
     assert delays == [1.0, 3.0]
     assert source.last_diagnostics.request_attempts == 3
     assert source.last_diagnostics.retry_attempts == 2
+    # A recovered retry is a degraded but complete collection, and Oracle -- not
+    # the collection layer -- is what says so.
+    health = source.last_health_diagnostics
+    assert isinstance(health, DirectSourceDiagnostics)
+    assert health.failed_request_count == 2
+    assert health.reason_codes == ("request_retry_recovered",)
+    assert health.degraded is True
+    assert health.incomplete is False
+    assert health.complete is True
 
 
 def test_permanent_4xx_fails_without_retrying():

@@ -2,6 +2,7 @@
 
 from watcher.config import NON_DIRECT_ATS, supported_ats
 from watcher.run import _DirectSourceProvider, _default_direct_sources
+from watcher.sources.base import DirectSourceDiagnostics
 from watcher.sources.registry import (
     DIRECT_ATS,
     DIRECT_SOURCE_SPECS,
@@ -38,6 +39,21 @@ def test_every_registered_direct_ats_can_be_constructed():
     for ats, source in sources.items():
         assert source is not None, ats
         assert callable(getattr(source, "fetch", None)), ats
+
+
+def test_every_registered_direct_ats_publishes_shared_health_diagnostics():
+    """Collection reads one contract, so every adapter must expose it.
+
+    `watcher/collection.py` no longer translates adapter-specific diagnostics,
+    so an adapter that never publishes `last_health_diagnostics` would silently
+    report no health evidence at all.
+    """
+
+    for ats, source in build_direct_sources().items():
+        published = getattr(source, "last_health_diagnostics", None)
+        assert isinstance(published, DirectSourceDiagnostics), ats
+        # Nothing has been fetched yet, so no adapter claims a result.
+        assert published.succeeded is None, ats
 
 
 def test_registry_entries_are_unique_and_well_formed():

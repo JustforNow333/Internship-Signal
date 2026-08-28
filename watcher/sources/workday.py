@@ -22,6 +22,7 @@ from watcher.config import (
     workday_min_interval_seconds,
 )
 from watcher.sources.base import (
+    DirectSourceDiagnostics,
     JsonHttpResponse,
     SourceError,
     SourceFetchError,
@@ -467,6 +468,9 @@ def _text_values(value: object, *, depth: int = 0) -> list[str]:
 class WorkdaySource:
     name = "workday"
     page_size = 20
+    # Workday owns the translation from its own listing/enrichment counters to
+    # the shared health contract; collection only reads this attribute.
+    last_health_diagnostics = DirectSourceDiagnostics(attempted=False)
 
     def __init__(
         self,
@@ -669,7 +673,9 @@ class WorkdaySource:
         self._listing_pages = 1
         self._listing_rows = len(postings)
         rows, skip_reasons = self._parse_postings(postings, company, token, shard, site)
-        return self._finalize(rows, len(postings), skip_reasons, company)
+        rows = self._finalize(rows, len(postings), skip_reasons, company)
+        self._publish_health_diagnostics(rows)
+        return rows
 
     def probe_transport(self, company: CompanyCfg) -> tuple[Any, dict[str, object]]:
         """Fetch only the first page and return payload plus safe metadata."""
@@ -848,6 +854,7 @@ class WorkdaySource:
                 self._detail_degraded_reason = reasons[0]
 
         self.last_diagnostics = self._diagnostics_snapshot()
+        self._publish_health_diagnostics(rows)
         self._log_detail_summary(company)
         return rows
 
@@ -981,6 +988,63 @@ class WorkdaySource:
         self._listing_request_failures = 0
         self.last_response_metadata = {}
         self.last_diagnostics = WorkdayParseDiagnostics()
+        self.last_health_diagnostics = DirectSourceDiagnostics()
+
+    def _publish_health_diagnostics(self, rows: list[dict]) -> None:
+        """Translate Workday's own counters into the shared health contract.
+
+        Only Workday knows that a lost continuation page, a detail-enrichment
+        outage, and a skipped posting record are all *failed requests* or
+        *incomplete collection* rather than ordinary success, so the mapping
+        belongs here rather than in the collection layer. `skip_reasons` splits
+        the single skip counter into records Workday could not read at all
+        (`posting_not_object`) and records that failed schema validation.
+        """
+
+        diagnostics = self.last_diagnostics
+        skip_reasons = dict(diagnostics.skip_reasons)
+        malformed = int(skip_reasons.get("posting_not_object", 0) or 0)
+        skipped = int(diagnostics.malformed_postings_skipped or 0)
+        schema_errors = max(0, skipped - malformed)
+        recovered_retries = int(diagnostics.retry_attempts or 0)
+        detail_failures = int(diagnostics.detail_failures or 0)
+        failed_requests = recovered_retries
+        failed_requests += detail_failures
+        failed_requests += int(diagnostics.disappeared_postings or 0)
+        # A continuation page that was lost after earlier pages succeeded is a
+        # failed request that the run still reports as a degraded success.
+        failed_requests += int(diagnostics.listing_request_failures or 0)
+        listing_incomplete = bool(diagnostics.listing_incomplete)
+        enrichment_degraded = bool(diagnostics.detail_enrichment_degraded)
+        degraded = enrichment_degraded
+        degraded = degraded or listing_incomplete
+        degraded = degraded or skipped > 0
+        degraded = degraded or recovered_retries > 0
+        incomplete = bool(listing_incomplete or skipped > 0 or enrichment_degraded)
+        reasons: list[str] = []
+        if malformed:
+            reasons.append("malformed_records_skipped")
+        if schema_errors:
+            reasons.append("schema_invalid_records_skipped")
+        if enrichment_degraded:
+            reasons.append("material_enrichment_failed")
+        elif detail_failures:
+            reasons.append("optional_enrichment_failed")
+        if recovered_retries:
+            reasons.append("request_retry_recovered")
+        reasons.extend(str(code) for code, _count in diagnostics.detail_failure_reasons)
+        reasons.extend(str(code) for code in diagnostics.listing_incomplete_reasons)
+        self.last_health_diagnostics = DirectSourceDiagnostics(
+            succeeded=True,
+            retained_row_count=len(rows),
+            malformed_row_count=malformed,
+            schema_error_row_count=schema_errors,
+            failed_request_count=failed_requests,
+            incomplete=incomplete,
+            reason_codes=tuple(dict.fromkeys(reasons))[:12],
+            degraded=degraded,
+            complete=not incomplete,
+        )
 
     def _diagnostics_snapshot(self) -> WorkdayParseDiagnostics:
         current = self.last_diagnostics

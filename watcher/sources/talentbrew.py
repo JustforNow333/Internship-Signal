@@ -14,6 +14,7 @@ from urllib.parse import urlencode, urljoin, urlsplit
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
+    DirectDiagnosticsMixin,
     JsonHttpResponse,
     SourceError,
     SourceFetchError,
@@ -68,7 +69,7 @@ class _SearchPage:
     records_per_page: int
 
 
-class TalentBrewSource:
+class TalentBrewSource(DirectDiagnosticsMixin):
     """Collect a filtered TalentBrew search and its structured job details.
 
     TalentBrew's reusable public contract is the JSON envelope returned by
@@ -388,10 +389,33 @@ class TalentBrewSource:
         self._request_attempts = 0
         self._retry_attempts = 0
         self.last_diagnostics = TalentBrewDiagnostics()
+        self._begin_direct_diagnostics()
 
     def _finish(self, rows: list[dict]) -> None:
         self._valid_rows_retained = len(rows)
         self._snapshot()
+        self._publish_health_diagnostics(rows)
+
+    def _publish_health_diagnostics(self, rows: list[dict]) -> None:
+        """Publish the shared health contract from TalentBrew's own counters.
+
+        Pagination is validated strictly and raises rather than returning a
+        partial board, so a completed fetch is always complete. Duplicate
+        listings across pages are expected and never degrade the collection; a
+        recovered transport retry does.
+        """
+
+        self._finish_direct_diagnostics(
+            rows,
+            duplicate_row_count=self._duplicate_postings_skipped,
+            failed_request_count=self._retry_attempts,
+            incomplete=False,
+            degraded=bool(self._retry_attempts),
+            complete=True,
+            reason_codes=(
+                ("request_retry_recovered",) if self._retry_attempts else ()
+            ),
+        )
 
     def _snapshot(self) -> None:
         self.last_diagnostics = TalentBrewDiagnostics(

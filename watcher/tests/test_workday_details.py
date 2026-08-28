@@ -337,6 +337,14 @@ def test_materially_changed_detail_schema_is_not_counted_as_enriched(detail):
     assert source.last_diagnostics.detail_successes == 0
     assert source.last_diagnostics.detail_failures == 1
     assert source.last_diagnostics.detail_enrichment_degraded is True
+    # Enrichment failure is a Workday-owned concept; the shared contract only
+    # sees a degraded, incomplete collection with a bounded reason code.
+    health = source.last_health_diagnostics
+    assert health.reason_codes == ("material_enrichment_failed", "schema_error")
+    assert health.failed_request_count == 1
+    assert health.incomplete is True
+    assert health.degraded is True
+    assert health.complete is False
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,11 @@ from __future__ import annotations
 import pytest
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import SourceFetchError, SourceSchemaError
+from watcher.sources.base import (
+    DirectSourceDiagnostics,
+    SourceFetchError,
+    SourceSchemaError,
+)
 from watcher.sources.workday import MAX_LISTING_PAGES, WorkdaySource
 
 PAGE_SIZE = WorkdaySource.page_size
@@ -94,6 +98,16 @@ def test_stable_total_on_every_page_collects_whole_board(monkeypatch):
     assert source.last_diagnostics.listing_pages == 6
     assert source.last_diagnostics.listing_incomplete is False
     assert anomalies(source) == {}
+    # Workday publishes the shared health contract itself; the collection layer
+    # reads it verbatim rather than interpreting Workday's own counters.
+    health = source.last_health_diagnostics
+    assert isinstance(health, DirectSourceDiagnostics)
+    assert health.succeeded is True
+    assert health.retained_row_count == 112
+    assert health.reason_codes == ()
+    assert health.incomplete is False
+    assert health.degraded is False
+    assert health.complete is True
 
 
 def test_total_present_only_on_first_page_collects_whole_board(monkeypatch):
@@ -207,6 +221,13 @@ def test_partial_page_before_reported_total_marks_incomplete(monkeypatch):
     assert source.last_diagnostics.listing_incomplete_reasons == (
         "pagination_ended_early",
     )
+    # A board that stopped early is a degraded, incomplete success, and only
+    # Workday knows that its pagination state means that.
+    health = source.last_health_diagnostics
+    assert health.reason_codes == ("pagination_ended_early",)
+    assert health.incomplete is True
+    assert health.degraded is True
+    assert health.complete is False
 
 
 def test_empty_terminal_page_ends_pagination(monkeypatch):
