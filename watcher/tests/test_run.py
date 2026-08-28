@@ -1401,12 +1401,12 @@ def test_main_logs_startup_and_total_runtime_stages(tmp_path, monkeypatch, caplo
     caplog.set_level("INFO", logger="watcher.run")
     config = WatcherConfig(companies=())
     sentinel = object()
-    monkeypatch.setattr("watcher.run.load_watchlist", lambda _path: config)
-    monkeypatch.setattr("watcher.run.email_sending_enabled", lambda: False)
-    monkeypatch.setattr("watcher.run.load_health_alert_policy", lambda: None)
-    monkeypatch.setattr("watcher.run.run_once", lambda *_args, **_kwargs: sentinel)
-    monkeypatch.setattr("watcher.run.print_report", lambda result: None)
-    monkeypatch.setattr("watcher.run.print_heartbeat", lambda result: None)
+    monkeypatch.setattr("watcher.cli.load_watchlist", lambda _path: config)
+    monkeypatch.setattr("watcher.cli.email_sending_enabled", lambda: False)
+    monkeypatch.setattr("watcher.cli.load_health_alert_policy", lambda: None)
+    monkeypatch.setattr("watcher.cli.run_once", lambda *_args, **_kwargs: sentinel)
+    monkeypatch.setattr("watcher.cli.print_report", lambda result: None)
+    monkeypatch.setattr("watcher.cli.print_heartbeat", lambda result: None)
 
     exit_code = watcher_main(
         [
@@ -1496,7 +1496,7 @@ def test_collect_rows_preserves_an_explicitly_empty_source_registry(monkeypatch)
     def fail_if_defaults_are_built():
         raise AssertionError("default adapters should not be constructed")
 
-    monkeypatch.setattr("watcher.run._default_direct_sources", fail_if_defaults_are_built)
+    monkeypatch.setattr("watcher.collection._default_direct_sources", fail_if_defaults_are_built)
 
     rows, errors = collect_rows(
         config,
@@ -1520,7 +1520,7 @@ def test_collect_rows_fetches_and_aggregates_every_configured_github_feed_once(m
         github_listing_urls=tuple(sources),
     )
     monkeypatch.setattr(
-        "watcher.run.GitHubListingsSource",
+        "watcher.collection.GitHubListingsSource",
         lambda url, **_kwargs: sources[url],
     )
     stats = CollectionStats()
@@ -1549,7 +1549,7 @@ def test_one_failed_github_feed_keeps_successful_feed_rows_and_records_url(monke
         github_listing_urls=tuple(sources),
     )
     monkeypatch.setattr(
-        "watcher.run.GitHubListingsSource",
+        "watcher.collection.GitHubListingsSource",
         lambda url, **_kwargs: sources[url],
     )
     stats = CollectionStats()
@@ -1590,7 +1590,7 @@ def test_all_github_feeds_failing_does_not_remove_direct_rows(monkeypatch):
         github_listing_urls=urls,
     )
     monkeypatch.setattr(
-        "watcher.run.GitHubListingsSource",
+        "watcher.collection.GitHubListingsSource",
         lambda url, **_kwargs: sources[url],
     )
     stats = CollectionStats()

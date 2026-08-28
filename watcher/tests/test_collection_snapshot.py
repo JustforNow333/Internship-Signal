@@ -452,7 +452,7 @@ def test_replay_skips_network_and_all_operational_side_effects(
         calls.append(True)
         raise AssertionError("replay invoked a forbidden side effect")
 
-    monkeypatch.setattr("watcher.run.collect_batch", fail_if_called)
+    monkeypatch.setattr("watcher.pipeline.collect_batch", fail_if_called)
 
     class ExplodingHealthStore:
         def record_attempts(self, _attempts):
@@ -903,13 +903,13 @@ def test_cli_replay_is_network_free_and_side_effect_free_even_when_email_enabled
         calls.append(True)
         raise AssertionError("CLI replay invoked a forbidden operation")
 
-    monkeypatch.setattr("watcher.run.load_watchlist", lambda _path: config)
-    monkeypatch.setattr("watcher.run.email_sending_enabled", lambda: True)
-    monkeypatch.setattr("watcher.run._default_direct_sources", forbidden)
-    monkeypatch.setattr("watcher.run.send_digest", forbidden)
-    monkeypatch.setattr("watcher.run.evaluate_and_send_health_alerts", forbidden)
-    monkeypatch.setattr("watcher.run.print_report", lambda _result: None)
-    monkeypatch.setattr("watcher.run.print_heartbeat", lambda _result: None)
+    monkeypatch.setattr("watcher.cli.load_watchlist", lambda _path: config)
+    monkeypatch.setattr("watcher.cli.email_sending_enabled", lambda: True)
+    monkeypatch.setattr("watcher.collection._default_direct_sources", forbidden)
+    monkeypatch.setattr("watcher.pipeline.send_digest", forbidden)
+    monkeypatch.setattr("watcher.pipeline.evaluate_and_send_health_alerts", forbidden)
+    monkeypatch.setattr("watcher.cli.print_report", lambda _result: None)
+    monkeypatch.setattr("watcher.cli.print_heartbeat", lambda _result: None)
     monkeypatch.delenv("WATCHER_HEALTH_REPORT_PATH", raising=False)
 
     exit_code = watcher_main(

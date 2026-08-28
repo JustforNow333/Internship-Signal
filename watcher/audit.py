@@ -25,13 +25,13 @@ from watcher.audit_trace import (
     not_collected_trace,
     query_matches_trace,
 )
+from watcher.collection import CollectionStats, collect_rows
 from watcher.config import (
     DEFAULT_WATCHLIST_PATH,
     WatcherConfig,
     load_watchlist,
     resolve_analysis_cache_path,
 )
-from watcher.run import CollectionStats, collect_rows
 from watcher.seen_store import SeenStore
 from watcher.source_comparison import (
     SourceComparisonReport,

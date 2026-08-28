@@ -1011,7 +1011,7 @@ def test_snapshot_cli_uses_official_replay_and_is_idempotent_without_side_effect
         raise AssertionError("forbidden operational side effect")
 
     monkeypatch.setenv("HOSTED_DATABASE_URL", job_postgres_url)
-    monkeypatch.setattr("watcher.run.collect_batch", forbidden)
+    monkeypatch.setattr("watcher.collection.collect_batch", forbidden)
     monkeypatch.setattr("watcher.notify.send_digest", forbidden)
     monkeypatch.setattr("watcher.seen_store.SeenStore.mark_emailed", forbidden)
 
