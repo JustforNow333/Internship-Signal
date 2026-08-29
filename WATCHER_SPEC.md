@@ -85,46 +85,34 @@ net whose hits are simply lower-priority (see §5).
 
 ---
 
-## 2. New code layout
+## 2. Code layout
 
-Add a sibling package; do not scatter files into `app/`.
+Keep shared primitives neutral and watcher implementation in its focused
+owners; compatibility facades retain established import paths.
 
 ```
 internship-signal/
-├── backend/app/...              (existing — only the analyze_rows refactor)
+├── internship_signal/domain/   neutral schema, identity, eligibility primitives
+├── backend/app/...             analysis, APIs, persistence, hosted product
 └── watcher/
-    ├── __init__.py
-    ├── run.py                   entry point: python -m watcher.run
-    ├── config.py                load + validate watchlist.yml, env settings
-    ├── season.py                pure configured-term staleness checks
-    ├── watchlist.yml            per-company config (see §3)
-    ├── alumni.csv               the fraternity list (see §6)
-    ├── sources/
-    │   ├── base.py              Source protocol + canonical-row helpers
-    │   ├── registry.py          canonical direct-ATS registration + construction
-    │   ├── greenhouse.py        one adapter, all Greenhouse companies
-    │   ├── lever.py
-    │   ├── ashby.py
-    │   ├── smartrecruiters.py
-    │   ├── workable.py
-    │   ├── icims.py
-    │   ├── successfactors.py
-    │   ├── paylocity.py
-    │   ├── workday.py           per-tenant; fussier (see §4)
-    │   ├── bespoke/             one file per custom site (google.py, amazon.py…)
-    │   ├── github_listings.py   Simplify JSON backstop
-    │   └── github_markdown_table.py  header-driven Markdown backstop
-    ├── filters.py               SWE + internship + open detection
-    ├── seen_store.py            SQLite "already emailed" memory
-    ├── alumni.py                load + match alumni to companies
-    ├── notify.py                build + send the email digest
-    └── tests/
-        ├── fixtures/            saved JSON/HTML samples per source
-        ├── test_sources.py      each adapter parses fixtures → canonical rows
-        ├── test_filters.py      swe/internship/open classification
-        ├── test_seen_store.py   new vs already-seen
-        ├── test_alumni.py       company-name matching incl. fuzzy cases
-        └── test_run.py          end-to-end with mocked sources + fake SMTP
+    ├── config/                 models, env, loader, validation; package facade
+    ├── sources/                focused shared modules + provider adapters
+    │   ├── registry.py         sole direct-ATS registry and construction owner
+    │   ├── base.py             compatibility facade only
+    │   └── __init__.py         lazy package compatibility facade
+    ├── health/                 models, state, coverage, store, policy, output
+    ├── collection.py           source execution, outcomes, diagnostics
+    ├── pipeline.py             run_once orchestration
+    ├── reporting.py            reports and heartbeat output
+    ├── cli.py                  argument parsing and startup
+    ├── run_logging.py          stable watcher logger and timing
+    ├── run.py                  compatibility facade + python -m entry point
+    ├── source_health.py        source-health compatibility facade
+    ├── health_alerts.py        health-alert compatibility facade
+    ├── text_safety.py          dependency-free failure-path text conversion
+    ├── season.py               configured-term staleness checks
+    ├── watchlist.yml           per-company config (see §3)
+    └── tests/                  offline fixtures and regression tests
 ```
 
 Reuse, do not reimplement: centralized posting identity and URL/company
@@ -618,12 +606,13 @@ breadth, added one tested adapter at a time.
 
 ## 14. Persistent source health
 
-`watcher/source_health.py` owns source attempts, deterministic state updates,
-transitions/recoveries, effective company coverage, sanitization, SQLite health
-persistence, JSON output, and GitHub Actions summary rendering. It performs no
-network requests. `run.py` remains responsible for calling sources and creates
-one run ID and UTC observation timestamp shared by all attempts in an
-execution.
+Canonical modules under `watcher/health/` own source attempts, deterministic
+state updates, transitions/recoveries, effective company coverage,
+sanitization, SQLite health persistence, JSON output, and GitHub Actions
+summary rendering. They perform no network requests; `watcher/source_health.py`
+is the compatibility facade. `watcher/collection.py` calls sources, while
+`watcher/pipeline.py` creates the run ID and UTC observation timestamp shared by
+all attempts in an execution.
 
 Stable direct keys combine normalized company, `direct`, and configured ATS,
 so changing an adapter starts a separate history. GitHub feed keys use a SHA-256

@@ -1,9 +1,9 @@
 # Claude Repository Guide
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: lazily resolve the unchanged `watcher.sources` public facade,
-  preserving canonical identity, explicit support-submodule imports, adapter
-  behavior, and low-level source boundaries; make one commit and do not push.
+- Current task: document the architecture boundaries now present on
+  `product-mvp`, preserve product-specific guidance, exclude internal-only
+  capabilities, make one documentation-only commit, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -70,6 +70,16 @@
   `sources/base.py` remains the compatibility facade. The `watcher.sources`
   package facade lazily resolves and caches documented exports, keeping
   low-level and individual-adapter imports isolated from unrelated adapters.
+- Watcher execution belongs in `collection.py`, `pipeline.py`, `reporting.py`,
+  `cli.py`, and `run_logging.py`; `run.py` is the stable entry point and
+  compatibility facade only. Health implementation belongs in the semantic
+  owner under `watcher/health/`; `source_health.py` and `health_alerts.py` are
+  compatibility facades. `text_safety.py` stays a narrow dependency-free owner
+  for total failure-path text conversion.
+- Put implementation in canonical owners, keep lower layers independent of
+  orchestration, preserve legacy paths through re-exports, and share
+  abstractions only when semantics match. Add focused guard tests for important
+  ownership and dependency boundaries.
 - Student-status exclusions require clear mandatory evidence and use stable
   `phd_only`, `graduate_only`, `freshman_only`, or
   `returning_intern_only` reasons. Mixed, preferred, incidental, or ambiguous

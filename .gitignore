@@ -258,6 +258,8 @@ source-layer-port*.log
 source-layer-port*.json
 source-package-port*.log
 source-package-port*.json
+architecture-boundary-port*.log
+architecture-boundary-port*.json
 domain-layer-port*.log
 domain-layer-port*.json
 config-model-port*.log

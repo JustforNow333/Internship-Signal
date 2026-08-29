@@ -16,6 +16,9 @@ This file tracks completed watcher steps and the next handoff target.
   The `watcher.sources` package facade now lazily resolves and caches the same
   documented exports, so importing the package, a low-level module, or one
   adapter does not load unrelated adapters.
+- Root architecture guidance now records the neutral domain, finalized config,
+  source, execution, and health owners plus their compatibility facades and
+  canonical routing rules, adapted to the modules present on `product-mvp`.
 - Canonical job columns, shared company/title/URL normalizers, and categorical
   eligibility reason codes now have a neutral `internship_signal/domain` owner;
   backend compatibility imports retain identical values and object identity.
@@ -187,10 +190,11 @@ This file tracks completed watcher steps and the next handoff target.
      `HEARTBEAT: ran, rows_fetched=17069, jobs_scored=15897, matches=68, new=68, errors=0, season_status=ok, configured_terms=Summer_2027, github_feeds_configured=1, github_feeds_succeeded=1, alumni_csv_status=loaded-csv, alumni_records_loaded=306, alumni_employers_indexed=278, sent=no, seen_marked=0`.
      The isolated DB contained zero seen rows afterward.
 7. Persistent source-health monitoring:
-   - `watcher/source_health.py` owns explicit attempt/state/transition/coverage
-     models, pure status rules, stable query-free health keys, bounded error
-     sanitization, SQLite persistence, aggregate summaries, JSON reports, and
-     GitHub Actions summary rendering.
+   - Focused modules under `watcher/health/` own explicit
+     attempt/state/transition/coverage models, pure status rules, stable
+     query-free health keys, bounded error sanitization, SQLite persistence,
+     aggregate summaries, JSON reports, and GitHub Actions summary rendering;
+     `watcher/source_health.py` remains their compatibility facade.
    - Every configured company records one direct outcome per run. Supported
      successes retain exact row counts, valid zero results stay successes,
      typed failures remain nonfatal, and `bespoke`/`github_only` entries record
@@ -890,9 +894,10 @@ This file tracks completed watcher steps and the next handoff target.
      `10d4f89e49e168d44b6b52054ce6aed749a143a9`.
    - The concurrency implementation is present in the working tree:
      `watcher/collection_concurrency.py`, configuration parsing/validation,
-     deterministic collection planning/reduction in `watcher/run.py`, the
-     offline benchmark, staged canary harness, and their tests and
-     documentation. Focused offline verification passed `96` tests.
+     deterministic collection planning/reduction now owned by
+     `watcher/collection.py`, the offline benchmark, staged canary harness, and
+     their tests and documentation. Focused offline verification passed `96`
+     tests.
    - Both full canaries described here ran before the implementation was
      committed or pushed. At that time, the working tree had 24 modified
      tracked files and seven untracked files, including the concurrency module,

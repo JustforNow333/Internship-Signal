@@ -3,10 +3,10 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: make the `watcher.sources` package facade resolve its unchanged
-  public exports lazily. Preserve canonical object identity, explicit support
-  submodule imports, source behavior, and the existing low-level ownership
-  boundaries; make one isolated commit and do not push.
+- Current task: document the repository architecture boundaries that now exist
+  on `product-mvp`. Keep the guidance aligned with real canonical owners and
+  compatibility facades, exclude internal-only capabilities, make one
+  documentation-only commit, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -81,6 +81,141 @@
 - Use `WATCHER_PROGRESS.md` for current status, `README.md` for operations, and
   `evaluation/README.md` for scoring-benchmark instructions.
 - Record watcher progress only in the root `WATCHER_PROGRESS.md`.
+
+## Architecture and ownership
+
+The paths below are the current ownership map for `product-mvp`; current code
+wins over historical documentation. Preserve product-specific backend, hosted,
+and frontend ownership described elsewhere in this guide and in
+`backend/HOSTED_BACKEND.md` and `frontend/HOSTED_API.md`.
+
+### Neutral domain
+
+`internship_signal/domain/` is the dependency-neutral layer shared by backend
+and watcher:
+
+- `jobs.py` owns the canonical job schema;
+- `identity.py` owns shared company, title, and URL identity normalization;
+- `eligibility.py` owns shared categorical eligibility definitions and reason
+  codes.
+
+Imports flow `watcher → domain ← backend`. Domain modules must not import
+watcher or backend orchestration. Move only genuinely shared, dependency-light
+primitives there; scoring, dedupe orchestration, APIs, persistence, and watcher
+operations stay with their existing application owners.
+
+### Watcher configuration
+
+In `watcher/config/`, `models.py` owns dataclasses and value objects, `env.py`
+owns dotenv/environment loading and coercion, `loader.py` owns watchlist/YAML
+loading and config construction, and `validation.py` owns validation policy.
+`__init__.py` is the env-first compatibility facade only. Add behavior to its
+canonical owner and preserve legacy imports through explicit re-exports.
+
+### Source layer
+
+In `watcher/sources/`, ownership is:
+
+- `contracts.py`: source contracts, response types, and exceptions;
+- `diagnostics.py`: direct-source diagnostics and diagnostic mixins;
+- `transport.py`: HTTP requests, response decoding, and failure
+  classification;
+- `parsing.py`: shared record parsing and schema diagnostics;
+- `rows.py`: canonical source-row construction;
+- `sanitize.py`: total source diagnostic, URL, body, and text sanitization;
+- `retry.py`: the narrow shared bounded-retry primitive;
+- `registry.py`: the sole direct-adapter registry and construction authority;
+- `base.py`: compatibility re-exports only;
+- provider modules: provider-specific requests, pagination, parsing,
+  completeness, retry interpretation, and diagnostics.
+
+Canonical source modules must import their real owners rather than route
+through `base.py`, and `base.py` must not gain implementation. Adapters publish
+`DirectSourceDiagnostics`; collection consumes that shared contract rather than
+provider-private fields. Keep distinct provider retry behavior local when it
+does not match `retry.py` instead of weakening either contract.
+
+`watcher.sources` is the lazy compatibility facade. Preserve its documented
+exports, canonical object identity, `__getattr__` caching, explicit support
+submodule imports, and lightweight leaf imports; do not import the registry or
+all adapters merely to populate the package namespace.
+
+### Watcher execution
+
+`watcher/collection.py` owns source execution, outcomes, attempts, and
+collection diagnostics/stats. `watcher/pipeline.py` owns `run_once` orchestration
+and stage sequencing. `watcher/reporting.py` owns console reports, health-report
+output, and the application heartbeat; `watcher/cli.py` owns argument parsing
+and startup; `watcher/run_logging.py` owns the stable logger and timing helper.
+`watcher/run.py` is the stable entry point and compatibility facade only. Patch
+the module that owns and uses a binding, not its re-export in `run.py`.
+
+### Health subsystem and text safety
+
+In `watcher/health/`, `models.py` owns records/constants, `sanitize.py` total
+health sanitizers, `state.py` keys/transitions, `coverage.py` coverage,
+`store.py` persistence, `policy.py` alert policy, `rendering.py` message text,
+`service.py` alert/delivery orchestration and SMTP, and `report.py` health
+artifacts, workflow output, heartbeat, and CLI reporting.
+`watcher/source_health.py` and `watcher/health_alerts.py` are compatibility
+facades. New health behavior belongs in its canonical `watcher.health.*` owner,
+with facade paths retained through re-exports where needed.
+
+`watcher/text_safety.py` owns only dependency-free safe text and exception
+conversion for failure paths. Keep it narrow and total rather than turning it
+into a general utility module.
+
+### General boundary rules
+
+1. Put implementation in its semantic owner, not a compatibility facade.
+2. Keep one canonical schema, registry, policy, constant set, or normalizer;
+   preserve legacy paths with re-exports rather than duplicate implementations.
+3. Lower layers must not depend on orchestration or service layers.
+4. Keep provider-specific behavior in provider adapters; collection and health
+   consume shared contracts.
+5. Share an abstraction only when caller semantics genuinely match. Similar
+   syntax alone is not a reason to merge distinct policies or retry behavior.
+6. Preserve public and intentional test/script seams during structural moves.
+7. Keep behavior-preserving refactors isolated from redesign and unrelated
+   cleanup, with focused parity tests.
+8. Add focused architectural guard tests when an import, dependency, registry,
+   facade, or ownership boundary is important enough to preserve.
+
+### Canonical routing
+
+| Change | Canonical owner |
+| --- | --- |
+| canonical job schema | `internship_signal/domain/jobs.py` |
+| shared identity normalizer | `internship_signal/domain/identity.py` |
+| categorical eligibility definition | `internship_signal/domain/eligibility.py` |
+| config model/value object | `watcher/config/models.py` |
+| dotenv or environment parsing | `watcher/config/env.py` |
+| watchlist/YAML loading | `watcher/config/loader.py` |
+| config validation | `watcher/config/validation.py` |
+| source contract or exception | `watcher/sources/contracts.py` |
+| direct-source diagnostics | `watcher/sources/diagnostics.py` |
+| HTTP source plumbing | `watcher/sources/transport.py` |
+| shared source parsing | `watcher/sources/parsing.py` |
+| canonical source row | `watcher/sources/rows.py` |
+| source diagnostic sanitization | `watcher/sources/sanitize.py` |
+| shared bounded retry | `watcher/sources/retry.py` |
+| direct-adapter registration | `watcher/sources/registry.py` |
+| provider-specific behavior | provider module in `watcher/sources/` |
+| collection execution/outcome | `watcher/collection.py` |
+| run orchestration | `watcher/pipeline.py` |
+| report or heartbeat output | `watcher/reporting.py` |
+| watcher startup/CLI | `watcher/cli.py` |
+| stable run logging/timing | `watcher/run_logging.py` |
+| health record or constant | `watcher/health/models.py` |
+| health sanitization | `watcher/health/sanitize.py` |
+| health state/transition | `watcher/health/state.py` |
+| health coverage | `watcher/health/coverage.py` |
+| health persistence | `watcher/health/store.py` |
+| health alert policy | `watcher/health/policy.py` |
+| health rendering | `watcher/health/rendering.py` |
+| health delivery orchestration | `watcher/health/service.py` |
+| health artifact/CLI report | `watcher/health/report.py` |
+| failure-path text conversion | `watcher/text_safety.py` |
 
 ## Scope and architecture
 
@@ -174,8 +309,9 @@
 - Cache corruption, schema mismatch, or SQLite failure is nonfatal and falls
   back to fresh analysis; batch reads, transactional writes, and one bounded
   30-day cleanup per run must preserve byte-identical jobs and dedupe reports.
-- `watcher/run.py` fetches direct sources before GitHub so backend dedupe keeps
-  direct provenance. `bespoke` and `github_only` skip direct fetching.
+- `watcher/collection.py` fetches direct sources before GitHub so backend
+  dedupe keeps direct provenance. `bespoke` and `github_only` skip direct
+  fetching.
 - Collection concurrency is opt-in in the application, whose default is
   `serial`; scheduled production explicitly selects `concurrent`. Validate
   global workers (1-16), Workday concurrency (1-5), and per-origin concurrency
@@ -266,8 +402,9 @@
 
 ## Source health and Workday
 
-- `watcher/source_health.py` is pure and makes no network requests. Record one
-  direct outcome per company and one outcome per GitHub feed per run.
+- Canonical modules under `watcher/health/` are pure and make no network
+  requests; `watcher/source_health.py` is their compatibility facade. Record
+  one direct outcome per company and one outcome per GitHub feed per run.
 - Health state shares `seen.sqlite`; writes are transactional and must not alter
   `seen`. Initialization is not a transition. Health is nonfatal and does not
   affect email or seen marking.
