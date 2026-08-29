@@ -89,6 +89,7 @@ SUPPORT_SUBMODULES = (
     "base",
     "contracts",
     "diagnostics",
+    "direct",
     "parsing",
     "retry",
     "rows",

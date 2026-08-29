@@ -98,6 +98,7 @@ internship-signal/
     ├── config/                 models, env, loader, validation; package facade
     ├── sources/                focused shared modules + provider adapters
     │   ├── registry.py         sole direct-ATS registry and construction owner
+    │   ├── direct.py           narrow matching record/diagnostic lifecycle
     │   ├── base.py             compatibility facade only
     │   └── __init__.py         lazy package compatibility facade
     ├── health/                 models, state, coverage, store, policy, output

@@ -6,19 +6,18 @@ from typing import Any
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
-    DirectDiagnosticsMixin,
     SourceSchemaError,
     ensure_list,
     fetch_json,
     html_to_text,
     iso_date,
     make_row,
-    parse_records,
     require_token,
 )
+from watcher.sources.direct import SinglePayloadDirectAdapter
 
 
-class GreenhouseSource(DirectDiagnosticsMixin):
+class GreenhouseSource(SinglePayloadDirectAdapter):
     name = "greenhouse"
 
     @staticmethod
@@ -29,22 +28,12 @@ class GreenhouseSource(DirectDiagnosticsMixin):
         token = require_token(company, self.name)
         return self.parse(fetch_json(self.endpoint(token), self.name), company)
 
-    def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
-        self._begin_direct_diagnostics()
+    def _records_from_payload(self, payload: Any, company: CompanyCfg) -> list:
         if not isinstance(payload, dict):
             raise SourceSchemaError("greenhouse expected a JSON object")
-        jobs = ensure_list(payload.get("jobs"), self.name, "jobs")
-        rows = parse_records(
-            jobs,
-            lambda job: self._parse_job(job, company),
-            source_name=self.name,
-            company_name=company.name,
-            diagnostics=self._record_parse_diagnostics,
-        )
-        self._finish_direct_diagnostics(rows)
-        return rows
+        return ensure_list(payload.get("jobs"), self.name, "jobs")
 
-    def _parse_job(self, job: Any, company: CompanyCfg) -> dict:
+    def _parse_record(self, job: Any, company: CompanyCfg) -> dict:
         if not isinstance(job, dict):
             raise SourceSchemaError("greenhouse expected each job to be an object")
 

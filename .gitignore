@@ -260,6 +260,8 @@ source-package-port*.log
 source-package-port*.json
 architecture-boundary-port*.log
 architecture-boundary-port*.json
+direct-record-port*.log
+direct-record-port*.json
 domain-layer-port*.log
 domain-layer-port*.json
 config-model-port*.log

@@ -15,6 +15,7 @@ from watcher.sources import (
     base,
     contracts,
     diagnostics,
+    direct,
     parsing,
     retry,
     rows,
@@ -74,6 +75,7 @@ OWNERS = {
 CANONICAL_IMPLEMENTATION_MODULES = (
     contracts,
     diagnostics,
+    direct,
     parsing,
     retry,
     rows,
@@ -205,6 +207,10 @@ def test_split_modules_keep_the_reference_layering():
     assert source_imports[rows] == set()
     assert source_imports[contracts] == {"watcher.sources.sanitize"}
     assert source_imports[diagnostics] == {"watcher.sources.sanitize"}
+    assert source_imports[direct] == {
+        "watcher.sources.diagnostics",
+        "watcher.sources.parsing",
+    }
     assert source_imports[parsing] == {"watcher.sources.contracts"}
     assert source_imports[retry] == {"watcher.sources.contracts"}
     assert source_imports[transport] == {
@@ -236,6 +242,7 @@ def test_low_level_modules_do_not_import_collection_pipeline_or_health_layers():
         "watcher.sources.base",
         "watcher.sources.contracts",
         "watcher.sources.diagnostics",
+        "watcher.sources.direct",
         "watcher.sources.parsing",
         "watcher.sources.rows",
         "watcher.sources.sanitize",

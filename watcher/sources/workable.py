@@ -8,17 +8,16 @@ from typing import Any, Callable
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
-    DirectDiagnosticsMixin,
     SourceSchemaError,
     ensure_list,
     html_to_text,
     iso_date,
     make_row,
     page_fingerprint,
-    parse_records,
     post_json,
     require_token,
 )
+from watcher.sources.direct import DirectRecordAdapter
 from watcher.sources.retry import (
     DEFAULT_MAX_ATTEMPTS,
     RequestRetrier,
@@ -31,7 +30,7 @@ DEFAULT_MAX_PAGES = 1_000
 DEFAULT_MAX_CRAWL_RETRIES = 5
 
 
-class WorkableSource(DirectDiagnosticsMixin):
+class WorkableSource(DirectRecordAdapter):
     name = "workable"
 
     def __init__(
@@ -178,12 +177,10 @@ class WorkableSource(DirectDiagnosticsMixin):
         return rows
 
     def _parse_records(self, jobs: list, company: CompanyCfg) -> list[dict]:
-        return parse_records(
+        return self._parse_direct_records(
             jobs,
+            company,
             lambda job: self._parse_job(job, company),
-            source_name=self.name,
-            company_name=company.name,
-            diagnostics=self._record_parse_diagnostics,
         )
 
     def _parse_job(self, job: Any, company: CompanyCfg) -> dict:

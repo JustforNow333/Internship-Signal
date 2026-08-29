@@ -1,9 +1,9 @@
 # Claude Repository Guide
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: document the architecture boundaries now present on
-  `product-mvp`, preserve product-specific guidance, exclude internal-only
-  capabilities, make one documentation-only commit, and do not push.
+- Current task: port the narrow direct-record parsing abstraction for only the
+  seven adapters with matching semantics, preserve provider behavior and lazy
+  source boundaries, make one isolated commit, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -66,10 +66,12 @@
 - Register direct ATS adapters only in `watcher/sources/registry.py`; config,
   runtime construction, and hosted direct coverage derive from `DIRECT_ATS`.
 - Shared source ownership belongs in `contracts.py`, `diagnostics.py`,
-  `transport.py`, `parsing.py`, `rows.py`, `sanitize.py`, and `retry.py`;
-  `sources/base.py` remains the compatibility facade. The `watcher.sources`
-  package facade lazily resolves and caches documented exports, keeping
-  low-level and individual-adapter imports isolated from unrelated adapters.
+  `direct.py`, `transport.py`, `parsing.py`, `rows.py`, `sanitize.py`, and
+  `retry.py`; `sources/base.py` remains the compatibility facade. `direct.py`
+  shares only identical direct-record parsing/diagnostic lifecycle; distinct
+  pagination, retry, fallback, completeness, and dedupe stay provider-owned.
+  The `watcher.sources` package facade lazily resolves and caches documented
+  exports, keeping low-level and individual-adapter imports isolated.
 - Watcher execution belongs in `collection.py`, `pipeline.py`, `reporting.py`,
   `cli.py`, and `run_logging.py`; `run.py` is the stable entry point and
   compatibility facade only. Health implementation belongs in the semantic

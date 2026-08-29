@@ -19,6 +19,10 @@ This file tracks completed watcher steps and the next handoff target.
 - Root architecture guidance now records the neutral domain, finalized config,
   source, execution, and health owners plus their compatibility facades and
   canonical routing rules, adapted to the modules present on `product-mvp`.
+- `watcher/sources/direct.py` now narrowly shares invariant record parsing and
+  single-payload diagnostics for the seven adapters whose semantics match;
+  provider-specific pagination, retry, fallback, completeness, and dedupe stay
+  in their adapters.
 - Canonical job columns, shared company/title/URL normalizers, and categorical
   eligibility reason codes now have a neutral `internship_signal/domain` owner;
   backend compatibility imports retain identical values and object identity.

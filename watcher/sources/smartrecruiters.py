@@ -6,10 +6,19 @@ import re
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import DirectDiagnosticsMixin, SourceSchemaError, ensure_list, fetch_json, iso_date, make_row, page_fingerprint, parse_records, require_token
+from watcher.sources.base import (
+    SourceSchemaError,
+    ensure_list,
+    fetch_json,
+    iso_date,
+    make_row,
+    page_fingerprint,
+    require_token,
+)
+from watcher.sources.direct import DirectRecordAdapter
 
 
-class SmartRecruitersSource(DirectDiagnosticsMixin):
+class SmartRecruitersSource(DirectRecordAdapter):
     name = "smartrecruiters"
     page_size = 100
 
@@ -61,13 +70,16 @@ class SmartRecruitersSource(DirectDiagnosticsMixin):
         self._finish_direct_diagnostics(rows)
         return rows
 
-    def _parse_postings(self, postings: list, company: CompanyCfg, token: str) -> list[dict]:
-        return parse_records(
+    def _parse_postings(
+        self,
+        postings: list,
+        company: CompanyCfg,
+        token: str,
+    ) -> list[dict]:
+        return self._parse_direct_records(
             postings,
+            company,
             lambda posting: self._parse_posting(posting, company, token),
-            source_name=self.name,
-            company_name=company.name,
-            diagnostics=self._record_parse_diagnostics,
         )
 
     def _page(self, payload: Any) -> tuple[list, int | None]:

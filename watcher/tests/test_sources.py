@@ -9,14 +9,23 @@ from watcher.config import CompanyCfg, DEFAULT_WATCHLIST_PATH, load_watchlist
 from watcher.eligibility import LOCATION_US, OUTSIDE_US, assess_us_location
 from watcher.sources import (
     AshbySource,
+    BainSource,
+    DirectSourceDiagnostics,
+    EpicSource,
     GitHubListingsSource,
     GitHubMarkdownTableSource,
     GreenhouseSource,
+    IbmSource,
+    IcimsSource,
     LeverSource,
+    OracleHcmSource,
+    PaylocitySource,
     SourceError,
     SourceFetchError,
     SmartRecruitersSource,
     SourceSchemaError,
+    SuccessFactorsSource,
+    TalentBrewSource,
     WorkableSource,
     WorkdaySource,
 )
@@ -28,6 +37,7 @@ from watcher.sources.base import (
     html_to_text,
     iso_date,
 )
+from watcher.sources.direct import DirectRecordAdapter, SinglePayloadDirectAdapter
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TEST_GITHUB_FEED_URL = "https://fixtures.example.test/internships/listings.json"
@@ -68,6 +78,32 @@ def assert_canonical_row(row: dict) -> None:
     assert row["source_url"]
     assert "source" in row["extra"]
     assert "source_adapter" in row["extra"]
+
+
+def test_direct_record_abstraction_stays_narrow():
+    assert issubclass(GreenhouseSource, SinglePayloadDirectAdapter)
+    assert issubclass(LeverSource, SinglePayloadDirectAdapter)
+    direct_only = (
+        AshbySource,
+        IcimsSource,
+        PaylocitySource,
+        SmartRecruitersSource,
+        WorkableSource,
+    )
+    for source_type in direct_only:
+        assert issubclass(source_type, DirectRecordAdapter)
+        assert not issubclass(source_type, SinglePayloadDirectAdapter)
+
+    for source_type in (
+        WorkdaySource,
+        SuccessFactorsSource,
+        OracleHcmSource,
+        TalentBrewSource,
+        IbmSource,
+        BainSource,
+        EpicSource,
+    ):
+        assert not issubclass(source_type, DirectRecordAdapter)
 
 
 def test_fixture_json_round_trips_utf8_non_ascii(tmp_path):
@@ -119,7 +155,8 @@ def test_greenhouse_fixture_to_canonical_rows():
     payload = load_fixture(fixture_path.name)
     company = CompanyCfg(name="Astera Labs", ats="greenhouse", token="asteraearlycareer2026")
 
-    rows = GreenhouseSource().parse(payload, company)
+    source = GreenhouseSource()
+    rows = source.parse(payload, company)
 
     assert len(rows) == 5
     first = rows[0]
@@ -151,6 +188,11 @@ def test_greenhouse_fixture_to_canonical_rows():
         "\ufffd",
     ):
         assert mojibake not in first["description"]
+    assert source.last_health_diagnostics == DirectSourceDiagnostics(
+        succeeded=True,
+        retained_row_count=5,
+        complete=True,
+    )
 
 
 def test_greenhouse_unexpected_shape_raises():
@@ -162,7 +204,8 @@ def test_lever_fixture_to_canonical_rows():
     payload = load_fixture("lever_ifm_us.json")
     company = CompanyCfg(name="Institute of Foundation Models", ats="lever", token="ifm-us")
 
-    rows = LeverSource().parse(payload, company)
+    source = LeverSource()
+    rows = source.parse(payload, company)
 
     assert len(rows) == 43
     first = rows[0]
@@ -181,6 +224,11 @@ def test_lever_fixture_to_canonical_rows():
     assert first["extra"]["country"] == "US"
     assert assess_us_location(first).status == LOCATION_US
     assert "Institute of Foundation Models" in first["description"]
+    assert source.last_health_diagnostics == DirectSourceDiagnostics(
+        succeeded=True,
+        retained_row_count=43,
+        complete=True,
+    )
 
 
 def test_lever_unexpected_shape_raises():
@@ -695,7 +743,8 @@ def test_smartrecruiters_fixture_to_canonical_rows():
     payload = load_fixture("smartrecruiters_boschgroup_page.json")
     company = CompanyCfg(name="Bosch", ats="smartrecruiters", token="BoschGroup")
 
-    rows = SmartRecruitersSource().parse(payload, company)
+    source = SmartRecruitersSource()
+    rows = source.parse(payload, company)
 
     assert len(rows) == 5
     first = rows[0]
@@ -710,6 +759,11 @@ def test_smartrecruiters_fixture_to_canonical_rows():
     assert first["extra"]["smartrecruiters_company"] == "Bosch Group"
     assert first["extra"]["location"]["country"] == "cn"
     assert assess_us_location(first).status == OUTSIDE_US
+    assert source.last_health_diagnostics == DirectSourceDiagnostics(
+        succeeded=True,
+        retained_row_count=5,
+        complete=True,
+    )
 
 
 def test_smartrecruiters_unexpected_shape_raises():
@@ -721,7 +775,8 @@ def test_workable_fixture_to_canonical_rows():
     payload = load_fixture("workable_huggingface_jobs.json")
     company = CompanyCfg(name="Hugging Face", ats="workable", token="huggingface")
 
-    rows = WorkableSource().parse(payload, company)
+    source = WorkableSource()
+    rows = source.parse(payload, company)
 
     assert len(rows) == 7
     first = rows[0]
@@ -738,6 +793,11 @@ def test_workable_fixture_to_canonical_rows():
     assert first["extra"]["shortcode"] == "F8427A442D"
     assert first["extra"]["locations"][0]["countryCode"] == "US"
     assert assess_us_location(first).status == LOCATION_US
+    assert source.last_health_diagnostics == DirectSourceDiagnostics(
+        succeeded=True,
+        retained_row_count=7,
+        complete=True,
+    )
 
 
 def test_workable_preserves_non_null_optional_list_values_in_order():

@@ -6,19 +6,18 @@ from typing import Any
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
-    DirectDiagnosticsMixin,
     SourceSchemaError,
     ensure_list,
     fetch_json,
     html_to_text,
     iso_date,
     make_row,
-    parse_records,
     require_token,
 )
+from watcher.sources.direct import SinglePayloadDirectAdapter
 
 
-class LeverSource(DirectDiagnosticsMixin):
+class LeverSource(SinglePayloadDirectAdapter):
     name = "lever"
 
     @staticmethod
@@ -29,20 +28,10 @@ class LeverSource(DirectDiagnosticsMixin):
         token = require_token(company, self.name)
         return self.parse(fetch_json(self.endpoint(token), self.name), company)
 
-    def parse(self, payload: Any, company: CompanyCfg) -> list[dict]:
-        self._begin_direct_diagnostics()
-        postings = ensure_list(payload, self.name, "payload")
-        rows = parse_records(
-            postings,
-            lambda posting: self._parse_posting(posting, company),
-            source_name=self.name,
-            company_name=company.name,
-            diagnostics=self._record_parse_diagnostics,
-        )
-        self._finish_direct_diagnostics(rows)
-        return rows
+    def _records_from_payload(self, payload: Any, company: CompanyCfg) -> list:
+        return ensure_list(payload, self.name, "payload")
 
-    def _parse_posting(self, posting: Any, company: CompanyCfg) -> dict:
+    def _parse_record(self, posting: Any, company: CompanyCfg) -> dict:
         if not isinstance(posting, dict):
             raise SourceSchemaError("lever expected each posting to be an object")
 

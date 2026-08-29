@@ -10,7 +10,6 @@ from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 from watcher.config import CompanyCfg, is_valid_hostname
 from watcher.sources.base import (
-    DirectDiagnosticsMixin,
     JsonHttpResponse,
     SourceError,
     SourceSchemaError,
@@ -21,8 +20,8 @@ from watcher.sources.base import (
     iso_date,
     make_row,
     page_fingerprint,
-    parse_records,
 )
+from watcher.sources.direct import DirectRecordAdapter
 
 JIBE_JSON = "jibe_json"
 CLASSIC = "classic"
@@ -51,7 +50,7 @@ class _ClassicPage:
         return page_fingerprint([dict(card) for card in self.cards])
 
 
-class IcimsSource(DirectDiagnosticsMixin):
+class IcimsSource(DirectRecordAdapter):
     """Collect one completely enumerable anonymous iCIMS board."""
 
     name = "icims"
@@ -155,12 +154,10 @@ class IcimsSource(DirectDiagnosticsMixin):
                     "icims jibe returned more records than totalCount"
                 )
 
-            parsed = parse_records(
+            parsed = self._parse_direct_records(
                 postings,
+                company,
                 lambda posting: _parse_jibe_posting(posting, company, portal),
-                source_name=self.name,
-                company_name=company.name,
-                diagnostics=self._record_parse_diagnostics,
             )
             self._duplicate_count += _merge_rows(rows, row_index, parsed)
 
@@ -228,12 +225,10 @@ class IcimsSource(DirectDiagnosticsMixin):
             if current_page > total_pages:
                 raise SourceSchemaError("icims classic pagination metadata is invalid")
 
-            parsed = parse_records(
+            parsed = self._parse_direct_records(
                 list(page.cards),
+                company,
                 lambda card: _parse_classic_card(card, company, portal),
-                source_name=self.name,
-                company_name=company.name,
-                diagnostics=self._record_parse_diagnostics,
             )
             self._duplicate_count += _merge_rows(rows, row_index, parsed)
 

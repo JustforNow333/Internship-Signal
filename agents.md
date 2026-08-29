@@ -3,10 +3,10 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: document the repository architecture boundaries that now exist
-  on `product-mvp`. Keep the guidance aligned with real canonical owners and
-  compatibility facades, exclude internal-only capabilities, make one
-  documentation-only commit, and do not push.
+- Current task: port the narrow direct-record parsing abstraction into the
+  current split source layer. Share only identical parsing/diagnostic lifecycle
+  across the seven intended adapters, preserve every provider-specific
+  behavior, make one isolated commit, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -118,6 +118,8 @@ In `watcher/sources/`, ownership is:
 
 - `contracts.py`: source contracts, response types, and exceptions;
 - `diagnostics.py`: direct-source diagnostics and diagnostic mixins;
+- `direct.py`: the narrow shared record-parsing call and single-payload
+  diagnostic lifecycle used only where provider semantics match;
 - `transport.py`: HTTP requests, response decoding, and failure
   classification;
 - `parsing.py`: shared record parsing and schema diagnostics;
@@ -194,6 +196,7 @@ into a general utility module.
 | config validation | `watcher/config/validation.py` |
 | source contract or exception | `watcher/sources/contracts.py` |
 | direct-source diagnostics | `watcher/sources/diagnostics.py` |
+| matching direct-record lifecycle | `watcher/sources/direct.py` |
 | HTTP source plumbing | `watcher/sources/transport.py` |
 | shared source parsing | `watcher/sources/parsing.py` |
 | canonical source row | `watcher/sources/rows.py` |
@@ -272,8 +275,11 @@ into a general utility module.
   ATS adapters and runtime construction. Config validation derives its direct
   values from `DIRECT_ATS`; `bespoke` and `github_only` remain non-direct.
 - Shared source ownership is split across `contracts.py`, `diagnostics.py`,
-  `transport.py`, `parsing.py`, `rows.py`, and `sanitize.py`; `base.py` is the
-  compatibility facade and `retry.py` owns bounded retry mechanics. The
+  `direct.py`, `transport.py`, `parsing.py`, `rows.py`, and `sanitize.py`;
+  `base.py` is the compatibility facade and `retry.py` owns bounded retry
+  mechanics. `direct.py` shares only identical record-parsing and
+  single-payload diagnostic lifecycle; provider-specific pagination, retry,
+  fallback, completeness, and dedupe remain in adapters. The
   `watcher.sources` package facade resolves and caches its documented exports
   lazily, so low-level and individual-adapter imports do not load unrelated
   adapters. Workday's registry entry alone requests the shared pacer.

@@ -10,15 +10,14 @@ from typing import Any, Callable
 
 from watcher.config import CompanyCfg
 from watcher.sources.base import (
-    DirectDiagnosticsMixin,
     SourceError,
     SourceSchemaError,
     TextHttpResponse,
     get_text_response,
     html_to_text,
     make_row,
-    parse_records,
 )
+from watcher.sources.direct import DirectRecordAdapter
 
 HOST = "recruiting.paylocity.com"
 _COMPANY_ID = re.compile(
@@ -34,7 +33,7 @@ _DETAIL_BASE = re.compile(
 )
 
 
-class PaylocitySource(DirectDiagnosticsMixin):
+class PaylocitySource(DirectRecordAdapter):
     """Collect the full job array used by Paylocity's official public UI."""
 
     name = "paylocity"
@@ -85,12 +84,10 @@ class PaylocitySource(DirectDiagnosticsMixin):
         if not isinstance(jobs, list):
             raise SourceSchemaError("paylocity expected pageData.Jobs to be a list")
 
-        parsed = parse_records(
+        parsed = self._parse_direct_records(
             jobs,
+            company,
             lambda job: _parse_posting(job, company, company_id, module_id),
-            source_name=self.name,
-            company_name=company.name,
-            diagnostics=self._record_parse_diagnostics,
         )
         rows: list[dict] = []
         rows_by_id: dict[str, dict] = {}
