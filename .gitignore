@@ -246,14 +246,16 @@ watcher/cleanup-audit*.json
 # Local hosted-backend promotion verification output.
 hosted-backend-promotion*.log
 hosted-backend-push*.log
-# Local collection/identity port review output is scratch; reusable fixtures
-# and tests remain tracked.
+# Local collection, identity, and source-layer port review output is scratch;
+# reusable fixtures and tests remain tracked.
 collection-identity-port*.log
 collection-identity-port*.json
 classification-recall-port*.log
 classification-recall-port*.json
 source-health-port*.log
 source-health-port*.json
+source-layer-port*.log
+source-layer-port*.json
 # Prompt-maintained guidance, bug-audit, and branch-handoff scratch stay local.
 agents.local.md
 agents.*.md

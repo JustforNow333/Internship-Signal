@@ -3,8 +3,9 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: publish the reviewed hosted match-pagination fix directly to
-  `origin/product-mvp` with a normal, non-force push.
+- Current task: split the current MVP source base into focused low-level
+  modules behind a behavior-preserving `watcher.sources.base` facade. Keep the
+  domain/config refactors out, make one isolated commit, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -122,6 +123,9 @@
 - `watcher/sources/registry.py` is the single registration point for direct
   ATS adapters and runtime construction. Config validation derives its direct
   values from `DIRECT_ATS`; `bespoke` and `github_only` remain non-direct.
+- Shared source ownership is split across `contracts.py`, `diagnostics.py`,
+  `transport.py`, `parsing.py`, `rows.py`, and `sanitize.py`; `base.py` is the
+  compatibility facade and `retry.py` owns bounded retry mechanics.
   Workday's registry entry alone requests the shared pacer.
 - Adapters live in `watcher/sources/`, return canonical rows, and set
   `extra.source` plus `extra.source_adapter`. GitHub rows also keep safe

@@ -10,6 +10,9 @@ This file tracks completed watcher steps and the next handoff target.
 - Backend `analyze_rows(rows, today=None)` seam is built and reused by watcher.
 - Watcher source layer is built: Greenhouse, Lever, Ashby, SmartRecruiters,
   Workable, Workday, and SimplifyJobs GitHub listings.
+- Shared source contracts, diagnostics, transport, parsing, canonical-row, and
+  sanitization helpers now have focused modules; `sources/base.py` remains a
+  compatibility facade with unchanged adapter behavior and import identities.
 - `watcher/detect.py` and the generated priority `watcher/watchlist.yml` are in
   place.
 - `watcher/alumni.py` is built and real-data verified against the private

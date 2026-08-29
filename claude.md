@@ -1,8 +1,9 @@
 # Claude Repository Guide
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: publish the reviewed hosted match-pagination fix directly to
-  `origin/product-mvp` with a normal, non-force push.
+- Current task: split the current MVP source base into focused low-level
+  modules behind a behavior-preserving `watcher.sources.base` facade. Keep the
+  domain/config refactors out, make one isolated commit, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -52,6 +53,9 @@
   `watcher/eligibility.py`; filters add internship/open/min-score checks.
 - Register direct ATS adapters only in `watcher/sources/registry.py`; config,
   runtime construction, and hosted direct coverage derive from `DIRECT_ATS`.
+- Shared source ownership belongs in `contracts.py`, `diagnostics.py`,
+  `transport.py`, `parsing.py`, `rows.py`, `sanitize.py`, and `retry.py`;
+  `sources/base.py` remains the compatibility facade.
 - Student-status exclusions require clear mandatory evidence and use stable
   `phd_only`, `graduate_only`, `freshman_only`, or
   `returning_intern_only` reasons. Mixed, preferred, incidental, or ambiguous
