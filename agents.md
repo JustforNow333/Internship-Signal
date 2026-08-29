@@ -3,9 +3,9 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: extract dotenv and process-environment handling into
-  `watcher/config/env.py`. Preserve import-time dotenv precedence, keep loading
-  and validation in the stage-two transitional module, retain the
+- Current task: extract watchlist/YAML loading and config construction into
+  `watcher/config/loader.py`. Move the current MVP implementation intact, keep
+  validation in the stage-three transitional module, retain the
   `watcher.config` facade, make one isolated commit, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
@@ -114,8 +114,9 @@
   and their coercion helpers; it loads dotenv before evaluating
   `DEFAULT_SEEN_DB_PATH`, while explicit process values win.
 - `watcher/config/models.py` owns the dependency-light configuration
-  dataclasses and intrinsic constants. The stage-two `watcher.config` facade
-  retains current imports, while loading and validation remain in
+  dataclasses and intrinsic constants. `watcher/config/loader.py` owns
+  watchlist/YAML parsing and config construction. The stage-three
+  `watcher.config` facade retains current imports, while validation remains in
   `config/_legacy.py`.
 - Production watchlists require nonblank `defaults.terms`. Company overrides
   may inherit but may not be empty.

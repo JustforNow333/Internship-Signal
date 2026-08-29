@@ -20,7 +20,9 @@ This file tracks completed watcher steps and the next handoff target.
   dependency-light `watcher/config/models.py`; `watcher.config` remains the
   compatibility facade. Dotenv loading, environment-derived settings, and
   coercion helpers now live in low-level `watcher/config/env.py`, with dotenv
-  initialization preceding defaults; loading and validation stay transitional.
+  initialization preceding defaults. Watchlist/YAML parsing and configuration
+  construction now live in `watcher/config/loader.py`; validation remains in
+  the transitional `_legacy.py` owner for the next extraction stage.
 - `watcher/detect.py` and the generated priority `watcher/watchlist.yml` are in
   place.
 - `watcher/alumni.py` is built and real-data verified against the private

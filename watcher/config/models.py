@@ -2,8 +2,8 @@
 
 This module owns only the four configuration dataclasses and the constants
 intrinsic to their fields. Environment parsing, dotenv handling, and coercion
-helpers live in ``env.py``; YAML loading and watchlist validation remain in
-``_legacy.py``.
+helpers live in ``env.py``; YAML loading lives in ``loader.py`` and watchlist
+validation remains in ``_legacy.py``.
 
 ``DEFAULT_SEEN_DB_PATH`` is environment-derived and owned by ``env.py``, which
 guarantees that dotenv initialization runs before the field default is read.
@@ -198,7 +198,7 @@ class WatcherConfig:
     def effective_github_listing_sources(self) -> tuple[GitHubListingSourceCfg, ...]:
         """Return typed sources plus deterministic adapters for legacy URLs."""
 
-        from watcher.config._legacy import (
+        from watcher.config.loader import (
             _github_source_sort_key,
             _legacy_github_source,
         )

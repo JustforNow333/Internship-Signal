@@ -232,7 +232,7 @@ def test_all_current_public_facade_symbols_resolve():
     assert set(config.__all__) == expected
     assert all(hasattr(config, name) for name in expected)
     assert config._parse_env_assignment is config.env._parse_env_assignment
-    assert config._parse_watchlist_yaml is config._legacy._parse_watchlist_yaml
+    assert config._parse_watchlist_yaml is config.loader._parse_watchlist_yaml
 
 
 def test_real_watchlist_and_source_registry_use_the_canonical_models():
@@ -289,6 +289,7 @@ def test_config_low_level_modules_have_no_high_level_dependencies():
         "watcher.config",
         "watcher.config.env",
         "watcher.config.models",
+        "watcher.config.loader",
         "watcher.config._legacy",
         "watcher.sources.registry",
         "watcher.sources.greenhouse",
