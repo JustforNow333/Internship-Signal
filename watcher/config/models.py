@@ -1,26 +1,22 @@
 """Dependency-light configuration data models for the watcher.
 
 This module owns only the four configuration dataclasses and the constants
-intrinsic to their fields. Environment parsing, dotenv handling, YAML loading,
-watchlist validation, and coercion helpers remain in ``_legacy.py`` during the
-first extraction stage. Model methods reach those helpers through narrow,
-deferred imports so this module has no watcher dependency at import time.
+intrinsic to their fields. Environment parsing, dotenv handling, and coercion
+helpers live in ``env.py``; YAML loading and watchlist validation remain in
+``_legacy.py``.
 
-``WATCHER_DIR`` lives here because ``DEFAULT_SEEN_DB_PATH`` is a class-field
-default. The package facade imports ``_legacy`` first, preserving the prior
-``load_dotenv()``-before-default evaluation order.
+``DEFAULT_SEEN_DB_PATH`` is environment-derived and owned by ``env.py``, which
+guarantees that dotenv initialization runs before the field default is read.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
+from watcher.config.env import ConfigError, DEFAULT_SEEN_DB_PATH
 
-WATCHER_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_SEEN_DB_PATH = Path(os.getenv("WATCHER_SEEN_DB", WATCHER_DIR / "seen.sqlite"))
 DEFAULT_ANALYSIS_CACHE_ENABLED = True
 COLLECTION_MODE_SERIAL = "serial"
 COLLECTION_MODE_CONCURRENT = "concurrent"
@@ -63,11 +59,7 @@ class CollectionConcurrencyCfg:
     per_origin_max_concurrency: int = DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY
 
     def __post_init__(self) -> None:
-        from watcher.config._legacy import (
-            ConfigError,
-            _bounded_int,
-            _collection_mode_value,
-        )
+        from watcher.config.env import _bounded_int, _collection_mode_value
 
         object.__setattr__(self, "mode", _collection_mode_value(self.mode))
         object.__setattr__(
@@ -192,7 +184,7 @@ class WatcherConfig:
     )
 
     def __post_init__(self) -> None:
-        from watcher.config._legacy import resolve_analysis_cache_path
+        from watcher.config.env import resolve_analysis_cache_path
 
         seen_db_path = Path(self.seen_db_path)
         cache_path = (

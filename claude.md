@@ -1,10 +1,10 @@
 # Claude Repository Guide
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: extract the four current watcher configuration dataclasses and
-  intrinsic constants into `watcher/config/models.py`, retain the
-  `watcher.config` facade, leave environment/loading/validation in the
-  stage-one transitional module, make one isolated commit, and do not push.
+- Current task: extract dotenv and process-environment handling into
+  `watcher/config/env.py`, preserve dotenv-before-default evaluation and
+  process precedence, retain the `watcher.config` facade, leave loading and
+  validation in the stage-two transitional module, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -51,8 +51,10 @@
   reason codes. It imports neither backend nor watcher; backend compatibility
   paths re-export the same objects.
 - `watcher/config/models.py` owns the four configuration dataclasses and their
-  intrinsic constants. `watcher.config` remains the public facade; stage-one
-  environment, loading, and validation code stays in `config/_legacy.py`.
+  intrinsic constants. `watcher/config/env.py` owns dotenv and environment
+  settings and runs dotenv initialization before environment-derived defaults.
+  `watcher.config` remains the public facade; stage-two loading and validation
+  code stays in `config/_legacy.py`.
 - Route JSON endpoints through `_json_object`; malformed or excessively nested
   JSON and invalid request shapes are HTTP 400, never internal errors.
 - Keep CSV cleanup in `process_csv`; use `analyze_rows` for canonical rows.

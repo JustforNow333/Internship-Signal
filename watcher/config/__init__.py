@@ -1,33 +1,37 @@
 """Stable watcher configuration facade.
 
-The package is in the first extraction stage: ``models.py`` owns configuration
-dataclasses and intrinsic constants, while ``_legacy.py`` keeps environment,
-loading, validation, and helper behavior. Existing imports from
-``watcher.config`` remain supported by explicit re-exports.
+The package is in the second extraction stage: ``env.py`` owns dotenv and
+process-environment handling, ``models.py`` owns configuration dataclasses,
+and ``_legacy.py`` retains loading and validation. ``env.py`` is imported
+first so dotenv initialization precedes environment-derived model defaults.
 """
 
 from __future__ import annotations
 
-from watcher.config._legacy import (
+from watcher.config.env import (
     DEFAULT_ANALYSIS_CACHE_FILENAME,
     DEFAULT_DOTENV_PATH,
-    DEFAULT_WATCHLIST_PATH,
+    DEFAULT_SEEN_DB_PATH,
     DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS,
     MAX_WORKDAY_MIN_INTERVAL_SECONDS,
-    NON_DIRECT_ATS,
     REPO_ROOT,
-    SUPPORTED_GITHUB_LISTING_FORMATS,
+    WATCHER_DIR,
     ConfigError,
     _parse_env_assignment,
-    _parse_watchlist_yaml,
     analysis_cache_enabled,
-    is_valid_hostname,
     load_collection_concurrency,
     load_dotenv,
-    load_watchlist,
     resolve_analysis_cache_path,
-    supported_ats,
     workday_min_interval_seconds,
+)
+from watcher.config._legacy import (
+    DEFAULT_WATCHLIST_PATH,
+    NON_DIRECT_ATS,
+    SUPPORTED_GITHUB_LISTING_FORMATS,
+    _parse_watchlist_yaml,
+    is_valid_hostname,
+    load_watchlist,
+    supported_ats,
 )
 from watcher.config.models import (
     COLLECTION_MODE_CONCURRENT,
@@ -36,7 +40,6 @@ from watcher.config.models import (
     DEFAULT_COLLECTION_MAX_WORKERS,
     DEFAULT_COLLECTION_MODE,
     DEFAULT_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY,
-    DEFAULT_SEEN_DB_PATH,
     DEFAULT_WORKDAY_MAX_CONCURRENCY,
     MAX_COLLECTION_MAX_WORKERS,
     MAX_COLLECTION_PER_ORIGIN_MAX_CONCURRENCY,
@@ -46,7 +49,6 @@ from watcher.config.models import (
     MIN_WORKDAY_MAX_CONCURRENCY,
     SUPPORTED_COLLECTION_MODES,
     SUPPORTED_WORKDAY_DETAIL_POLICIES,
-    WATCHER_DIR,
     WORKDAY_DETAIL_EARLY_CAREER,
     WORKDAY_DETAIL_INTERNSHIP,
     WORKDAY_DETAIL_NONE,

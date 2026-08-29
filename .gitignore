@@ -260,6 +260,8 @@ domain-layer-port*.log
 domain-layer-port*.json
 config-model-port*.log
 config-model-port*.json
+config-env-port*.log
+config-env-port*.json
 # Prompt-maintained guidance, bug-audit, and branch-handoff scratch stay local.
 agents.local.md
 agents.*.md

@@ -153,7 +153,7 @@ def test_github_source_and_watcher_config_methods_are_unchanged():
 
 
 def test_collection_concurrency_behavior_and_config_error_identity_are_unchanged():
-    from watcher.config import _legacy, models
+    from watcher.config import _legacy, env, models
 
     settings = config.CollectionConcurrencyCfg(
         mode="  CONCURRENT  ", max_workers="8", workday_max_concurrency="2"
@@ -167,20 +167,21 @@ def test_collection_concurrency_behavior_and_config_error_identity_are_unchanged
     }
     assert settings.concurrent is True
     assert config.ConfigError is _legacy.ConfigError
+    assert config.ConfigError is env.ConfigError
     assert models.CollectionConcurrencyCfg is config.CollectionConcurrencyCfg
     with pytest.raises(config.ConfigError, match="WATCHER_COLLECTION_MODE"):
         config.CollectionConcurrencyCfg(mode="parallel")
 
 
 def test_package_conversion_preserves_resolved_paths():
-    from watcher.config import models
+    from watcher.config import env
 
     assert config.WATCHER_DIR == ROOT / "watcher"
     assert config.REPO_ROOT == ROOT
     assert config.DEFAULT_DOTENV_PATH == ROOT / ".env"
     assert config.DEFAULT_WATCHLIST_PATH == ROOT / "watcher" / "watchlist.yml"
     assert config.DEFAULT_WATCHLIST_PATH.exists()
-    assert models.WATCHER_DIR is config.WATCHER_DIR
+    assert env.WATCHER_DIR is config.WATCHER_DIR
 
 
 def test_all_current_public_facade_symbols_resolve():
@@ -230,7 +231,7 @@ def test_all_current_public_facade_symbols_resolve():
 
     assert set(config.__all__) == expected
     assert all(hasattr(config, name) for name in expected)
-    assert config._parse_env_assignment is config._legacy._parse_env_assignment
+    assert config._parse_env_assignment is config.env._parse_env_assignment
     assert config._parse_watchlist_yaml is config._legacy._parse_watchlist_yaml
 
 
@@ -247,9 +248,8 @@ def test_real_watchlist_and_source_registry_use_the_canonical_models():
     assert set(build_direct_sources()) == set(DIRECT_ATS)
 
 
-def test_models_have_no_high_level_dependencies():
+def test_config_low_level_modules_have_no_high_level_dependencies():
     model_path = ROOT / "watcher" / "config" / "models.py"
-    tree = ast.parse(model_path.read_text(encoding="utf-8"))
     prohibited = (
         "backend",
         "watcher.collection",
@@ -259,27 +259,35 @@ def test_models_have_no_high_level_dependencies():
         "watcher.seen_store",
         "watcher.notify",
     )
-    imported = []
-    module_level = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported.append(node.module)
-    for node in tree.body:
-        if isinstance(node, ast.Import):
-            module_level.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            module_level.append(node.module)
+    for path in (model_path, ROOT / "watcher" / "config" / "env.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imported = []
+        module_level = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.append(node.module)
+        for node in tree.body:
+            if isinstance(node, ast.Import):
+                module_level.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                module_level.append(node.module)
 
-    assert not [name for name in imported if name.startswith(prohibited)]
-    assert not [name for name in module_level if name.startswith("watcher")]
+        assert not [name for name in imported if name.startswith(prohibited)]
+        if path.name == "env.py":
+            assert not [name for name in module_level if name.startswith("watcher")]
+        else:
+            assert [name for name in module_level if name.startswith("watcher")] == [
+                "watcher.config.env"
+            ]
 
 
 @pytest.mark.parametrize(
     "first",
     [
         "watcher.config",
+        "watcher.config.env",
         "watcher.config.models",
         "watcher.config._legacy",
         "watcher.sources.registry",

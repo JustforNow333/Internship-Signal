@@ -18,8 +18,9 @@ This file tracks completed watcher steps and the next handoff target.
   backend compatibility imports retain identical values and object identity.
 - Watcher configuration dataclasses and their intrinsic constants now live in
   dependency-light `watcher/config/models.py`; `watcher.config` remains the
-  compatibility facade, and stage-one environment/loading/validation behavior
-  stays in the transitional module.
+  compatibility facade. Dotenv loading, environment-derived settings, and
+  coercion helpers now live in low-level `watcher/config/env.py`, with dotenv
+  initialization preceding defaults; loading and validation stay transitional.
 - `watcher/detect.py` and the generated priority `watcher/watchlist.yml` are in
   place.
 - `watcher/alumni.py` is built and real-data verified against the private
