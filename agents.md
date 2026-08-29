@@ -3,10 +3,10 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: move the shared canonical schema, identity normalizers, and
-  categorical eligibility codes into `internship_signal/domain` with legacy
-  re-exports. Preserve the source split, make one isolated commit, and do not
-  push.
+- Current task: extract the four current watcher configuration dataclasses and
+  intrinsic constants into `watcher/config/models.py`. Keep environment,
+  loading, and validation in the stage-one transitional module, preserve the
+  `watcher.config` facade, make one isolated commit, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -110,8 +110,11 @@
 
 ## Watcher config and sources
 
-- `watcher/config.py` owns the small dependency-free watchlist loader and
-  dotenv loading; process environment values win.
+- `watcher/config/models.py` owns the dependency-light configuration
+  dataclasses and their intrinsic defaults/value constants. The stage-one
+  `watcher.config` facade retains every current import, while dotenv,
+  environment, loading, and validation remain in `config/_legacy.py`; process
+  environment values win.
 - Production watchlists require nonblank `defaults.terms`. Company overrides
   may inherit but may not be empty.
 - GitHub feed URLs must be nonblank HTTP(S), credential-free, and distinct

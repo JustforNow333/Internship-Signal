@@ -16,6 +16,10 @@ This file tracks completed watcher steps and the next handoff target.
 - Canonical job columns, shared company/title/URL normalizers, and categorical
   eligibility reason codes now have a neutral `internship_signal/domain` owner;
   backend compatibility imports retain identical values and object identity.
+- Watcher configuration dataclasses and their intrinsic constants now live in
+  dependency-light `watcher/config/models.py`; `watcher.config` remains the
+  compatibility facade, and stage-one environment/loading/validation behavior
+  stays in the transitional module.
 - `watcher/detect.py` and the generated priority `watcher/watchlist.yml` are in
   place.
 - `watcher/alumni.py` is built and real-data verified against the private
