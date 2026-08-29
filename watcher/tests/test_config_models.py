@@ -153,7 +153,7 @@ def test_github_source_and_watcher_config_methods_are_unchanged():
 
 
 def test_collection_concurrency_behavior_and_config_error_identity_are_unchanged():
-    from watcher.config import _legacy, env, models, validation
+    from watcher.config import env, models, validation
 
     settings = config.CollectionConcurrencyCfg(
         mode="  CONCURRENT  ", max_workers="8", workday_max_concurrency="2"
@@ -166,7 +166,6 @@ def test_collection_concurrency_behavior_and_config_error_identity_are_unchanged
         "per_origin_max_concurrency": 2,
     }
     assert settings.concurrent is True
-    assert config.ConfigError is _legacy.ConfigError
     assert config.ConfigError is env.ConfigError
     assert config.supported_ats is validation.supported_ats
     assert config.is_valid_hostname is validation.is_valid_hostname
@@ -237,6 +236,102 @@ def test_all_current_public_facade_symbols_resolve():
     assert config._parse_watchlist_yaml is config.loader._parse_watchlist_yaml
 
 
+def test_every_facade_export_has_one_canonical_owner():
+    from watcher.config import env, loader, models, validation
+
+    owners = {
+        env: {
+            "ConfigError",
+            "DEFAULT_ANALYSIS_CACHE_FILENAME",
+            "DEFAULT_DOTENV_PATH",
+            "DEFAULT_SEEN_DB_PATH",
+            "DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS",
+            "MAX_WORKDAY_MIN_INTERVAL_SECONDS",
+            "REPO_ROOT",
+            "WATCHER_DIR",
+            "analysis_cache_enabled",
+            "load_collection_concurrency",
+            "load_dotenv",
+            "resolve_analysis_cache_path",
+            "workday_min_interval_seconds",
+        },
+        loader: {"DEFAULT_WATCHLIST_PATH", "load_watchlist"},
+        validation: {
+            "NON_DIRECT_ATS",
+            "SUPPORTED_GITHUB_LISTING_FORMATS",
+            "is_valid_hostname",
+            "supported_ats",
+        },
+        models: set(config.__all__) - {
+            "ConfigError",
+            "DEFAULT_ANALYSIS_CACHE_FILENAME",
+            "DEFAULT_DOTENV_PATH",
+            "DEFAULT_SEEN_DB_PATH",
+            "DEFAULT_WATCHLIST_PATH",
+            "DEFAULT_WORKDAY_MIN_INTERVAL_SECONDS",
+            "MAX_WORKDAY_MIN_INTERVAL_SECONDS",
+            "NON_DIRECT_ATS",
+            "REPO_ROOT",
+            "SUPPORTED_GITHUB_LISTING_FORMATS",
+            "WATCHER_DIR",
+            "analysis_cache_enabled",
+            "is_valid_hostname",
+            "load_collection_concurrency",
+            "load_dotenv",
+            "load_watchlist",
+            "resolve_analysis_cache_path",
+            "supported_ats",
+            "workday_min_interval_seconds",
+        },
+    }
+
+    exported = set()
+    for owner, names in owners.items():
+        exported.update(names)
+        for name in names:
+            assert getattr(config, name) is getattr(owner, name), name
+
+    assert exported == set(config.__all__)
+    assert config._parse_env_assignment is env._parse_env_assignment
+    assert config._parse_watchlist_yaml is loader._parse_watchlist_yaml
+    assert "_parse_env_assignment" not in config.__all__
+    assert "_parse_watchlist_yaml" not in config.__all__
+
+
+def test_facade_contains_only_explicit_reexports_and_all():
+    tree = ast.parse(
+        (ROOT / "watcher" / "config" / "__init__.py").read_text(encoding="utf-8")
+    )
+    substantive = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    ]
+    wildcard_imports = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        and any(alias.name == "*" for alias in node.names)
+    ]
+
+    assert substantive == []
+    assert wildcard_imports == []
+
+
+def test_repository_named_facade_imports_still_resolve():
+    imported = set()
+    for root in (ROOT / "watcher", ROOT / "backend", ROOT / "scripts"):
+        for path in root.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module == "watcher.config":
+                    imported.update(
+                        alias.name for alias in node.names if alias.name != "*"
+                    )
+
+    assert not sorted(name for name in imported if not hasattr(config, name))
+
+
 def test_real_watchlist_and_source_registry_use_the_canonical_models():
     from watcher.config import models
     from watcher.sources.registry import DIRECT_ATS, build_direct_sources
@@ -277,12 +372,7 @@ def test_config_low_level_modules_have_no_high_level_dependencies():
                 module_level.append(node.module)
 
         assert not [name for name in imported if name.startswith(prohibited)]
-        if path.name == "env.py":
-            assert not [name for name in module_level if name.startswith("watcher")]
-        else:
-            assert [name for name in module_level if name.startswith("watcher")] == [
-                "watcher.config.env"
-            ]
+        assert not [name for name in module_level if name.startswith("watcher")]
 
 
 @pytest.mark.parametrize(
@@ -293,7 +383,6 @@ def test_config_low_level_modules_have_no_high_level_dependencies():
         "watcher.config.models",
         "watcher.config.loader",
         "watcher.config.validation",
-        "watcher.config._legacy",
         "watcher.sources.registry",
         "watcher.sources.greenhouse",
         "watcher.sources.workday",

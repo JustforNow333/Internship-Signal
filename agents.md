@@ -3,11 +3,10 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: extract configuration validation into
-  `watcher/config/validation.py`. Move the current MVP rules intact, keep the
-  canonical source registry authoritative, retain `_legacy.py` compatibility
-  imports and the `watcher.config` facade, make one isolated commit, and do not
-  push.
+- Current task: finalize the `watcher.config` public facade over `env.py`,
+  `models.py`, `validation.py`, and `loader.py`. Preserve env-first evaluation
+  and every current export identity, remove the unused transitional shim, make
+  one isolated commit, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -118,8 +117,9 @@
   dataclasses and intrinsic constants. `watcher/config/loader.py` owns
   watchlist/YAML parsing and config construction; `watcher/config/validation.py`
   owns validation and derives direct ATS support from the source registry. The
-  stage-four `watcher.config` facade retains current imports, while
-  `config/_legacy.py` remains compatibility-only until final cleanup.
+  final `watcher.config` facade explicitly re-exports the supported surface and
+  imports `env.py` first; config submodules use relative owner imports and no
+  transitional implementation module remains.
 - Production watchlists require nonblank `defaults.terms`. Company overrides
   may inherit but may not be empty.
 - GitHub feed URLs must be nonblank HTTP(S), credential-free, and distinct

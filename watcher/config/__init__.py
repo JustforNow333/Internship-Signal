@@ -1,16 +1,14 @@
-"""Stable watcher configuration facade.
+"""Stable public facade for watcher configuration.
 
-The package is in the fourth extraction stage: ``env.py`` owns dotenv and
-process-environment handling, ``models.py`` owns configuration dataclasses,
-``validation.py`` owns watchlist validation, ``loader.py`` owns watchlist
-loading, and ``_legacy.py`` retains compatibility imports until final facade
-cleanup. ``env.py`` is imported first so dotenv initialization precedes
-environment-derived model defaults.
+Environment handling lives in :mod:`.env`, dataclasses in :mod:`.models`,
+watchlist validation in :mod:`.validation`, and loading in :mod:`.loader`.
+Importing the environment layer first preserves the load-bearing dotenv and
+environment-derived default evaluation order.
 """
 
 from __future__ import annotations
 
-from watcher.config.env import (
+from .env import (
     DEFAULT_ANALYSIS_CACHE_FILENAME,
     DEFAULT_DOTENV_PATH,
     DEFAULT_SEEN_DB_PATH,
@@ -26,18 +24,7 @@ from watcher.config.env import (
     resolve_analysis_cache_path,
     workday_min_interval_seconds,
 )
-from watcher.config.validation import (
-    NON_DIRECT_ATS,
-    SUPPORTED_GITHUB_LISTING_FORMATS,
-    is_valid_hostname,
-    supported_ats,
-)
-from watcher.config.loader import (
-    DEFAULT_WATCHLIST_PATH,
-    _parse_watchlist_yaml,
-    load_watchlist,
-)
-from watcher.config.models import (
+from .models import (
     COLLECTION_MODE_CONCURRENT,
     COLLECTION_MODE_SERIAL,
     DEFAULT_ANALYSIS_CACHE_ENABLED,
@@ -60,6 +47,17 @@ from watcher.config.models import (
     CompanyCfg,
     GitHubListingSourceCfg,
     WatcherConfig,
+)
+from .validation import (
+    NON_DIRECT_ATS,
+    SUPPORTED_GITHUB_LISTING_FORMATS,
+    is_valid_hostname,
+    supported_ats,
+)
+from .loader import (
+    DEFAULT_WATCHLIST_PATH,
+    _parse_watchlist_yaml,
+    load_watchlist,
 )
 
 

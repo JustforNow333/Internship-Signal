@@ -23,8 +23,9 @@ This file tracks completed watcher steps and the next handoff target.
   initialization preceding defaults. Watchlist/YAML parsing and configuration
   construction now live in `watcher/config/loader.py`; pure watchlist and
   per-source rules now live in `watcher/config/validation.py`, with direct ATS
-  support still derived from the canonical source registry. `_legacy.py`
-  remains a compatibility-only bridge until final facade cleanup.
+  support still derived from the canonical source registry. The finalized
+  `watcher.config` facade imports environment handling first, explicitly
+  re-exports the supported API, and has no transitional `_legacy.py` shim.
 - `watcher/detect.py` and the generated priority `watcher/watchlist.yml` are in
   place.
 - `watcher/alumni.py` is built and real-data verified against the private

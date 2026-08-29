@@ -86,38 +86,52 @@ def test_validation_rules_are_not_duplicated_into_loader():
         assert message not in source
 
 
-def test_legacy_no_longer_defines_loader_owned_symbols_or_imports_loader():
-    tree = ast.parse(
-        (ROOT / "watcher" / "config" / "_legacy.py").read_text(encoding="utf-8")
-    )
-    defined = {
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.ClassDef))
-    }
-    moved = {
-        "load_watchlist",
-        "_build_company",
-        "_parse_watchlist_yaml",
-        "_split_key_value",
-        "_parse_value",
-        "_string_tuple",
-        "_aliases_tuple",
-        "_terms_tuple",
-        "_github_listing_urls",
-        "_github_listing_sources",
-        "_legacy_github_source",
-        "_github_source_sort_key",
-    }
-    imports = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imports.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imports.append(node.module)
+def test_transitional_config_module_is_removed_and_unreferenced():
+    transitional = "_" + "legacy"
+    assert not (ROOT / "watcher" / "config" / f"{transitional}.py").exists()
 
-    assert not defined & moved
-    assert "watcher.config.loader" not in imports
+    for path in (ROOT / "watcher" / "config").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imports.append(node.module)
+        assert f"watcher.config.{transitional}" not in imports, path
+
+
+def test_config_submodules_import_canonical_owners_without_the_facade():
+    expected_relative = {
+        "env.py": {"models"},
+        "models.py": {"env", "loader"},
+        "validation.py": {"env", "models"},
+        "loader.py": {"env", "models", "validation"},
+    }
+
+    for filename, expected in expected_relative.items():
+        tree = ast.parse(
+            (ROOT / "watcher" / "config" / filename).read_text(encoding="utf-8")
+        )
+        relative = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module
+        }
+        facade_imports = [
+            node
+            for node in ast.walk(tree)
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "watcher.config"
+            )
+            or (
+                isinstance(node, ast.Import)
+                and any(alias.name == "watcher.config" for alias in node.names)
+            )
+        ]
+        assert relative == expected, filename
+        assert facade_imports == [], filename
 
 
 def test_minimal_watchlist_preserves_defaults_and_model_types(tmp_path):
@@ -288,7 +302,6 @@ def test_real_watchlist_round_trips_through_current_dataclass_fields():
         "watcher.config",
         "watcher.config.loader",
         "watcher.config.validation",
-        "watcher.config._legacy",
         "watcher.config.models",
         "watcher.config.env",
         "watcher.sources.registry",

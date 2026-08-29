@@ -346,33 +346,6 @@ def test_facade_reexports_environment_objects_by_identity():
     assert all(getattr(config, name) is getattr(env, name) for name in names)
 
 
-def test_legacy_module_no_longer_defines_environment_owned_symbols():
-    tree = ast.parse(
-        (ROOT / "watcher" / "config" / "_legacy.py").read_text(encoding="utf-8")
-    )
-    defined = {
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.ClassDef))
-    }
-    environment_owned = {
-        "ConfigError",
-        "load_dotenv",
-        "_parse_env_assignment",
-        "_parse_env_value",
-        "_strip_comment",
-        "resolve_analysis_cache_path",
-        "analysis_cache_enabled",
-        "workday_min_interval_seconds",
-        "_collection_mode_value",
-        "_bounded_int",
-        "load_collection_concurrency",
-        "_env_or_default",
-    }
-
-    assert not defined & environment_owned
-
-
 def test_environment_module_has_no_high_level_dependencies():
     tree = ast.parse(
         (ROOT / "watcher" / "config" / "env.py").read_text(encoding="utf-8")
@@ -410,7 +383,6 @@ def test_environment_module_has_no_high_level_dependencies():
         "watcher.config.env",
         "watcher.config.models",
         "watcher.config.validation",
-        "watcher.config._legacy",
         "watcher.sources.registry",
         "watcher.sources.workday",
     ),

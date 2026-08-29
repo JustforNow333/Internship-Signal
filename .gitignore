@@ -266,6 +266,8 @@ config-loader-port*.log
 config-loader-port*.json
 config-validation-port*.log
 config-validation-port*.json
+config-facade-port*.log
+config-facade-port*.json
 # Prompt-maintained guidance, bug-audit, and branch-handoff scratch stay local.
 agents.local.md
 agents.*.md

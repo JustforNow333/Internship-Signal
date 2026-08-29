@@ -86,29 +86,9 @@ def _company(name: str, ats: str, fields: str = "") -> str:
     ),
 )
 def test_public_validation_symbols_are_direct_reexports(name):
-    from watcher.config import _legacy, validation
+    from watcher.config import validation
 
     assert getattr(config, name) is getattr(validation, name)
-    assert getattr(_legacy, name) is getattr(validation, name)
-
-
-def test_private_legacy_validation_seams_retain_identity():
-    from watcher.config import _legacy, validation
-
-    names = (
-        "_HOSTNAME_LABEL",
-        "_validate_github_source_uniqueness",
-        "_validate_icims_config",
-        "_validate_oracle_hcm_config",
-        "_validate_paylocity_config",
-        "_validate_successfactors_config",
-        "_validate_talentbrew_config",
-        "_validate_unique_company_names",
-        "_validated_feed_url",
-    )
-
-    assert config.ConfigError is _legacy.ConfigError
-    assert all(getattr(_legacy, name) is getattr(validation, name) for name in names)
 
 
 @pytest.mark.parametrize("ats", sorted(VALID_COMPANY_FIELDS))
@@ -331,26 +311,12 @@ def test_validation_stays_below_loader_and_registry_import_is_deferred():
     assert not [name for name in module_imports if name.startswith("watcher.sources")]
 
 
-def test_legacy_contains_only_compatibility_imports():
-    tree = ast.parse(
-        (ROOT / "watcher/config/_legacy.py").read_text(encoding="utf-8")
-    )
-    substantive = [
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    ]
-
-    assert substantive == []
-
-
 @pytest.mark.parametrize(
     "first",
     (
         "watcher.config",
         "watcher.config.loader",
         "watcher.config.validation",
-        "watcher.config._legacy",
         "watcher.config.models",
         "watcher.config.env",
         "watcher.sources.registry",
