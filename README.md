@@ -19,10 +19,9 @@ Requirements: Python 3.10+ and Node 18+.
 **1. Backend (FastAPI, port 8000)**
 
 ```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate   # optional but recommended
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python3 -m venv backend/.venv && source backend/.venv/bin/activate   # optional
+pip install -r backend/requirements.txt
+PYTHONPATH=.:backend uvicorn app.main:app --reload --port 8000
 ```
 
 **2. Frontend (Vite + React, port 5173)**
@@ -44,8 +43,8 @@ per-user watchlists, follow [backend/HOSTED_BACKEND.md](backend/HOSTED_BACKEND.m
 **Run the tests**
 
 ```bash
-cd backend && python3 -m pytest tests/ -q     # 86 passed
-cd frontend && npm test                        # 20 passed (vitest)
+PYTHONPATH=.:backend python3 -m pytest backend/tests -q   # 86 passed
+cd frontend && npm test                                  # 20 passed (vitest)
 ```
 
 Actual output from this machine:

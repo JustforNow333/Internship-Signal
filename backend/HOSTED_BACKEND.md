@@ -217,8 +217,8 @@ backend\venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 Start FastAPI:
 
 ```powershell
-Set-Location backend
-venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+$env:PYTHONPATH = ".;backend"
+backend\venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
 Run migrations and FastAPI from the same shell so the process environment

@@ -3,9 +3,10 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: split the current MVP source base into focused low-level
-  modules behind a behavior-preserving `watcher.sources.base` facade. Keep the
-  domain/config refactors out, make one isolated commit, and do not push.
+- Current task: move the shared canonical schema, identity normalizers, and
+  categorical eligibility codes into `internship_signal/domain` with legacy
+  re-exports. Preserve the source split, make one isolated commit, and do not
+  push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -83,6 +84,10 @@
 
 ## Scope and architecture
 
+- `internship_signal/domain/` owns dependency-light concepts shared by backend
+  and watcher: canonical job columns, identity normalizers, and categorical
+  eligibility reason codes. It imports neither application layer; legacy
+  backend owners re-export the same objects.
 - Change only the layer the user requested. Do not add adapters, scheduling, or
   workflow changes without explicit scope.
 - Keep CSV parsing/cleaning in `backend/app/ingest.py::process_csv`.
@@ -319,7 +324,7 @@ Backend and watcher:
 
 ```bash
 PYTHONPATH=.:backend backend/venv/Scripts/python.exe -m pytest backend/tests watcher/tests -q
-PYTHONPATH=.:backend python3 -m compileall -q backend watcher scripts
+PYTHONPATH=.:backend python3 -m compileall -q internship_signal backend watcher scripts
 ```
 
 WSL fallback for the Windows virtualenv:

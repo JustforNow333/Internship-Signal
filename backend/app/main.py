@@ -1,6 +1,7 @@
 """Internship Signal API.
 
-Run from backend/:  uvicorn app.main:app --reload --port 8000
+Run from the repository root with `PYTHONPATH=.:backend`:
+uvicorn app.main:app --reload --port 8000
 """
 
 import json

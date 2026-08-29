@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.app.normalize import CANONICAL_COLUMNS
+from internship_signal.domain.jobs import CANONICAL_COLUMNS
 
 
 def make_row(

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Mapping, Sequence, TextIO
 
 from backend.app.ingest import analyze_rows
-from backend.app.dedupe import norm_company, norm_title
+from internship_signal.domain.identity import norm_company, norm_title
 from watcher.company_matching import company_matching_key
 from watcher.audit_trace import (
     AuditQuery,
@@ -530,10 +530,10 @@ def _seen_record_matches(
         return False
     if query.url:
         from backend.app.dedupe import (
-            norm_url,
             posting_specific_url_key,
             stable_requisition_key,
         )
+        from internship_signal.domain.identity import norm_url
 
         query_requisition = stable_requisition_key({"source_url": query.url})
         stored_url = str(record.get("url") or "")

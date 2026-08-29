@@ -13,6 +13,9 @@ This file tracks completed watcher steps and the next handoff target.
 - Shared source contracts, diagnostics, transport, parsing, canonical-row, and
   sanitization helpers now have focused modules; `sources/base.py` remains a
   compatibility facade with unchanged adapter behavior and import identities.
+- Canonical job columns, shared company/title/URL normalizers, and categorical
+  eligibility reason codes now have a neutral `internship_signal/domain` owner;
+  backend compatibility imports retain identical values and object identity.
 - `watcher/detect.py` and the generated priority `watcher/watchlist.yml` are in
   place.
 - `watcher/alumni.py` is built and real-data verified against the private

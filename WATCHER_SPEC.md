@@ -15,8 +15,8 @@ modify the scoring/classification logic or break any existing test.
 
 The existing pipeline in `backend/app/ingest.py::process_csv` does **everything
 after rows exist** — dedupe, salary parse, classify, flag, score, summarize.
-A "row" is just a dict whose keys are `CANONICAL_COLUMNS` (defined in
-`normalize.py`):
+A "row" is just a dict whose keys are `CANONICAL_COLUMNS` (owned by
+`internship_signal/domain/jobs.py` and re-exported by `normalize.py`):
 
 ```python
 CANONICAL_COLUMNS = [

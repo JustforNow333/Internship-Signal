@@ -11,7 +11,7 @@ from html import unescape
 from typing import Iterable
 from urllib.parse import urlsplit
 
-from backend.app.dedupe import norm_url
+from internship_signal.domain.identity import norm_url
 from watcher.company_matching import company_matches
 from watcher.config import CompanyCfg
 from watcher.season_terms import terms_match

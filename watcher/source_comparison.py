@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Mapping, Sequence, TextIO
 
-from backend.app.dedupe import norm_company
+from internship_signal.domain.identity import norm_company
 from watcher.audit_trace import (
     AuditQuery,
     PostingAuditOutcome,

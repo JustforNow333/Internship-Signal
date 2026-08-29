@@ -9,11 +9,9 @@ frontend can show an honest cleaning report.
 import re
 from datetime import date, datetime
 
-CANONICAL_COLUMNS = [
-    "company", "title", "location", "compensation", "description",
-    "requirements", "source_url", "date_posted", "deadline",
-    "remote_status", "internship_type",
-]
+# Re-exported for existing callers; the canonical job schema is owned by the
+# neutral domain package that both the backend and watcher depend on.
+from internship_signal.domain.jobs import CANONICAL_COLUMNS
 
 ALIASES = {
     "company": {"company", "company name", "employer", "org", "organization", "firm", "hiring company"},

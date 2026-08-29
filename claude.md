@@ -1,9 +1,10 @@
 # Claude Repository Guide
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: split the current MVP source base into focused low-level
-  modules behind a behavior-preserving `watcher.sources.base` facade. Keep the
-  domain/config refactors out, make one isolated commit, and do not push.
+- Current task: move the shared canonical schema, identity normalizers, and
+  categorical eligibility codes into `internship_signal/domain` with legacy
+  re-exports. Preserve the source split, make one isolated commit, and do not
+  push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -45,6 +46,10 @@
 - Read `agents.md` before repository work. Before watcher work, also read
   `WATCHER_SPEC.md` in full; use `WATCHER_PROGRESS.md` only for current status.
 - Change only the requested layer and preserve unrelated work.
+- `internship_signal/domain/` is the dependency-light shared owner for
+  canonical job columns, identity normalizers, and categorical eligibility
+  reason codes. It imports neither backend nor watcher; backend compatibility
+  paths re-export the same objects.
 - Route JSON endpoints through `_json_object`; malformed or excessively nested
   JSON and invalid request shapes are HTTP 400, never internal errors.
 - Keep CSV cleanup in `process_csv`; use `analyze_rows` for canonical rows.

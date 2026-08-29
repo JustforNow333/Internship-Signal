@@ -11,7 +11,7 @@ from datetime import timezone
 from typing import Iterable
 from typing import Mapping, Sequence
 
-from backend.app.dedupe import norm_company
+from internship_signal.domain.identity import norm_company
 from watcher.config import CompanyCfg
 from watcher.health.models import (
     COVERAGE_BACKSTOP_ONLY,

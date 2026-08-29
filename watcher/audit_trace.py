@@ -16,13 +16,11 @@ from urllib.parse import urlsplit, urlunsplit
 from backend.app.dedupe import (
     fallback_posting_key,
     non_specific_posting_urls,
-    norm_company,
-    norm_title,
-    norm_url,
     posting_identity_key,
     posting_specific_url_key,
     stable_requisition_key,
 )
+from internship_signal.domain.identity import norm_company, norm_title, norm_url
 from watcher.company_matching import (
     company_matching_key,
     match_watchlist_company,
