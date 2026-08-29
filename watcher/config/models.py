@@ -3,7 +3,7 @@
 This module owns only the four configuration dataclasses and the constants
 intrinsic to their fields. Environment parsing, dotenv handling, and coercion
 helpers live in ``env.py``; YAML loading lives in ``loader.py`` and watchlist
-validation remains in ``_legacy.py``.
+validation lives in ``validation.py``.
 
 ``DEFAULT_SEEN_DB_PATH`` is environment-derived and owned by ``env.py``, which
 guarantees that dotenv initialization runs before the field default is read.

@@ -35,29 +35,39 @@ def test_facade_reexports_loader_objects_by_identity():
     assert config._parse_watchlist_yaml is loader._parse_watchlist_yaml
 
 
-def test_loader_reuses_transitional_validation_objects():
-    from watcher.config import _legacy, loader
+def test_loader_reuses_validation_owner_objects():
+    from watcher.config import loader, validation
 
     names = (
-        "SUPPORTED_GITHUB_LISTING_FORMATS",
+        "_validate_aliases",
+        "_validate_company_entry",
+        "_validate_company_identity",
+        "_validate_default_terms_present",
         "_validate_github_source_uniqueness",
+        "_validate_github_listing_sources_value",
         "_validate_icims_config",
         "_validate_oracle_hcm_config",
         "_validate_paylocity_config",
         "_validate_successfactors_config",
         "_validate_talentbrew_config",
+        "_validate_terms_tuple",
+        "_validate_token_config",
         "_validate_unique_company_names",
-        "_validated_feed_url",
-        "supported_ats",
+        "_validate_watchlist_sections",
+        "_validate_workday_config",
+        "_validated_github_listing_urls",
+        "_validated_github_source_fields",
+        "_validated_min_score",
     )
 
-    assert all(getattr(loader, name) is getattr(_legacy, name) for name in names)
+    assert all(getattr(loader, name) is getattr(validation, name) for name in names)
 
 
 def test_validation_rules_are_not_duplicated_into_loader():
-    tree = ast.parse(
-        (ROOT / "watcher" / "config" / "loader.py").read_text(encoding="utf-8")
+    source = (ROOT / "watcher" / "config" / "loader.py").read_text(
+        encoding="utf-8"
     )
+    tree = ast.parse(source)
     defined = {
         node.name
         for node in tree.body
@@ -67,6 +77,13 @@ def test_validation_rules_are_not_duplicated_into_loader():
     assert not [name for name in defined if name.startswith("_validate")]
     assert "is_valid_hostname" not in defined
     assert "supported_ats" not in defined
+    for message in (
+        "entries require token",
+        "defaults.min_score must be",
+        "aliases may not contain",
+        "duplicate feed identities",
+    ):
+        assert message not in source
 
 
 def test_legacy_no_longer_defines_loader_owned_symbols_or_imports_loader():
@@ -270,6 +287,7 @@ def test_real_watchlist_round_trips_through_current_dataclass_fields():
     (
         "watcher.config",
         "watcher.config.loader",
+        "watcher.config.validation",
         "watcher.config._legacy",
         "watcher.config.models",
         "watcher.config.env",

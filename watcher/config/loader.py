@@ -4,20 +4,18 @@ This module owns locating and reading the watchlist, the small hand-written
 YAML subset parser, and construction of ``CompanyCfg``,
 ``GitHubListingSourceCfg``, and ``WatcherConfig`` from parsed values.
 
-Validation is deliberately not extracted yet. Per-ATS rules, hostname and feed
-URL checks, uniqueness checks, and accepted-value vocabularies remain in
-``_legacy.py`` and are called through a temporary one-way dependency.
+Validation is deliberately separate. Per-ATS rules, hostname and feed URL
+checks, uniqueness checks, and accepted-value vocabularies live in
+``validation.py``; this module only parses and constructs configuration.
 """
 
 from __future__ import annotations
 
 import ast
 import hashlib
-import re
 from pathlib import Path
 from typing import Sequence
 
-from watcher.company_matching import company_matching_key
 from watcher.config.env import (
     DEFAULT_SEEN_DB_PATH,
     WATCHER_DIR,
@@ -28,7 +26,6 @@ from watcher.config.env import (
     resolve_analysis_cache_path,
 )
 from watcher.config.models import (
-    SUPPORTED_WORKDAY_DETAIL_POLICIES,
     WORKDAY_DETAIL_INTERNSHIP,
     WORKDAY_DETAIL_NONE,
     CompanyCfg,
@@ -36,18 +33,26 @@ from watcher.config.models import (
     WatcherConfig,
 )
 
-# Validation remains in the transitional module until stage four.
-from watcher.config._legacy import (
-    SUPPORTED_GITHUB_LISTING_FORMATS,
+from watcher.config.validation import (
+    _validate_aliases,
+    _validate_company_entry,
+    _validate_company_identity,
+    _validate_default_terms_present,
     _validate_github_source_uniqueness,
+    _validate_github_listing_sources_value,
     _validate_icims_config,
     _validate_oracle_hcm_config,
     _validate_paylocity_config,
     _validate_successfactors_config,
     _validate_talentbrew_config,
+    _validate_terms_tuple,
+    _validate_token_config,
     _validate_unique_company_names,
-    _validated_feed_url,
-    supported_ats,
+    _validate_watchlist_sections,
+    _validate_workday_config,
+    _validated_github_listing_urls,
+    _validated_github_source_fields,
+    _validated_min_score,
 )
 
 
@@ -69,13 +74,9 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
     data = _parse_watchlist_yaml(path.read_text(encoding="utf-8"))
     defaults = data.get("defaults", {})
     companies_data = data.get("companies", [])
-    if not isinstance(defaults, dict):
-        raise ConfigError("watchlist defaults must be a mapping")
-    if not isinstance(companies_data, list) or not companies_data:
-        raise ConfigError("watchlist must define at least one company")
+    _validate_watchlist_sections(defaults, companies_data)
 
-    if "terms" not in defaults:
-        raise ConfigError("watchlist defaults.terms must explicitly define at least one nonblank term")
+    _validate_default_terms_present(defaults)
     terms = _terms_tuple(defaults["terms"], "defaults.terms")
     github_listing_sources = _github_listing_sources(defaults.get("github_listing_sources", ()))
     github_listing_urls = _github_listing_urls(defaults.get("github_listing_urls", ()))
@@ -83,11 +84,7 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
         (*github_listing_sources, *(_legacy_github_source(url) for url in github_listing_urls))
     )
     target_roles = frozenset(_string_tuple(defaults.get("target_roles", ("swe",))))
-    min_score = defaults.get("min_score")
-    if min_score in ("", None):
-        min_score = None
-    elif not isinstance(min_score, int):
-        raise ConfigError("defaults.min_score must be an integer when set")
+    min_score = _validated_min_score(defaults.get("min_score"))
 
     companies = tuple(_build_company(entry, terms) for entry in companies_data)
     _validate_unique_company_names(companies)
@@ -106,17 +103,12 @@ def load_watchlist(path: str | Path = DEFAULT_WATCHLIST_PATH) -> WatcherConfig:
 
 
 def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
-    if not isinstance(entry, dict):
-        raise ConfigError("each company entry must be a mapping")
+    _validate_company_entry(entry)
     name = str(entry.get("name") or "").strip()
     ats = str(entry.get("ats") or "").strip()
     token = str(entry.get("token") or "").strip()
-    if not name:
-        raise ConfigError("company entry missing name")
-    if ats not in supported_ats():
-        raise ConfigError(f"{name}: unsupported ats '{ats}'")
-    if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "workable"} and not token:
-        raise ConfigError(f"{name}: {ats} entries require token")
+    _validate_company_identity(name, ats)
+    _validate_token_config(name, ats, token)
     workday_site = str(entry.get("workday_site") or "").strip()
     workday_shard = str(entry.get("workday_shard") or "").strip()
     if "workday_detail_policy" in entry:
@@ -131,18 +123,14 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         )
     else:
         workday_detail_policy = WORKDAY_DETAIL_INTERNSHIP
-    if ats == "workday":
-        if not token:
-            raise ConfigError(f"{name}: workday entries require token")
-        if not workday_shard:
-            raise ConfigError(f"{name}: workday entries require workday_shard")
-        if not workday_site:
-            raise ConfigError(f"{name}: workday entries require workday_site")
-        if workday_detail_policy not in SUPPORTED_WORKDAY_DETAIL_POLICIES:
-            supported = ", ".join(sorted(SUPPORTED_WORKDAY_DETAIL_POLICIES))
-            raise ConfigError(
-                f"{name}: workday_detail_policy must be one of: {supported}"
-            )
+    _validate_workday_config(
+        name,
+        ats=ats,
+        token=token,
+        shard=workday_shard,
+        site=workday_site,
+        detail_policy=workday_detail_policy,
+    )
     oracle_hcm_host = str(entry.get("oracle_hcm_host") or "").strip().casefold()
     oracle_hcm_site = str(entry.get("oracle_hcm_site") or "").strip()
     source_url = str(entry.get("source_url") or "").strip()
@@ -381,29 +369,14 @@ def _aliases_tuple(value: object, company_name: str) -> tuple[str, ...]:
         values = tuple(value)
     else:
         values = (value,)
-    aliases: list[str] = []
-    normalized: dict[str, str] = {}
-    for raw_alias in values:
-        alias = str(raw_alias).strip()
-        if not alias:
-            raise ConfigError(f"{company_name}: aliases may not contain blank values")
-        key = company_matching_key(alias)
-        if not key:
-            raise ConfigError(f"{company_name}: alias {alias!r} normalizes to blank")
-        previous = normalized.get(key)
-        if previous is not None:
-            raise ConfigError(
-                f"{company_name}: aliases {previous!r} and {alias!r} normalize to the same value"
-            )
-        normalized[key] = alias
-        aliases.append(alias)
-    return tuple(aliases)
+    aliases = tuple(str(raw_alias).strip() for raw_alias in values)
+    _validate_aliases(aliases, company_name)
+    return aliases
 
 
 def _terms_tuple(value, label: str) -> tuple[str, ...]:
     terms = _string_tuple(value)
-    if not terms:
-        raise ConfigError(f"{label} must define at least one nonblank term")
+    _validate_terms_tuple(terms, label)
     return terms
 
 
@@ -417,47 +390,20 @@ def _github_listing_urls(value) -> tuple[str, ...]:
     else:
         values = (value,)
 
-    urls: list[str] = []
-    identities: dict[tuple[str, str, int | None, str], str] = {}
-    for raw_url in values:
-        url, identity = _validated_feed_url(raw_url, "defaults.github_listing_urls")
-        previous = identities.get(identity)
-        if previous is not None and previous != url:
-            raise ConfigError(
-                "defaults.github_listing_urls contains duplicate feed identities that differ only by query or fragment"
-            )
-        identities[identity] = url
-        if url not in urls:
-            urls.append(url)
-    return tuple(urls)
+    return _validated_github_listing_urls(values)
 
 
 def _github_listing_sources(value) -> tuple[GitHubListingSourceCfg, ...]:
     if value in (None, ""):
         return ()
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise ConfigError("defaults.github_listing_sources must be a list of mappings")
+    _validate_github_listing_sources_value(value)
 
     sources = []
     for index, entry in enumerate(value, start=1):
-        label = f"defaults.github_listing_sources[{index}]"
-        if not isinstance(entry, dict):
-            raise ConfigError(f"{label} must be a mapping")
-        name = str(entry.get("name") or "").strip()
-        source_format = str(entry.get("format") or "").strip()
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
-            raise ConfigError(
-                f"{label}.name must use only letters, digits, periods, underscores, or hyphens"
-            )
-        if source_format not in SUPPORTED_GITHUB_LISTING_FORMATS:
-            raise ConfigError(
-                f"{label}.format must be one of: "
-                + ", ".join(sorted(SUPPORTED_GITHUB_LISTING_FORMATS))
-            )
-        url, _identity = _validated_feed_url(entry.get("url"), f"{label}.url")
-        default_term = str(entry.get("default_term") or "").strip()
-        if source_format == "github_markdown_table" and not default_term:
-            raise ConfigError(f"{label}.default_term is required for github_markdown_table")
+        name, source_format, url, default_term = _validated_github_source_fields(
+            entry,
+            index,
+        )
         sources.append(
             GitHubListingSourceCfg(
                 name=name,

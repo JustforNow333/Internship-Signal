@@ -1,10 +1,10 @@
 # Claude Repository Guide
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: extract watchlist/YAML loading and config construction into
-  `watcher/config/loader.py`, move the current MVP implementation intact,
-  retain the `watcher.config` facade, leave validation in the stage-three
-  transitional module, and do not push.
+- Current task: extract configuration validation into
+  `watcher/config/validation.py`, move the current MVP rules intact, keep the
+  source registry authoritative, retain `_legacy.py` compatibility imports and
+  the `watcher.config` facade, and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -54,8 +54,9 @@
   intrinsic constants. `watcher/config/env.py` owns dotenv and environment
   settings and runs dotenv initialization before environment-derived defaults.
   `watcher/config/loader.py` owns watchlist/YAML parsing and config construction.
-  `watcher.config` remains the public facade; validation stays in
-  `config/_legacy.py` until the next stage.
+  `watcher/config/validation.py` owns validation and derives direct ATS support
+  from the source registry. `watcher.config` remains the public facade;
+  `_legacy.py` is compatibility-only until final cleanup.
 - Route JSON endpoints through `_json_object`; malformed or excessively nested
   JSON and invalid request shapes are HTTP 400, never internal errors.
 - Keep CSV cleanup in `process_csv`; use `analyze_rows` for canonical rows.

@@ -153,7 +153,7 @@ def test_github_source_and_watcher_config_methods_are_unchanged():
 
 
 def test_collection_concurrency_behavior_and_config_error_identity_are_unchanged():
-    from watcher.config import _legacy, env, models
+    from watcher.config import _legacy, env, models, validation
 
     settings = config.CollectionConcurrencyCfg(
         mode="  CONCURRENT  ", max_workers="8", workday_max_concurrency="2"
@@ -168,6 +168,8 @@ def test_collection_concurrency_behavior_and_config_error_identity_are_unchanged
     assert settings.concurrent is True
     assert config.ConfigError is _legacy.ConfigError
     assert config.ConfigError is env.ConfigError
+    assert config.supported_ats is validation.supported_ats
+    assert config.is_valid_hostname is validation.is_valid_hostname
     assert models.CollectionConcurrencyCfg is config.CollectionConcurrencyCfg
     with pytest.raises(config.ConfigError, match="WATCHER_COLLECTION_MODE"):
         config.CollectionConcurrencyCfg(mode="parallel")
@@ -290,6 +292,7 @@ def test_config_low_level_modules_have_no_high_level_dependencies():
         "watcher.config.env",
         "watcher.config.models",
         "watcher.config.loader",
+        "watcher.config.validation",
         "watcher.config._legacy",
         "watcher.sources.registry",
         "watcher.sources.greenhouse",

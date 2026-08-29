@@ -21,8 +21,10 @@ This file tracks completed watcher steps and the next handoff target.
   compatibility facade. Dotenv loading, environment-derived settings, and
   coercion helpers now live in low-level `watcher/config/env.py`, with dotenv
   initialization preceding defaults. Watchlist/YAML parsing and configuration
-  construction now live in `watcher/config/loader.py`; validation remains in
-  the transitional `_legacy.py` owner for the next extraction stage.
+  construction now live in `watcher/config/loader.py`; pure watchlist and
+  per-source rules now live in `watcher/config/validation.py`, with direct ATS
+  support still derived from the canonical source registry. `_legacy.py`
+  remains a compatibility-only bridge until final facade cleanup.
 - `watcher/detect.py` and the generated priority `watcher/watchlist.yml` are in
   place.
 - `watcher/alumni.py` is built and real-data verified against the private

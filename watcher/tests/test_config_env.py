@@ -409,6 +409,7 @@ def test_environment_module_has_no_high_level_dependencies():
         "watcher.config",
         "watcher.config.env",
         "watcher.config.models",
+        "watcher.config.validation",
         "watcher.config._legacy",
         "watcher.sources.registry",
         "watcher.sources.workday",

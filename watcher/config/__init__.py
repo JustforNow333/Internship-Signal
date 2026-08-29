@@ -1,9 +1,10 @@
 """Stable watcher configuration facade.
 
-The package is in the third extraction stage: ``env.py`` owns dotenv and
+The package is in the fourth extraction stage: ``env.py`` owns dotenv and
 process-environment handling, ``models.py`` owns configuration dataclasses,
-``loader.py`` owns watchlist loading, and ``_legacy.py`` retains validation.
-``env.py`` is imported first so dotenv initialization precedes
+``validation.py`` owns watchlist validation, ``loader.py`` owns watchlist
+loading, and ``_legacy.py`` retains compatibility imports until final facade
+cleanup. ``env.py`` is imported first so dotenv initialization precedes
 environment-derived model defaults.
 """
 
@@ -25,7 +26,7 @@ from watcher.config.env import (
     resolve_analysis_cache_path,
     workday_min_interval_seconds,
 )
-from watcher.config._legacy import (
+from watcher.config.validation import (
     NON_DIRECT_ATS,
     SUPPORTED_GITHUB_LISTING_FORMATS,
     is_valid_hostname,
