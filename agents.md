@@ -3,10 +3,10 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: finalize the `watcher.config` public facade over `env.py`,
-  `models.py`, `validation.py`, and `loader.py`. Preserve env-first evaluation
-  and every current export identity, remove the unused transitional shim, make
-  one isolated commit, and do not push.
+- Current task: make the `watcher.sources` package facade resolve its unchanged
+  public exports lazily. Preserve canonical object identity, explicit support
+  submodule imports, source behavior, and the existing low-level ownership
+  boundaries; make one isolated commit and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -138,8 +138,10 @@
   values from `DIRECT_ATS`; `bespoke` and `github_only` remain non-direct.
 - Shared source ownership is split across `contracts.py`, `diagnostics.py`,
   `transport.py`, `parsing.py`, `rows.py`, and `sanitize.py`; `base.py` is the
-  compatibility facade and `retry.py` owns bounded retry mechanics.
-  Workday's registry entry alone requests the shared pacer.
+  compatibility facade and `retry.py` owns bounded retry mechanics. The
+  `watcher.sources` package facade resolves and caches its documented exports
+  lazily, so low-level and individual-adapter imports do not load unrelated
+  adapters. Workday's registry entry alone requests the shared pacer.
 - Adapters live in `watcher/sources/`, return canonical rows, and set
   `extra.source` plus `extra.source_adapter`. GitHub rows also keep safe
   `extra.feed_url`.

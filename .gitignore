@@ -256,6 +256,8 @@ source-health-port*.log
 source-health-port*.json
 source-layer-port*.log
 source-layer-port*.json
+source-package-port*.log
+source-package-port*.json
 domain-layer-port*.log
 domain-layer-port*.json
 config-model-port*.log

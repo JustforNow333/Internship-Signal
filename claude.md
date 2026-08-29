@@ -1,9 +1,9 @@
 # Claude Repository Guide
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: finalize the `watcher.config` public facade over its four
-  focused modules, preserve env-first evaluation and every current export
-  identity, remove the unused transitional shim, and do not push.
+- Current task: lazily resolve the unchanged `watcher.sources` public facade,
+  preserving canonical identity, explicit support-submodule imports, adapter
+  behavior, and low-level source boundaries; make one commit and do not push.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
   of scope on this branch.
@@ -67,7 +67,9 @@
   runtime construction, and hosted direct coverage derive from `DIRECT_ATS`.
 - Shared source ownership belongs in `contracts.py`, `diagnostics.py`,
   `transport.py`, `parsing.py`, `rows.py`, `sanitize.py`, and `retry.py`;
-  `sources/base.py` remains the compatibility facade.
+  `sources/base.py` remains the compatibility facade. The `watcher.sources`
+  package facade lazily resolves and caches documented exports, keeping
+  low-level and individual-adapter imports isolated from unrelated adapters.
 - Student-status exclusions require clear mandatory evidence and use stable
   `phd_only`, `graduate_only`, `freshman_only`, or
   `returning_intern_only` reasons. Mixed, preferred, incidental, or ambiguous

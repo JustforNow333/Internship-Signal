@@ -13,6 +13,9 @@ This file tracks completed watcher steps and the next handoff target.
 - Shared source contracts, diagnostics, transport, parsing, canonical-row, and
   sanitization helpers now have focused modules; `sources/base.py` remains a
   compatibility facade with unchanged adapter behavior and import identities.
+  The `watcher.sources` package facade now lazily resolves and caches the same
+  documented exports, so importing the package, a low-level module, or one
+  adapter does not load unrelated adapters.
 - Canonical job columns, shared company/title/URL normalizers, and categorical
   eligibility reason codes now have a neutral `internship_signal/domain` owner;
   backend compatibility imports retain identical values and object identity.
