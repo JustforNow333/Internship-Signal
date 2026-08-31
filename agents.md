@@ -3,14 +3,15 @@
 ## Current integration
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: port the narrow direct-record parsing abstraction into the
-  current split source layer. Share only identical parsing/diagnostic lifecycle
-  across the seven intended adapters, preserve every provider-specific
-  behavior, make one isolated commit, and do not push.
+- Current product work measures current source coverage and expands it through
+  evidence-backed, isolated source changes. The coverage audit is read-only.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
-- Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
-  of scope on this branch.
-- Shared watcher and core fixes must arrive as reviewed, isolated commits.
+- The required shared correctness and architecture migration from
+  `internal-tool` is complete. Evaluate future internal commits individually;
+  they are not a migration queue.
+- Internal-only personal/alumni behavior, shadow tracking, and scheduling or
+  workflow changes remain excluded from this branch.
+- Applicable shared fixes must still arrive as reviewed, isolated commits.
 
 ## Hosted per-user matching (Phase 2B)
 
@@ -155,8 +156,10 @@ the module that owns and uses a binding, not its re-export in `run.py`.
 ### Health subsystem and text safety
 
 In `watcher/health/`, `models.py` owns records/constants, `sanitize.py` total
-health sanitizers, `state.py` keys/transitions, `coverage.py` coverage,
-`store.py` persistence, `policy.py` alert policy, `rendering.py` message text,
+health sanitizers, `state.py` keys/transitions, `coverage.py` per-run and
+read-only product coverage classification, `store.py` persistence and
+read-only health snapshots, `policy.py` alert policy, and `rendering.py`
+message text,
 `service.py` alert/delivery orchestration and SMTP, and `report.py` health
 artifacts, workflow output, heartbeat, and CLI reporting.
 `watcher/source_health.py` and `watcher/health_alerts.py` are compatibility
@@ -380,9 +383,11 @@ into a general utility module.
 - Digest policy: no default score gate; exclude ineligible jobs; sort by fit,
   generic score, role priority, company, and title; send nothing for zero new
   matches.
-- `watcher.audit` is read-only: state-only mode makes no requests, live mode
-  reuses normal collection/analysis with email and priming disabled, and
-  neither mode may mutate `seen` or health history.
+- `watcher.audit` is read-only: state-only and coverage modes make no requests,
+  live mode reuses normal collection/analysis with email and priming disabled,
+  and no mode may mutate `seen` or health history. Coverage trusts only
+  persisted successful direct health; global GitHub health is not
+  company-level listing evidence.
 - Source comparison computes lightweight outcomes/counts for every job, then
   selects details before building and sanitizing rich traces. The report owns
   deterministic eligible/anomaly/non-routine/routine-sample retention; the

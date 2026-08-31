@@ -691,6 +691,21 @@ identity, deduplication and its exact merge tier, season, internship/open and
 U.S. status, role confidence/evidence, watcher eligibility, scoring, historical
 notification state, and one stable final reason. `--json` emits stable JSON.
 
+The product coverage mode reads only the current watchlist and an in-memory
+snapshot of persisted source health:
+
+```bash
+PYTHONPATH=.:backend python3 -m watcher.audit --coverage
+PYTHONPATH=.:backend python3 -m watcher.audit --coverage --json watcher-coverage-audit.json
+```
+
+It distinguishes verified healthy direct sources, degraded or failing direct
+sources, configured direct sources without trustworthy evidence, intentional
+backstop-only coverage, and companies needing source investigation. A missing
+state database is reported without creating one. Configured ATS metadata alone
+does not establish verified coverage, and global GitHub feed health is not
+treated as evidence for a particular company.
+
 The same command exposes the bounded source comparison:
 
 ```bash

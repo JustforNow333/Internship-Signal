@@ -37,13 +37,27 @@ from watcher.health.sanitize import (
 from watcher.health.state import calculate_next_state, normalize_attempt, transition_for
 
 class SourceHealthStore:
-    """Persist health attempts and current state in the watcher's SQLite file."""
+    """Persist health state or open an isolated read-only snapshot of it."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, read_only: bool = False):
         self.path = Path(path)
-        if self.path.parent:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
+        self.read_only = read_only
+        self.source_database_present = self.path.is_file()
+        if read_only:
+            self._conn = sqlite3.connect(":memory:")
+            if self.source_database_present:
+                source = sqlite3.connect(
+                    f"{self.path.resolve().as_uri()}?mode=ro",
+                    uri=True,
+                )
+                try:
+                    source.backup(self._conn)
+                finally:
+                    source.close()
+        else:
+            if self.path.parent:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(self.path)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
 
@@ -73,6 +87,8 @@ class SourceHealthStore:
         self,
         attempts: Iterable[SourceAttempt],
     ) -> tuple[dict[str, SourceHealthState], tuple[HealthTransition, ...]]:
+        if self.read_only:
+            raise RuntimeError("source-health store is read-only")
         normalized = tuple(normalize_attempt(attempt) for attempt in attempts)
         states: dict[str, SourceHealthState] = {}
         transitions: list[HealthTransition] = []

@@ -32,6 +32,8 @@ from watcher.config import (
     load_watchlist,
     resolve_analysis_cache_path,
 )
+from watcher.health.coverage import build_coverage_audit, render_coverage_audit
+from watcher.health.store import SourceHealthStore
 from watcher.seen_store import SeenStore
 from watcher.source_comparison import (
     SourceComparisonReport,
@@ -359,11 +361,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Render the current source-comparison report instead of posting traces.",
     )
+    parser.add_argument(
+        "--coverage",
+        action="store_true",
+        help=(
+            "Report configured product source coverage from persisted health "
+            "without collection or state changes."
+        ),
+    )
     parser.add_argument("--comparison-json", help="Write comparison JSON.")
     parser.add_argument("--comparison-markdown", help="Write comparison Markdown.")
     args = parser.parse_args(argv)
     if args.limit < 1 or args.limit > 1000:
         parser.error("--limit must be between 1 and 1000")
+    if args.coverage and args.live:
+        parser.error("--coverage is read-only and cannot be used with --live")
+    if args.coverage and args.comparison:
+        parser.error("--coverage cannot be combined with --comparison")
 
     query = AuditQuery(
         company=args.company,
@@ -373,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
         job_id=args.job_id,
         identity=args.identity,
     )
-    if not args.comparison and not any(query.as_dict().values()):
+    if not args.comparison and not args.coverage and not any(query.as_dict().values()):
         parser.error(
             "provide at least one posting query or use --comparison"
         )
@@ -386,6 +400,31 @@ def main(argv: list[str] | None = None) -> int:
             seen_db_path=seen_db_path,
             analysis_cache_path=resolve_analysis_cache_path(seen_db_path),
         )
+
+    if args.coverage:
+        with SourceHealthStore(config.seen_db_path, read_only=True) as health_store:
+            coverage_report = build_coverage_audit(
+                config,
+                health_store.all_current_states(),
+                state_database_present=health_store.source_database_present,
+            )
+        payload = coverage_report.as_dict()
+        if args.json == "-":
+            print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
+        else:
+            render_coverage_audit(coverage_report)
+            if args.json:
+                Path(args.json).write_text(
+                    json.dumps(
+                        payload,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+        return 0
 
     report: SourceComparisonReport | None = None
     with SeenStore(config.seen_db_path, read_only=True) as seen_store:

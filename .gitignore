@@ -159,6 +159,8 @@ _scratch*.py
 eligibility-demo*.json
 # Read-only audit/comparison exports may contain operational posting metadata.
 watcher-audit*.json
+watcher-coverage-audit*.json
+watcher/coverage-audit*.json
 watcher-source-comparison*.json
 source-comparison*.json
 watcher/source-comparison-redesign*.json

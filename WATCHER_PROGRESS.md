@@ -7,6 +7,15 @@ This file tracks completed watcher steps and the next handoff target.
 
 ## Current Status
 
+- The required shared correctness and architecture migration from
+  `internal-tool` is complete. Future internal commits are evaluated
+  individually rather than treated as a porting queue; internal-only
+  personal/alumni, shadow-tracking, and scheduling behavior remain excluded.
+  Current product work measures and expands source coverage.
+- `python -m watcher.audit --coverage` now reports deterministic product-native
+  coverage from the canonical registry, current watchlist, and a read-only
+  persisted-health snapshot. It makes no requests or state changes and does not
+  create a missing SQLite database.
 - Backend `analyze_rows(rows, today=None)` seam is built and reused by watcher.
 - Watcher source layer is built: Greenhouse, Lever, Ashby, SmartRecruiters,
   Workable, Workday, and SimplifyJobs GitHub listings.
@@ -1049,8 +1058,30 @@ This file tracks completed watcher steps and the next handoff target.
      byte-identical, and the disposable database and task-started service were
      cleaned up.
 
+45. Product-native source coverage audit (2026-08-30):
+   - The required shared correctness/architecture migration is closed. Future
+     internal changes are evaluated individually; product work now measures
+     and expands source coverage without importing personal-only metadata.
+   - `python -m watcher.audit --coverage` classifies current companies from the
+     canonical direct registry, watchlist, and a read-only in-memory health
+     snapshot. Missing databases stay absent, global feed health is not
+     company evidence, and stable JSON is available through `--json`.
+   - A disposable copy of the fetched production `watcher-data` state reported
+     129 companies: 88 verified direct, 1 degraded direct, 0 direct without
+     evidence, 40 intentional backstop-only, and 0 needing investigation.
+     Pfizer/Workday was the degraded source: 519 rows were retained, with
+     `schema_invalid_records_skipped` and an incomplete attempt. The copied
+     database SHA-256 was identical before and after the audit.
+   - Focused health/config/registry/audit/architecture/hosted-catalog tests
+     passed (`778 passed`). Full backend/watcher validation passed (`2372
+     passed, 100 skipped, 1 existing warning`), as did compileall and
+     `git diff --check`.
+
 ## Next
 
+- Use the product coverage report to prioritize degraded direct integrations,
+  then unverified direct configurations, then reusable ATS families, leaving
+  one-off bespoke work last.
 - Keep the labeled `scoring_us_rolefit_20260726` inputs frozen; use report-only
   reevaluation for separately scoped production changes.
 - Commit the independent holdout tooling, then collect the holdout only from

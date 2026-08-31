@@ -1,13 +1,14 @@
 # Claude Repository Guide
 
 - `product-mvp` is the hosted multi-user product branch.
-- Current task: port the narrow direct-record parsing abstraction for only the
-  seven adapters with matching semantics, preserve provider behavior and lazy
-  source boundaries, make one isolated commit, and do not push.
+- Current product work measures source coverage and expands it through
+  evidence-backed, isolated source changes; the coverage audit is read-only.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
-- Personal scoring, alumni-specific behavior, and internal-only workflow changes are out
-  of scope on this branch.
-- Shared watcher and core fixes must arrive as reviewed, isolated commits.
+- The required shared correctness/architecture migration from `internal-tool`
+  is complete. Future internal commits are evaluated individually, not queued
+  for migration. Internal-only personal/alumni behavior, shadow tracking, and
+  scheduling or workflow changes remain excluded.
+- Applicable shared fixes must still arrive as reviewed, isolated commits.
 - `hosted_user_job_matches` holds one durable row per `(user_id, job_id)`.
   Reconciliation never deletes history: losing a match stamps
   `no_longer_matches_at`, a later rematch clears it, and `saved_at`/
@@ -175,8 +176,10 @@
   missing/blank, and invalid values; disabled schedules warn with the pending
   count, while manual dry runs do not.
 - Watcher audits are read-only and reuse production identity, dedupe,
-  classification, eligibility, scoring, and seen lookup; state-only audits
-  never fetch, and live audits never email, prime, or persist health attempts.
+  classification, eligibility, scoring, and seen lookup. State-only and source
+  coverage audits never fetch; live audits never email, prime, or persist
+  health attempts. Coverage requires trustworthy persisted direct health and
+  never treats global GitHub health as company-level listing evidence.
 - Source comparison computes lightweight outcomes/counts for every job, then
   selects details before building and sanitizing rich traces. The report owns
   deterministic eligible/anomaly/non-routine/routine-sample retention; the

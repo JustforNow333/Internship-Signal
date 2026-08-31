@@ -807,6 +807,22 @@ URLs, or snapshot contents.
 
 ## 17. Bounded source comparison
 
+### Product source coverage audit
+
+`python -m watcher.audit --coverage` is a network-free view of current product
+source coverage. It combines the validated `WatcherConfig`, the canonical
+direct-adapter registry, and a read-only in-memory snapshot of persisted source
+health. The report classifies every configured company exactly once as verified
+healthy direct, degraded/failing direct, direct without trustworthy evidence,
+intentional backstop-only, or needing source investigation. Healthy-empty is
+trustworthy direct evidence; a configured ATS by itself is not.
+
+GitHub configuration may establish intentional backstop reliance, but global
+feed health never proves that a particular company has a listing. Coverage mode
+never collects, sends email, changes watcher or hosted state, or creates a
+missing SQLite file. JSON ordering and fields are deterministic, and the report
+contains no source URLs, errors, posting data, or internal-only annotations.
+
 Source comparison is observability-only and cannot affect matching, email,
 seen state, scoring, eligibility, collection, or deduplication. Its fixed
 pipeline is:
