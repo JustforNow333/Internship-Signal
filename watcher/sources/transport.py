@@ -113,6 +113,7 @@ def post_json_response(
     *,
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     include_preview: bool = False,
+    request_headers: Mapping[str, str] | None = None,
     opener: Callable[..., Any] = urlopen,
 ) -> JsonHttpResponse:
     """POST JSON once and return decoded data with bounded safe metadata.
@@ -123,14 +124,16 @@ def post_json_response(
     """
 
     body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
+    }
+    headers.update(request_headers or {})
     request = Request(
         url,
         data=body,
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": USER_AGENT,
-        },
+        headers=headers,
         method="POST",
     )
     try:

@@ -266,6 +266,9 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "paylocity_company_id": company.paylocity_company_id,
                 "paylocity_module_id": company.paylocity_module_id,
                 "paylocity_slug": company.paylocity_slug,
+                "brassring_host": company.brassring_host,
+                "brassring_partner_id": company.brassring_partner_id,
+                "brassring_site_id": company.brassring_site_id,
                 "module": company.module,
                 "terms": list(company.terms),
             }

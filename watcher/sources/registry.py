@@ -19,6 +19,7 @@ from typing import Callable
 
 from watcher.sources.ashby import AshbySource
 from watcher.sources.bain import BainSource
+from watcher.sources.brassring import BrassRingSource
 from watcher.sources.epic import EpicSource
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.ibm import IbmSource
@@ -56,6 +57,7 @@ class DirectSourceSpec:
 DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("ashby", AshbySource),
     DirectSourceSpec("bain", BainSource),
+    DirectSourceSpec("brassring", BrassRingSource),
     DirectSourceSpec("epic", EpicSource),
     DirectSourceSpec("greenhouse", GreenhouseSource),
     DirectSourceSpec("ibm", IbmSource),

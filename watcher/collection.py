@@ -520,6 +520,7 @@ def _direct_collection_task(
             talentbrew_host=company.talentbrew_host,
             icims_host=company.icims_host,
             successfactors_host=company.successfactors_host,
+            brassring_host=company.brassring_host,
         ),
         provider=company.ats,
         run=run,

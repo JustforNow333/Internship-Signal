@@ -562,3 +562,12 @@ git status --short --ignored
   leaving reusable benchmark scripts, tests, and fixtures trackable.
 - Keep rebuildable `analysis-cache.sqlite` transactionally independent from
   durable `seen.sqlite`; only the durable database belongs on `watcher-data`.
+- BrassRing is anonymous-session only: bootstrap the official TGNewUI board
+  page for cookies, request token, encrypted session value, and partner/site
+  context; never hardcode transient values or add authentication. Force
+  `SortType: JobTitle`, require two consecutive complete snapshots agreeing on
+  total and requisition identity before reporting complete, and never treat
+  `lastupdated` as a posting date. `JobsCount` is the only total; `TotalJobsCount`
+  is always `0` and must be ignored. Accept a posting URL only on the configured
+  site, or on a sibling site whose `frmSiteId` is the configured site, always
+  with matching host, partner, `PageType`, and `jobid`/`reqid`.

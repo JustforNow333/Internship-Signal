@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from typing import Sequence
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from watcher.company_matching import company_matching_key
 from .env import ConfigError
@@ -390,6 +390,44 @@ def _validate_paylocity_config(
     ):
         raise ConfigError(
             f"{name}: paylocity source_url must exactly match its configured public board"
+        )
+
+
+def _validate_brassring_config(
+    name: str,
+    *,
+    host: str,
+    partner_id: str,
+    site_id: str,
+    source_url: str,
+) -> None:
+    if not is_valid_hostname(host):
+        raise ConfigError(f"{name}: brassring_host must be a hostname")
+    if not re.fullmatch(r"[1-9][0-9]{0,19}", partner_id):
+        raise ConfigError(f"{name}: brassring_partner_id must be a positive integer")
+    if not re.fullmatch(r"[1-9][0-9]{0,19}", site_id):
+        raise ConfigError(f"{name}: brassring_site_id must be a positive integer")
+    try:
+        parsed = urlsplit(source_url)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ConfigError(
+            f"{name}: brassring entries require a valid source_url"
+        ) from exc
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != host
+        or parsed.netloc.casefold() != host
+        or parsed.username
+        or parsed.password
+        or parsed_port is not None
+        or parsed.path.casefold() != "/tgnewui/search/home/home"
+        or query != {"partnerid": [partner_id], "siteid": [site_id]}
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: brassring source_url must exactly match its configured public board"
         )
 
 

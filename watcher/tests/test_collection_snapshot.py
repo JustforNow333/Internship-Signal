@@ -765,6 +765,34 @@ def test_paylocity_identity_changes_collection_fingerprint():
         )
 
 
+def test_brassring_board_identity_changes_collection_fingerprint():
+    company = CompanyCfg(
+        name="BrassRing Example",
+        ats="brassring",
+        brassring_host="jobs.example.test",
+        brassring_partner_id="25008",
+        brassring_site_id="5131",
+        source_url=(
+            "https://jobs.example.test/TGnewUI/Search/Home/Home"
+            "?partnerid=25008&siteid=5131"
+        ),
+    )
+    config = WatcherConfig(companies=(company,))
+
+    for field, value in (
+        ("brassring_host", "jobs.other.test"),
+        ("brassring_partner_id", "25009"),
+        ("brassring_site_id", "5132"),
+    ):
+        changed = replace(
+            config,
+            companies=(replace(company, **{field: value}),),
+        )
+        assert collection_config_fingerprint(changed) != (
+            collection_config_fingerprint(config)
+        )
+
+
 def test_replay_defaults_to_snapshot_date_and_today_can_override(tmp_path):
     config = _config(cache_enabled=False)
     captured = datetime(2026, 6, 9, 23, 59, tzinfo=timezone.utc)

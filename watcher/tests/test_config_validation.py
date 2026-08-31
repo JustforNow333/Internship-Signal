@@ -19,6 +19,13 @@ HEAD = 'defaults:\n  terms: ["Summer 2027"]\n'
 VALID_COMPANY_FIELDS = {
     "ashby": '    token: "example"\n',
     "bain": "",
+    "brassring": (
+        '    brassring_host: "jobs.example.test"\n'
+        '    brassring_partner_id: "25008"\n'
+        '    brassring_site_id: "5131"\n'
+        '    source_url: "https://jobs.example.test/TGnewUI/Search/Home/Home'
+        '?partnerid=25008&siteid=5131"\n'
+    ),
     "epic": "",
     "greenhouse": '    token: "example"\n',
     "ibm": "",
@@ -145,6 +152,7 @@ def test_token_backed_sources_keep_exact_missing_token_error(tmp_path, ats):
     ("ats", "expected"),
     (
         ("workday", "Example: workday entries require token"),
+        ("brassring", "Example: brassring_host must be a hostname"),
         ("oracle_hcm", "Example: oracle_hcm entries require oracle_hcm_host"),
         ("talentbrew", "Example: talentbrew entries require a valid talentbrew_host"),
         ("icims", "Example: icims_variant must be one of: classic, jibe_json"),
@@ -164,6 +172,94 @@ def test_unknown_ats_keeps_exact_error(tmp_path):
         _load(tmp_path, _company("Example", "unknown"))
 
     assert str(caught.value) == "Example: unsupported ats 'unknown'"
+
+
+BRASSRING_URL_ERROR = (
+    "Example: brassring source_url must exactly match its configured public board"
+)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    (
+        (
+            {"brassring_host": "https://jobs.example.test"},
+            "Example: brassring_host must be a hostname",
+        ),
+        (
+            {"brassring_partner_id": "0"},
+            "Example: brassring_partner_id must be a positive integer",
+        ),
+        (
+            {"brassring_site_id": "5131a"},
+            "Example: brassring_site_id must be a positive integer",
+        ),
+        (
+            {
+                "source_url": (
+                    "https://user:secret@jobs.example.test/TGnewUI/Search/Home/"
+                    "Home?partnerid=25008&siteid=5131"
+                )
+            },
+            BRASSRING_URL_ERROR,
+        ),
+        (
+            {
+                "source_url": (
+                    "https://jobs.other.test/TGnewUI/Search/Home/Home"
+                    "?partnerid=25008&siteid=5131"
+                )
+            },
+            BRASSRING_URL_ERROR,
+        ),
+        (
+            {
+                "source_url": (
+                    "http://jobs.example.test/TGnewUI/Search/Home/Home"
+                    "?partnerid=25008&siteid=5131"
+                )
+            },
+            BRASSRING_URL_ERROR,
+        ),
+        (
+            {
+                "source_url": (
+                    "https://jobs.example.test/TGnewUI/Search/Home/Home"
+                    "?partnerid=25008&siteid=5131&keyword=intern"
+                )
+            },
+            BRASSRING_URL_ERROR,
+        ),
+        (
+            {
+                "source_url": (
+                    "https://jobs.example.test/TGnewUI/Search/Home/Home"
+                    "?partnerid=99999&siteid=5131"
+                )
+            },
+            BRASSRING_URL_ERROR,
+        ),
+    ),
+)
+def test_brassring_rejects_incomplete_or_untrusted_board_configuration(
+    tmp_path, overrides, expected
+):
+    fields = {
+        "brassring_host": "jobs.example.test",
+        "brassring_partner_id": "25008",
+        "brassring_site_id": "5131",
+        "source_url": (
+            "https://jobs.example.test/TGnewUI/Search/Home/Home"
+            "?partnerid=25008&siteid=5131"
+        ),
+    }
+    fields.update(overrides)
+    rendered = "".join(f'    {key}: "{value}"\n' for key, value in fields.items())
+
+    with pytest.raises(config.ConfigError) as caught:
+        _load(tmp_path, _company("Example", "brassring", rendered))
+
+    assert str(caught.value) == expected
 
 
 @pytest.mark.parametrize(
@@ -247,6 +343,7 @@ def test_loader_calls_validation_owner_without_duplicating_rules():
 
     names = (
         "_validate_aliases",
+        "_validate_brassring_config",
         "_validate_company_entry",
         "_validate_company_identity",
         "_validate_default_terms_present",
@@ -321,6 +418,7 @@ def test_validation_stays_below_loader_and_registry_import_is_deferred():
         "watcher.config.env",
         "watcher.sources.registry",
         "watcher.sources.workday",
+        "watcher.sources.brassring",
     ),
 )
 def test_no_import_cycle_whichever_module_loads_first(first):

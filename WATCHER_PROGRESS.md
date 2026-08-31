@@ -16,6 +16,10 @@ This file tracks completed watcher steps and the next handoff target.
   coverage from the canonical registry, current watchlist, and a read-only
   persisted-health snapshot. It makes no requests or state changes and does not
   create a missing SQLite database.
+- UBS now has direct IBM/Kenexa BrassRing coverage through `ats: brassring`
+  rather than a `bespoke` backstop-only entry. The adapter bootstraps an
+  anonymous TGNewUI session, forces `SortType: JobTitle`, and accepts rows only
+  after two consecutive complete snapshots agree on total and identity.
 - Backend `analyze_rows(rows, today=None)` seam is built and reused by watcher.
 - Watcher source layer is built: Greenhouse, Lever, Ashby, SmartRecruiters,
   Workable, Workday, and SimplifyJobs GitHub listings.
@@ -1076,6 +1080,65 @@ This file tracks completed watcher steps and the next handoff target.
      passed (`778 passed`). Full backend/watcher validation passed (`2372
      passed, 100 skipped, 1 existing warning`), as did compileall and
      `git diff --check`.
+
+46. UBS BrassRing direct source (2026-08-31):
+   - `watcher/sources/brassring.py` adds `BrassRingSource` for IBM/Kenexa
+     TGNewUI. It opens an anonymous cookie session on the official board page,
+     reads the published request token, encrypted session value, and
+     partner/site context, and fails closed when any of them is missing,
+     malformed, or inconsistent with configuration. No transient session or
+     token value is hardcoded.
+   - Listings come from `/TgNewUI/Search/Ajax/ProcessSortAndShowMoreJobs` with
+     `SortType: JobTitle` forced, because the audited default ordering was not
+     stable. Fields map conservatively: `reqid` to requisition identity,
+     `jobtitle`, `formtext23` to location, `jobdescription` to description,
+     `formtext21`/`department` to bounded extras, and the posting-specific
+     `Link` to a canonically rebuilt source URL. `lastupdated` is deliberately
+     not treated as a posting date. UBS needs no detail requests.
+   - Completeness requires explicit total metadata, advancing non-repeating
+     pages, full pages until the last, raw and unique counts consistent with
+     the reported total, unique requisition identities, nonconflicting
+     ID/URL relationships, and explicit zero-result handling. Rows are returned
+     only after two consecutive complete snapshots report the same total and
+     identity set, within a bounded pass limit; unstable or changing boards
+     fail closed rather than reporting complete.
+   - Configuration adds `brassring_host`, `brassring_partner_id`, and
+     `brassring_site_id` across models, loader, and validation. Validation
+     rejects malformed hosts, non-positive IDs, credentials in the board URL,
+     and any `source_url` that is not exactly the configured public board.
+     `brassring` is registered in the canonical direct registry, and the
+     collection fingerprint and per-origin concurrency key both key off the
+     configured board host.
+   - `transport.post_json_response` gained only an optional `request_headers`
+     override; cookie-aware anonymous session handling stays in `brassring.py`.
+   - UBS moved from `ats: bespoke` to `ats: brassring`; no other company
+     changed. `python -m watcher.audit --coverage` moves UBS from intentional
+     backstop-only coverage to direct coverage awaiting health evidence, with
+     no other company reclassified.
+   - Live read-only verification against the official UBS board corrected two
+     assumptions the offline audit had made:
+     - `TotalJobsCount` is not a second total. The live board reports it as `0`
+       on every page, so `JobsCount` is the only trustworthy total metadata and
+       the cross-check against `TotalJobsCount` was removed.
+     - 13 of 86 postings are localized siblings of the configured board. They
+       publish their own `siteid` (`5132`/`5133`) plus `frmSiteId=5131`, so the
+       posting-URL rule now accepts exactly those two shapes: the configured
+       site with no `frmSiteId`, or a sibling site whose `frmSiteId` is the
+       configured site. Host, partner, `PageType`, and `jobid`/`reqid` equality
+       are still required, the posting's own site is retained in the canonical
+       URL and in bounded `brassring_posting_site_id` metadata, and requisition
+       identity stays scoped to the configured board.
+   - Final live read-only run: 86 of 86 rows retained across two agreeing
+     snapshots, 1 bootstrap request, 4 listing requests, 0 retries, and
+     `complete=True` with no malformed, schema-invalid, or duplicate records.
+     No state was written.
+   - Targeted BrassRing/config/registry/source-package/collection/health/hosted
+     catalog tests passed, as did full backend and watcher validation
+     (`2408 passed, 100 skipped, 1 existing warning`), compileall, and
+     `git diff --check`. The one remaining failure,
+     `test_repository_ignores_private_holdout_artifact_paths`, is the
+     pre-existing Windows-Git-versus-WSL-worktree pointer issue: the ignore
+     rule itself resolves correctly under the repository's own git.
 
 ## Next
 

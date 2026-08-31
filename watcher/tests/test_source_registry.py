@@ -16,6 +16,7 @@ def test_direct_ats_surface_is_unchanged():
         {
             "ashby",
             "bain",
+            "brassring",
             "epic",
             "greenhouse",
             "ibm",

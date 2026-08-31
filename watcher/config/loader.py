@@ -35,6 +35,7 @@ from .models import (
 
 from .validation import (
     _validate_aliases,
+    _validate_brassring_config,
     _validate_company_entry,
     _validate_company_identity,
     _validate_default_terms_present,
@@ -194,6 +195,17 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             slug=paylocity_slug,
             source_url=source_url,
         )
+    brassring_host = str(entry.get("brassring_host") or "").strip().casefold()
+    brassring_partner_id = str(entry.get("brassring_partner_id") or "").strip()
+    brassring_site_id = str(entry.get("brassring_site_id") or "").strip()
+    if ats == "brassring":
+        _validate_brassring_config(
+            name,
+            host=brassring_host,
+            partner_id=brassring_partner_id,
+            site_id=brassring_site_id,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
@@ -221,6 +233,9 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         paylocity_company_id=paylocity_company_id,
         paylocity_module_id=paylocity_module_id,
         paylocity_slug=paylocity_slug,
+        brassring_host=brassring_host,
+        brassring_partner_id=brassring_partner_id,
+        brassring_site_id=brassring_site_id,
         source_url=source_url,
         module=str(entry.get("module") or "").strip(),
         aliases=aliases,

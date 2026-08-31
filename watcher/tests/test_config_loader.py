@@ -40,6 +40,7 @@ def test_loader_reuses_validation_owner_objects():
 
     names = (
         "_validate_aliases",
+        "_validate_brassring_config",
         "_validate_company_entry",
         "_validate_company_identity",
         "_validate_default_terms_present",
@@ -306,6 +307,7 @@ def test_real_watchlist_round_trips_through_current_dataclass_fields():
         "watcher.config.env",
         "watcher.sources.registry",
         "watcher.sources.workday",
+        "watcher.sources.brassring",
     ),
 )
 def test_no_import_cycle_whichever_module_loads_first(first):

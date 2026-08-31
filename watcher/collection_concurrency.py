@@ -105,6 +105,7 @@ def direct_origin_key(
     talentbrew_host: str = "",
     icims_host: str = "",
     successfactors_host: str = "",
+    brassring_host: str = "",
 ) -> str:
     """Return the shared origin key for one direct adapter fetch.
 
@@ -140,6 +141,11 @@ def direct_origin_key(
             f"https://{host}"
             if host != UNKNOWN_ORIGIN
             else "adapter:successfactors"
+        )
+    if adapter == "brassring":
+        host = _safe_key(brassring_host, limit=253)
+        return _safe_key(
+            f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:brassring"
         )
     host = DIRECT_ORIGIN_HOSTS.get(adapter)
     if host:

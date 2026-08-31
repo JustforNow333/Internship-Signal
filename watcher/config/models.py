@@ -141,6 +141,9 @@ class CompanyCfg:
     paylocity_company_id: str = ""
     paylocity_module_id: str = ""
     paylocity_slug: str = ""
+    brassring_host: str = ""
+    brassring_partner_id: str = ""
+    brassring_site_id: str = ""
     source_url: str = ""
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)

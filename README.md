@@ -252,6 +252,21 @@ Paylocity entries use `ats: paylocity` with a lower-case company UUID, positive
 module ID, safe board slug, and the exact public recruiting-board URL. The
 adapter validates the embedded board identity before accepting its job array.
 
+BrassRing entries use `ats: brassring` with a hostname-only `brassring_host`,
+positive `brassring_partner_id` and `brassring_site_id`, and the exact
+credential-free TGNewUI board URL those three values imply. The adapter opens an
+anonymous cookie session on that page, reads the request token and encrypted
+session value it publishes, and posts them to the structured TGNewUI listing
+endpoint with `SortType: JobTitle`. Because the board's default ordering shifts
+between requests, rows are returned only after two consecutive complete
+enumerations report the same total and the same requisition identities; totals
+that change, repeated pages, short pages, or unstable identities fail closed
+instead. `JobsCount` is the only total the board publishes; `TotalJobsCount` is
+always `0` and is ignored. Localized sibling boards of the same partner are
+listed with their own `siteid` plus a `frmSiteId` naming the configured board,
+and those postings keep their own reachable URL. No per-job detail request is
+made.
+
 The Simplify JSON backstop likewise retains valid entries from a mixed
 malformed payload and emits one bounded warning. Its deliberately nonempty feed
 still fails when every entry is malformed.

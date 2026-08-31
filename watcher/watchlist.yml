@@ -521,12 +521,14 @@ companies:
     note: "Official TalentBrew Early Careers category"
 
   - name: "UBS"
-    ats: bespoke
-    module: "ubs"
+    ats: brassring
+    brassring_host: "jobs.ubs.com"
+    brassring_partner_id: "25008"
+    brassring_site_id: "5131"
     aliases: ["UBS Group"]
     alumni_match: ["ubs"]
     source_url: "https://jobs.ubs.com/TGnewUI/Search/Home/Home?partnerid=25008&siteid=5131"
-    note: "Taleo-style early careers portal; unsupported by current watcher adapters"
+    note: "Official IBM/Kenexa BrassRing TGNewUI public board"
 
   - name: "Nomura"
     ats: successfactors

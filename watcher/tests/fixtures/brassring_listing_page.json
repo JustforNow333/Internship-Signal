@@ -1,0 +1,87 @@
+{
+  "JobsCount": 3,
+  "TotalJobsCount": 0,
+  "Jobs": {
+    "Job": [
+      {
+        "Link": "https://jobs.ubs.com/TGnewUI/Search/home/HomeWithPreLoad?partnerid=25008&siteid=5131&PageType=JobDetails&jobid=100001",
+        "Questions": [
+          {
+            "QuestionName": "reqid",
+            "Value": "100001"
+          },
+          {
+            "QuestionName": "jobtitle",
+            "Value": "Technology Intern"
+          },
+          {
+            "QuestionName": "formtext23",
+            "Value": "New York, United States"
+          },
+          {
+            "QuestionName": "jobdescription",
+            "Value": "<p>Build reliable systems.</p>"
+          },
+          {
+            "QuestionName": "formtext21",
+            "Value": "Technology"
+          },
+          {
+            "QuestionName": "department",
+            "Value": "Engineering"
+          },
+          {
+            "QuestionName": "lastupdated",
+            "Value": "31-Aug-2026"
+          }
+        ]
+      },
+      {
+        "Link": "https://jobs.ubs.com/TGnewUI/Search/home/HomeWithPreLoad?partnerid=25008&siteid=5131&PageType=JobDetails&jobid=100002",
+        "Questions": [
+          {
+            "QuestionName": "reqid",
+            "Value": "100002"
+          },
+          {
+            "QuestionName": "jobtitle",
+            "Value": "Data Internship"
+          },
+          {
+            "QuestionName": "formtext23",
+            "Value": "Chicago, United States"
+          },
+          {
+            "QuestionName": "jobdescription",
+            "Value": "Analyze data."
+          }
+        ]
+      },
+      {
+        "Link": "https://jobs.ubs.com/TGnewUI/Search/home/HomeWithPreLoad?partnerid=25008&siteid=5132&PageType=JobDetails&jobid=100003&frmSiteId=5131",
+        "Questions": [
+          {
+            "QuestionName": "reqid",
+            "Value": "100003"
+          },
+          {
+            "QuestionName": "jobtitle",
+            "Value": "Alternance Internship"
+          },
+          {
+            "QuestionName": "formtext23",
+            "Value": "France"
+          },
+          {
+            "QuestionName": "jobdescription",
+            "Value": "Localized posting."
+          },
+          {
+            "QuestionName": "formtext21",
+            "Value": "Technology"
+          }
+        ]
+      }
+    ]
+  }
+}

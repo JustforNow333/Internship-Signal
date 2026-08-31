@@ -427,6 +427,16 @@ def test_oracle_hcm_tenants_use_their_configured_host_origin():
     assert jpmc != example
 
 
+def test_brassring_boards_use_their_configured_host_origin():
+    ubs = direct_origin_key("brassring", brassring_host="jobs.ubs.com")
+    other = direct_origin_key("brassring", brassring_host="jobs.example.test")
+
+    assert ubs == "https://jobs.ubs.com"
+    assert other == "https://jobs.example.test"
+    assert ubs != other
+    assert direct_origin_key("brassring") == "adapter:brassring"
+
+
 def test_origin_keys_exclude_credentials_paths_and_queries():
     key = origin_key_for_url(
         "https://user:secret@raw.githubusercontent.test:8443/owner/repo/listings.json?token=abc#frag"
