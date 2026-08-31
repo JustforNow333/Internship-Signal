@@ -293,3 +293,8 @@
   identical identity set; a single-request crawl is atomic and skips it. The
   board honors `PostedDate` ordering only, needs no cookie or anti-forgery
   token, and all tenants on one UltiPro host share that host's origin limit.
+- A watchlist company migrates to an existing adapter only on verified
+  identity, never on a matching name. Confirm the board's own metadata identity
+  (for Greenhouse, the board `name`) against the entry's alumni/watchlist
+  evidence, and leave the entry unchanged when the evidence names no single
+  company rather than redefining the entity to fit an available board.

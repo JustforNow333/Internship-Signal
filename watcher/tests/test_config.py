@@ -76,6 +76,11 @@ RECENT_DIRECT_ADAPTER_METADATA = {
 
 
 CONFIRMED_DIRECT_SOURCE_ADDITIONS = {
+    "Taula Capital": {
+        "ats": "greenhouse",
+        "token": "taulacapital",
+        "source_url": "https://boards.greenhouse.io/taulacapital",
+    },
     "BlackLine": {
         "ats": "workday",
         "token": "blackline",

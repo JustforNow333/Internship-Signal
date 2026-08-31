@@ -654,10 +654,10 @@ companies:
     note: "company-hosted careers portal"
 
   - name: "Taula Capital"
-    ats: github_only
+    ats: greenhouse
+    token: "taulacapital"
     alumni_match: ["taula capital"]
-    source_url: "https://www.taulacapital.com/"
-    note: "no supported ATS URL or active careers portal found"
+    source_url: "https://boards.greenhouse.io/taulacapital"
 
   - name: "Evercore"
     ats: bespoke

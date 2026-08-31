@@ -28,6 +28,9 @@ This file tracks completed watcher steps and the next handoff target.
   rather than a `github_only` backstop-only entry. The adapter posts the
   official search endpoint anonymously and proves completeness from the board's
   authoritative `totalCount`.
+- Taula Capital now has direct Greenhouse coverage through the existing
+  adapter. Ardent stays backstop-only: its alumni evidence is a bare `Ardent`
+  employer string that does not identify one company.
 - Backend `analyze_rows(rows, today=None)` seam is built and reused by watcher.
 - Watcher source layer is built: Greenhouse, Lever, Ashby, SmartRecruiters,
   Workable, Workday, and SimplifyJobs GitHub listings.
@@ -1283,6 +1286,42 @@ This file tracks completed watcher steps and the next handoff target.
      commit `1ebc230`: Windows Git cannot resolve this WSL-created worktree
      pointer, while the ignore rule itself resolves correctly under the
      repository's own git. No product behavior or test was changed for it.
+
+49. Greenhouse migration for Taula Capital (2026-08-31):
+   - The discovery audit of the remaining backstop-only cohort found no new
+     platform worth an adapter, but two companies whose official source is a
+     Greenhouse board the watcher already supports. Only one survived identity
+     verification.
+   - Taula Capital moved from `ats: github_only` to `ats: greenhouse` with
+     token `taulacapital`, dropping its stale "no supported ATS URL" note.
+     `GET /v1/boards/taulacapital` returns `name: "Taula Capital"`, an exact
+     unambiguous identity match. Configuration only: no adapter, registry,
+     config-schema, transport, retry, health, fingerprint, origin, or hosted
+     change.
+   - Ardent was investigated and deliberately not migrated. The
+     `ardentmc` Greenhouse board is ArdentMC (`www.ardentmc.com`), a federal/DoD
+     IT services contractor that brands itself simply "Ardent" with 83 open
+     roles. The watchlist entry's only evidence is one alumni record whose
+     employer string is the bare word `Ardent` with occupation
+     `VP of Engineering` and no domain, location, or industry field. That is
+     consistent with ArdentMC but does not distinguish it from other employers
+     that brand as plain "Ardent", so the entry's existing "ambiguous company
+     name" note still stands and the entity's meaning was not redefined to fit
+     an available board.
+   - Live read-only verification: the Taula Capital board resolves to
+     `name: "Taula Capital"` and currently holds zero postings, which the
+     existing Greenhouse adapter reports as healthy direct coverage
+     (`retained_row_count=0`, `complete=True`, `degraded=False`, no malformed or
+     schema-invalid records). No health, seen, or hosted state was written.
+   - `python -m watcher.audit --coverage` moves Taula Capital from intentional
+     backstop-only coverage (37 to 36 companies) to direct coverage awaiting
+     health evidence (92 to 93). Ardent stays backstop-only and no other company
+     reclassified.
+   - Targeted watchlist/config, source registry and package, coverage-audit,
+     source-health, and hosted catalog tests passed (`421 passed`), as did full
+     backend and watcher validation (`2490 passed, 100 skipped, 1 existing
+     warning`), compileall, and `git diff --check`. The pre-existing
+     Windows-Git-versus-WSL-worktree holdout-path failure is unchanged.
 
 ## Next
 
