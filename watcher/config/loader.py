@@ -46,6 +46,7 @@ from .validation import (
     _validate_paylocity_config,
     _validate_successfactors_config,
     _validate_talentbrew_config,
+    _validate_taleo_sourcing_config,
     _validate_terms_tuple,
     _validate_token_config,
     _validate_unique_company_names,
@@ -206,6 +207,17 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             site_id=brassring_site_id,
             source_url=source_url,
         )
+    taleo_sourcing_host = (
+        str(entry.get("taleo_sourcing_host") or "").strip().casefold()
+    )
+    taleo_sourcing_site = str(entry.get("taleo_sourcing_site") or "").strip()
+    if ats == "taleo_sourcing":
+        _validate_taleo_sourcing_config(
+            name,
+            host=taleo_sourcing_host,
+            site=taleo_sourcing_site,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
@@ -236,6 +248,8 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         brassring_host=brassring_host,
         brassring_partner_id=brassring_partner_id,
         brassring_site_id=brassring_site_id,
+        taleo_sourcing_host=taleo_sourcing_host,
+        taleo_sourcing_site=taleo_sourcing_site,
         source_url=source_url,
         module=str(entry.get("module") or "").strip(),
         aliases=aliases,

@@ -431,6 +431,42 @@ def _validate_brassring_config(
         )
 
 
+def _validate_taleo_sourcing_config(
+    name: str,
+    *,
+    host: str,
+    site: str,
+    source_url: str,
+) -> None:
+    if not is_valid_hostname(host):
+        raise ConfigError(f"{name}: taleo_sourcing_host must be a hostname")
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?", site):
+        raise ConfigError(
+            f"{name}: taleo_sourcing_site must be a bounded site identifier"
+        )
+    try:
+        parsed = urlsplit(source_url)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ConfigError(
+            f"{name}: taleo_sourcing entries require a valid source_url"
+        ) from exc
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != host
+        or parsed.netloc.casefold() != host
+        or parsed.username
+        or parsed.password
+        or parsed_port is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: taleo_sourcing source_url must be its credential-free portal root"
+        )
+
+
 def is_valid_hostname(value: str) -> bool:
     """Return whether value is a lower-case DNS hostname without URL syntax."""
 

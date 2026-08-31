@@ -14,6 +14,7 @@ from email.utils import parsedate_to_datetime
 from json import JSONDecodeError
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from watcher.sources.contracts import (
@@ -123,10 +124,67 @@ def post_json_response(
     headers, request headers, or a raw response body.
     """
 
-    body = json.dumps(payload).encode("utf-8")
+    return _post_encoded_response(
+        url,
+        body=json.dumps(payload).encode("utf-8"),
+        content_type="application/json",
+        source_name=source_name,
+        timeout=timeout,
+        max_response_bytes=max_response_bytes,
+        include_preview=include_preview,
+        request_headers=request_headers,
+        opener=opener,
+    )
+
+
+def post_form_response(
+    url: str,
+    fields: Mapping[str, str],
+    source_name: str,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    *,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    include_preview: bool = False,
+    request_headers: Mapping[str, str] | None = None,
+    opener: Callable[..., Any] = urlopen,
+) -> JsonHttpResponse:
+    """POST form-encoded fields once and return the decoded JSON response.
+
+    Some anonymous public boards accept only ``application/x-www-form-urlencoded``
+    request bodies while still answering with JSON. This helper differs from
+    `post_json_response` in body encoding alone; decoding, bounded metadata, and
+    failure classification are identical, and it records no cookies, request
+    headers, or raw response body.
+    """
+
+    return _post_encoded_response(
+        url,
+        body=urlencode(dict(fields)).encode("utf-8"),
+        content_type="application/x-www-form-urlencoded; charset=UTF-8",
+        source_name=source_name,
+        timeout=timeout,
+        max_response_bytes=max_response_bytes,
+        include_preview=include_preview,
+        request_headers=request_headers,
+        opener=opener,
+    )
+
+
+def _post_encoded_response(
+    url: str,
+    *,
+    body: bytes,
+    content_type: str,
+    source_name: str,
+    timeout: int,
+    max_response_bytes: int,
+    include_preview: bool,
+    request_headers: Mapping[str, str] | None,
+    opener: Callable[..., Any],
+) -> JsonHttpResponse:
     headers = {
         "Accept": "application/json",
-        "Content-Type": "application/json",
+        "Content-Type": content_type,
         "User-Agent": USER_AGENT,
     }
     headers.update(request_headers or {})

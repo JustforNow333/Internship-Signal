@@ -48,6 +48,8 @@ EXPECTED_FIELDS = {
         ("brassring_host", ""),
         ("brassring_partner_id", ""),
         ("brassring_site_id", ""),
+        ("taleo_sourcing_host", ""),
+        ("taleo_sourcing_site", ""),
         ("source_url", ""),
         ("module", ""),
         ("aliases", "<factory:tuple>"),

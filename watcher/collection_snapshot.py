@@ -269,6 +269,8 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "brassring_host": company.brassring_host,
                 "brassring_partner_id": company.brassring_partner_id,
                 "brassring_site_id": company.brassring_site_id,
+                "taleo_sourcing_host": company.taleo_sourcing_host,
+                "taleo_sourcing_site": company.taleo_sourcing_site,
                 "module": company.module,
                 "terms": list(company.terms),
             }

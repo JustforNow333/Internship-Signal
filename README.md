@@ -267,6 +267,18 @@ listed with their own `siteid` plus a `frmSiteId` naming the configured board,
 and those postings keep their own reachable URL. No per-job detail request is
 made.
 
+Taleo Enterprise Sourcing entries use `ats: taleo_sourcing` with a
+hostname-only `taleo_sourcing_host`, a bounded `taleo_sourcing_site` identifier,
+and the credential-free portal root as `source_url`. This adapter covers the
+Taleo Enterprise Sourcing / SelectMinds product only, not Taleo Career Section
+boards. It bootstraps an anonymous session on the portal home page, reads the
+hidden `tss-token` and the site identifier the page publishes, creates one
+server-side search, and enumerates the paginated listing HTML the JSON results
+endpoint returns. Completeness requires an explicit total, explicit
+current/total page metadata, advancing non-repeating pages, a raw count that
+matches the reported total, and unique posting identities; anything else fails
+closed. Posting dates are not invented, and detail pages are never fetched.
+
 The Simplify JSON backstop likewise retains valid entries from a mixed
 malformed payload and emits one bounded warning. Its deliberately nonempty feed
 still fails when every entry is malformed.

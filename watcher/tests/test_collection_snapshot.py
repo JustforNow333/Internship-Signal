@@ -793,6 +793,29 @@ def test_brassring_board_identity_changes_collection_fingerprint():
         )
 
 
+def test_taleo_sourcing_portal_identity_changes_collection_fingerprint():
+    company = CompanyCfg(
+        name="Taleo Sourcing Example",
+        ats="taleo_sourcing",
+        taleo_sourcing_host="jobs.example.test",
+        taleo_sourcing_site="default657",
+        source_url="https://jobs.example.test/",
+    )
+    config = WatcherConfig(companies=(company,))
+
+    for field, value in (
+        ("taleo_sourcing_host", "jobs.other.test"),
+        ("taleo_sourcing_site", "default658"),
+    ):
+        changed = replace(
+            config,
+            companies=(replace(company, **{field: value}),),
+        )
+        assert collection_config_fingerprint(changed) != (
+            collection_config_fingerprint(config)
+        )
+
+
 def test_replay_defaults_to_snapshot_date_and_today_can_override(tmp_path):
     config = _config(cache_enabled=False)
     captured = datetime(2026, 6, 9, 23, 59, tzinfo=timezone.utc)

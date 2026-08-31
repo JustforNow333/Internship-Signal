@@ -31,6 +31,7 @@ EXPORT_OWNERS = {
     "SmartRecruitersSource": "watcher.sources.smartrecruiters",
     "SuccessFactorsSource": "watcher.sources.successfactors",
     "TalentBrewSource": "watcher.sources.talentbrew",
+    "TaleoSourcingSource": "watcher.sources.taleo_sourcing",
     "Source": "watcher.sources.contracts",
     "SourceError": "watcher.sources.contracts",
     "SourceFetchError": "watcher.sources.contracts",
@@ -57,6 +58,7 @@ EXPECTED_ALL = (
     "SmartRecruitersSource",
     "SuccessFactorsSource",
     "TalentBrewSource",
+    "TaleoSourcingSource",
     "Source",
     "SourceError",
     "SourceFetchError",
@@ -83,6 +85,7 @@ ADAPTER_MODULES = frozenset(
         "watcher.sources.smartrecruiters",
         "watcher.sources.successfactors",
         "watcher.sources.talentbrew",
+        "watcher.sources.taleo_sourcing",
         "watcher.sources.workable",
         "watcher.sources.workday",
     }

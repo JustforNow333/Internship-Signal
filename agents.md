@@ -571,3 +571,11 @@ git status --short --ignored
   is always `0` and must be ignored. Accept a posting URL only on the configured
   site, or on a sibling site whose `frmSiteId` is the configured site, always
   with matching host, partner, `PageType`, and `jobid`/`reqid`.
+- Taleo Sourcing covers the Oracle Taleo Enterprise Sourcing/SelectMinds
+  product only, never Career Section or a shared Taleo/BrassRing base. Bootstrap
+  the portal home page for cookies, the hidden `tss-token`, and the published
+  site identifier, create one server-side search, then page its JSON listing
+  HTML. Require explicit total and current/total page metadata, advancing
+  non-repeating pages, a raw count matching the total, and unique posting
+  identities; never invent a posting date or fetch detail pages for
+  completeness.

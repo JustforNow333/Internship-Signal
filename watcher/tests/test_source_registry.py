@@ -27,6 +27,7 @@ def test_direct_ats_surface_is_unchanged():
             "smartrecruiters",
             "successfactors",
             "talentbrew",
+            "taleo_sourcing",
             "workable",
             "workday",
         }

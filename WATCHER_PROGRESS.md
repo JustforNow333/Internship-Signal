@@ -20,6 +20,10 @@ This file tracks completed watcher steps and the next handoff target.
   rather than a `bespoke` backstop-only entry. The adapter bootstraps an
   anonymous TGNewUI session, forces `SortType: JobTitle`, and accepts rows only
   after two consecutive complete snapshots agree on total and identity.
+- Arup now has direct Oracle Taleo Enterprise Sourcing coverage through
+  `ats: taleo_sourcing` rather than a `bespoke` backstop-only entry. The adapter
+  bootstraps an anonymous portal session, creates one server-side search, and
+  pages its JSON listing HTML under explicit total and page metadata.
 - Backend `analyze_rows(rows, today=None)` seam is built and reused by watcher.
 - Watcher source layer is built: Greenhouse, Lever, Ashby, SmartRecruiters,
   Workable, Workday, and SimplifyJobs GitHub listings.
@@ -1139,6 +1143,67 @@ This file tracks completed watcher steps and the next handoff target.
      `test_repository_ignores_private_holdout_artifact_paths`, is the
      pre-existing Windows-Git-versus-WSL-worktree pointer issue: the ignore
      rule itself resolves correctly under the repository's own git.
+
+47. Arup Taleo Enterprise Sourcing direct source (2026-08-31):
+   - `watcher/sources/taleo_sourcing.py` adds `TaleoSourcingSource` for the
+     Oracle Taleo Enterprise Sourcing / SelectMinds product only. It is
+     deliberately not a generic Taleo adapter and shares no base class with
+     BrassRing.
+   - The adapter GETs the portal root through a cookie-aware opener, extracts
+     exactly one hidden `tsstoken` value and exactly one published site
+     identifier, and fails closed when either is missing, duplicated, blank,
+     oversized, control-character bearing, or inconsistent with configuration.
+     It then POSTs `/ajax/jobs/search/create` for one server-side
+     `JobSearch.id` and pages `/ajax/content/job_results` with
+     `JobSearch.id`, `page_index`, `site-name`, and `include_site=true`,
+     sending the token as the `tss-token` header on every AJAX request.
+   - Listing HTML is parsed with a bounded `HTMLParser` for the numeric posting
+     ID, title, posting URL, location, category, region, and description
+     excerpt. `date_posted` is never invented because the listing contract does
+     not publish a trustworthy posting date, and detail pages are never fetched.
+   - Completeness requires the explicit `total_results` count, explicit
+     `jPaginateNumPages`/`jPaginateCurrPage` metadata, a page count that agrees
+     with the total and the observed page size, advancing pages whose index
+     matches the request, no repeated page fingerprints, no short non-final
+     page, a raw count equal to the reported total on the reported final page,
+     unique posting IDs, nonconflicting ID/URL relationships, explicit
+     zero-result handling, and a bounded maximum page safeguard. Any changed
+     total or page count fails closed.
+   - Reused abstractions: `DirectRecordAdapter._parse_direct_records` for the
+     per-page record lifecycle and its shared diagnostics, `RequestRetrier`
+     with a crawl-wide retry budget, `page_fingerprint`, `make_row`, and the
+     canonical contracts/transport modules. `SinglePayloadDirectAdapter` was
+     deliberately not used because this is a multi-request session source, and
+     `direct.py` was not broadened. Nothing imports the `base.py` facade.
+   - `transport.post_form_response` is the only shared transport addition: a
+     provider-neutral form-encoded POST that reuses the existing decoding,
+     metadata, and failure classification through a new private
+     `_post_encoded_response` helper shared with `post_json_response`.
+   - Configuration adds `taleo_sourcing_host` and `taleo_sourcing_site` across
+     models, loader, and validation, which rejects malformed hosts, blank or
+     unbounded site identifiers, non-HTTPS URLs, credentials, ports, and any
+     `source_url` that is not the credential-free portal root on the configured
+     host. `taleo_sourcing` is registered in the canonical direct registry, and
+     the collection fingerprint and per-origin concurrency key both key off the
+     configured portal host. Source-health keys and hosted catalog coverage
+     derive from the canonical registry and needed no per-ATS change.
+   - Arup moved from `ats: bespoke` / `module: arup` to `ats: taleo_sourcing`;
+     no other company changed, and UBS/BrassRing behavior is untouched.
+     `python -m watcher.audit --coverage` moves Arup from intentional
+     backstop-only coverage (39 to 38 companies) to direct coverage awaiting
+     health evidence, becoming verified only once a healthy direct run is
+     persisted.
+   - Live read-only verification against the official Arup portal: 709 of 709
+     rows retained across 71 pages, 709 unique posting IDs and URLs, 1
+     bootstrap request, 1 search creation, 73 total request attempts, 0
+     retries, 0 malformed or schema-invalid records, every `date_posted`
+     empty, and `complete=True`. No health, seen, or hosted state was written.
+   - Targeted Taleo Sourcing, config/registry/source-package, collection and
+     replay, architecture/import-boundary, and hosted catalog tests passed, as
+     did full backend and watcher validation (`2451 passed, 100 skipped, 1
+     existing warning`), compileall, and `git diff --check`. The one remaining
+     failure stays the pre-existing Windows-Git-versus-WSL-worktree pointer
+     issue in `test_repository_ignores_private_holdout_artifact_paths`.
 
 ## Next
 

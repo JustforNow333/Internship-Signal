@@ -521,6 +521,7 @@ def _direct_collection_task(
             icims_host=company.icims_host,
             successfactors_host=company.successfactors_host,
             brassring_host=company.brassring_host,
+            taleo_sourcing_host=company.taleo_sourcing_host,
         ),
         provider=company.ats,
         run=run,

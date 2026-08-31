@@ -106,6 +106,7 @@ def direct_origin_key(
     icims_host: str = "",
     successfactors_host: str = "",
     brassring_host: str = "",
+    taleo_sourcing_host: str = "",
 ) -> str:
     """Return the shared origin key for one direct adapter fetch.
 
@@ -146,6 +147,11 @@ def direct_origin_key(
         host = _safe_key(brassring_host, limit=253)
         return _safe_key(
             f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:brassring"
+        )
+    if adapter == "taleo_sourcing":
+        host = _safe_key(taleo_sourcing_host, limit=253)
+        return _safe_key(
+            f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:taleo_sourcing"
         )
     host = DIRECT_ORIGIN_HOSTS.get(adapter)
     if host:

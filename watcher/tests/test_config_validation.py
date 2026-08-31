@@ -55,6 +55,11 @@ VALID_COMPANY_FIELDS = {
         '    successfactors_locale: "en_US"\n'
         '    source_url: "https://careers.example.test/Example/"\n'
     ),
+    "taleo_sourcing": (
+        '    taleo_sourcing_host: "jobs.example.test"\n'
+        '    taleo_sourcing_site: "default657"\n'
+        '    source_url: "https://jobs.example.test/"\n'
+    ),
     "talentbrew": (
         '    talentbrew_host: "careers.example.test"\n'
         '    talentbrew_site_id: "123"\n'
@@ -153,6 +158,7 @@ def test_token_backed_sources_keep_exact_missing_token_error(tmp_path, ats):
     (
         ("workday", "Example: workday entries require token"),
         ("brassring", "Example: brassring_host must be a hostname"),
+        ("taleo_sourcing", "Example: taleo_sourcing_host must be a hostname"),
         ("oracle_hcm", "Example: oracle_hcm entries require oracle_hcm_host"),
         ("talentbrew", "Example: talentbrew entries require a valid talentbrew_host"),
         ("icims", "Example: icims_variant must be one of: classic, jibe_json"),
@@ -354,6 +360,7 @@ def test_loader_calls_validation_owner_without_duplicating_rules():
         "_validate_paylocity_config",
         "_validate_successfactors_config",
         "_validate_talentbrew_config",
+        "_validate_taleo_sourcing_config",
         "_validate_terms_tuple",
         "_validate_token_config",
         "_validate_unique_company_names",
@@ -419,6 +426,7 @@ def test_validation_stays_below_loader_and_registry_import_is_deferred():
         "watcher.sources.registry",
         "watcher.sources.workday",
         "watcher.sources.brassring",
+        "watcher.sources.taleo_sourcing",
     ),
 )
 def test_no_import_cycle_whichever_module_loads_first(first):

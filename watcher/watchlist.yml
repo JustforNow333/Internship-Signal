@@ -780,11 +780,12 @@ companies:
     source_url: "https://careers.smartrecruiters.com/WTW"
 
   - name: "Arup"
-    ats: bespoke
-    module: "arup"
+    ats: taleo_sourcing
+    taleo_sourcing_host: "jobs.arup.com"
+    taleo_sourcing_site: "default657"
     alumni_match: ["arup"]
     source_url: "https://jobs.arup.com/"
-    note: "Taleo/company-hosted careers portal; unsupported by current watcher adapters"
+    note: "Official Oracle Taleo Enterprise Sourcing public portal"
 
   - name: "Thornton Tomasetti"
     ats: workday
