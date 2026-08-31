@@ -1,0 +1,56 @@
+{
+  "totalCount": 2,
+  "opportunities": [
+    {
+      "Id": "c7386a75-3c4e-47ff-a821-36b2dd61f1d2",
+      "Title": "Equipment Maintenance Technician",
+      "RequisitionNumber": "EQUIP004239",
+      "PostedDate": "2026-08-19T15:45:32.99Z",
+      "BriefDescription": "This position will provide comprehensive maintenance support.",
+      "JobCategoryName": "Battery Manufacturing",
+      "FullTime": true,
+      "Featured": false,
+      "JobLocationType": 1,
+      "OpportunityType": 1,
+      "Distance": null,
+      "MatchScore": null,
+      "MatchedLocations": [],
+      "Locations": [
+        {
+          "Id": "0a712694-cb28-5a20-aa82-d1d62b2586bf",
+          "LocalizedName": null,
+          "LocalizedDescription": "Greer, SC",
+          "Address": {
+            "Line1": "1605 Poplar Drive Ext",
+            "Line2": null,
+            "City": "Greer",
+            "PostalCode": "29651",
+            "State": {"Code": "SC", "Name": "South Carolina"},
+            "Country": {"Code": "USA", "Name": "United States"}
+          },
+          "DisplayAddress": true
+        }
+      ]
+    },
+    {
+      "Id": "dfe36c7e-1111-4222-8333-444455556666",
+      "Title": "Embedded Systems Software Intern",
+      "RequisitionNumber": "EMBED004228",
+      "PostedDate": null,
+      "BriefDescription": null,
+      "JobCategoryName": "Engineering",
+      "FullTime": false,
+      "Locations": [
+        {
+          "LocalizedDescription": "Munich",
+          "Address": {
+            "City": "Munich",
+            "State": null,
+            "Country": {"Code": "DEU", "Name": "Germany"}
+          }
+        }
+      ]
+    }
+  ],
+  "locations": []
+}

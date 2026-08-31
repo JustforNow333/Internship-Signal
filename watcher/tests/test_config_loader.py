@@ -52,6 +52,7 @@ def test_loader_reuses_validation_owner_objects():
         "_validate_successfactors_config",
         "_validate_talentbrew_config",
         "_validate_taleo_sourcing_config",
+        "_validate_ukg_config",
         "_validate_terms_tuple",
         "_validate_token_config",
         "_validate_unique_company_names",
@@ -310,6 +311,7 @@ def test_real_watchlist_round_trips_through_current_dataclass_fields():
         "watcher.sources.workday",
         "watcher.sources.brassring",
         "watcher.sources.taleo_sourcing",
+        "watcher.sources.ukg",
     ),
 )
 def test_no_import_cycle_whichever_module_loads_first(first):

@@ -28,6 +28,7 @@ def test_direct_ats_surface_is_unchanged():
             "successfactors",
             "talentbrew",
             "taleo_sourcing",
+            "ukg",
             "workable",
             "workday",
         }

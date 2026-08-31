@@ -31,6 +31,7 @@ from watcher.sources.smartrecruiters import SmartRecruitersSource
 from watcher.sources.successfactors import SuccessFactorsSource
 from watcher.sources.talentbrew import TalentBrewSource
 from watcher.sources.taleo_sourcing import TaleoSourcingSource
+from watcher.sources.ukg import UkgSource
 from watcher.sources.workable import WorkableSource
 from watcher.sources.workday import WorkdayPacer, WorkdaySource
 
@@ -70,6 +71,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("successfactors", SuccessFactorsSource),
     DirectSourceSpec("talentbrew", TalentBrewSource),
     DirectSourceSpec("taleo_sourcing", TaleoSourcingSource),
+    DirectSourceSpec("ukg", UkgSource),
     DirectSourceSpec("workable", WorkableSource),
     DirectSourceSpec("workday", WorkdaySource, needs_workday_pacer=True),
 )

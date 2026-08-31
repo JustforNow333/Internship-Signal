@@ -467,6 +467,43 @@ def _validate_taleo_sourcing_config(
         )
 
 
+def _validate_ukg_config(
+    name: str,
+    *,
+    host: str,
+    tenant: str,
+    board_id: str,
+    source_url: str,
+) -> None:
+    if not is_valid_hostname(host):
+        raise ConfigError(f"{name}: ukg_host must be a hostname")
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?", tenant):
+        raise ConfigError(f"{name}: ukg_tenant must be a bounded safe identifier")
+    if not re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", board_id
+    ):
+        raise ConfigError(f"{name}: ukg_board_id must be a UUID")
+    try:
+        parsed = urlsplit(source_url)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ConfigError(f"{name}: ukg entries require a valid source_url") from exc
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != host
+        or parsed.netloc.casefold() != host
+        or parsed.username
+        or parsed.password
+        or parsed_port is not None
+        or parsed.path != f"/{tenant}/JobBoard/{board_id}/"
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: ukg source_url must be its credential-free public board root"
+        )
+
+
 def is_valid_hostname(value: str) -> bool:
     """Return whether value is a lower-case DNS hostname without URL syntax."""
 

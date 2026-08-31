@@ -47,6 +47,7 @@ from .validation import (
     _validate_successfactors_config,
     _validate_talentbrew_config,
     _validate_taleo_sourcing_config,
+    _validate_ukg_config,
     _validate_terms_tuple,
     _validate_token_config,
     _validate_unique_company_names,
@@ -218,6 +219,17 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             site=taleo_sourcing_site,
             source_url=source_url,
         )
+    ukg_host = str(entry.get("ukg_host") or "").strip().casefold()
+    ukg_tenant = str(entry.get("ukg_tenant") or "").strip()
+    ukg_board_id = str(entry.get("ukg_board_id") or "").strip().casefold()
+    if ats == "ukg":
+        _validate_ukg_config(
+            name,
+            host=ukg_host,
+            tenant=ukg_tenant,
+            board_id=ukg_board_id,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
@@ -250,6 +262,9 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         brassring_site_id=brassring_site_id,
         taleo_sourcing_host=taleo_sourcing_host,
         taleo_sourcing_site=taleo_sourcing_site,
+        ukg_host=ukg_host,
+        ukg_tenant=ukg_tenant,
+        ukg_board_id=ukg_board_id,
         source_url=source_url,
         module=str(entry.get("module") or "").strip(),
         aliases=aliases,

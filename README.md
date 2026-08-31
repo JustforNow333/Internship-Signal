@@ -279,6 +279,19 @@ current/total page metadata, advancing non-repeating pages, a raw count that
 matches the reported total, and unique posting identities; anything else fails
 closed. Posting dates are not invented, and detail pages are never fetched.
 
+UKG (UltiPro) Recruiting entries use `ats: ukg` with a hostname-only `ukg_host`,
+a bounded `ukg_tenant`, a UUID `ukg_board_id`, and the credential-free public
+board root as `source_url`. The adapter POSTs the official
+`JobBoardView/LoadSearchResults` search with `Top`/`Skip` offset pagination; no
+cookie or anti-forgery token is required. The board's own `totalCount` is the
+authoritative total, so completeness is proven from it rather than from repeated
+whole-board snapshots. A crawl that spans more than one page additionally
+re-enumerates in the opposite posted-date order and requires an identical
+posting identity set, which is what catches a mid-crawl insert and delete that
+leaves the total unchanged. `PostedDate` is a real timestamp and is normalized
+rather than invented, and structured `Locations[].Address` supplies city, state,
+and country directly.
+
 The Simplify JSON backstop likewise retains valid entries from a mixed
 malformed payload and emits one bounded warning. Its deliberately nonempty feed
 still fails when every entry is malformed.

@@ -166,8 +166,8 @@ companies:
 ```
 
 `ats` ∈ {bain, epic, ibm, greenhouse, lever, ashby, smartrecruiters, workable,
-workday, icims, successfactors, paylocity, brassring, taleo_sourcing, bespoke,
-github_only}. `config.py` validates every entry at startup and fails loudly on
+workday, icims, successfactors, paylocity, brassring, taleo_sourcing, ukg,
+bespoke, github_only}. `config.py` validates every entry at startup and fails loudly on
 an unknown `ats` or a `bespoke` entry whose module is missing.
 
 `defaults.terms` must be present and contain at least one nonblank term. A

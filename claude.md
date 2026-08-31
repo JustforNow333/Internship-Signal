@@ -287,3 +287,9 @@
   non-repeating pages, a raw count matching the total, and unique posting
   identities; never invent a posting date or fetch detail pages for
   completeness.
+- UKG proves completeness from the board's authoritative `totalCount` with
+  fixed `Top`/advancing `Skip`, not from repeated whole-board snapshots. Only a
+  multi-page crawl runs the extra reverse posted-date pass and requires an
+  identical identity set; a single-request crawl is atomic and skips it. The
+  board honors `PostedDate` ordering only, needs no cookie or anti-forgery
+  token, and all tenants on one UltiPro host share that host's origin limit.

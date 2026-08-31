@@ -24,6 +24,10 @@ This file tracks completed watcher steps and the next handoff target.
   `ats: taleo_sourcing` rather than a `bespoke` backstop-only entry. The adapter
   bootstraps an anonymous portal session, creates one server-side search, and
   pages its JSON listing HTML under explicit total and page metadata.
+- Proterra now has direct UKG (UltiPro) Recruiting coverage through `ats: ukg`
+  rather than a `github_only` backstop-only entry. The adapter posts the
+  official search endpoint anonymously and proves completeness from the board's
+  authoritative `totalCount`.
 - Backend `analyze_rows(rows, today=None)` seam is built and reused by watcher.
 - Watcher source layer is built: Greenhouse, Lever, Ashby, SmartRecruiters,
   Workable, Workday, and SimplifyJobs GitHub listings.
@@ -1204,6 +1208,81 @@ This file tracks completed watcher steps and the next handoff target.
      existing warning`), compileall, and `git diff --check`. The one remaining
      failure stays the pre-existing Windows-Git-versus-WSL-worktree pointer
      issue in `test_repository_ignores_private_holdout_artifact_paths`.
+
+48. Proterra UKG Recruiting direct source (2026-08-31):
+   - `watcher/sources/ukg.py` adds `UkgSource` for the UKG/UltiPro Recruiting
+     public job board, following the read-only unsupported-platform audit that
+     ranked it the strongest remaining opportunity.
+   - Requests are anonymous JSON POSTs to
+     `/<tenant>/JobBoard/<board-id>/JobBoardView/LoadSearchResults` using the
+     official `opportunitySearch` (`Top`, `Skip`, `QueryString`, `OrderBy`,
+     `Filters`) plus `matchCriteria` structure. Live verification confirmed no
+     cookie and no anti-forgery token are required, so no bootstrap or session
+     step was added.
+   - Mapping is conservative: `Id` is the stable native posting ID and drives
+     both identity and the canonical `OpportunityDetail` URL,
+     `RequisitionNumber` is retained as a second stable identity in bounded
+     extras, `Title`, structured `Locations[].Address` becomes
+     `City, State Name, Country Name` with country and state kept separately in
+     extras and never derived from each other, `PostedDate` goes through the
+     existing `iso_date` normalization, `BriefDescription` is the description,
+     and `JobCategoryName`/`FullTime` are bounded extras. A null `PostedDate`
+     stays empty rather than being invented.
+   - Completeness is proven from the board's authoritative `totalCount`:
+     nonnegative integer total, total consistent across pages, fixed `Top`,
+     advancing `Skip`, every non-final page exactly `Top` records, a short page
+     only when the arithmetic completes the total, `raw_seen` never exceeding
+     and finally equal to the total, no repeated page fingerprints, unique `Id`,
+     no `RequisitionNumber` shared by two Ids, no conflicting ID/URL, explicit
+     zero-result handling, and a bounded page safeguard.
+   - Alternate-sort verification is used, but narrowly. A single-request crawl
+     is atomic, so it skips the check entirely; only a crawl spanning several
+     offsets re-enumerates once in ascending posted-date order and requires an
+     identical identity set. That is what detects a mid-crawl insert and delete
+     that leaves `totalCount` unchanged, which offset pagination alone cannot
+     see. The board was verified to honor `PostedDate` ordering only, so the
+     ascending pass is a genuinely independent traversal. BrassRing's mandatory
+     two-snapshot rule was deliberately not copied because BrassRing publishes
+     no reliable total, and no generic snapshot-agreement abstraction was added.
+   - Reused abstractions: `DirectRecordAdapter._parse_direct_records` for the
+     per-page record lifecycle and shared diagnostics, `RequestRetrier` with the
+     default bounded policy, `page_fingerprint`, `iso_date`, `make_row`, and the
+     canonical contracts/transport owners. `SinglePayloadDirectAdapter` was not
+     used because UKG is a paginated multi-request source, `direct.py` was not
+     modified, no transport change was needed (`post_json_response` already
+     covers the contract), and nothing imports the `base.py` facade.
+   - Configuration adds `ukg_host`, `ukg_tenant`, and `ukg_board_id` across
+     models, loader, and validation, which rejects malformed hosts, unsafe or
+     unbounded tenants, non-UUID board IDs, non-HTTPS URLs, credentials, ports,
+     queries, fragments, and any `source_url` whose path is not exactly
+     `/<tenant>/JobBoard/<board-id>/`. `ukg` is registered in the canonical
+     direct registry and the lazy package surface. The collection fingerprint
+     captures all three fields, and the per-origin concurrency key is the
+     UltiPro host, so every tenant on one recruiting host shares that host's
+     limit. Source-health keys and hosted catalog coverage derive from
+     `DIRECT_ATS` and needed no per-ATS change.
+   - Proterra moved from `ats: github_only` to `ats: ukg`; no other company
+     changed. `python -m watcher.audit --coverage` moves Proterra from
+     intentional backstop-only coverage (38 to 37 companies) to direct coverage
+     awaiting health evidence, becoming verified only once a healthy production
+     run persists evidence.
+   - Live read-only verification: 8 of 8 rows retained, 8 unique posting Ids, 8
+     unique requisition numbers, 8 unique URLs, 1 page, 1 request attempt, 0
+     retries, 0 skipped records, every `date_posted` populated from a real
+     `PostedDate`, structured locations resolving to
+     `Greer, South Carolina, United States`, and `complete=True`. A second
+     bounded run at `page_size=3` exercised the multi-page path: 3 forward
+     pages plus 3 reverse-order verification pages, identity sets in agreement,
+     `complete=True`. No health, seen, or hosted state was written.
+   - Targeted UKG, config/registry/source-package, collection/replay/
+     concurrency, architecture/import-boundary, health, and hosted catalog
+     tests passed (`525 passed`), as did full backend and watcher validation
+     (`2490 passed, 100 skipped, 1 existing warning`), compileall, and
+     `git diff --check`. `test_repository_ignores_private_holdout_artifact_paths`
+     still fails and was confirmed to reproduce identically on the clean parent
+     commit `1ebc230`: Windows Git cannot resolve this WSL-created worktree
+     pointer, while the ignore rule itself resolves correctly under the
+     repository's own git. No product behavior or test was changed for it.
 
 ## Next
 

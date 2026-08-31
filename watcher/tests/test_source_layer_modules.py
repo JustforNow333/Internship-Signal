@@ -242,6 +242,7 @@ def test_low_level_modules_do_not_import_collection_pipeline_or_health_layers():
         "watcher.sources.base",
         "watcher.sources.brassring",
         "watcher.sources.taleo_sourcing",
+        "watcher.sources.ukg",
         "watcher.sources.contracts",
         "watcher.sources.diagnostics",
         "watcher.sources.direct",

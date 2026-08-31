@@ -146,6 +146,9 @@ class CompanyCfg:
     brassring_site_id: str = ""
     taleo_sourcing_host: str = ""
     taleo_sourcing_site: str = ""
+    ukg_host: str = ""
+    ukg_tenant: str = ""
+    ukg_board_id: str = ""
     source_url: str = ""
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)

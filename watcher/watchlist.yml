@@ -631,10 +631,13 @@ companies:
     source_url: "https://halo-industries.workable.com/"
 
   - name: "Proterra"
-    ats: github_only
+    ats: ukg
+    ukg_host: "recruiting2.ultipro.com"
+    ukg_tenant: "PRO1047PROTI"
+    ukg_board_id: "e33a1c2e-8d7a-4008-851e-f7bd1d7bf788"
     alumni_match: ["proterra"]
-    source_url: "https://recruiting2.ultipro.com/PRO1047PROTI/JobBoard/e33a1c2e-8d7a-4008-851e-f7bd1d7bf788/?q=&o=postedDateDesc&w=&wc=&we=&wpst="
-    note: "UKG/UltiPro portal; unsupported by current watcher adapters"
+    source_url: "https://recruiting2.ultipro.com/PRO1047PROTI/JobBoard/e33a1c2e-8d7a-4008-851e-f7bd1d7bf788/"
+    note: "Official UKG/UltiPro Recruiting public job board"
 
   - name: "SharkNinja"
     ats: greenhouse

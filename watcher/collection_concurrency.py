@@ -107,6 +107,7 @@ def direct_origin_key(
     successfactors_host: str = "",
     brassring_host: str = "",
     taleo_sourcing_host: str = "",
+    ukg_host: str = "",
 ) -> str:
     """Return the shared origin key for one direct adapter fetch.
 
@@ -152,6 +153,12 @@ def direct_origin_key(
         host = _safe_key(taleo_sourcing_host, limit=253)
         return _safe_key(
             f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:taleo_sourcing"
+        )
+    if adapter == "ukg":
+        # Every tenant on one UltiPro recruiting host shares that host's limit.
+        host = _safe_key(ukg_host, limit=253)
+        return _safe_key(
+            f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:ukg"
         )
     host = DIRECT_ORIGIN_HOSTS.get(adapter)
     if host:

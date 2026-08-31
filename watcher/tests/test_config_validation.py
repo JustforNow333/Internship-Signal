@@ -67,6 +67,13 @@ VALID_COMPANY_FIELDS = {
         '    talentbrew_category_name: "Early Careers"\n'
         '    source_url: "https://careers.example.test/search-jobs"\n'
     ),
+    "ukg": (
+        '    ukg_host: "recruiting.example.test"\n'
+        '    ukg_tenant: "EXA1047EXAI"\n'
+        '    ukg_board_id: "e33a1c2e-8d7a-4008-851e-f7bd1d7bf788"\n'
+        '    source_url: "https://recruiting.example.test/EXA1047EXAI/JobBoard/'
+        'e33a1c2e-8d7a-4008-851e-f7bd1d7bf788/"\n'
+    ),
     "workable": '    token: "example"\n',
     "workday": (
         '    token: "example"\n'
@@ -159,6 +166,7 @@ def test_token_backed_sources_keep_exact_missing_token_error(tmp_path, ats):
         ("workday", "Example: workday entries require token"),
         ("brassring", "Example: brassring_host must be a hostname"),
         ("taleo_sourcing", "Example: taleo_sourcing_host must be a hostname"),
+        ("ukg", "Example: ukg_host must be a hostname"),
         ("oracle_hcm", "Example: oracle_hcm entries require oracle_hcm_host"),
         ("talentbrew", "Example: talentbrew entries require a valid talentbrew_host"),
         ("icims", "Example: icims_variant must be one of: classic, jibe_json"),
@@ -361,6 +369,7 @@ def test_loader_calls_validation_owner_without_duplicating_rules():
         "_validate_successfactors_config",
         "_validate_talentbrew_config",
         "_validate_taleo_sourcing_config",
+        "_validate_ukg_config",
         "_validate_terms_tuple",
         "_validate_token_config",
         "_validate_unique_company_names",
@@ -427,6 +436,7 @@ def test_validation_stays_below_loader_and_registry_import_is_deferred():
         "watcher.sources.workday",
         "watcher.sources.brassring",
         "watcher.sources.taleo_sourcing",
+        "watcher.sources.ukg",
     ),
 )
 def test_no_import_cycle_whichever_module_loads_first(first):

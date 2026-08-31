@@ -271,6 +271,9 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "brassring_site_id": company.brassring_site_id,
                 "taleo_sourcing_host": company.taleo_sourcing_host,
                 "taleo_sourcing_site": company.taleo_sourcing_site,
+                "ukg_host": company.ukg_host,
+                "ukg_tenant": company.ukg_tenant,
+                "ukg_board_id": company.ukg_board_id,
                 "module": company.module,
                 "terms": list(company.terms),
             }
