@@ -76,6 +76,74 @@ RECENT_DIRECT_ADAPTER_METADATA = {
 
 
 CONFIRMED_DIRECT_SOURCE_ADDITIONS = {
+    "Anthropic": {
+        "ats": "greenhouse",
+        "token": "anthropic",
+    },
+    "SpaceX": {
+        "ats": "greenhouse",
+        "token": "spacex",
+    },
+    "Stripe": {
+        "ats": "greenhouse",
+        "token": "stripe",
+    },
+    "Databricks": {
+        "ats": "greenhouse",
+        "token": "databricks",
+    },
+    "Waymo": {
+        "ats": "greenhouse",
+        "token": "waymo",
+    },
+    "Twitch": {
+        "ats": "greenhouse",
+        "token": "twitch",
+    },
+    "Take-Two Interactive": {
+        "ats": "greenhouse",
+        "token": "taketwo",
+    },
+    "Baidu USA": {
+        "ats": "greenhouse",
+        "token": "baidu",
+    },
+    "Epic Games": {
+        "ats": "greenhouse",
+        "token": "epicgames",
+    },
+    "Block": {
+        "ats": "greenhouse",
+        "token": "block",
+    },
+    "Plaid": {
+        "ats": "ashby",
+        "token": "plaid",
+    },
+    "Cerebras": {
+        "ats": "ashby",
+        "token": "cerebras",
+    },
+    "Docker": {
+        "ats": "ashby",
+        "token": "docker",
+    },
+    "Zoox": {
+        "ats": "lever",
+        "token": "zoox",
+    },
+    "ServiceNow": {
+        "ats": "smartrecruiters",
+        "token": "servicenow",
+    },
+    "Palantir": {
+        "ats": "smartrecruiters",
+        "token": "palantir",
+    },
+    "Grab": {
+        "ats": "smartrecruiters",
+        "token": "grab",
+    },
     "Taula Capital": {
         "ats": "greenhouse",
         "token": "taulacapital",

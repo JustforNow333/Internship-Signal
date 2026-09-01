@@ -952,3 +952,288 @@ companies:
     aliases: ["HSS"]
     alumni_match: ["hospital for special surgery", "hss"]
     source_url: "https://hss.wd1.myworkdayjobs.com/HSS_Careers"
+
+  # --- Big Tech coverage expansion (2026-09-01) ---
+  - name: "Dropbox"
+    ats: greenhouse
+    token: "dropbox"
+    alumni_match: ["dropbox"]
+    source_url: "https://boards.greenhouse.io/dropbox"
+
+  - name: "Databricks"
+    ats: greenhouse
+    token: "databricks"
+    alumni_match: ["databricks"]
+    source_url: "https://boards.greenhouse.io/databricks"
+
+  - name: "Cloudflare"
+    ats: greenhouse
+    token: "cloudflare"
+    alumni_match: ["cloudflare"]
+    source_url: "https://boards.greenhouse.io/cloudflare"
+
+  - name: "Datadog"
+    ats: greenhouse
+    token: "datadog"
+    alumni_match: ["datadog"]
+    source_url: "https://boards.greenhouse.io/datadog"
+
+  - name: "MongoDB"
+    ats: greenhouse
+    token: "mongodb"
+    alumni_match: ["mongodb"]
+    source_url: "https://boards.greenhouse.io/mongodb"
+
+  - name: "Elastic"
+    ats: greenhouse
+    token: "elastic"
+    alumni_match: ["elastic"]
+    source_url: "https://boards.greenhouse.io/elastic"
+
+  - name: "Zscaler"
+    ats: greenhouse
+    token: "zscaler"
+    alumni_match: ["zscaler"]
+    source_url: "https://boards.greenhouse.io/zscaler"
+
+  - name: "Okta"
+    ats: greenhouse
+    token: "okta"
+    alumni_match: ["okta"]
+    source_url: "https://boards.greenhouse.io/okta"
+
+  - name: "Airbnb"
+    ats: greenhouse
+    token: "airbnb"
+    alumni_match: ["airbnb"]
+    source_url: "https://boards.greenhouse.io/airbnb"
+
+  - name: "Lyft"
+    ats: greenhouse
+    token: "lyft"
+    alumni_match: ["lyft"]
+    source_url: "https://boards.greenhouse.io/lyft"
+
+  - name: "Pinterest"
+    ats: greenhouse
+    token: "pinterest"
+    alumni_match: ["pinterest"]
+    source_url: "https://boards.greenhouse.io/pinterest"
+
+  - name: "Reddit"
+    ats: greenhouse
+    token: "reddit"
+    alumni_match: ["reddit"]
+    source_url: "https://boards.greenhouse.io/reddit"
+
+  - name: "Roblox"
+    ats: greenhouse
+    token: "roblox"
+    alumni_match: ["roblox"]
+    source_url: "https://boards.greenhouse.io/roblox"
+
+  - name: "Discord"
+    ats: greenhouse
+    token: "discord"
+    alumni_match: ["discord"]
+    source_url: "https://boards.greenhouse.io/discord"
+
+  - name: "Instacart"
+    ats: greenhouse
+    token: "instacart"
+    alumni_match: ["instacart"]
+    source_url: "https://boards.greenhouse.io/instacart"
+
+  - name: "Stripe"
+    ats: greenhouse
+    token: "stripe"
+    alumni_match: ["stripe"]
+    source_url: "https://boards.greenhouse.io/stripe"
+
+  - name: "Block"
+    ats: greenhouse
+    token: "block"
+    aliases: ["Square"]
+    alumni_match: ["block", "square"]
+    source_url: "https://boards.greenhouse.io/block"
+
+  - name: "Coinbase"
+    ats: greenhouse
+    token: "coinbase"
+    alumni_match: ["coinbase"]
+    source_url: "https://boards.greenhouse.io/coinbase"
+
+  - name: "Robinhood"
+    ats: greenhouse
+    token: "robinhood"
+    alumni_match: ["robinhood"]
+    source_url: "https://boards.greenhouse.io/robinhood"
+
+  - name: "Affirm"
+    ats: greenhouse
+    token: "affirm"
+    alumni_match: ["affirm"]
+    source_url: "https://boards.greenhouse.io/affirm"
+
+  - name: "SoFi"
+    ats: greenhouse
+    token: "sofi"
+    alumni_match: ["sofi"]
+    source_url: "https://boards.greenhouse.io/sofi"
+
+  - name: "Anthropic"
+    ats: greenhouse
+    token: "anthropic"
+    alumni_match: ["anthropic"]
+    source_url: "https://boards.greenhouse.io/anthropic"
+
+  - name: "Scale AI"
+    ats: greenhouse
+    token: "scaleai"
+    aliases: ["Scale"]
+    alumni_match: ["scale ai"]
+    source_url: "https://boards.greenhouse.io/scaleai"
+
+  - name: "CoreWeave"
+    ats: greenhouse
+    token: "coreweave"
+    alumni_match: ["coreweave"]
+    source_url: "https://boards.greenhouse.io/coreweave"
+
+  - name: "SpaceX"
+    ats: greenhouse
+    token: "spacex"
+    alumni_match: ["spacex"]
+    source_url: "https://boards.greenhouse.io/spacex"
+
+  - name: "Figma"
+    ats: greenhouse
+    token: "figma"
+    alumni_match: ["figma"]
+    source_url: "https://boards.greenhouse.io/figma"
+
+  - name: "GitLab"
+    ats: greenhouse
+    token: "gitlab"
+    alumni_match: ["gitlab"]
+    source_url: "https://boards.greenhouse.io/gitlab"
+
+  - name: "Samsara"
+    ats: greenhouse
+    token: "samsara"
+    alumni_match: ["samsara"]
+    source_url: "https://boards.greenhouse.io/samsara"
+
+  - name: "Toast"
+    ats: greenhouse
+    token: "toast"
+    alumni_match: ["toast"]
+    source_url: "https://boards.greenhouse.io/toast"
+
+  - name: "Epic Games"
+    ats: greenhouse
+    token: "epicgames"
+    alumni_match: ["epic games"]
+    source_url: "https://boards.greenhouse.io/epicgames"
+
+  - name: "Riot Games"
+    ats: greenhouse
+    token: "riotgames"
+    alumni_match: ["riot games"]
+    source_url: "https://boards.greenhouse.io/riotgames"
+
+  - name: "Take-Two Interactive"
+    ats: greenhouse
+    token: "taketwo"
+    aliases: ["Take-Two", "Rockstar Games"]
+    alumni_match: ["take-two interactive", "take-two"]
+    source_url: "https://boards.greenhouse.io/taketwo"
+
+  - name: "Coupang"
+    ats: greenhouse
+    token: "coupang"
+    alumni_match: ["coupang"]
+    source_url: "https://boards.greenhouse.io/coupang"
+
+  - name: "Twitch"
+    ats: greenhouse
+    token: "twitch"
+    alumni_match: ["twitch"]
+    source_url: "https://boards.greenhouse.io/twitch"
+
+  - name: "Waymo"
+    ats: greenhouse
+    token: "waymo"
+    alumni_match: ["waymo"]
+    source_url: "https://boards.greenhouse.io/waymo"
+
+  - name: "Baidu USA"
+    ats: greenhouse
+    token: "baidu"
+    aliases: ["Baidu"]
+    alumni_match: ["baidu usa", "baidu"]
+    source_url: "https://boards.greenhouse.io/baidu"
+
+  - name: "Confluent"
+    ats: ashby
+    token: "confluent"
+    alumni_match: ["confluent"]
+    source_url: "https://jobs.ashbyhq.com/confluent"
+
+  - name: "Plaid"
+    ats: ashby
+    token: "plaid"
+    alumni_match: ["plaid"]
+    source_url: "https://jobs.ashbyhq.com/plaid"
+
+  - name: "Perplexity"
+    ats: ashby
+    token: "perplexity"
+    aliases: ["Perplexity AI"]
+    alumni_match: ["perplexity"]
+    source_url: "https://jobs.ashbyhq.com/perplexity"
+
+  - name: "Cohere"
+    ats: ashby
+    token: "cohere"
+    alumni_match: ["cohere"]
+    source_url: "https://jobs.ashbyhq.com/cohere"
+
+  - name: "Cerebras"
+    ats: ashby
+    token: "cerebras"
+    aliases: ["Cerebras Systems"]
+    alumni_match: ["cerebras"]
+    source_url: "https://jobs.ashbyhq.com/cerebras"
+
+  - name: "Docker"
+    ats: ashby
+    token: "docker"
+    alumni_match: ["docker"]
+    source_url: "https://jobs.ashbyhq.com/docker"
+
+  - name: "Zoox"
+    ats: lever
+    token: "zoox"
+    alumni_match: ["zoox"]
+    source_url: "https://jobs.lever.co/zoox"
+
+  - name: "ServiceNow"
+    ats: smartrecruiters
+    token: "servicenow"
+    alumni_match: ["servicenow"]
+    source_url: "https://careers.smartrecruiters.com/servicenow"
+
+  - name: "Palantir"
+    ats: smartrecruiters
+    token: "palantir"
+    aliases: ["Palantir Technologies"]
+    alumni_match: ["palantir"]
+    source_url: "https://careers.smartrecruiters.com/palantir"
+
+  - name: "Grab"
+    ats: smartrecruiters
+    token: "grab"
+    aliases: ["Grab Holdings"]
+    alumni_match: ["grab"]
+    source_url: "https://careers.smartrecruiters.com/grab"

@@ -261,7 +261,6 @@ def test_default_watchlist_covers_required_exact_variants(label, canonical):
     [
         "Armstrong",
         "Compass Group",
-        "Epic Games",
         "American Express Global Business Travel",
         "Amazon Studios",
         "Oracle Health",
@@ -271,3 +270,24 @@ def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
     config = load_watchlist(DEFAULT_WATCHLIST_PATH)
 
     assert match_watchlist_company(label, config.companies) is None
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        # Epic Games is configured in its own right, so the watchlist must
+        # resolve it and Epic to different companies rather than conflating them.
+        ("Epic Games", "Epic Games"),
+        ("Epic", "Epic"),
+        ("Riot Games", "Riot Games"),
+        ("Square", "Block"),
+        ("Baidu", "Baidu USA"),
+    ],
+)
+def test_similarly_named_configured_companies_resolve_distinctly(label, expected):
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+
+    matched = match_watchlist_company(label, config.companies)
+
+    assert matched is not None
+    assert matched.name == expected
