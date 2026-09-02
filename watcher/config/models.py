@@ -41,6 +41,13 @@ SUPPORTED_WORKDAY_DETAIL_POLICIES = frozenset(
         WORKDAY_DETAIL_EARLY_CAREER,
     }
 )
+# Workday serves the same CXS contract from two public host layouts. ``jobs``
+# is the usual ``{tenant}.{shard}.myworkdayjobs.com``; ``site`` is the
+# ``{shard}.myworkdaysite.com`` layout that carries the tenant in the path. The
+# variant is always configured explicitly and never inferred from a URL.
+WORKDAY_HOST_JOBS = "jobs"
+WORKDAY_HOST_SITE = "site"
+SUPPORTED_WORKDAY_HOST_VARIANTS = frozenset({WORKDAY_HOST_JOBS, WORKDAY_HOST_SITE})
 
 
 @dataclass(frozen=True)
@@ -126,6 +133,7 @@ class CompanyCfg:
     workday_shard: str = ""
     workday_site: str = ""
     workday_detail_policy: str = WORKDAY_DETAIL_INTERNSHIP
+    workday_host_variant: str = WORKDAY_HOST_JOBS
     oracle_hcm_host: str = ""
     oracle_hcm_site: str = ""
     talentbrew_host: str = ""

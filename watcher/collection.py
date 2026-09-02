@@ -516,6 +516,7 @@ def _direct_collection_task(
             company.ats,
             token=company.token,
             workday_shard=company.workday_shard,
+            workday_host_variant=company.workday_host_variant,
             oracle_hcm_host=company.oracle_hcm_host,
             talentbrew_host=company.talentbrew_host,
             icims_host=company.icims_host,

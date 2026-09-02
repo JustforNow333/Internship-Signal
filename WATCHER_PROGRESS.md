@@ -21,6 +21,15 @@ This file tracks completed watcher steps and the next handoff target.
   three more that existing adapters can serve: xAI (Greenhouse `xai`, the board
   `careers.x.com` officially embeds, so it covers the merged X entity too),
   Mistral AI (Ashby `mistral.ai`), and Hugging Face (Workable `huggingface`).
+- Workday now has an explicit `workday_host_variant` of `jobs` or `site`.
+  `jobs` is the default `{tenant}.{shard}.myworkdayjobs.com` layout every
+  existing company keeps; `site` is the `{shard}.myworkdaysite.com` layout whose
+  posting URLs carry the tenant as `/recruiting/{tenant}/{site}`. Both serve the
+  identical CXS contract, so only URL construction and per-origin grouping
+  changed - parsing, pagination, totals, retries, pacing, identity, diagnostics,
+  and completeness rules are untouched. The variant is always configured
+  explicitly and never inferred from a URL. Snap is the first `site` tenant, and
+  KLA joined on the default layout.
 - Intel and NXP are now configured Workday sources. The wd1/wd3/wd5 failures
   that had blocked them were traced to an expired cross-signed ISRG Root X2 in
   the local Windows trust store, not to Workday: the served leaf certificates

@@ -101,6 +101,7 @@ def direct_origin_key(
     ats: str,
     token: str = "",
     workday_shard: str = "",
+    workday_host_variant: str = "",
     oracle_hcm_host: str = "",
     talentbrew_host: str = "",
     icims_host: str = "",
@@ -120,6 +121,12 @@ def direct_origin_key(
     if adapter == PROVIDER_WORKDAY:
         tenant = _safe_key(token, limit=63)
         shard = _safe_key(workday_shard, limit=63)
+        if str(workday_host_variant or "").strip().casefold() == "site":
+            # Every tenant on one myworkdaysite shard shares that single host,
+            # so they must share its per-origin limit.
+            if shard == UNKNOWN_ORIGIN:
+                return _safe_key("https://myworkdaysite.com")
+            return _safe_key(f"https://{shard}.myworkdaysite.com")
         if tenant == UNKNOWN_ORIGIN or shard == UNKNOWN_ORIGIN:
             return _safe_key("https://myworkdayjobs.com")
         return _safe_key(f"https://{tenant}.{shard}.myworkdayjobs.com")

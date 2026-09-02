@@ -28,6 +28,7 @@ from .env import (
 from .models import (
     WORKDAY_DETAIL_INTERNSHIP,
     WORKDAY_DETAIL_NONE,
+    WORKDAY_HOST_JOBS,
     CompanyCfg,
     GitHubListingSourceCfg,
     WatcherConfig,
@@ -127,6 +128,9 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         )
     else:
         workday_detail_policy = WORKDAY_DETAIL_INTERNSHIP
+    workday_host_variant = (
+        str(entry.get("workday_host_variant") or "").strip() or WORKDAY_HOST_JOBS
+    )
     _validate_workday_config(
         name,
         ats=ats,
@@ -134,6 +138,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         shard=workday_shard,
         site=workday_site,
         detail_policy=workday_detail_policy,
+        host_variant=workday_host_variant,
     )
     oracle_hcm_host = str(entry.get("oracle_hcm_host") or "").strip().casefold()
     oracle_hcm_site = str(entry.get("oracle_hcm_site") or "").strip()
@@ -254,6 +259,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         workday_shard=workday_shard,
         workday_site=workday_site,
         workday_detail_policy=workday_detail_policy,
+        workday_host_variant=workday_host_variant,
         oracle_hcm_host=oracle_hcm_host,
         oracle_hcm_site=oracle_hcm_site,
         talentbrew_host=talentbrew_host,

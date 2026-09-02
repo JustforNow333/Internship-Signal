@@ -18,6 +18,8 @@ from watcher.config import (
     WORKDAY_DETAIL_EARLY_CAREER,
     WORKDAY_DETAIL_INTERNSHIP,
     WORKDAY_DETAIL_NONE,
+    WORKDAY_HOST_JOBS,
+    WORKDAY_HOST_SITE,
     CompanyCfg,
     workday_min_interval_seconds,
 )
@@ -509,24 +511,53 @@ class WorkdaySource:
         self._pacer = pacer or WorkdayPacer(interval, sleeper=sleeper, clock=clock)
 
     @staticmethod
-    def endpoint(token: str, shard: str, site: str) -> str:
-        return f"https://{token}.{shard}.myworkdayjobs.com/wday/cxs/{token}/{site}/jobs"
+    def api_host(token: str, shard: str, variant: str = WORKDAY_HOST_JOBS) -> str:
+        """Return the CXS API host for one public Workday host layout.
+
+        Both layouts serve the identical CXS contract; only the host differs,
+        and the variant is always taken from explicit configuration.
+        """
+
+        if variant == WORKDAY_HOST_SITE:
+            return f"{shard}.myworkdaysite.com"
+        return f"{token}.{shard}.myworkdayjobs.com"
 
     @staticmethod
-    def posting_url(token: str, shard: str, site: str, external_path: str) -> str:
-        return f"https://{token}.{shard}.myworkdayjobs.com/{site}{external_path}"
+    def endpoint(
+        token: str, shard: str, site: str, variant: str = WORKDAY_HOST_JOBS
+    ) -> str:
+        host = WorkdaySource.api_host(token, shard, variant)
+        return f"https://{host}/wday/cxs/{token}/{site}/jobs"
 
     @staticmethod
-    def detail_endpoint(token: str, shard: str, site: str, external_path: str) -> str:
+    def posting_url(
+        token: str,
+        shard: str,
+        site: str,
+        external_path: str,
+        variant: str = WORKDAY_HOST_JOBS,
+    ) -> str:
+        host = WorkdaySource.api_host(token, shard, variant)
+        if variant == WORKDAY_HOST_SITE:
+            # The site layout carries the tenant in the human-facing path.
+            return f"https://{host}/recruiting/{token}/{site}{external_path}"
+        return f"https://{host}/{site}{external_path}"
+
+    @staticmethod
+    def detail_endpoint(
+        token: str,
+        shard: str,
+        site: str,
+        external_path: str,
+        variant: str = WORKDAY_HOST_JOBS,
+    ) -> str:
         """Return the public CXS detail endpoint linked by ``externalPath``."""
 
         path = str(external_path or "").strip()
         if not path.startswith("/"):
             path = f"/{path}"
-        return (
-            f"https://{token}.{shard}.myworkdayjobs.com/wday/cxs/"
-            f"{token}/{site}{path}"
-        )
+        host = WorkdaySource.api_host(token, shard, variant)
+        return f"https://{host}/wday/cxs/{token}/{site}{path}"
 
     def fetch(self, company: CompanyCfg) -> list[dict]:
         self._reset_diagnostics()
@@ -545,7 +576,7 @@ class WorkdaySource:
         while True:
             try:
                 payload = self._fetch_page(
-                    self.endpoint(token, shard, site),
+                    self.endpoint(token, shard, site, company.workday_host_variant),
                     {"appliedFacets": {}, "limit": self.page_size, "offset": offset, "searchText": ""},
                 )
                 postings, total_found = self._page(payload)
@@ -686,7 +717,7 @@ class WorkdaySource:
         site = _required(company.workday_site, "workday_site", company)
         self._pacer.wait_for_tenant(company.name)
         payload = self._fetch_page(
-            self.endpoint(token, shard, site),
+            self.endpoint(token, shard, site, company.workday_host_variant),
             {"appliedFacets": {}, "limit": self.page_size, "offset": 0, "searchText": ""},
         )
         self.last_diagnostics = self._diagnostics_snapshot()
@@ -801,7 +832,9 @@ class WorkdaySource:
                 row["extra"]["workday_detail_candidate_reason"] = reason
             try:
                 payload = self._fetch_detail(
-                    self.detail_endpoint(token, shard, site, path)
+                    self.detail_endpoint(
+                        token, shard, site, path, company.workday_host_variant
+                    )
                 )
                 info = _detail_posting_info(payload)
                 listing_id = str(
@@ -1099,7 +1132,9 @@ class WorkdaySource:
             title=title,
             location=str(posting.get("locationsText") or "").strip(),
             description=html_to_text(posting.get("jobDescription")),
-            source_url=self.posting_url(token, shard, site, external_path),
+            source_url=self.posting_url(
+                token, shard, site, external_path, company.workday_host_variant
+            ),
             date_posted=str(posting.get("postedOn") or "").strip(),
             remote_status=_remote_status(posting),
             extra={

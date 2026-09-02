@@ -16,6 +16,8 @@ from watcher.company_matching import company_matching_key
 from .env import ConfigError
 from .models import (
     SUPPORTED_WORKDAY_DETAIL_POLICIES,
+    SUPPORTED_WORKDAY_HOST_VARIANTS,
+    WORKDAY_HOST_JOBS,
     CompanyCfg,
     GitHubListingSourceCfg,
 )
@@ -90,6 +92,7 @@ def _validate_workday_config(
     shard: str,
     site: str,
     detail_policy: str,
+    host_variant: str = WORKDAY_HOST_JOBS,
 ) -> None:
     if ats != "workday":
         return
@@ -103,6 +106,11 @@ def _validate_workday_config(
         supported = ", ".join(sorted(SUPPORTED_WORKDAY_DETAIL_POLICIES))
         raise ConfigError(
             f"{name}: workday_detail_policy must be one of: {supported}"
+        )
+    if host_variant not in SUPPORTED_WORKDAY_HOST_VARIANTS:
+        supported = ", ".join(sorted(SUPPORTED_WORKDAY_HOST_VARIANTS))
+        raise ConfigError(
+            f"{name}: workday_host_variant must be one of: {supported}"
         )
 
 

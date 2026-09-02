@@ -251,6 +251,7 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "workday_shard": company.workday_shard,
                 "workday_site": company.workday_site,
                 "workday_detail_policy": company.workday_detail_policy,
+                "workday_host_variant": company.workday_host_variant,
                 "oracle_hcm_host": company.oracle_hcm_host,
                 "oracle_hcm_site": company.oracle_hcm_site,
                 "talentbrew_host": company.talentbrew_host,

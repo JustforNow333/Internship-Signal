@@ -22,6 +22,7 @@ EXPECTED_CONFIG = {
     "Intel": ("workday", "intel", "wd1", "External"),
     "NXP": ("workday", "nxp", "wd3", "careers"),
     "KLA": ("workday", "kla", "wd1", "Search"),
+    "Snap": ("workday", "snapchat", "wd1", "snap"),
     "AMD": ("icims", "jibe_json", "careers.amd.com"),
     "GitHub": ("icims", "jibe_json", "githubinc.jibeapply.com"),
     "Docusign": ("icims", "jibe_json", "careers.docusign.com"),

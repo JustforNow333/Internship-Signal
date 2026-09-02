@@ -313,6 +313,8 @@ def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
         ("NXP Semiconductors", "NXP"),
         ("KLA", "KLA"),
         ("KLA Corporation", "KLA"),
+        ("Snap", "Snap"),
+        ("Snapchat", "Snap"),
         ("Baidu", "Baidu USA"),
     ],
 )

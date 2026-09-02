@@ -1383,3 +1383,13 @@ companies:
     aliases: ["KLA Corporation"]
     alumni_match: ["kla"]
     source_url: "https://kla.wd1.myworkdayjobs.com/Search"
+
+  - name: "Snap"
+    ats: workday
+    token: "snapchat"
+    workday_shard: "wd1"
+    workday_site: "snap"
+    workday_host_variant: site
+    aliases: ["Snap Inc.", "Snapchat"]
+    alumni_match: ["snap", "snapchat"]
+    source_url: "https://wd1.myworkdaysite.com/recruiting/snapchat/snap"
