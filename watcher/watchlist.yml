@@ -1393,3 +1393,27 @@ companies:
     aliases: ["Snap Inc.", "Snapchat"]
     alumni_match: ["snap", "snapchat"]
     source_url: "https://wd1.myworkdaysite.com/recruiting/snapchat/snap"
+
+  - name: "Cisco"
+    ats: workday
+    token: "cisco"
+    workday_shard: "wd5"
+    workday_site: "Cisco_Careers"
+    aliases: ["Cisco Systems"]
+    alumni_match: ["cisco"]
+    source_url: "https://cisco.wd5.myworkdayjobs.com/Cisco_Careers"
+
+  - name: "eBay"
+    ats: workday
+    token: "ebay"
+    workday_shard: "wd5"
+    workday_site: "apply"
+    aliases: ["eBay Inc."]
+    alumni_match: ["ebay"]
+    source_url: "https://ebay.wd5.myworkdayjobs.com/apply"
+
+  - name: "Snowflake"
+    ats: ashby
+    token: "snowflake"
+    alumni_match: ["snowflake"]
+    source_url: "https://jobs.ashbyhq.com/snowflake"

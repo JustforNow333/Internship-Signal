@@ -23,6 +23,8 @@ EXPECTED_CONFIG = {
     "NXP": ("workday", "nxp", "wd3", "careers"),
     "KLA": ("workday", "kla", "wd1", "Search"),
     "Snap": ("workday", "snapchat", "wd1", "snap"),
+    "Cisco": ("workday", "cisco", "wd5", "Cisco_Careers"),
+    "eBay": ("workday", "ebay", "wd5", "apply"),
     "AMD": ("icims", "jibe_json", "careers.amd.com"),
     "GitHub": ("icims", "jibe_json", "githubinc.jibeapply.com"),
     "Docusign": ("icims", "jibe_json", "careers.docusign.com"),

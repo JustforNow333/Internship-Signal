@@ -315,6 +315,10 @@ def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
         ("KLA Corporation", "KLA"),
         ("Snap", "Snap"),
         ("Snapchat", "Snap"),
+        ("Cisco", "Cisco"),
+        ("Cisco Systems", "Cisco"),
+        ("eBay", "eBay"),
+        ("Snowflake", "Snowflake"),
         ("Baidu", "Baidu USA"),
     ],
 )

@@ -21,6 +21,13 @@ This file tracks completed watcher steps and the next handoff target.
   three more that existing adapters can serve: xAI (Greenhouse `xai`, the board
   `careers.x.com` officially embeds, so it covers the merged X entity too),
   Mistral AI (Ashby `mistral.ai`), and Hugging Face (Workable `huggingface`).
+- A Phenom audit of Cisco, HPE, Snowflake, and eBay found that Phenom is only a
+  secondary marketing search layer for all four: every sampled apply URL points
+  at an ATS the watcher already supports, and Phenom's own totals disagreed with
+  the authoritative board on three of the four. No Phenom adapter was built.
+  Cisco, eBay, and Snowflake are now configured on their real sources. HPE stays
+  unresolved because its Workday board reproducibly returns one schema-invalid
+  record, so the crawl is incomplete and degraded rather than complete.
 - Workday now has an explicit `workday_host_variant` of `jobs` or `site`.
   `jobs` is the default `{tenant}.{shard}.myworkdayjobs.com` layout every
   existing company keeps; `site` is the `{shard}.myworkdaysite.com` layout whose
