@@ -17,6 +17,15 @@ This file tracks completed watcher steps and the next handoff target.
   three iCIMS/Jibe companies, and two Oracle HCM companies. Netflix now has a
   narrow direct adapter for its verified legacy Eightfold contract; Micron's
   newer PCSX contract remains unsupported.
+- A second discovery pass over the 41 remaining Big Tech targets found only
+  three more that existing adapters can serve: xAI (Greenhouse `xai`, the board
+  `careers.x.com` officially embeds, so it covers the merged X entity too),
+  Mistral AI (Ashby `mistral.ai`), and Hugging Face (Workable `huggingface`).
+  Intel, Samsung Electronics, and NXP have confirmed Workday tenants but could
+  not be live-verified because `myworkdayjobs.com` was unreachable, so they were
+  not added. Everything else is on Phenom, Eightfold PCSX, Avature, Gr8People,
+  Workday `myworkdaysite` (a host the adapter does not build), or a fully
+  company-hosted portal.
 - `python -m watcher.audit --coverage` now reports deterministic product-native
   coverage from the canonical registry, current watchlist, and a read-only
   persisted-health snapshot. It makes no requests or state changes and does not

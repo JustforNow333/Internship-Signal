@@ -301,6 +301,12 @@ def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
         ("Epic", "Epic"),
         ("Riot Games", "Riot Games"),
         ("Square", "Block"),
+        # xAI shares Musk-entity recruiting branding with SpaceX but is a
+        # separate Greenhouse board with a disjoint posting set.
+        ("xAI", "xAI"),
+        ("X Corp", "xAI"),
+        ("SpaceX", "SpaceX"),
+        ("Mistral", "Mistral AI"),
         ("Baidu", "Baidu USA"),
     ],
 )

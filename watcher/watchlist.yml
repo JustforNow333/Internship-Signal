@@ -1334,3 +1334,25 @@ companies:
     oracle_hcm_site: "CX"
     alumni_match: ["texas instruments"]
     source_url: "https://edbz.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs"
+
+  # --- Big Tech follow-up: verified existing-adapter coverage (2026-09-01) ---
+
+  - name: "xAI"
+    ats: greenhouse
+    token: "xai"
+    aliases: ["X Corp"]
+    alumni_match: ["xai", "x corp"]
+    source_url: "https://boards.greenhouse.io/xai"
+
+  - name: "Mistral AI"
+    ats: ashby
+    token: "mistral.ai"
+    aliases: ["Mistral"]
+    alumni_match: ["mistral ai", "mistral"]
+    source_url: "https://jobs.ashbyhq.com/mistral.ai"
+
+  - name: "Hugging Face"
+    ats: workable
+    token: "huggingface"
+    alumni_match: ["hugging face"]
+    source_url: "https://apply.workable.com/huggingface/"

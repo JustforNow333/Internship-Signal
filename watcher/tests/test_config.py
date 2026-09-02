@@ -76,6 +76,18 @@ RECENT_DIRECT_ADAPTER_METADATA = {
 
 
 CONFIRMED_DIRECT_SOURCE_ADDITIONS = {
+    "xAI": {
+        "ats": "greenhouse",
+        "token": "xai",
+    },
+    "Mistral AI": {
+        "ats": "ashby",
+        "token": "mistral.ai",
+    },
+    "Hugging Face": {
+        "ats": "workable",
+        "token": "huggingface",
+    },
     "Anthropic": {
         "ats": "greenhouse",
         "token": "anthropic",
