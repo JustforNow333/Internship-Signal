@@ -21,6 +21,7 @@ EXPECTED_CONFIG = {
     "Marvell": ("workday", "marvell", "wd1", "MarvellCareers"),
     "Intel": ("workday", "intel", "wd1", "External"),
     "NXP": ("workday", "nxp", "wd3", "careers"),
+    "KLA": ("workday", "kla", "wd1", "Search"),
     "AMD": ("icims", "jibe_json", "careers.amd.com"),
     "GitHub": ("icims", "jibe_json", "githubinc.jibeapply.com"),
     "Docusign": ("icims", "jibe_json", "careers.docusign.com"),

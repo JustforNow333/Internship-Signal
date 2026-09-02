@@ -1374,3 +1374,12 @@ companies:
     aliases: ["NXP Semiconductors"]
     alumni_match: ["nxp"]
     source_url: "https://nxp.wd3.myworkdayjobs.com/careers"
+
+  - name: "KLA"
+    ats: workday
+    token: "kla"
+    workday_shard: "wd1"
+    workday_site: "Search"
+    aliases: ["KLA Corporation"]
+    alumni_match: ["kla"]
+    source_url: "https://kla.wd1.myworkdayjobs.com/Search"
