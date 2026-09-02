@@ -410,13 +410,16 @@ def test_icims_scope_affects_origin_and_collection_snapshot_fingerprint():
         ) != collection_config_fingerprint(config)
 
 
-def test_default_watchlist_uses_verified_icims_configuration_for_five_companies():
+def test_default_watchlist_uses_verified_icims_configuration_for_eight_companies():
     companies = {
         company.name: company
         for company in load_watchlist(DEFAULT_WATCHLIST_PATH).companies
     }
     expected = {
+        "AMD": ("jibe_json", "careers.amd.com", ()),
         "Aon": ("jibe_json", "jobs.aon.com", ()),
+        "Docusign": ("jibe_json", "careers.docusign.com", ()),
+        "GitHub": ("jibe_json", "githubinc.jibeapply.com", ()),
         "JHU Applied Physics Laboratory": ("jibe_json", "careers.jhuapl.edu", ()),
         "ZS": ("jibe_json", "jobs.zs.com", ()),
         "General Dynamics Electric Boat": ("classic", "careers-gdeb.icims.com", ()),

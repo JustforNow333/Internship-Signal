@@ -87,6 +87,26 @@ def test_company_matches_uses_only_exact_canonical_and_alias_keys():
     assert not company_matches("Amazom", company)
 
 
+@pytest.mark.parametrize(
+    ("configured_name", "observed_name"),
+    [
+        ("AMD", "Advanced Micro Devices"),
+        ("Analog Devices", "ADI"),
+        ("Cadence", "Cadence Design Systems"),
+        ("Marvell", "Marvell Technology"),
+    ],
+)
+def test_verified_config_expansion_aliases_match_unambiguously(
+    configured_name, observed_name
+):
+    companies = {
+        company.name: company
+        for company in load_watchlist(DEFAULT_WATCHLIST_PATH).companies
+    }
+
+    assert company_matches(observed_name, companies[configured_name])
+
+
 def _write_watchlist(tmp_path: Path, companies: str) -> Path:
     path = tmp_path / "watchlist.yml"
     path.write_text(

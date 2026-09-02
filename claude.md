@@ -3,6 +3,9 @@
 - `product-mvp` is the hosted multi-user product branch.
 - Current product work measures source coverage and expands it through
   evidence-backed, isolated source changes; the coverage audit is read-only.
+- The 46-company expansion is published at `3ab275d`; current local work is
+  config-only and admits only live-complete existing adapters. Micron remains
+  excluded because its official careers flow moved to Eightfold.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - The required shared correctness/architecture migration from `internal-tool`
   is complete. Future internal commits are evaluated individually, not queued

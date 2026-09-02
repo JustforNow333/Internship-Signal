@@ -313,6 +313,9 @@ hosted-notification*.log
 hosted-notification*.json
 phase3a-notification-smoke*.log
 phase3a-notification-smoke*.json
+# Live source-verification output is operational evidence, not a source fixture.
+source-verification*.log
+source-verification*.json
 !/.gitignore
 !/agents.md
 !/claude.md

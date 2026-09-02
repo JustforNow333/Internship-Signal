@@ -25,11 +25,28 @@ WAVE_ONE_DIRECT_COMPANIES = {
 }
 
 ICIMS_DIRECT_COMPANIES = {
+    "AMD",
     "Aon",
     "Analysis Group",
+    "Docusign",
     "General Dynamics Electric Boat",
+    "GitHub",
     "JHU Applied Physics Laboratory",
     "ZS",
+}
+
+VERIFIED_CONFIG_EXPANSION_COMPANIES = {
+    "AMD",
+    "Analog Devices",
+    "Autodesk",
+    "Cadence",
+    "CrowdStrike",
+    "Docusign",
+    "Fortinet",
+    "GitHub",
+    "Marvell",
+    "Palo Alto Networks",
+    "Texas Instruments",
 }
 
 SUCCESSFACTORS_DIRECT_COMPANIES = {
@@ -125,6 +142,16 @@ def test_icims_sources_are_exposed_as_direct_hosted_catalog_coverage():
     companies_by_name = {company.name: company for company in catalog.companies}
 
     for name in ICIMS_DIRECT_COMPANIES:
+        company = companies_by_name[name]
+        assert company.coverage == "direct"
+        assert company.selectable is True
+
+
+def test_verified_config_expansion_is_exposed_as_direct_hosted_catalog_coverage():
+    catalog = CompanyCatalog.from_watcher_config()
+    companies_by_name = {company.name: company for company in catalog.companies}
+
+    for name in VERIFIED_CONFIG_EXPANSION_COMPANIES:
         company = companies_by_name[name]
         assert company.coverage == "direct"
         assert company.selectable is True

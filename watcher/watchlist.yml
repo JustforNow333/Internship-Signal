@@ -1237,3 +1237,90 @@ companies:
     aliases: ["Grab Holdings"]
     alumni_match: ["grab"]
     source_url: "https://careers.smartrecruiters.com/grab"
+
+  - name: "Autodesk"
+    ats: workday
+    token: "autodesk"
+    workday_shard: "wd1"
+    workday_site: "Ext"
+    alumni_match: ["autodesk"]
+    source_url: "https://autodesk.wd1.myworkdayjobs.com/Ext"
+
+  - name: "Palo Alto Networks"
+    ats: workday
+    token: "paloaltonetworks"
+    workday_shard: "wd5"
+    workday_site: "panwexternalcareers"
+    alumni_match: ["palo alto networks"]
+    source_url: "https://paloaltonetworks.wd5.myworkdayjobs.com/panwexternalcareers"
+
+  - name: "CrowdStrike"
+    ats: workday
+    token: "crowdstrike"
+    workday_shard: "wd5"
+    workday_site: "crowdstrikecareers"
+    alumni_match: ["crowdstrike"]
+    source_url: "https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers"
+
+  - name: "Analog Devices"
+    ats: workday
+    token: "analogdevices"
+    workday_shard: "wd1"
+    workday_site: "External"
+    aliases: ["ADI"]
+    alumni_match: ["analog devices", "adi"]
+    source_url: "https://analogdevices.wd1.myworkdayjobs.com/External"
+
+  - name: "Cadence"
+    ats: workday
+    token: "cadence"
+    workday_shard: "wd1"
+    workday_site: "External_Careers"
+    aliases: ["Cadence Design Systems"]
+    alumni_match: ["cadence", "cadence design systems"]
+    source_url: "https://cadence.wd1.myworkdayjobs.com/External_Careers"
+
+  - name: "Marvell"
+    ats: workday
+    token: "marvell"
+    workday_shard: "wd1"
+    workday_site: "MarvellCareers"
+    aliases: ["Marvell Technology"]
+    alumni_match: ["marvell", "marvell technology"]
+    source_url: "https://marvell.wd1.myworkdayjobs.com/MarvellCareers"
+
+  - name: "AMD"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "careers.amd.com"
+    aliases: ["Advanced Micro Devices"]
+    alumni_match: ["amd", "advanced micro devices"]
+    source_url: "https://careers.amd.com/careers-home/jobs"
+
+  - name: "GitHub"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "githubinc.jibeapply.com"
+    alumni_match: ["github"]
+    source_url: "https://githubinc.jibeapply.com/jobs"
+
+  - name: "Docusign"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "careers.docusign.com"
+    alumni_match: ["docusign"]
+    source_url: "https://careers.docusign.com/careers-home/jobs"
+
+  - name: "Fortinet"
+    ats: oracle_hcm
+    oracle_hcm_host: "edel.fa.us2.oraclecloud.com"
+    oracle_hcm_site: "CX_2001"
+    alumni_match: ["fortinet"]
+    source_url: "https://edel.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2001/jobs"
+
+  - name: "Texas Instruments"
+    ats: oracle_hcm
+    oracle_hcm_host: "edbz.fa.us2.oraclecloud.com"
+    oracle_hcm_site: "CX"
+    alumni_match: ["texas instruments"]
+    source_url: "https://edbz.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/jobs"

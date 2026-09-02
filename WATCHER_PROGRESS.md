@@ -12,6 +12,10 @@ This file tracks completed watcher steps and the next handoff target.
   individually rather than treated as a porting queue; internal-only
   personal/alumni, shadow-tracking, and scheduling behavior remain excluded.
   Current product work measures and expands source coverage.
+- The 46-company Big Tech expansion is published at `3ab275d`. A follow-up
+  config-only expansion has live-complete evidence for six Workday companies,
+  three iCIMS/Jibe companies, and two Oracle HCM companies; Micron is held back
+  because its official careers flow now uses unsupported Eightfold.
 - `python -m watcher.audit --coverage` now reports deterministic product-native
   coverage from the canonical registry, current watchlist, and a read-only
   persisted-health snapshot. It makes no requests or state changes and does not
