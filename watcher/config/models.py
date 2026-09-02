@@ -149,6 +149,9 @@ class CompanyCfg:
     ukg_host: str = ""
     ukg_tenant: str = ""
     ukg_board_id: str = ""
+    eightfold_host: str = ""
+    eightfold_domain: str = ""
+    eightfold_variant: str = ""
     source_url: str = ""
     module: str = ""
     aliases: Sequence[str] = field(default_factory=tuple)

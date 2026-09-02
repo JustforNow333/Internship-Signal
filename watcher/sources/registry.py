@@ -21,6 +21,7 @@ from watcher.sources.ashby import AshbySource
 from watcher.sources.bain import BainSource
 from watcher.sources.brassring import BrassRingSource
 from watcher.sources.epic import EpicSource
+from watcher.sources.eightfold import EightfoldSource
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.ibm import IbmSource
 from watcher.sources.icims import IcimsSource
@@ -61,6 +62,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("bain", BainSource),
     DirectSourceSpec("brassring", BrassRingSource),
     DirectSourceSpec("epic", EpicSource),
+    DirectSourceSpec("eightfold", EightfoldSource),
     DirectSourceSpec("greenhouse", GreenhouseSource),
     DirectSourceSpec("ibm", IbmSource),
     DirectSourceSpec("icims", IcimsSource),

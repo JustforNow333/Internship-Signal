@@ -108,6 +108,7 @@ def direct_origin_key(
     brassring_host: str = "",
     taleo_sourcing_host: str = "",
     ukg_host: str = "",
+    eightfold_host: str = "",
 ) -> str:
     """Return the shared origin key for one direct adapter fetch.
 
@@ -159,6 +160,11 @@ def direct_origin_key(
         host = _safe_key(ukg_host, limit=253)
         return _safe_key(
             f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:ukg"
+        )
+    if adapter == "eightfold":
+        host = _safe_key(eightfold_host, limit=253)
+        return _safe_key(
+            f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:eightfold"
         )
     host = DIRECT_ORIGIN_HOSTS.get(adapter)
     if host:

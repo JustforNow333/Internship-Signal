@@ -5,9 +5,10 @@
 - `product-mvp` is the hosted multi-user product branch.
 - Current product work measures current source coverage and expands it through
   evidence-backed, isolated source changes. The coverage audit is read-only.
-- The 46-company Big Tech expansion is published at `3ab275d`. Current local
-  work adds only live-complete existing-adapter configurations; Micron remains
-  excluded because its official careers flow moved from Workday to Eightfold.
+- The 46-company Big Tech expansion is published at `3ab275d`, and the verified
+  config-only follow-up is published at `81b4ca3`. Current work adds a narrow
+  Netflix-only legacy Eightfold direct adapter. PCSX remains unsupported, so
+  Qualcomm, Lam Research, and Micron stay excluded; Nutanix is Jobvite.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - The required shared correctness and architecture migration from
   `internal-tool` is complete. Evaluate future internal commits individually;

@@ -316,6 +316,8 @@ phase3a-notification-smoke*.json
 # Live source-verification output is operational evidence, not a source fixture.
 source-verification*.log
 source-verification*.json
+eightfold-live-verification*.log
+eightfold-live-verification*.json
 !/.gitignore
 !/agents.md
 !/claude.md

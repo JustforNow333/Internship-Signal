@@ -274,6 +274,9 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "ukg_host": company.ukg_host,
                 "ukg_tenant": company.ukg_tenant,
                 "ukg_board_id": company.ukg_board_id,
+                "eightfold_host": company.eightfold_host,
+                "eightfold_domain": company.eightfold_domain,
+                "eightfold_variant": company.eightfold_variant,
                 "module": company.module,
                 "terms": list(company.terms),
             }

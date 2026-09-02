@@ -18,6 +18,7 @@ def test_direct_ats_surface_is_unchanged():
             "bain",
             "brassring",
             "epic",
+            "eightfold",
             "greenhouse",
             "ibm",
             "icims",

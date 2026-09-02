@@ -523,6 +523,7 @@ def _direct_collection_task(
             brassring_host=company.brassring_host,
             taleo_sourcing_host=company.taleo_sourcing_host,
             ukg_host=company.ukg_host,
+            eightfold_host=company.eightfold_host,
         ),
         provider=company.ats,
         run=run,

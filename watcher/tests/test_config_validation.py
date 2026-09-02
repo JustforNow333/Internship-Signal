@@ -27,6 +27,12 @@ VALID_COMPANY_FIELDS = {
         '?partnerid=25008&siteid=5131"\n'
     ),
     "epic": "",
+    "eightfold": (
+        '    eightfold_host: "jobs.example.test"\n'
+        '    eightfold_domain: "example.com"\n'
+        '    eightfold_variant: "legacy"\n'
+        '    source_url: "https://jobs.example.test/careers"\n'
+    ),
     "greenhouse": '    token: "example"\n',
     "ibm": "",
     "icims": (

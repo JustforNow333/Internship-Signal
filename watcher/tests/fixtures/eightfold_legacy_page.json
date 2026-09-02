@@ -1,0 +1,30 @@
+{
+  "domain": "netflix.com",
+  "count": 2,
+  "positions": [
+    {
+      "id": 790298014263,
+      "name": "AI Engineer",
+      "location": "USA - Remote",
+      "locations": ["USA - Remote"],
+      "department": "Data & Insights",
+      "business_unit": "Streaming",
+      "t_create": 1721692800,
+      "ats_job_id": "AJRT30201",
+      "job_description": "<p>Build reliable systems.</p>",
+      "canonicalPositionUrl": "https://explore.jobs.netflix.net/careers/job/790298014263"
+    },
+    {
+      "id": 790298014264,
+      "name": "Software Engineer Intern",
+      "location": "Los Gatos, California",
+      "locations": ["Los Gatos, California"],
+      "department": "Engineering",
+      "business_unit": "Streaming",
+      "t_create": 1721779200,
+      "ats_job_id": "AJRT30202",
+      "job_description": "<p>Develop production software.</p>",
+      "canonicalPositionUrl": "https://explore.jobs.netflix.net/careers/job/790298014264"
+    }
+  ]
+}

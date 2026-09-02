@@ -12,6 +12,16 @@ defaults:
   min_score:
 
 companies:
+  - name: "Netflix"
+    ats: eightfold
+    eightfold_host: "explore.jobs.netflix.net"
+    eightfold_domain: "netflix.com"
+    eightfold_variant: "legacy"
+    aliases: ["Netflix, Inc."]
+    alumni_match: ["netflix"]
+    source_url: "https://explore.jobs.netflix.net/careers"
+    note: "Official legacy Eightfold public board"
+
   - name: "Capital One"
     ats: workday
     token: "capitalone"

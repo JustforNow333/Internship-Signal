@@ -504,6 +504,41 @@ def _validate_ukg_config(
         )
 
 
+def _validate_eightfold_config(
+    name: str,
+    *,
+    host: str,
+    domain: str,
+    variant: str,
+    source_url: str,
+) -> None:
+    if variant != "legacy":
+        raise ConfigError(f"{name}: eightfold_variant must be legacy")
+    if not is_valid_hostname(host):
+        raise ConfigError(f"{name}: eightfold_host must be a hostname")
+    if not is_valid_hostname(domain):
+        raise ConfigError(f"{name}: eightfold_domain must be a hostname")
+    try:
+        parsed = urlsplit(source_url)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ConfigError(f"{name}: eightfold entries require a valid source_url") from exc
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != host
+        or parsed.netloc.casefold() != host
+        or parsed.username
+        or parsed.password
+        or parsed_port is not None
+        or parsed.path not in {"/careers", "/careers/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: eightfold source_url must be its credential-free HTTPS careers root"
+        )
+
+
 def is_valid_hostname(value: str) -> bool:
     """Return whether value is a lower-case DNS hostname without URL syntax."""
 

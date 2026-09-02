@@ -292,6 +292,13 @@ leaves the total unchanged. `PostedDate` is a real timestamp and is normalized
 rather than invented, and structured `Locations[].Address` supplies city, state,
 and country directly.
 
+Netflix uses `ats: eightfold` with `eightfold_host:
+explore.jobs.netflix.net`, `eightfold_domain: netflix.com`, and the explicit
+`eightfold_variant: legacy`. This narrow adapter supports only the anonymous
+`GET /api/apply/v2/jobs` contract: it requires a stable authoritative total,
+fixed ten-row page arithmetic, unique posting IDs, an exact final raw count,
+and an explicit terminal empty page. Eightfold PCSX tenants are not supported.
+
 The Simplify JSON backstop likewise retains valid entries from a mixed
 malformed payload and emits one bounded warning. Its deliberately nonempty feed
 still fails when every entry is malformed.

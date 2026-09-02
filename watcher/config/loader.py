@@ -42,6 +42,7 @@ from .validation import (
     _validate_github_source_uniqueness,
     _validate_github_listing_sources_value,
     _validate_icims_config,
+    _validate_eightfold_config,
     _validate_oracle_hcm_config,
     _validate_paylocity_config,
     _validate_successfactors_config,
@@ -230,6 +231,17 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             board_id=ukg_board_id,
             source_url=source_url,
         )
+    eightfold_host = str(entry.get("eightfold_host") or "").strip().casefold()
+    eightfold_domain = str(entry.get("eightfold_domain") or "").strip().casefold()
+    eightfold_variant = str(entry.get("eightfold_variant") or "").strip().casefold()
+    if ats == "eightfold":
+        _validate_eightfold_config(
+            name,
+            host=eightfold_host,
+            domain=eightfold_domain,
+            variant=eightfold_variant,
+            source_url=source_url,
+        )
     if "terms" in entry:
         company_terms = _terms_tuple(entry["terms"], f"{name}.terms")
     else:
@@ -265,6 +277,9 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         ukg_host=ukg_host,
         ukg_tenant=ukg_tenant,
         ukg_board_id=ukg_board_id,
+        eightfold_host=eightfold_host,
+        eightfold_domain=eightfold_domain,
+        eightfold_variant=eightfold_variant,
         source_url=source_url,
         module=str(entry.get("module") or "").strip(),
         aliases=aliases,

@@ -53,7 +53,7 @@ GitHub Actions cron (hourly)
         │
         ▼
 For each company in watchlist.yml:
-    ┌─ Tier 1: direct ATS adapter (Greenhouse/Lever/Ashby/SmartRecruiters/iCIMS/SuccessFactors/Workday/bespoke)
+    ┌─ Tier 1: direct ATS adapter (Greenhouse/Lever/Ashby/SmartRecruiters/iCIMS/SuccessFactors/Eightfold legacy/Workday/bespoke)
     │     └─ success → canonical rows tagged source="direct"
     │     └─ fail/blocked → log, continue (do NOT abort the run)
     │
@@ -269,6 +269,15 @@ metadata and the native numeric Avature ID produce posting-specific
 board is not authoritative and is never used as collection input.
 
 These are clean and cover a large fraction of mid-size tech + funded startups.
+
+**Eightfold legacy (Netflix only)** uses the anonymous
+`GET /api/apply/v2/jobs` contract on `explore.jobs.netflix.net` with exact
+domain `netflix.com`. The provider-specific adapter fixes page size at ten and
+requires a stable authoritative `count`, valid page arithmetic, nonrepeating
+pages, exact raw/unique identity counts, and a terminal empty page. Malformed
+records, retries recovered during the crawl, inconsistent totals, and safety
+cap exhaustion never produce a complete healthy result. The newer PCSX
+contract is intentionally unsupported.
 
 ### Workday (`sources/workday.py`)
 
