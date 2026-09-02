@@ -19,6 +19,8 @@ EXPECTED_CONFIG = {
     "Analog Devices": ("workday", "analogdevices", "wd1", "External"),
     "Cadence": ("workday", "cadence", "wd1", "External_Careers"),
     "Marvell": ("workday", "marvell", "wd1", "MarvellCareers"),
+    "Intel": ("workday", "intel", "wd1", "External"),
+    "NXP": ("workday", "nxp", "wd3", "careers"),
     "AMD": ("icims", "jibe_json", "careers.amd.com"),
     "GitHub": ("icims", "jibe_json", "githubinc.jibeapply.com"),
     "Docusign": ("icims", "jibe_json", "careers.docusign.com"),

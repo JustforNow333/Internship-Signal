@@ -1356,3 +1356,21 @@ companies:
     token: "huggingface"
     alumni_match: ["hugging face"]
     source_url: "https://apply.workable.com/huggingface/"
+
+  - name: "Intel"
+    ats: workday
+    token: "intel"
+    workday_shard: "wd1"
+    workday_site: "External"
+    aliases: ["Intel Corporation"]
+    alumni_match: ["intel"]
+    source_url: "https://intel.wd1.myworkdayjobs.com/External"
+
+  - name: "NXP"
+    ats: workday
+    token: "nxp"
+    workday_shard: "wd3"
+    workday_site: "careers"
+    aliases: ["NXP Semiconductors"]
+    alumni_match: ["nxp"]
+    source_url: "https://nxp.wd3.myworkdayjobs.com/careers"

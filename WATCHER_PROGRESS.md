@@ -21,6 +21,13 @@ This file tracks completed watcher steps and the next handoff target.
   three more that existing adapters can serve: xAI (Greenhouse `xai`, the board
   `careers.x.com` officially embeds, so it covers the merged X entity too),
   Mistral AI (Ashby `mistral.ai`), and Hugging Face (Workable `huggingface`).
+- Intel and NXP are now configured Workday sources. The wd1/wd3/wd5 failures
+  that had blocked them were traced to an expired cross-signed ISRG Root X2 in
+  the local Windows trust store, not to Workday: the served leaf certificates
+  are valid Let's Encrypt certificates and verify normally against a current CA
+  bundle. Samsung Electronics stays unconfigured because its board persistently
+  returns two postings missing both title and externalPath, so the Workday
+  adapter reports the crawl incomplete and degraded rather than complete.
   Intel, Samsung Electronics, and NXP have confirmed Workday tenants but could
   not be live-verified because `myworkdayjobs.com` was unreachable, so they were
   not added. Everything else is on Phenom, Eightfold PCSX, Avature, Gr8People,

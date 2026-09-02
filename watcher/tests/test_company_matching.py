@@ -307,6 +307,10 @@ def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
         ("X Corp", "xAI"),
         ("SpaceX", "SpaceX"),
         ("Mistral", "Mistral AI"),
+        ("Intel", "Intel"),
+        ("Intel Corporation", "Intel"),
+        ("NXP", "NXP"),
+        ("NXP Semiconductors", "NXP"),
         ("Baidu", "Baidu USA"),
     ],
 )
