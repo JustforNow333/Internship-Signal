@@ -38,15 +38,23 @@ ICIMS_DIRECT_COMPANIES = {
 VERIFIED_CONFIG_EXPANSION_COMPANIES = {
     "AMD",
     "Analog Devices",
+    "Applied Materials",
     "Autodesk",
+    "Box",
+    "Broadcom",
     "Cadence",
     "CrowdStrike",
+    "DigitalOcean",
     "Docusign",
     "Fortinet",
     "GitHub",
+    "GlobalFoundries",
     "Marvell",
+    "Nvidia",
     "Palo Alto Networks",
+    "TSMC",
     "Texas Instruments",
+    "Unity",
 }
 
 SUCCESSFACTORS_DIRECT_COMPANIES = {
@@ -54,6 +62,7 @@ SUCCESSFACTORS_DIRECT_COMPANIES = {
     "Exxon Mobil",
     "MIT Lincoln Laboratory",
     "Nomura",
+    "TSMC",
     "Vaisala",
 }
 

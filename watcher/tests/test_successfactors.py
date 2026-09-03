@@ -472,18 +472,19 @@ def test_default_watchlist_uses_verified_successfactors_configuration():
         item.name: item for item in load_watchlist(DEFAULT_WATCHLIST_PATH).companies
     }
     expected = {
-        "EY": ("careers.ey.com", "ey"),
-        "Exxon Mobil": ("jobs.exxonmobil.com", ""),
-        "MIT Lincoln Laboratory": ("careers.ll.mit.edu", ""),
-        "Nomura": ("careers.nomura.com", "Nomura"),
-        "Vaisala": ("careers.vaisala.com", ""),
+        "EY": ("careers.ey.com", "ey", ""),
+        "Exxon Mobil": ("jobs.exxonmobil.com", "", ""),
+        "MIT Lincoln Laboratory": ("careers.ll.mit.edu", "", ""),
+        "Nomura": ("careers.nomura.com", "Nomura", ""),
+        "TSMC": ("ro.careers.tsmc.com", "", "en_US"),
+        "Vaisala": ("careers.vaisala.com", "", ""),
     }
-    for name, (host, prefix) in expected.items():
+    for name, (host, prefix, locale) in expected.items():
         configured = companies[name]
         assert configured.ats == "successfactors"
         assert configured.successfactors_host == host
         assert configured.successfactors_site_prefix == prefix
-        assert configured.successfactors_locale == ""
+        assert configured.successfactors_locale == locale
         assert configured.module == ""
 
 

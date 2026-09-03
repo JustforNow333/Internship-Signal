@@ -28,6 +28,15 @@ This file tracks completed watcher steps and the next handoff target.
   Cisco, eBay, and Snowflake are now configured on their real sources. HPE stays
   unresolved because its Workday board reproducibly returns one schema-invalid
   record, so the crawl is incomplete and degraded rather than complete.
+- The authoritative-ATS audit added eight config-only sources through unchanged
+  adapters: Nvidia, Broadcom, Unity, GlobalFoundries, and Applied Materials on
+  Workday; TSMC on SuccessFactors; and Box and DigitalOcean on Greenhouse. Fresh
+  live verification retained 2,000, 384, 123, 666, 2,000, 308, 147, and 147
+  rows respectively, with complete non-degraded diagnostics and unique canonical
+  identities. Sony remains excluded because one fresh 109-row response contained
+  only 108 unique posting identities. The `purestorage` Greenhouse board belongs
+  to the same corporation formerly named Pure Storage, but its current legal and
+  board identity is Everpure, so it was inspected only and not configured.
 - Workday now has an explicit `workday_host_variant` of `jobs` or `site`.
   `jobs` is the default `{tenant}.{shard}.myworkdayjobs.com` layout every
   existing company keeps; `site` is the `{shard}.myworkdaysite.com` layout whose

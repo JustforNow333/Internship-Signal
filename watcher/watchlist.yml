@@ -1417,3 +1417,73 @@ companies:
     token: "snowflake"
     alumni_match: ["snowflake"]
     source_url: "https://jobs.ashbyhq.com/snowflake"
+
+  # --- Authoritative-ATS audit: verified existing-adapter coverage (2026-09-02) ---
+
+  - name: "Nvidia"
+    ats: workday
+    token: "nvidia"
+    workday_shard: "wd5"
+    workday_site: "NVIDIAExternalCareerSite"
+    aliases: ["NVIDIA Corporation"]
+    alumni_match: ["nvidia"]
+    source_url: "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"
+
+  - name: "Broadcom"
+    ats: workday
+    token: "broadcom"
+    workday_shard: "wd1"
+    workday_site: "External_Career"
+    aliases: ["Broadcom Inc."]
+    alumni_match: ["broadcom"]
+    source_url: "https://broadcom.wd1.myworkdayjobs.com/External_Career"
+
+  - name: "Unity"
+    ats: workday
+    token: "unitytech"
+    workday_shard: "wd1"
+    workday_site: "Unity"
+    aliases: ["Unity Technologies"]
+    alumni_match: ["unity", "unity technologies"]
+    source_url: "https://unitytech.wd1.myworkdayjobs.com/Unity"
+
+  - name: "GlobalFoundries"
+    ats: workday
+    token: "globalfoundries"
+    workday_shard: "wd1"
+    workday_site: "External"
+    aliases: ["GlobalFoundries Inc."]
+    alumni_match: ["globalfoundries"]
+    source_url: "https://globalfoundries.wd1.myworkdayjobs.com/External"
+
+  - name: "Applied Materials"
+    ats: workday
+    token: "amat"
+    workday_shard: "wd1"
+    workday_site: "External"
+    aliases: ["Applied Materials Inc."]
+    alumni_match: ["applied materials"]
+    source_url: "https://amat.wd1.myworkdayjobs.com/External"
+
+  - name: "TSMC"
+    ats: successfactors
+    successfactors_host: "ro.careers.tsmc.com"
+    successfactors_site_prefix: ""
+    successfactors_locale: "en_US"
+    aliases: ["Taiwan Semiconductor Manufacturing Company"]
+    alumni_match: ["tsmc", "taiwan semiconductor manufacturing company"]
+    source_url: "https://ro.careers.tsmc.com/"
+
+  - name: "Box"
+    ats: greenhouse
+    token: "boxinc"
+    aliases: ["Box Inc."]
+    alumni_match: ["box"]
+    source_url: "https://job-boards.greenhouse.io/boxinc"
+
+  - name: "DigitalOcean"
+    ats: greenhouse
+    token: "digitalocean98"
+    aliases: ["DigitalOcean Holdings"]
+    alumni_match: ["digitalocean"]
+    source_url: "https://job-boards.greenhouse.io/digitalocean98"

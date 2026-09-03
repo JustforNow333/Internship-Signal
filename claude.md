@@ -3,9 +3,10 @@
 - `product-mvp` is the hosted multi-user product branch.
 - Current product work measures source coverage and expands it through
   evidence-backed, isolated source changes; the coverage audit is read-only.
-- The 46-company expansion is published at `3ab275d`, and the verified
-  config-only follow-up at `81b4ca3`. Current work is a Netflix-only legacy
-  Eightfold adapter; PCSX stays unsupported and unconfigured.
+- Existing-adapter coverage follows authoritative application destinations, not
+  secondary career frontends. Keep Sony excluded after its inconsistent
+  duplicate identity response, and do not label the current Everpure board as
+  `Pure Storage`. Eightfold PCSX stays unsupported and unconfigured.
 - Phase 3A is complete, and Phase 3B scheduling and automation remain paused.
 - The required shared correctness/architecture migration from `internal-tool`
   is complete. Future internal commits are evaluated individually, not queued
