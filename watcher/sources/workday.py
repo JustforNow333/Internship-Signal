@@ -23,6 +23,7 @@ from watcher.config import (
     CompanyCfg,
     workday_min_interval_seconds,
 )
+from watcher.sources.retry import http_retry_delay
 from watcher.sources.base import (
     DirectSourceDiagnostics,
     JsonHttpResponse,
@@ -40,7 +41,6 @@ from watcher.sources.base import (
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_MAX_ATTEMPTS = 3
-MAX_RETRY_AFTER_SECONDS = 10.0
 DEFAULT_MAX_DETAIL_CANDIDATES = 100
 MAX_CONFIGURABLE_DETAIL_CANDIDATES = 500
 # Pagination now continues while a tenant keeps returning full pages, so it
@@ -771,7 +771,7 @@ class WorkdaySource:
                 if detail:
                     self._detail_retries += 1
                 retry_after = exc.response_metadata.get("retry_after_seconds")
-                delay = workday_retry_delay(
+                delay = http_retry_delay(
                     attempt,
                     jitter=self._jitter,
                     retry_after=retry_after if isinstance(retry_after, (int, float)) else None,
@@ -1469,28 +1469,6 @@ def _remote_status(posting: dict) -> str:
     if "hybrid" in text:
         return "Hybrid"
     return ""
-
-
-def workday_retry_delay(
-    failed_attempt: int,
-    *,
-    jitter: Callable[[float, float], float] = random.uniform,
-    retry_after: float | None = None,
-) -> float:
-    """Return the bounded delay before the next attempt.
-
-    Failed attempt one yields roughly 1-2 seconds; failed attempt two yields
-    roughly 3-5 seconds. A Retry-After value can raise the delay up to ten
-    seconds but can never create an unbounded sleep.
-    """
-
-    if failed_attempt <= 1:
-        backoff = 1.0 + max(0.0, min(1.0, float(jitter(0.0, 1.0))))
-    else:
-        backoff = 3.0 + max(0.0, min(2.0, float(jitter(0.0, 2.0))))
-    if retry_after is not None:
-        backoff = max(backoff, min(MAX_RETRY_AFTER_SECONDS, max(0.0, float(retry_after))))
-    return min(MAX_RETRY_AFTER_SECONDS, backoff)
 
 
 def _log_transport_failure(

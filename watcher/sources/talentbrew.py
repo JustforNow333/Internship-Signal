@@ -26,7 +26,7 @@ from watcher.sources.base import (
     make_row,
     page_fingerprint,
 )
-from watcher.sources.workday import DEFAULT_MAX_ATTEMPTS, workday_retry_delay
+from watcher.sources.retry import DEFAULT_MAX_ATTEMPTS, http_retry_delay
 
 DEFAULT_PAGE_SIZE = 16
 DEFAULT_MAX_PAGES = 100
@@ -372,7 +372,7 @@ class TalentBrewSource(DirectDiagnosticsMixin):
                     raise
                 self._retry_attempts += 1
                 retry_after = exc.response_metadata.get("retry_after_seconds")
-                delay = workday_retry_delay(
+                delay = http_retry_delay(
                     attempt,
                     retry_after=retry_after,
                     jitter=self._jitter,

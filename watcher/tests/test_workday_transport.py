@@ -8,7 +8,8 @@ import pytest
 
 from watcher.config import CompanyCfg, ConfigError, workday_min_interval_seconds
 from watcher.sources.base import SourceFetchError, SourceSchemaError, post_json_response
-from watcher.sources.workday import WorkdayPacer, WorkdaySource, workday_retry_delay
+from watcher.sources.retry import http_retry_delay
+from watcher.sources.workday import WorkdayPacer, WorkdaySource
 
 
 URL = "https://tenant.wd5.myworkdayjobs.com/wday/cxs/tenant/Site/jobs?secret=hidden"
@@ -494,8 +495,10 @@ def test_transport_retry_count_survives_a_later_schema_failure():
 
 
 def test_backoff_jitter_is_injectable_and_deterministic():
-    assert workday_retry_delay(1, jitter=lambda low, high: 0.25) == 1.25
-    assert workday_retry_delay(2, jitter=lambda low, high: 1.5) == 4.5
+    # Workday's delays are unchanged by moving the helper to the neutral retry
+    # owner: these are the same values this test pinned before the move.
+    assert http_retry_delay(1, jitter=lambda low, high: 0.25) == 1.25
+    assert http_retry_delay(2, jitter=lambda low, high: 1.5) == 4.5
 
 
 def test_pacer_waits_between_tenants_and_can_be_disabled():

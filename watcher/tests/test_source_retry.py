@@ -1,14 +1,19 @@
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 
 from watcher.sources.base import SourceFetchError
 from watcher.sources.retry import (
     DEFAULT_MAX_ATTEMPTS,
+    MAX_RETRY_AFTER_SECONDS,
     RequestRetrier,
     RetryPolicy,
+    http_retry_delay,
     retry_delay,
 )
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class Recorder:
@@ -257,3 +262,86 @@ def test_the_policy_is_immutable():
 
     with pytest.raises(FrozenInstanceError):
         policy.max_attempts = 1
+
+
+# --- Retry-After-aware delay: the neutral owner of a formula three adapters
+# --- share (Workday, Oracle HCM, TalentBrew). Values pinned here are the ones
+# --- those adapters produced when the helper lived in workday.py.
+
+
+@pytest.mark.parametrize(
+    ("failed_attempt", "jitter_value", "retry_after", "expected"),
+    [
+        # First failure: 1s base plus jitter clamped to [0, 1].
+        (0, 0.0, None, 1.0),
+        (1, 0.0, None, 1.0),
+        (1, 0.25, None, 1.25),
+        (1, 1.0, None, 2.0),
+        (1, 3.0, None, 2.0),
+        (1, -1.0, None, 1.0),
+        # Later failures: 3s base plus jitter clamped to [0, 2].
+        (2, 0.0, None, 3.0),
+        (2, 1.5, None, 4.5),
+        (2, 2.0, None, 5.0),
+        (2, 3.0, None, 5.0),
+        (5, 0.0, None, 3.0),
+        # Retry-After raises the wait but never past the ceiling.
+        (1, 0.0, 2.0, 2.0),
+        (1, 0.0, 7.5, 7.5),
+        (1, 0.0, 10.0, 10.0),
+        (1, 0.0, 99.0, 10.0),
+        (1, 0.0, -5.0, 1.0),
+        (2, 2.0, 1.0, 5.0),
+    ],
+)
+def test_http_retry_delay_is_bounded_and_honors_retry_after(
+    failed_attempt, jitter_value, retry_after, expected
+):
+    assert (
+        http_retry_delay(
+            failed_attempt,
+            jitter=lambda _low, _high: jitter_value,
+            retry_after=retry_after,
+        )
+        == expected
+    )
+
+
+def test_http_retry_delay_never_exceeds_the_retry_after_ceiling():
+    for failed_attempt in range(0, 6):
+        for retry_after in (None, 0.0, 5.0, 1_000_000.0):
+            delay = http_retry_delay(
+                failed_attempt,
+                jitter=lambda _low, _high: 99.0,
+                retry_after=retry_after,
+            )
+            assert 0.0 <= delay <= MAX_RETRY_AFTER_SECONDS
+
+
+def test_adapters_take_retry_behavior_from_the_neutral_owner_not_workday():
+    """Oracle HCM and TalentBrew must not import retry behavior from Workday."""
+
+    import ast
+
+    for module in ("oracle_hcm", "talentbrew", "workday"):
+        tree = ast.parse(
+            (ROOT / f"watcher/sources/{module}.py").read_text(encoding="utf-8")
+        )
+        workday_imports = {
+            name.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "watcher.sources.workday"
+            for name in node.names
+        }
+        assert not {"DEFAULT_MAX_ATTEMPTS", "workday_retry_delay"} & workday_imports, (
+            f"{module} still imports retry behavior from workday"
+        )
+
+    from watcher.sources import oracle_hcm, talentbrew, workday
+
+    assert oracle_hcm.http_retry_delay is http_retry_delay
+    assert talentbrew.http_retry_delay is http_retry_delay
+    assert workday.http_retry_delay is http_retry_delay
+    assert oracle_hcm.DEFAULT_MAX_ATTEMPTS == talentbrew.DEFAULT_MAX_ATTEMPTS == 3
+    assert not hasattr(workday, "workday_retry_delay")

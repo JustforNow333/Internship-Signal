@@ -28,10 +28,13 @@ This file tracks completed watcher steps and the next handoff target.
   a duplicate entry. Akamai's real backend is Oracle HCM at
   `fa-extu-saasfaprod1.fa.ocs.oraclecloud.com` site `CX_1`, whose site title is
   "Akamai Career Site".
-- Architecture debt: `watcher/sources/oracle_hcm.py` imports `DEFAULT_MAX_ATTEMPTS`
-  and `workday_retry_delay` from provider-specific `watcher/sources/workday.py`
-  rather than the neutral `watcher/sources/retry.py`. Migrate that in its own
-  behavior-preserving task before any substantive Oracle adapter change.
+- The Retry-After-aware backoff that Workday, Oracle HCM, and TalentBrew all
+  share now lives in the neutral `watcher/sources/retry.py` as
+  `http_retry_delay`, alongside `MAX_RETRY_AFTER_SECONDS`. No adapter imports
+  retry behavior from another provider module. The move was behavior-preserving:
+  a 280-case pre/post grid over attempt, jitter, and Retry-After produced
+  identical delays, and `retry_delay` (used by `RequestRetrier`) is a separate
+  formula that was left untouched.
 - A Phenom audit of Cisco, HPE, Snowflake, and eBay found that Phenom is only a
   secondary marketing search layer for all four: every sampled apply URL points
   at an ATS the watcher already supports, and Phenom's own totals disagreed with

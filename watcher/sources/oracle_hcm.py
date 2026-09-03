@@ -24,7 +24,7 @@ from watcher.sources.base import (
     page_fingerprint,
     parse_records,
 )
-from watcher.sources.workday import DEFAULT_MAX_ATTEMPTS, workday_retry_delay
+from watcher.sources.retry import DEFAULT_MAX_ATTEMPTS, http_retry_delay
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PAGE_SIZE = 200
@@ -235,7 +235,7 @@ class OracleHcmSource(DirectDiagnosticsMixin):
                 self._retry_attempts += 1
                 retry_after = exc.response_metadata.get("retry_after_seconds")
                 self._sleeper(
-                    workday_retry_delay(
+                    http_retry_delay(
                         attempt,
                         jitter=self._jitter,
                         retry_after=(

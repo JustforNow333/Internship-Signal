@@ -591,6 +591,10 @@ git status --short --ignored
   identical identity set; a single-request crawl is atomic and skips it. The
   board honors `PostedDate` ordering only, needs no cookie or anti-forgery
   token, and all tenants on one UltiPro host share that host's origin limit.
+- Reusable retry mechanics belong to `watcher/sources/retry.py`, never to another
+  provider adapter. `retry_delay` backs `RequestRetrier`; `http_retry_delay` is
+  the separate Retry-After-aware formula shared by Workday, Oracle HCM, and
+  TalentBrew. Provider modules keep only their own orchestration.
 - A watchlist company migrates to an existing adapter only on verified
   identity, never on a matching name. Confirm the board's own metadata identity
   (for Greenhouse, the board `name`) against the entry's alumni/watchlist
