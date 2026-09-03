@@ -326,6 +326,8 @@ def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
         ("Pure Storage, Inc.", "Everpure"),
         ("Akamai", "Akamai"),
         ("Akamai Technologies", "Akamai"),
+        ("Shopify", "Shopify"),
+        ("Shopify Inc.", "Shopify"),
         ("Nvidia", "Nvidia"),
         ("NVIDIA Corporation", "Nvidia"),
         ("Broadcom Inc.", "Broadcom"),

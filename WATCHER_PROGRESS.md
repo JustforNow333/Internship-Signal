@@ -28,6 +28,16 @@ This file tracks completed watcher steps and the next handoff target.
   a duplicate entry. Akamai's real backend is Oracle HCM at
   `fa-extu-saasfaprod1.fa.ocs.oraclecloud.com` site `CX_1`, whose site title is
   "Akamai Career Site".
+- Shopify has a first-party direct source. Its authoritative inventory is served
+  by Shopify itself at `/careers.data` as a React Router single-fetch payload, a
+  flattened array where objects are `{"_<key index>": <value index>}`, strings
+  are deduplicated by index, and negative indices are null sentinels. Application
+  data behind a posting is Ashby-backed and Ashby field names appear inside the
+  payload, but no public Ashby board or token exists, so Shopify is the only
+  enumerable source of record and this is deliberately not an Ashby variant. One
+  request enumerates the whole board; no detail request is made, and canonical
+  posting routes are built as `/careers/<title slug>_<posting uuid>`, the route
+  Shopify's own legacy `?ashby_jid=` link redirects to.
 - The Retry-After-aware backoff that Workday, Oracle HCM, and TalentBrew all
   share now lives in the neutral `watcher/sources/retry.py` as
   `http_retry_delay`, alongside `MAX_RETRY_AFTER_SECONDS`. No adapter imports

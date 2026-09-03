@@ -1502,3 +1502,9 @@ companies:
     aliases: ["Akamai Technologies"]
     alumni_match: ["akamai", "akamai technologies"]
     source_url: "https://fa-extu-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs"
+
+  - name: "Shopify"
+    ats: shopify
+    aliases: ["Shopify Inc."]
+    alumni_match: ["shopify"]
+    source_url: "https://www.shopify.com/careers"

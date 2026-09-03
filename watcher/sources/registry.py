@@ -28,6 +28,7 @@ from watcher.sources.icims import IcimsSource
 from watcher.sources.lever import LeverSource
 from watcher.sources.oracle_hcm import OracleHcmSource
 from watcher.sources.paylocity import PaylocitySource
+from watcher.sources.shopify import ShopifySource
 from watcher.sources.smartrecruiters import SmartRecruitersSource
 from watcher.sources.successfactors import SuccessFactorsSource
 from watcher.sources.talentbrew import TalentBrewSource
@@ -69,6 +70,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("lever", LeverSource),
     DirectSourceSpec("oracle_hcm", OracleHcmSource),
     DirectSourceSpec("paylocity", PaylocitySource),
+    DirectSourceSpec("shopify", ShopifySource),
     DirectSourceSpec("smartrecruiters", SmartRecruitersSource),
     DirectSourceSpec("successfactors", SuccessFactorsSource),
     DirectSourceSpec("talentbrew", TalentBrewSource),

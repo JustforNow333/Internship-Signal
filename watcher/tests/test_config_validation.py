@@ -54,6 +54,7 @@ VALID_COMPANY_FIELDS = {
         '    source_url: "https://recruiting.paylocity.com/recruiting/jobs/All/'
         'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/Example"\n'
     ),
+    "shopify": "",
     "smartrecruiters": '    token: "Example"\n',
     "successfactors": (
         '    successfactors_host: "careers.example.test"\n'
