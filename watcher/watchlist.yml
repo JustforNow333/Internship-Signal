@@ -1508,3 +1508,30 @@ companies:
     aliases: ["Shopify Inc."]
     alumni_match: ["shopify"]
     source_url: "https://www.shopify.com/careers"
+
+  - name: "Zoom"
+    ats: workday
+    token: "zoom"
+    workday_shard: "wd5"
+    workday_site: "Zoom"
+    aliases: ["Zoom Video Communications"]
+    alumni_match: ["zoom"]
+    source_url: "https://zoom.wd5.myworkdayjobs.com/Zoom"
+
+  - name: "HPE"
+    ats: workday
+    token: "hpe"
+    workday_shard: "wd5"
+    workday_site: "Jobsathpe"
+    aliases: ["Hewlett Packard Enterprise"]
+    alumni_match: ["hpe", "hewlett packard enterprise"]
+    source_url: "https://hpe.wd5.myworkdayjobs.com/Jobsathpe"
+
+  - name: "Samsung Electronics"
+    ats: workday
+    token: "sec"
+    workday_shard: "wd3"
+    workday_site: "Samsung_Careers"
+    aliases: ["Samsung"]
+    alumni_match: ["samsung electronics", "samsung"]
+    source_url: "https://sec.wd3.myworkdayjobs.com/Samsung_Careers"

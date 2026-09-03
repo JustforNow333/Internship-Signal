@@ -28,6 +28,12 @@ This file tracks completed watcher steps and the next handoff target.
   a duplicate entry. Akamai's real backend is Oracle HCM at
   `fa-extu-saasfaprod1.fa.ocs.oraclecloud.com` site `CX_1`, whose site title is
   "Akamai Career Site".
+- Zoom, HPE, and Samsung Electronics are configured Workday sources. HPE and
+  Samsung had been held back because their boards reproducibly returned records
+  the adapter could not accept - one schema-invalid record for HPE, two records
+  missing both title and `externalPath` for Samsung. Fresh crawls show both
+  defects resolved upstream, and each was confirmed with two consecutive
+  complete passes before being added rather than on a single run.
 - Shopify has a first-party direct source. Its authoritative inventory is served
   by Shopify itself at `/careers.data` as a React Router single-fetch payload, a
   flattened array where objects are `{"_<key index>": <value index>}`, strings
