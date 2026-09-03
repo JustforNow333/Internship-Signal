@@ -21,6 +21,17 @@ This file tracks completed watcher steps and the next handoff target.
   three more that existing adapters can serve: xAI (Greenhouse `xai`, the board
   `careers.x.com` officially embeds, so it covers the merged X entity too),
   Mistral AI (Ashby `mistral.ai`), and Hugging Face (Workable `huggingface`).
+- Everpure and Akamai are configured on their authoritative sources. Everpure is
+  the continuing company formerly named Pure Storage, so its Greenhouse board
+  keeps the `purestorage` token while the entry carries the new name with
+  `Pure Storage` as an alias; both names resolve to the one company rather than
+  a duplicate entry. Akamai's real backend is Oracle HCM at
+  `fa-extu-saasfaprod1.fa.ocs.oraclecloud.com` site `CX_1`, whose site title is
+  "Akamai Career Site".
+- Architecture debt: `watcher/sources/oracle_hcm.py` imports `DEFAULT_MAX_ATTEMPTS`
+  and `workday_retry_delay` from provider-specific `watcher/sources/workday.py`
+  rather than the neutral `watcher/sources/retry.py`. Migrate that in its own
+  behavior-preserving task before any substantive Oracle adapter change.
 - A Phenom audit of Cisco, HPE, Snowflake, and eBay found that Phenom is only a
   secondary marketing search layer for all four: every sampled apply URL points
   at an ATS the watcher already supports, and Phenom's own totals disagreed with

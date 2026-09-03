@@ -39,6 +39,11 @@ EXPECTED_CONFIG = {
     "GitHub": ("icims", "jibe_json", "githubinc.jibeapply.com"),
     "Docusign": ("icims", "jibe_json", "careers.docusign.com"),
     "Fortinet": ("oracle_hcm", "edel.fa.us2.oraclecloud.com", "CX_2001"),
+    "Akamai": (
+        "oracle_hcm",
+        "fa-extu-saasfaprod1.fa.ocs.oraclecloud.com",
+        "CX_1",
+    ),
     "Texas Instruments": ("oracle_hcm", "edbz.fa.us2.oraclecloud.com", "CX"),
 }
 

@@ -319,6 +319,13 @@ def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
         ("Cisco Systems", "Cisco"),
         ("eBay", "eBay"),
         ("Snowflake", "Snowflake"),
+        # Pure Storage, Inc. continued as Everpure; both names resolve to the
+        # single configured company rather than creating a duplicate entry.
+        ("Everpure", "Everpure"),
+        ("Pure Storage", "Everpure"),
+        ("Pure Storage, Inc.", "Everpure"),
+        ("Akamai", "Akamai"),
+        ("Akamai Technologies", "Akamai"),
         ("Nvidia", "Nvidia"),
         ("NVIDIA Corporation", "Nvidia"),
         ("Broadcom Inc.", "Broadcom"),

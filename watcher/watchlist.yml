@@ -1487,3 +1487,18 @@ companies:
     aliases: ["DigitalOcean Holdings"]
     alumni_match: ["digitalocean"]
     source_url: "https://job-boards.greenhouse.io/digitalocean98"
+
+  - name: "Everpure"
+    ats: greenhouse
+    token: "purestorage"
+    aliases: ["Pure Storage"]
+    alumni_match: ["everpure", "pure storage"]
+    source_url: "https://job-boards.greenhouse.io/purestorage"
+
+  - name: "Akamai"
+    ats: oracle_hcm
+    oracle_hcm_host: "fa-extu-saasfaprod1.fa.ocs.oraclecloud.com"
+    oracle_hcm_site: "CX_1"
+    aliases: ["Akamai Technologies"]
+    alumni_match: ["akamai", "akamai technologies"]
+    source_url: "https://fa-extu-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs"
