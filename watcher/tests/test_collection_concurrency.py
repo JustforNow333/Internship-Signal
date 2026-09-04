@@ -58,6 +58,7 @@ from watcher.sources.base import (
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.epic import EpicSource
 from watcher.sources.ibm import IbmSource
+from watcher.sources.kpmg import KpmgSource
 from watcher.sources.lever import LeverSource
 from watcher.sources.paylocity import PaylocitySource
 from watcher.sources.shopify import ShopifySource
@@ -377,6 +378,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "epic": EpicSource.endpoint(),
         "greenhouse": GreenhouseSource.endpoint("token"),
         "ibm": IbmSource.endpoint(start=0, results=100, page=1),
+        "kpmg": KpmgSource.endpoint(),
         "lever": LeverSource.endpoint("token"),
         "ashby": AshbySource.endpoint("token"),
         "shopify": ShopifySource.endpoint(),

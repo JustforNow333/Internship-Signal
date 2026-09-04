@@ -26,6 +26,7 @@ from watcher.sources.eightfold import EightfoldSource
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.ibm import IbmSource
 from watcher.sources.icims import IcimsSource
+from watcher.sources.kpmg import KpmgSource
 from watcher.sources.lever import LeverSource
 from watcher.sources.oracle_hcm import OracleHcmSource
 from watcher.sources.paylocity import PaylocitySource
@@ -69,6 +70,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("greenhouse", GreenhouseSource),
     DirectSourceSpec("ibm", IbmSource),
     DirectSourceSpec("icims", IcimsSource),
+    DirectSourceSpec("kpmg", KpmgSource),
     DirectSourceSpec("lever", LeverSource),
     DirectSourceSpec("oracle_hcm", OracleHcmSource),
     DirectSourceSpec("paylocity", PaylocitySource),

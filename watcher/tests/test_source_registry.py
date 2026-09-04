@@ -23,6 +23,7 @@ def test_direct_ats_surface_is_unchanged():
             "greenhouse",
             "ibm",
             "icims",
+            "kpmg",
             "lever",
             "oracle_hcm",
             "paylocity",

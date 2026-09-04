@@ -584,12 +584,11 @@ companies:
     source_url: "https://rb.wd5.myworkdayjobs.com/FRS"
 
   - name: "KPMG"
-    ats: bespoke
-    module: "kpmg"
+    ats: kpmg
     aliases: ["KPMG US"]
     alumni_match: ["kpmg", "kpmg us"]
     source_url: "https://www.kpmguscareers.com/job-search/"
-    note: "company-hosted careers portal; unsupported by current watcher adapters"
+    note: "Official KPMG US careers board; exact-total listing pagination, listing-only"
 
   - name: "EY"
     ats: successfactors
