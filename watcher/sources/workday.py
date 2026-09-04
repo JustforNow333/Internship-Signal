@@ -23,21 +23,19 @@ from watcher.config import (
     CompanyCfg,
     workday_min_interval_seconds,
 )
-from watcher.sources.retry import http_retry_delay
-from watcher.sources.base import (
-    DirectSourceDiagnostics,
+from watcher.sources.contracts import (
     JsonHttpResponse,
     SourceError,
     SourceFetchError,
     SourceSchemaError,
-    ensure_list,
-    get_json_response,
-    html_to_text,
-    make_row,
-    page_fingerprint,
-    post_json,
     require_token,
 )
+from watcher.sources.diagnostics import DirectSourceDiagnostics
+from watcher.sources.parsing import ensure_list, page_fingerprint
+from watcher.sources.retry import http_retry_delay
+from watcher.sources.rows import make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import get_json_response, post_json
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_MAX_ATTEMPTS = 3

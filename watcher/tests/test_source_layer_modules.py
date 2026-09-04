@@ -99,6 +99,7 @@ DIRECT_OWNER_IMPORT_ADAPTERS = (
     "watcher.sources.successfactors",
     "watcher.sources.talentbrew",
     "watcher.sources.workable",
+    "watcher.sources.workday",
 )
 
 
