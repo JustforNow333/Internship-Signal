@@ -86,6 +86,7 @@ CANONICAL_IMPLEMENTATION_MODULES = (
 DIRECT_OWNER_IMPORT_ADAPTERS = (
     "watcher.sources.ashby",
     "watcher.sources.bain",
+    "watcher.sources.bloomberg",
     "watcher.sources.epic",
     "watcher.sources.github_listings",
     "watcher.sources.github_markdown_table",

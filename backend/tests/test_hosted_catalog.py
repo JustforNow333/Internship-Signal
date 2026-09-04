@@ -68,6 +68,7 @@ SUCCESSFACTORS_DIRECT_COMPANIES = {
 
 BAIN_IBM_EPIC_DIRECT_COMPANIES = {
     "Bain & Company",
+    "Bloomberg",
     "Epic",
     "IBM",
 }

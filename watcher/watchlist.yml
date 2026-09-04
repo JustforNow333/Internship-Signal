@@ -62,11 +62,11 @@ companies:
     source_url: "https://workday.wd5.myworkdayjobs.com/Workday_Early_Career/job/USA-CA-Pleasanton/Analytics-Engineer-Intern_JR-0101608"
 
   - name: "Bloomberg"
-    ats: bespoke
-    module: "bloomberg"
+    ats: bloomberg
+    aliases: ["Bloomberg L.P."]
     alumni_match: ["bloomberg"]
-    source_url: "https://www.bloomberg.com/company/careers/"
-    note: "known company-hosted careers portal"
+    source_url: "https://bloomberg.avature.net/careers/SearchJobs"
+    note: "Official Bloomberg-specific board; exact-total listing pagination, listing-only"
 
   - name: "Epic"
     ats: epic

@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 EXPORT_OWNERS = {
     "AshbySource": "watcher.sources.ashby",
     "BainSource": "watcher.sources.bain",
+    "BloombergSource": "watcher.sources.bloomberg",
     "BrassRingSource": "watcher.sources.brassring",
     "DirectSourceDiagnostics": "watcher.sources.diagnostics",
     "EpicSource": "watcher.sources.epic",
@@ -47,6 +48,7 @@ EXPORT_OWNERS = {
 EXPECTED_ALL = (
     "AshbySource",
     "BainSource",
+    "BloombergSource",
     "BrassRingSource",
     "DirectSourceDiagnostics",
     "EpicSource",
@@ -78,6 +80,7 @@ ADAPTER_MODULES = frozenset(
     {
         "watcher.sources.ashby",
         "watcher.sources.bain",
+        "watcher.sources.bloomberg",
         "watcher.sources.brassring",
         "watcher.sources.epic",
         "watcher.sources.eightfold",

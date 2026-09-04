@@ -48,6 +48,7 @@ from watcher.source_health import (
 )
 from watcher.sources.ashby import AshbySource
 from watcher.sources.bain import BainSource
+from watcher.sources.bloomberg import BloombergSource
 from watcher.sources.base import (
     DirectSourceDiagnostics,
     SourceError,
@@ -372,6 +373,7 @@ def test_scope_limits_cannot_exceed_the_global_worker_pool():
 def test_direct_origin_hosts_match_the_adapter_endpoints():
     endpoints = {
         "bain": BainSource.endpoint(page=0, results=100),
+        "bloomberg": BloombergSource.endpoint(),
         "epic": EpicSource.endpoint(),
         "greenhouse": GreenhouseSource.endpoint("token"),
         "ibm": IbmSource.endpoint(start=0, results=100, page=1),
