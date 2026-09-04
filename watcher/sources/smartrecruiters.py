@@ -6,16 +6,11 @@ import re
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import (
-    SourceSchemaError,
-    ensure_list,
-    fetch_json,
-    iso_date,
-    make_row,
-    page_fingerprint,
-    require_token,
-)
+from watcher.sources.contracts import SourceSchemaError, require_token
 from watcher.sources.direct import DirectRecordAdapter
+from watcher.sources.parsing import ensure_list, page_fingerprint
+from watcher.sources.rows import iso_date, make_row
+from watcher.sources.transport import fetch_json
 
 
 class SmartRecruitersSource(DirectRecordAdapter):

@@ -5,16 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import (
-    SourceSchemaError,
-    ensure_list,
-    fetch_json,
-    html_to_text,
-    iso_date,
-    make_row,
-    require_token,
-)
+from watcher.sources.contracts import SourceSchemaError, require_token
 from watcher.sources.direct import SinglePayloadDirectAdapter
+from watcher.sources.parsing import ensure_list
+from watcher.sources.rows import iso_date, make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import fetch_json
 
 
 class LeverSource(SinglePayloadDirectAdapter):

@@ -15,8 +15,10 @@ from internship_signal.domain.identity import norm_url
 from watcher.company_matching import company_matches
 from watcher.config import CompanyCfg
 from watcher.season_terms import terms_match
-from watcher.sources.base import SourceError, SourceSchemaError, fetch_text, make_row
+from watcher.sources.contracts import SourceError, SourceSchemaError
 from watcher.sources.github_listings import _safe_feed_url
+from watcher.sources.rows import make_row
+from watcher.sources.transport import fetch_text
 
 LOGGER = logging.getLogger(__name__)
 

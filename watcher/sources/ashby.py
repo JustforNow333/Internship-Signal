@@ -9,18 +9,12 @@ from urllib.parse import quote
 from uuid import UUID
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import (
-    SourceFetchError,
-    SourceSchemaError,
-    ensure_list,
-    fetch_text,
-    get_json_response,
-    html_to_text,
-    iso_date,
-    make_row,
-    require_token,
-)
+from watcher.sources.contracts import SourceFetchError, SourceSchemaError, require_token
 from watcher.sources.direct import DirectRecordAdapter
+from watcher.sources.parsing import ensure_list
+from watcher.sources.rows import iso_date, make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import fetch_text, get_json_response
 
 
 _APP_DATA_ASSIGNMENT = re.compile(r"window\.__appData\s*=\s*")

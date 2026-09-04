@@ -83,6 +83,16 @@ CANONICAL_IMPLEMENTATION_MODULES = (
     transport,
 )
 
+DIRECT_OWNER_IMPORT_ADAPTERS = (
+    "watcher.sources.ashby",
+    "watcher.sources.github_listings",
+    "watcher.sources.github_markdown_table",
+    "watcher.sources.greenhouse",
+    "watcher.sources.lever",
+    "watcher.sources.smartrecruiters",
+    "watcher.sources.workable",
+)
+
 
 def _imports_of(module) -> set[str]:
     source = pathlib.Path(importlib.import_module(module.__name__).__file__)
@@ -196,6 +206,12 @@ def test_canonical_implementation_modules_do_not_import_base_facade(module):
     assert _base_facade_import_lines(module) == []
 
 
+@pytest.mark.parametrize("module_name", DIRECT_OWNER_IMPORT_ADAPTERS)
+def test_migrated_adapters_import_canonical_owners_directly(module_name):
+    module = importlib.import_module(module_name)
+    assert _base_facade_import_lines(module) == []
+
+
 def test_split_modules_keep_the_reference_layering():
     source_imports = {
         module: {
@@ -253,6 +269,7 @@ def test_low_level_modules_do_not_import_collection_pipeline_or_health_layers():
         "watcher.sources.retry",
         "watcher.sources.registry",
         "watcher.sources",
+        *DIRECT_OWNER_IMPORT_ADAPTERS,
     ],
 )
 def test_each_module_imports_first_without_a_cycle(first):

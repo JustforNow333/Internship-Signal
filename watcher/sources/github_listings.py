@@ -10,7 +10,10 @@ from urllib.parse import urlsplit, urlunsplit
 from watcher.company_matching import company_matches
 from watcher.config import CompanyCfg
 from watcher.season_terms import terms_match
-from watcher.sources.base import SourceError, SourceSchemaError, ensure_list, fetch_json, iso_date, make_row
+from watcher.sources.contracts import SourceError, SourceSchemaError
+from watcher.sources.parsing import ensure_list
+from watcher.sources.rows import iso_date, make_row
+from watcher.sources.transport import fetch_json
 
 LOGGER = logging.getLogger(__name__)
 

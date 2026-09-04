@@ -7,22 +7,17 @@ import time
 from typing import Any, Callable
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import (
-    SourceSchemaError,
-    ensure_list,
-    html_to_text,
-    iso_date,
-    make_row,
-    page_fingerprint,
-    post_json,
-    require_token,
-)
+from watcher.sources.contracts import SourceSchemaError, require_token
 from watcher.sources.direct import DirectRecordAdapter
+from watcher.sources.parsing import ensure_list, page_fingerprint
 from watcher.sources.retry import (
     DEFAULT_MAX_ATTEMPTS,
     RequestRetrier,
     RetryPolicy,
 )
+from watcher.sources.rows import iso_date, make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import post_json
 
 DEFAULT_MAX_PAGES = 1_000
 # A large board can span many cursor requests, so per-page attempts alone do
