@@ -94,12 +94,13 @@ def test_every_registered_direct_adapter_reports_direct_coverage(ats: str) -> No
     assert catalog.companies[0].selectable is True
 
 
-def test_talentbrew_reports_direct_coverage() -> None:
+@pytest.mark.parametrize("name", ["Barclays", "Synopsys"])
+def test_talentbrew_reports_direct_coverage(name: str) -> None:
     catalog = CompanyCatalog.from_watcher_config()
     talentbrew = next(
         company
         for company in catalog.companies
-        if company.name == "Barclays"
+        if company.name == name
     )
 
     assert talentbrew.coverage == "direct"

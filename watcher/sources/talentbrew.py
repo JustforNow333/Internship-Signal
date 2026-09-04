@@ -37,6 +37,24 @@ _CHALLENGE_MARKERS = (
     "security check",
     "verify you are human",
 )
+_HTML_VOID_ELEMENTS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -443,17 +461,18 @@ class _SearchResultsParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {key: value or "" for key, value in attrs}
         classes = set(values.get("class", "").split())
+        is_void = tag.casefold() in _HTML_VOID_ELEMENTS
         if values.get("id") == "search-results":
             self.metadata = values
         is_card = tag == "div" and "list-item" in classes
         if self.current is None and (tag == "li" or is_card):
             self.current = {}
             self.current_depth = 1
-        elif self.current is not None:
+        elif self.current is not None and not is_void:
             self.current_depth += 1
         if self.current is None:
             return
-        if self.capture:
+        if self.capture and not is_void:
             self.capture_depth += 1
         posting_id = values.get("data-job-id", "").strip()
         href = values.get("href", "").strip()
@@ -479,6 +498,8 @@ class _SearchResultsParser(HTMLParser):
             self.current[self.capture] = self.current.get(self.capture, "") + data
 
     def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() in _HTML_VOID_ELEMENTS:
+            return
         if self.capture:
             self.capture_depth -= 1
             if self.capture_depth == 0:

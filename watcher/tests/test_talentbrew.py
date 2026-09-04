@@ -16,7 +16,7 @@ from watcher.sources.base import (
     get_text_response,
     make_row,
 )
-from watcher.sources.talentbrew import _posting_href
+from watcher.sources.talentbrew import _SearchResultsParser, _posting_href
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -69,6 +69,42 @@ def premise_company():
     )
 
 
+def synopsys_company():
+    return CompanyCfg(
+        name="Synopsys",
+        ats="talentbrew",
+        talentbrew_host="careers.synopsys.com",
+        talentbrew_site_id="44408",
+        talentbrew_category_id="8675664",
+        talentbrew_category_name="Interns/Temp",
+        source_url="https://careers.synopsys.com/search-jobs",
+        terms=("intern", "internship"),
+    )
+
+
+def search_payload(card):
+    return {
+        "filters": '<section id="search-filters"></section>',
+        "results": (
+            '<section id="search-results" data-total-results="1" '
+            'data-total-job-results="1" data-total-pages="1" '
+            'data-current-page="1" data-records-per-page="16">'
+            f"<ul>{card}</ul></section>"
+        ),
+        "hasJobs": True,
+        "hasContent": False,
+    }
+
+
+def parsed_listings(payload, configured_company):
+    parser = _SearchResultsParser(
+        host=configured_company.talentbrew_host,
+        site=configured_company.talentbrew_site_id,
+    )
+    parser.feed(payload["results"])
+    return parser.page().listings
+
+
 DETAILS = {
     "97463249760": "talentbrew_detail_reference.html",
     "97500000001": "talentbrew_detail_fallback.html",
@@ -107,6 +143,131 @@ def variant_detail_request(url, _source_name):
         f'"title": {json.dumps(title)}, "url": {json.dumps(url)}{location}}}'
         "</script>"
     )
+
+
+def synopsys_detail_request(url, _source_name):
+    return (
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","@type":"JobPosting",'
+        '"title":"Digital Mission Engineering Software Development Internship",'
+        f'"url":{json.dumps(url)},"datePosted":"2026-08-31",'
+        '"description":"<p>Build mission engineering software.</p>",'
+        '"jobLocation":{"@type":"Place","address":{"@type":"PostalAddress",'
+        '"addressLocality":"Exton","addressRegion":"Pennsylvania",'
+        '"addressCountry":"United States"}}}'
+        "</script>"
+    )
+
+
+def test_existing_normal_talentbrew_cards_keep_the_same_parse_shape():
+    listings = parsed_listings(
+        json_fixture("talentbrew_search_heading_card.json"),
+        premise_company(),
+    )
+
+    assert [(item.posting_id, item.title, item.href) for item in listings] == [
+        (
+            "98222222221",
+            "Software Engineer Intern",
+            "/en/job/brentwood/software-engineer-intern/1388/98222222221",
+        ),
+        (
+            "98222222222",
+            "Data Analyst Intern",
+            "/en/job/nashville/data-analyst-intern/1388/98222222222",
+        ),
+    ]
+
+
+def test_card_with_ordinary_img_elements_parses():
+    listings = parsed_listings(
+        json_fixture("talentbrew_search_synopsys_void_elements.json"),
+        synopsys_company(),
+    )
+
+    assert [(item.posting_id, item.title, item.location) for item in listings] == [
+        (
+            "100128500176",
+            "Digital Mission Engineering Software Development Internship",
+            "Exton, Pennsylvania",
+        )
+    ]
+
+
+def test_multiple_html_void_elements_do_not_affect_card_depth():
+    payload = search_payload(
+        '<li><a href="/job/austin/software-intern/44408/100000000001" '
+        'data-job-id="100000000001"><strong>Software Intern</strong><br><img '
+        'src="/arrow.svg" alt=""></a><hr><input type="hidden"><meta '
+        'itemprop="position"><link rel="help" href="/help"><span '
+        'class="job-location">Austin, Texas</span></li>'
+    )
+
+    listings = parsed_listings(payload, synopsys_company())
+
+    assert [(item.posting_id, item.title, item.location) for item in listings] == [
+        ("100000000001", "Software Intern", "Austin, Texas")
+    ]
+
+
+def test_nested_non_void_elements_still_balance_normally():
+    payload = search_payload(
+        '<li><div><a href="/job/austin/software-intern/44408/100000000002" '
+        'data-job-id="100000000002"><span><strong>Software Intern</strong>'
+        '</span></a><div class="job-location"><span>Austin, Texas</span>'
+        "</div></div></li>"
+    )
+
+    listings = parsed_listings(payload, synopsys_company())
+
+    assert [(item.posting_id, item.title, item.location) for item in listings] == [
+        ("100000000002", "Software Intern", "Austin, Texas")
+    ]
+
+
+def test_unclosed_non_void_element_remains_rejected():
+    payload = search_payload(
+        '<li><a href="/job/austin/software-intern/44408/100000000003" '
+        'data-job-id="100000000003"><span><em><b>Software Intern</a></li>'
+    )
+
+    with pytest.raises(SourceSchemaError, match="without valid listing records"):
+        TalentBrewSource(request_text=synopsys_detail_request).parse(
+            payload,
+            synopsys_company(),
+        )
+
+
+def test_existing_self_closing_markup_continues_to_balance():
+    payload = search_payload(
+        '<li><a href="/job/austin/software-intern/44408/100000000004" '
+        'data-job-id="100000000004"><strong>Software Intern</strong><img '
+        'src="/arrow.svg" alt="" /></a><span class="job-location">Austin, '
+        "Texas</span></li>"
+    )
+
+    listings = parsed_listings(payload, synopsys_company())
+
+    assert [(item.posting_id, item.title, item.location) for item in listings] == [
+        ("100000000004", "Software Intern", "Austin, Texas")
+    ]
+
+
+def test_synopsys_shaped_fixture_produces_expected_canonical_row():
+    rows = TalentBrewSource(request_text=synopsys_detail_request).parse(
+        json_fixture("talentbrew_search_synopsys_void_elements.json"),
+        synopsys_company(),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["company"] == "Synopsys"
+    assert rows[0]["title"] == (
+        "Digital Mission Engineering Software Development Internship"
+    )
+    assert rows[0]["location"] == "Exton, Pennsylvania, United States"
+    assert rows[0]["date_posted"] == "2026-08-31"
+    assert rows[0]["source_url"].endswith("/44408/100128500176")
+    assert rows[0]["extra"]["source_id"] == "100128500176"
 
 
 def test_semantic_job_anchor_accepts_shared_radancy_variants_and_ignores_content():
@@ -484,7 +645,7 @@ def test_watchlist_registers_barclays_official_early_careers_scope():
     assert barclays.source_url == "https://search.jobs.barclays/search-jobs"
 
 
-def test_watchlist_registers_arm_and_premise_health_talentbrew_scopes():
+def test_watchlist_registers_arm_synopsys_and_premise_health_talentbrew_scopes():
     config = load_watchlist(DEFAULT_WATCHLIST_PATH)
     companies = {item.name: item for item in config.companies}
 
@@ -495,6 +656,16 @@ def test_watchlist_registers_arm_and_premise_health_talentbrew_scopes():
     assert arm.talentbrew_category_id == "8097056"
     assert arm.talentbrew_category_name == "Graduate"
     assert arm.source_url == "https://careers.arm.com/search-jobs"
+
+    synopsys = companies["Synopsys"]
+    assert synopsys.ats == "talentbrew"
+    assert synopsys.talentbrew_host == "careers.synopsys.com"
+    assert synopsys.talentbrew_site_id == "44408"
+    assert synopsys.talentbrew_category_id == "8675664"
+    assert synopsys.talentbrew_category_name == "Interns/Temp"
+    assert synopsys.aliases == ("Synopsys, Inc.",)
+    assert synopsys.alumni_match == ("synopsys",)
+    assert synopsys.source_url == "https://careers.synopsys.com/search-jobs"
 
     premise = companies["Premise Health"]
     assert premise.ats == "talentbrew"

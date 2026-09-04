@@ -340,6 +340,7 @@ def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
         ("Unity Technologies", "Unity"),
         ("GlobalFoundries Inc.", "GlobalFoundries"),
         ("Applied Materials Inc.", "Applied Materials"),
+        ("Synopsys, Inc.", "Synopsys"),
         ("Taiwan Semiconductor Manufacturing Company", "TSMC"),
         ("Box Inc.", "Box"),
         ("DigitalOcean Holdings", "DigitalOcean"),

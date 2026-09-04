@@ -1,0 +1,6 @@
+{
+  "filters": "<section id=\"search-filters\"></section>",
+  "results": "<section id=\"search-results\" data-total-results=\"31\" data-total-job-results=\"1\" data-total-pages=\"1\" data-current-page=\"1\" data-records-per-page=\"16\"><section id=\"search-results-list\" class=\"search-results-list\"><ul><li class=\"search-results-list__list-item\"><button type=\"button\" class=\"js-save-job-btn\" data-job-id=\"100128500176\" data-org-id=\"44408\"><span>Save</span></button><a class=\"sr-job-link\" href=\"/job/exton/digital-mission-engineering-software-development-internship/44408/100128500176\" data-job-id=\"100128500176\"><h2>Digital Mission Engineering Software Development Internship<img src=\"/images/result-arrow.svg\" alt=\"\"></h2><div class=\"sr-wrapper\"><span class=\"job-location\"><img src=\"/images/location.svg\" alt=\"\">Exton, Pennsylvania</span><span class=\"category\"><strong>Category: </strong>Interns/Temp</span><span class=\"job-date-posted\"><strong>Posted: </strong>08/31/2026</span><span class=\"jobId\"><strong>Job ID: </strong>18560</span></div></a></li></ul></section></section>",
+  "hasJobs": true,
+  "hasContent": true
+}

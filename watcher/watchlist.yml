@@ -41,6 +41,17 @@ companies:
     source_url: "https://careers.arm.com/search-jobs"
     note: "Official TalentBrew Graduate category"
 
+  - name: "Synopsys"
+    ats: talentbrew
+    talentbrew_host: "careers.synopsys.com"
+    talentbrew_site_id: "44408"
+    talentbrew_category_id: "8675664"
+    talentbrew_category_name: "Interns/Temp"
+    aliases: ["Synopsys, Inc."]
+    alumni_match: ["synopsys"]
+    source_url: "https://careers.synopsys.com/search-jobs"
+    note: "Official TalentBrew Interns/Temp category"
+
   - name: "Workday"
     ats: workday
     token: "workday"
