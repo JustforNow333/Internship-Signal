@@ -12,22 +12,21 @@ from typing import Any, Callable, Mapping
 from urllib.parse import quote, urlsplit
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import (
-    DirectDiagnosticsMixin,
+from watcher.sources.contracts import (
     JsonHttpResponse,
     SourceSchemaError,
     TextHttpResponse,
-    get_json_response,
-    get_text_response,
-    html_to_text,
-    make_row,
-    parse_records,
 )
+from watcher.sources.diagnostics import DirectDiagnosticsMixin
+from watcher.sources.parsing import parse_records
 from watcher.sources.retry import (
     DEFAULT_MAX_ATTEMPTS,
     RequestRetrier,
     RetryPolicy,
 )
+from watcher.sources.rows import make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import get_json_response, get_text_response
 
 CAREERS_HOST = "careers.epic.com"
 DETAIL_HOST = "epic.avature.net"

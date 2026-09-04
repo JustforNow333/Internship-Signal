@@ -11,20 +11,18 @@ from typing import Any, Callable
 from urllib.parse import quote, urlencode
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import (
-    DirectDiagnosticsMixin,
+from watcher.sources.contracts import (
     JsonHttpResponse,
     SourceError,
     SourceFetchError,
     SourceSchemaError,
-    get_json_response,
-    html_to_text,
-    iso_date,
-    make_row,
-    page_fingerprint,
-    parse_records,
 )
+from watcher.sources.diagnostics import DirectDiagnosticsMixin
+from watcher.sources.parsing import page_fingerprint, parse_records
 from watcher.sources.retry import DEFAULT_MAX_ATTEMPTS, http_retry_delay
+from watcher.sources.rows import iso_date, make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import get_json_response
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PAGE_SIZE = 200

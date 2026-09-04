@@ -13,20 +13,19 @@ from typing import Any, Callable
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import (
-    DirectDiagnosticsMixin,
+from watcher.sources.contracts import (
     JsonHttpResponse,
     SourceError,
     SourceFetchError,
     SourceSchemaError,
     TextHttpResponse,
-    get_json_response,
-    get_text_response,
-    html_to_text,
-    make_row,
-    page_fingerprint,
 )
+from watcher.sources.diagnostics import DirectDiagnosticsMixin
+from watcher.sources.parsing import page_fingerprint
 from watcher.sources.retry import DEFAULT_MAX_ATTEMPTS, http_retry_delay
+from watcher.sources.rows import make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import get_json_response, get_text_response
 
 DEFAULT_PAGE_SIZE = 16
 DEFAULT_MAX_PAGES = 100

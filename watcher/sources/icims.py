@@ -9,19 +9,17 @@ from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 from watcher.config import CompanyCfg, is_valid_hostname
-from watcher.sources.base import (
+from watcher.sources.contracts import (
     JsonHttpResponse,
     SourceError,
     SourceSchemaError,
     TextHttpResponse,
-    get_json_response,
-    get_text_response,
-    html_to_text,
-    iso_date,
-    make_row,
-    page_fingerprint,
 )
 from watcher.sources.direct import DirectRecordAdapter
+from watcher.sources.parsing import page_fingerprint
+from watcher.sources.rows import iso_date, make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import get_json_response, get_text_response
 
 JIBE_JSON = "jibe_json"
 CLASSIC = "classic"

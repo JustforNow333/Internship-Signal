@@ -85,11 +85,19 @@ CANONICAL_IMPLEMENTATION_MODULES = (
 
 DIRECT_OWNER_IMPORT_ADAPTERS = (
     "watcher.sources.ashby",
+    "watcher.sources.bain",
+    "watcher.sources.epic",
     "watcher.sources.github_listings",
     "watcher.sources.github_markdown_table",
     "watcher.sources.greenhouse",
+    "watcher.sources.ibm",
+    "watcher.sources.icims",
     "watcher.sources.lever",
+    "watcher.sources.oracle_hcm",
+    "watcher.sources.paylocity",
     "watcher.sources.smartrecruiters",
+    "watcher.sources.successfactors",
+    "watcher.sources.talentbrew",
     "watcher.sources.workable",
 )
 

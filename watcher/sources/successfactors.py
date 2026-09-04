@@ -13,21 +13,16 @@ from typing import Any, Callable, Mapping
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 from watcher.config import CompanyCfg, is_valid_hostname
-from watcher.sources.base import (
-    DirectDiagnosticsMixin,
-    SourceError,
-    SourceSchemaError,
-    TextHttpResponse,
-    get_text_response,
-    make_row,
-    page_fingerprint,
-    parse_records,
-)
+from watcher.sources.contracts import SourceError, SourceSchemaError, TextHttpResponse
+from watcher.sources.diagnostics import DirectDiagnosticsMixin
+from watcher.sources.parsing import page_fingerprint, parse_records
 from watcher.sources.retry import (
     DEFAULT_MAX_ATTEMPTS,
     RequestRetrier,
     RetryPolicy,
 )
+from watcher.sources.rows import make_row
+from watcher.sources.transport import get_text_response
 
 DEFAULT_MAX_PAGES = 1_000
 # A completely enumerated board can need hundreds of sequential page requests,

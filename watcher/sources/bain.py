@@ -9,21 +9,17 @@ from typing import Any, Callable, Mapping
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import (
-    DirectDiagnosticsMixin,
-    JsonHttpResponse,
-    SourceSchemaError,
-    get_json_response,
-    html_to_text,
-    make_row,
-    page_fingerprint,
-    parse_records,
-)
+from watcher.sources.contracts import JsonHttpResponse, SourceSchemaError
+from watcher.sources.diagnostics import DirectDiagnosticsMixin
+from watcher.sources.parsing import page_fingerprint, parse_records
 from watcher.sources.retry import (
     DEFAULT_MAX_ATTEMPTS,
     RequestRetrier,
     RetryPolicy,
 )
+from watcher.sources.rows import make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import get_json_response
 
 HOST = "www.bain.com"
 SEARCH_URL = f"https://{HOST}/en/api/jobsearch/keyword/get"

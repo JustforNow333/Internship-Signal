@@ -9,15 +9,11 @@ from json import JSONDecodeError
 from typing import Any, Callable
 
 from watcher.config import CompanyCfg
-from watcher.sources.base import (
-    SourceError,
-    SourceSchemaError,
-    TextHttpResponse,
-    get_text_response,
-    html_to_text,
-    make_row,
-)
+from watcher.sources.contracts import SourceError, SourceSchemaError, TextHttpResponse
 from watcher.sources.direct import DirectRecordAdapter
+from watcher.sources.rows import make_row
+from watcher.sources.sanitize import html_to_text
+from watcher.sources.transport import get_text_response
 
 HOST = "recruiting.paylocity.com"
 _COMPANY_ID = re.compile(
