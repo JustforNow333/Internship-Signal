@@ -63,10 +63,22 @@ This file tracks completed watcher steps and the next handoff target.
   Workday; TSMC on SuccessFactors; and Box and DigitalOcean on Greenhouse. Fresh
   live verification retained 2,000, 384, 123, 666, 2,000, 308, 147, and 147
   rows respectively, with complete non-degraded diagnostics and unique canonical
-  identities. Sony remains excluded because one fresh 109-row response contained
-  only 108 unique posting identities. The `purestorage` Greenhouse board belongs
+  identities. The `purestorage` Greenhouse board belongs
   to the same corporation formerly named Pure Storage, but its current legal and
   board identity is Everpure, so it was inspected only and not configured.
+- Sony is now a configured Workday source on `sonyglobal`/`wd1`/
+  `SonyGlobalCareers`. It had been excluded after one 109-row response carried
+  only 108 unique posting identities. A read-only stability audit ran three
+  consecutive crawls through the unchanged adapter, each retaining 111 rows with
+  111 unique identities and 111 unique canonical URLs, complete and non-degraded,
+  with zero malformed, schema-invalid, failed, or duplicate records and identical
+  id sets across all three. The duplicate-identity defect did not reproduce. The
+  entry aliases only the group legal name; Sony Pictures, Sony Interactive
+  Entertainment, and Sony Music hire separately and are deliberately not claimed.
+  The audit also found that the earlier `myworkdayjobs.com` unreachability is the
+  known stale ISRG Root X2 path in the local Windows trust store, not a Workday
+  fault: the served certificates verify normally against a current CA bundle with
+  verification enabled.
 - Workday now has an explicit `workday_host_variant` of `jobs` or `site`.
   `jobs` is the default `{tenant}.{shard}.myworkdayjobs.com` layout every
   existing company keeps; `site` is the `{shard}.myworkdaysite.com` layout whose

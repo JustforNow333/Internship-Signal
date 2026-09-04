@@ -30,6 +30,7 @@ EXPECTED_CONFIG = {
     "Zoom": ("workday", "zoom", "wd5", "Zoom"),
     "HPE": ("workday", "hpe", "wd5", "Jobsathpe"),
     "Samsung Electronics": ("workday", "sec", "wd3", "Samsung_Careers"),
+    "Sony": ("workday", "sonyglobal", "wd1", "SonyGlobalCareers"),
     "Nvidia": ("workday", "nvidia", "wd5", "NVIDIAExternalCareerSite"),
     "Broadcom": ("workday", "broadcom", "wd1", "External_Career"),
     "Unity": ("workday", "unitytech", "wd1", "Unity"),

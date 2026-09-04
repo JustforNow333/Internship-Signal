@@ -1546,3 +1546,12 @@ companies:
     aliases: ["Samsung"]
     alumni_match: ["samsung electronics", "samsung"]
     source_url: "https://sec.wd3.myworkdayjobs.com/Samsung_Careers"
+
+  - name: "Sony"
+    ats: workday
+    token: "sonyglobal"
+    workday_shard: "wd1"
+    workday_site: "SonyGlobalCareers"
+    aliases: ["Sony Group Corporation"]
+    alumni_match: ["sony"]
+    source_url: "https://sonyglobal.wd1.myworkdayjobs.com/SonyGlobalCareers"

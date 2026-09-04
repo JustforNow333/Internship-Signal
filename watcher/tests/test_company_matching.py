@@ -284,6 +284,11 @@ def test_default_watchlist_covers_required_exact_variants(label, canonical):
         "American Express Global Business Travel",
         "Amazon Studios",
         "Oracle Health",
+        # Sony's board is the group careers site; its separately hiring
+        # subsidiaries are not configured and must not be claimed by it.
+        "Sony Pictures",
+        "Sony Interactive Entertainment",
+        "Sony Music",
     ],
 )
 def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
@@ -334,6 +339,8 @@ def test_default_watchlist_does_not_claim_similar_unconfigured_companies(label):
         ("Hewlett Packard Enterprise", "HPE"),
         ("Samsung Electronics", "Samsung Electronics"),
         ("Samsung", "Samsung Electronics"),
+        ("Sony", "Sony"),
+        ("Sony Group Corporation", "Sony"),
         ("Nvidia", "Nvidia"),
         ("NVIDIA Corporation", "Nvidia"),
         ("Broadcom Inc.", "Broadcom"),
