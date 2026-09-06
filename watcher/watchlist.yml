@@ -75,12 +75,11 @@ companies:
     note: "official Next.js jobs data validated against the complete cached search ID set"
 
   - name: "Google"
-    ats: bespoke
-    module: "google"
+    ats: google
     aliases: ["Google LLC"]
     alumni_match: ["google", "google llc"]
-    source_url: "https://www.google.com/about/careers/"
-    note: "known company-hosted careers portal"
+    source_url: "https://www.google.com/about/careers/applications/jobs/results"
+    note: "Official Google careers RPC scoped to the Google organization; listing-only"
 
   - name: "PayPal"
     ats: workday

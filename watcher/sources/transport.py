@@ -170,6 +170,62 @@ def post_form_response(
     )
 
 
+def post_form_text_response(
+    url: str,
+    fields: Mapping[str, str],
+    source_name: str,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    *,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    request_headers: Mapping[str, str] | None = None,
+    opener: Callable[..., Any] = urlopen,
+) -> TextHttpResponse:
+    """POST form-encoded fields once and return the undecoded text response.
+
+    Some anonymous public endpoints answer a form POST with a body that is not
+    plain JSON - for example a payload behind an anti-XSSI guard, which the
+    caller must strip before decoding. This helper differs from
+    `post_form_response` in that alone: it returns the body as text and leaves
+    interpretation to the provider, while keeping the same bounded reads and
+    failure classification. It records no cookies or raw response body.
+    """
+
+    headers = {
+        "Accept": "*/*",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "User-Agent": USER_AGENT,
+    }
+    headers.update(request_headers or {})
+    request = Request(
+        url,
+        data=urlencode(dict(fields)).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with opener(request, timeout=timeout) as response:
+            return _decode_text_http_response(
+                response,
+                request_url=url,
+                source_name=source_name,
+                max_response_bytes=max_response_bytes,
+            )
+    except HTTPError as exc:
+        raise SourceFetchError(
+            f"{source_name} POST failed with HTTP {exc.code}: {_safe_url(url)}",
+            error_code=_http_error_code(exc.code),
+            status_code=exc.code,
+            retryable=exc.code == 429 or exc.code in {500, 502, 503, 504},
+        ) from exc
+    except (TimeoutError, URLError, OSError) as exc:
+        code = _network_error_code(exc)
+        raise SourceFetchError(
+            f"{source_name} POST failed: code={code} endpoint={_safe_url(url)}",
+            error_code=code,
+            retryable=True,
+        ) from exc
+
+
 def _post_encoded_response(
     url: str,
     *,

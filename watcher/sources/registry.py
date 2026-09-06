@@ -24,6 +24,7 @@ from watcher.sources.bloomberg import BloombergSource
 from watcher.sources.brassring import BrassRingSource
 from watcher.sources.epic import EpicSource
 from watcher.sources.eightfold import EightfoldSource
+from watcher.sources.google import GoogleSource
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.ibm import IbmSource
 from watcher.sources.icims import IcimsSource
@@ -69,6 +70,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("brassring", BrassRingSource),
     DirectSourceSpec("epic", EpicSource),
     DirectSourceSpec("eightfold", EightfoldSource),
+    DirectSourceSpec("google", GoogleSource),
     DirectSourceSpec("greenhouse", GreenhouseSource),
     DirectSourceSpec("ibm", IbmSource),
     DirectSourceSpec("icims", IcimsSource),

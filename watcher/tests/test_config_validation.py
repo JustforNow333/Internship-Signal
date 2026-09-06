@@ -37,6 +37,7 @@ VALID_COMPANY_FIELDS = {
     ),
     "greenhouse": '    token: "example"\n',
     "ibm": "",
+    "google": "",
     "kpmg": "",
     "icims": (
         "    icims_variant: jibe_json\n"

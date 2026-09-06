@@ -56,6 +56,7 @@ from watcher.sources.base import (
     SourceFetchError,
     make_row,
 )
+from watcher.sources.google import GoogleSource
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.epic import EpicSource
 from watcher.sources.ibm import IbmSource
@@ -378,6 +379,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "bechtel": BechtelSource.endpoint(),
         "bloomberg": BloombergSource.endpoint(),
         "epic": EpicSource.endpoint(),
+        "google": GoogleSource.endpoint(),
         "greenhouse": GreenhouseSource.endpoint("token"),
         "ibm": IbmSource.endpoint(start=0, results=100, page=1),
         "kpmg": KpmgSource.endpoint(),
