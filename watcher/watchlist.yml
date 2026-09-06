@@ -826,12 +826,11 @@ companies:
     note: "company-hosted careers portal; unsupported by current watcher adapters"
 
   - name: "Bechtel Corporation"
-    ats: bespoke
-    module: "bechtel_corporation"
+    ats: bechtel
     aliases: ["Bechtel"]
     alumni_match: ["bechtel corporation", "bechtel"]
     source_url: "https://jobs.bechtel.com/"
-    note: "BrassRing/Phenom careers portal; unsupported by current watcher adapters"
+    note: "Bechtel-specific requisition inventory; two matching complete listing passes required"
 
   - name: "Air Products"
     ats: workday

@@ -1,0 +1,90 @@
+{
+  "_fixture": {
+    "source": "https://jobs.bechtel.com/widgets",
+    "captured_utc_date": "2026-09-05",
+    "note": "Two actual listing records from the reconciled 938-job snapshot; total normalized to two. ATS description retains its first actual paragraph; tracking/aggregations omitted. Tests expand these records synthetically for pagination."
+  },
+  "populated": {
+    "refineSearch": {
+      "status": 200,
+      "hits": 2,
+      "totalHits": 2,
+      "data": {
+        "jobs": [
+          {
+            "reqId": "297512",
+            "jobId": "297512",
+            "jobSeqNo": "BCFBCKUS297512EXTERNALENUS",
+            "title": "AI Solutions Engineer",
+            "locale": "en_US",
+            "location": "Reston, Virginia, United States, 20190",
+            "multi_location": [
+              "Reston, Virginia, United States, 20190"
+            ],
+            "multi_location_array": [
+              {
+                "latlong": {
+                  "lon": -77.3411,
+                  "lat": 38.96872
+                },
+                "location": "Reston, Virginia, United States, 20190"
+              }
+            ],
+            "country": "United States",
+            "applyUrl": "https://career4.successfactors.com/career?company=Bechtel&career_ns=job_application&career_job_req_id=297512&jobPipeline=PhenomCareerSite",
+            "postedDate": "2026-08-07T17:23:36.141+0000",
+            "descriptionTeaser": "The AI Solutions Engineer will serve as the technical quality authority within the AI programme, responsible for establishing and enforcing AI coding standards, validating machine learning models and...",
+            "ml_job_parser": {
+              "descriptionTeaser_ats": "<p><span style=\"font-size: 9.0pt;\"><span style=\"font-family: Arial;\"><strong style=\"font-weight: bold;\">Requisition ID:  297512</strong></span></span></p>"
+            }
+          },
+          {
+            "reqId": "295378",
+            "jobId": "295378",
+            "jobSeqNo": "BCFBCKUS295378EXTERNALENUS",
+            "title": "Manager, State Government Affairs",
+            "locale": "en_US",
+            "location": "Houston, Texas, United States, 77056",
+            "multi_location": [
+              "Houston, Texas, United States, 77056",
+              "Washington, District of Columbia, United States, 20005"
+            ],
+            "multi_location_array": [
+              {
+                "latlong": {
+                  "lon": -95.46827,
+                  "lat": 29.73162
+                },
+                "location": "Houston, Texas, United States, 77056"
+              },
+              {
+                "latlong": {
+                  "lon": -77.02887,
+                  "lat": 38.90622
+                },
+                "location": "Washington, District of Columbia, United States, 20005"
+              }
+            ],
+            "country": "United States",
+            "applyUrl": "https://career4.successfactors.com/career?company=Bechtel&career_ns=job_application&career_job_req_id=295378&jobPipeline=PhenomCareerSite",
+            "postedDate": "2026-08-27T14:31:56.404+0000",
+            "descriptionTeaser": "Stakeholder Engagement: Build and maintain the strategy across Bechtel’s business lines to develop strong relationships with relevant state government agencies and associated organizations, congressio...",
+            "ml_job_parser": {
+              "descriptionTeaser_first200": "Requisition ID: 295378. Relocation Authorized: None. Telework Type: Part-Time Telework . Work Location: Houston, TX, Washington,DC. Salary Range: $153,600 - $234,300 annually (salary range is based..."
+            }
+          }
+        ]
+      }
+    }
+  },
+  "empty": {
+    "refineSearch": {
+      "status": 200,
+      "hits": 0,
+      "totalHits": 0,
+      "data": {
+        "jobs": []
+      }
+    }
+  }
+}

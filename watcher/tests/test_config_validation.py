@@ -19,6 +19,7 @@ HEAD = 'defaults:\n  terms: ["Summer 2027"]\n'
 VALID_COMPANY_FIELDS = {
     "ashby": '    token: "example"\n',
     "bain": "",
+    "bechtel": "",
     "bloomberg": "",
     "brassring": (
         '    brassring_host: "jobs.example.test"\n'
