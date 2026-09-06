@@ -48,6 +48,14 @@ UNKNOWN_ORIGIN = "unknown"
 # Host per direct adapter, mirroring each adapter's documented endpoint. A
 # regression test derives the same hosts from the adapters so the two cannot
 # drift. Workday is per tenant because each tenant is its own host.
+# API host per supported ByteDance careers portal, mirroring the adapter's own
+# portal table. A regression test derives this map from the adapter so the two
+# cannot drift.
+BYTEDANCE_CAREERS_PORTAL_HOSTS: Mapping[str, str] = {
+    "tiktok": "api.lifeattiktok.com",
+    "en": "jobs.bytedance.com",
+}
+
 DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "bain": "www.bain.com",
     "bechtel": "jobs.bechtel.com",
@@ -115,6 +123,7 @@ def direct_origin_key(
     taleo_sourcing_host: str = "",
     ukg_host: str = "",
     eightfold_host: str = "",
+    bytedance_careers_portal: str = "",
 ) -> str:
     """Return the shared origin key for one direct adapter fetch.
 
@@ -172,6 +181,18 @@ def direct_origin_key(
         host = _safe_key(ukg_host, limit=253)
         return _safe_key(
             f"https://{host}" if host != UNKNOWN_ORIGIN else "adapter:ukg"
+        )
+    if adapter == "bytedance_careers":
+        # Each configured portal is served from its own API host, so the two
+        # portals never share a per-origin limit with one another.
+        api_host = BYTEDANCE_CAREERS_PORTAL_HOSTS.get(
+            str(bytedance_careers_portal or "").strip()
+        )
+        host = _safe_key(api_host, limit=253) if api_host else UNKNOWN_ORIGIN
+        return _safe_key(
+            f"https://{host}"
+            if host != UNKNOWN_ORIGIN
+            else "adapter:bytedance_careers"
         )
     if adapter == "eightfold":
         host = _safe_key(eightfold_host, limit=253)

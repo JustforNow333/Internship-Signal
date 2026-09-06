@@ -43,6 +43,7 @@ from .validation import (
     _validate_github_source_uniqueness,
     _validate_github_listing_sources_value,
     _validate_icims_config,
+    _validate_bytedance_careers_config,
     _validate_eightfold_config,
     _validate_oracle_hcm_config,
     _validate_paylocity_config,
@@ -236,6 +237,15 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             board_id=ukg_board_id,
             source_url=source_url,
         )
+    bytedance_careers_portal = str(
+        entry.get("bytedance_careers_portal") or ""
+    ).strip()
+    if ats == "bytedance_careers":
+        _validate_bytedance_careers_config(
+            name,
+            portal=bytedance_careers_portal,
+            source_url=source_url,
+        )
     eightfold_host = str(entry.get("eightfold_host") or "").strip().casefold()
     eightfold_domain = str(entry.get("eightfold_domain") or "").strip().casefold()
     eightfold_variant = str(entry.get("eightfold_variant") or "").strip().casefold()
@@ -283,6 +293,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         ukg_host=ukg_host,
         ukg_tenant=ukg_tenant,
         ukg_board_id=ukg_board_id,
+        bytedance_careers_portal=bytedance_careers_portal,
         eightfold_host=eightfold_host,
         eightfold_domain=eightfold_domain,
         eightfold_variant=eightfold_variant,

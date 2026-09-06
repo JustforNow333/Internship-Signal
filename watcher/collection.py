@@ -525,6 +525,7 @@ def _direct_collection_task(
             taleo_sourcing_host=company.taleo_sourcing_host,
             ukg_host=company.ukg_host,
             eightfold_host=company.eightfold_host,
+            bytedance_careers_portal=company.bytedance_careers_portal,
         ),
         provider=company.ats,
         run=run,

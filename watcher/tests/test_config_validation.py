@@ -29,6 +29,10 @@ VALID_COMPANY_FIELDS = {
         '?partnerid=25008&siteid=5131"\n'
     ),
     "epic": "",
+    "bytedance_careers": (
+        '    bytedance_careers_portal: "tiktok"\n'
+        '    source_url: "https://lifeattiktok.com/search"\n'
+    ),
     "eightfold": (
         '    eightfold_host: "jobs.example.test"\n'
         '    eightfold_domain: "example.com"\n'

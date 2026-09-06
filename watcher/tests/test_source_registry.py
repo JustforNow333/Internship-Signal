@@ -24,6 +24,7 @@ def test_direct_ats_surface_is_unchanged():
             "greenhouse",
             "ibm",
             "icims",
+            "bytedance_careers",
             "google",
             "kpmg",
             "lever",

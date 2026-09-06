@@ -54,6 +54,7 @@ EXPECTED_FIELDS = {
         ("ukg_host", ""),
         ("ukg_tenant", ""),
         ("ukg_board_id", ""),
+        ("bytedance_careers_portal", ""),
         ("eightfold_host", ""),
         ("eightfold_domain", ""),
         ("eightfold_variant", ""),

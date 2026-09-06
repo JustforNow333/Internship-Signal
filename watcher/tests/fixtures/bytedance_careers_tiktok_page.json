@@ -1,0 +1,142 @@
+{
+ "code": 0,
+ "message": "ok",
+ "data": {
+  "count": 2,
+  "job_post_list": [
+   {
+    "id": "7680837629370140933",
+    "code": "A195147",
+    "title": "Content Quality Specialist - Tagalog",
+    "description": "About the team\nThe Safety Model Operations [SMO] team is responsible for building, optimizing, and maintaining machine learning models and operational processes that support TikTok's Trust & Safety sy",
+    "requirement": "Minimum Qualifications:\n1. Proven experience in internet Trust & Safety, Quality Assurance (QA), AI data evaluation, or policy operations.\n2. Exceptional logical reasoning and synthesis skills. Proven",
+    "recruit_type": {
+     "id": "101",
+     "name": null,
+     "en_name": "Regular",
+     "i18n_name": "Regular"
+    },
+    "job_category": {
+     "id": "6704215882479962371",
+     "name": null,
+     "en_name": "Operations",
+     "i18n_name": "Operations",
+     "parent": null
+    },
+    "city_info": {
+     "code": "CT_65",
+     "location_type": 3,
+     "name": null,
+     "en_name": "Kuala Lumpur",
+     "i18n_name": "Kuala Lumpur",
+     "parent": {
+      "code": "ST_1002064",
+      "location_type": 2,
+      "name": null,
+      "en_name": "Wilayah Persekutuan Kuala Lumpur",
+      "i18n_name": "Wilayah Persekutuan Kuala Lumpur",
+      "parent": {
+       "code": "CN_11",
+       "location_type": 1,
+       "name": null,
+       "en_name": "Malaysia",
+       "i18n_name": "Malaysia",
+       "parent": null
+      }
+     }
+    },
+    "tag_list": null,
+    "job_subject": null,
+    "vacancies": null,
+    "department_info": null,
+    "job_post_info": {
+     "min_salary": null,
+     "max_salary": null,
+     "currency": null,
+     "required_degree": null,
+     "experience": null,
+     "sequence": null,
+     "min_level": null,
+     "max_level": null,
+     "highlight_list": null,
+     "job_post_object_value_list": null,
+     "expiry_time": null
+    },
+    "process_type": null,
+    "channel_online_status": null
+   },
+   {
+    "id": "7677950258269653301",
+    "code": "A150050",
+    "title": "Talent Acquisition Project Intern (Product & Design) - 2026 Start",
+    "description": "About the Role\nWe're looking for a motivated and curious Talent Acquisition Intern to support the recruiters responsible for building world-class Product and Design teams at TikTok.\n\nAs part of our Ta",
+    "requirement": "Minimum Qualification(s):\n- Currently enrolled in a Bachelor’s degree in Human Resources, Business, Psychology, Communications, or related field\n- Interest in recruiting, talent strategy, people opera",
+    "recruit_type": {
+     "id": "202",
+     "name": null,
+     "en_name": "Intern",
+     "i18n_name": "Intern"
+    },
+    "job_category": {
+     "id": "6704216386916321540",
+     "name": null,
+     "en_name": "HR",
+     "i18n_name": "HR",
+     "parent": {
+      "id": "6704215913488451847",
+      "name": null,
+      "en_name": "Corporate Function / Support",
+      "i18n_name": "Corporate Function / Support",
+      "parent": null
+     }
+    },
+    "city_info": {
+     "code": "CT_94",
+     "location_type": 3,
+     "name": null,
+     "en_name": "Los Angeles",
+     "i18n_name": "Los Angeles",
+     "parent": {
+      "code": "ST_31",
+      "location_type": 2,
+      "name": null,
+      "en_name": "California",
+      "i18n_name": "California",
+      "parent": {
+       "code": "CN_6",
+       "location_type": 1,
+       "name": null,
+       "en_name": "United States of America",
+       "i18n_name": "United States of America",
+       "parent": null
+      }
+     }
+    },
+    "tag_list": null,
+    "job_subject": {
+     "id": "7391494724038953254",
+     "name": null,
+     "en_name": "Project Intern",
+     "i18n_name": "Project Intern"
+    },
+    "vacancies": null,
+    "department_info": null,
+    "job_post_info": {
+     "min_salary": null,
+     "max_salary": null,
+     "currency": null,
+     "required_degree": null,
+     "experience": null,
+     "sequence": null,
+     "min_level": null,
+     "max_level": null,
+     "highlight_list": null,
+     "job_post_object_value_list": null,
+     "expiry_time": null
+    },
+    "process_type": null,
+    "channel_online_status": null
+   }
+  ]
+ }
+}

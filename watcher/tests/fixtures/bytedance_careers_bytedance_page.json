@@ -1,0 +1,136 @@
+{
+ "code": 0,
+ "message": "ok",
+ "data": {
+  "count": 2,
+  "job_post_list": [
+   {
+    "id": "7673510574963738885",
+    "code": "A70775A",
+    "title": "Physical Design Engineer - Physical Verification - Singapore",
+    "description": "Team Introduction\nThe Silicon Platform Team acts as the core R&D middleware group for chip development within the company. The team covers the full spectrum of the chip design flow, including Logic Sy",
+    "requirement": "Minimum Qualifications\n1. BS degree in Electrical Engineering, Computer Engineering, or equivalent practical experience.\n2. 5+ years of experience in physical verification (DRC/LVS/ERC) for ASIC/SoC d",
+    "recruit_type": {
+     "id": "101",
+     "name": "正式",
+     "en_name": "Regular",
+     "i18n_name": "Regular"
+    },
+    "job_category": {
+     "id": "6704215862603155720",
+     "name": "研发",
+     "en_name": "R&D",
+     "i18n_name": "R&D",
+     "parent": null
+    },
+    "city_info": {
+     "code": "CT_163",
+     "location_type": 3,
+     "name": "新加坡",
+     "en_name": "Singapore",
+     "i18n_name": "Singapore",
+     "parent": {
+      "code": "ST_100785",
+      "location_type": 2,
+      "name": "新加坡",
+      "en_name": "Singapore",
+      "i18n_name": "Singapore",
+      "parent": {
+       "code": "CN_25",
+       "location_type": 1,
+       "name": "新加坡",
+       "en_name": "Singapore",
+       "i18n_name": "Singapore",
+       "parent": null
+      }
+     }
+    },
+    "tag_list": null,
+    "job_subject": null,
+    "vacancies": null,
+    "department_info": null,
+    "job_post_info": {
+     "min_salary": null,
+     "max_salary": null,
+     "currency": null,
+     "required_degree": null,
+     "experience": null,
+     "sequence": null,
+     "min_level": null,
+     "max_level": null,
+     "highlight_list": null,
+     "job_post_object_value_list": null,
+     "expiry_time": null
+    },
+    "process_type": null,
+    "channel_online_status": null
+   },
+   {
+    "id": "7673264681083898165",
+    "code": "A30447",
+    "title": "Research Scientist Graduate (Seed AI Foundation Model Infrastructure) - 2027 Start (PhD)",
+    "description": "About the team\nThe Seed Infrastructures team oversees the distributed training, reinforcement learning framework, high-performance inference, and heterogeneous hardware compilation technologies for AI",
+    "requirement": "Minimum Qualifications:\n- Individuals who are completing or have recently completed a PhD degree in Computer Science, Electrical Engineering, Electrical and Computer Engineering, Physics, Mathematics,",
+    "recruit_type": {
+     "id": "201",
+     "name": "正式",
+     "en_name": "Regular",
+     "i18n_name": "Regular"
+    },
+    "job_category": {
+     "id": "6704215862603155720",
+     "name": "研发",
+     "en_name": "R&D",
+     "i18n_name": "R&D",
+     "parent": null
+    },
+    "city_info": {
+     "code": "CT_1103355",
+     "location_type": 3,
+     "name": "圣何塞",
+     "en_name": "San Jose",
+     "i18n_name": "San Jose",
+     "parent": {
+      "code": "ST_31",
+      "location_type": 2,
+      "name": "加利福尼亚州",
+      "en_name": "California",
+      "i18n_name": "California",
+      "parent": {
+       "code": "CN_6",
+       "location_type": 1,
+       "name": "美国",
+       "en_name": "United States of America",
+       "i18n_name": "United States of America",
+       "parent": null
+      }
+     }
+    },
+    "tag_list": null,
+    "job_subject": {
+     "id": "7622958352622176517",
+     "name": "Seed Foundation Model Campus Recruitment - Graduates",
+     "en_name": "Seed Foundation Model Campus Recruitment - Graduates",
+     "i18n_name": "Seed Foundation Model Campus Recruitment - Graduates"
+    },
+    "vacancies": null,
+    "department_info": null,
+    "job_post_info": {
+     "min_salary": null,
+     "max_salary": null,
+     "currency": null,
+     "required_degree": null,
+     "experience": null,
+     "sequence": null,
+     "min_level": null,
+     "max_level": null,
+     "highlight_list": null,
+     "job_post_object_value_list": null,
+     "expiry_time": null
+    },
+    "process_type": null,
+    "channel_online_status": null
+   }
+  ]
+ }
+}

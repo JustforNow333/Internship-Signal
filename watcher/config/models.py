@@ -157,6 +157,7 @@ class CompanyCfg:
     ukg_host: str = ""
     ukg_tenant: str = ""
     ukg_board_id: str = ""
+    bytedance_careers_portal: str = ""
     eightfold_host: str = ""
     eightfold_domain: str = ""
     eightfold_variant: str = ""

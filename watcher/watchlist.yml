@@ -74,6 +74,22 @@ companies:
     source_url: "https://careers.epic.com/jobs/"
     note: "official Next.js jobs data validated against the complete cached search ID set"
 
+  - name: "TikTok"
+    ats: bytedance_careers
+    bytedance_careers_portal: "tiktok"
+    aliases: ["TikTok Inc.", "TikTok U.S."]
+    alumni_match: ["tiktok"]
+    source_url: "https://lifeattiktok.com/search"
+    note: "Official TikTok careers portal; portal-scoped single-payload inventory"
+
+  - name: "ByteDance"
+    ats: bytedance_careers
+    bytedance_careers_portal: "en"
+    aliases: ["ByteDance Ltd."]
+    alumni_match: ["bytedance"]
+    source_url: "https://joinbytedance.com/search"
+    note: "Official ByteDance careers portal; portal-scoped single-payload inventory"
+
   - name: "Google"
     ats: google
     aliases: ["Google LLC"]

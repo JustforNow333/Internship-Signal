@@ -278,6 +278,7 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "eightfold_host": company.eightfold_host,
                 "eightfold_domain": company.eightfold_domain,
                 "eightfold_variant": company.eightfold_variant,
+                "bytedance_careers_portal": company.bytedance_careers_portal,
                 "module": company.module,
                 "terms": list(company.terms),
             }

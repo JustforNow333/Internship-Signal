@@ -9,7 +9,7 @@ construction belong to ``loader.py``.
 from __future__ import annotations
 
 import re
-from typing import Sequence
+from typing import Mapping, Sequence
 from urllib.parse import parse_qs, urlsplit
 
 from watcher.company_matching import company_matching_key
@@ -509,6 +509,56 @@ def _validate_ukg_config(
     ):
         raise ConfigError(
             f"{name}: ukg source_url must be its credential-free public board root"
+        )
+
+
+# Careers site host per supported ByteDance careers portal. The source owns the
+# authoritative portal table; a regression test derives this map from it so the
+# config layer can validate entries without importing an adapter.
+BYTEDANCE_CAREERS_PORTAL_SITES: Mapping[str, str] = {
+    "tiktok": "lifeattiktok.com",
+    "en": "joinbytedance.com",
+}
+
+
+def _validate_bytedance_careers_config(
+    name: str,
+    *,
+    portal: str,
+    source_url: str,
+) -> None:
+    """Validate one ByteDance careers portal entry.
+
+    The portal is authoritative company scope, so it must name a portal the
+    source actually supports rather than any string, and the configured
+    source_url must be that portal's own credential-free HTTPS careers site.
+    """
+
+    if portal not in BYTEDANCE_CAREERS_PORTAL_SITES:
+        supported = ", ".join(sorted(BYTEDANCE_CAREERS_PORTAL_SITES))
+        raise ConfigError(
+            f"{name}: bytedance_careers_portal must be one of: {supported}"
+        )
+    expected_host = BYTEDANCE_CAREERS_PORTAL_SITES[portal]
+    try:
+        parsed = urlsplit(source_url)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ConfigError(
+            f"{name}: bytedance careers entries require a valid source_url"
+        ) from exc
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != expected_host
+        or parsed.username
+        or parsed.password
+        or parsed_port is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigError(
+            f"{name}: bytedance careers source_url must be its portal's "
+            "credential-free HTTPS careers site"
         )
 
 

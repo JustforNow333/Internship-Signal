@@ -22,6 +22,7 @@ from watcher.sources.bain import BainSource
 from watcher.sources.bechtel import BechtelSource
 from watcher.sources.bloomberg import BloombergSource
 from watcher.sources.brassring import BrassRingSource
+from watcher.sources.bytedance_careers import ByteDanceCareersSource
 from watcher.sources.epic import EpicSource
 from watcher.sources.eightfold import EightfoldSource
 from watcher.sources.google import GoogleSource
@@ -68,6 +69,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("bechtel", BechtelSource),
     DirectSourceSpec("bloomberg", BloombergSource),
     DirectSourceSpec("brassring", BrassRingSource),
+    DirectSourceSpec("bytedance_careers", ByteDanceCareersSource),
     DirectSourceSpec("epic", EpicSource),
     DirectSourceSpec("eightfold", EightfoldSource),
     DirectSourceSpec("google", GoogleSource),
