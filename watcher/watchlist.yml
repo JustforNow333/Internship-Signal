@@ -90,6 +90,13 @@ companies:
     source_url: "https://joinbytedance.com/search"
     note: "Official ByteDance careers portal; portal-scoped single-payload inventory"
 
+  - name: "Apple"
+    ats: apple
+    aliases: ["Apple Inc."]
+    alumni_match: ["apple", "apple inc"]
+    source_url: "https://jobs.apple.com/en-us/search"
+    note: "Official Apple careers search; union of the newest and locationAsc sorts, proven against totalRecords"
+
   - name: "Google"
     ats: google
     aliases: ["Google LLC"]

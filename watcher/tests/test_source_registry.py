@@ -14,6 +14,7 @@ from watcher.sources.workday import WorkdayPacer, WorkdaySource
 def test_direct_ats_surface_is_unchanged():
     assert DIRECT_ATS == frozenset(
         {
+            "apple",
             "ashby",
             "bain",
             "bechtel",

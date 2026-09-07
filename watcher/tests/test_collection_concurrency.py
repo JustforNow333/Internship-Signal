@@ -46,6 +46,7 @@ from watcher.source_health import (
     SOURCE_KIND_DIRECT,
     SOURCE_KIND_GITHUB_FEED,
 )
+from watcher.sources.apple import AppleSource
 from watcher.sources.ashby import AshbySource
 from watcher.sources.bain import BainSource
 from watcher.sources.bechtel import BechtelSource
@@ -375,6 +376,7 @@ def test_scope_limits_cannot_exceed_the_global_worker_pool():
 
 def test_direct_origin_hosts_match_the_adapter_endpoints():
     endpoints = {
+        "apple": AppleSource.endpoint(),
         "bain": BainSource.endpoint(page=0, results=100),
         "bechtel": BechtelSource.endpoint(),
         "bloomberg": BloombergSource.endpoint(),
