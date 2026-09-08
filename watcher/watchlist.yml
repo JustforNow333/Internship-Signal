@@ -1575,3 +1575,8 @@ companies:
     aliases: ["Sony Group Corporation"]
     alumni_match: ["sony"]
     source_url: "https://sonyglobal.wd1.myworkdayjobs.com/SonyGlobalCareers"
+
+  - name: "Atlassian"
+    ats: atlassian
+    aliases: ["Atlassian Corporation"]
+    source_url: "https://www.atlassian.com/company/careers/all-jobs"

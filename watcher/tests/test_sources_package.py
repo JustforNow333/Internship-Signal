@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 EXPORT_OWNERS = {
+    "AtlassianSource": "watcher.sources.atlassian",
     "AppleSource": "watcher.sources.apple",
     "AshbySource": "watcher.sources.ashby",
     "BainSource": "watcher.sources.bain",
@@ -51,6 +52,7 @@ EXPORT_OWNERS = {
 }
 
 EXPECTED_ALL = (
+    "AtlassianSource",
     "AppleSource",
     "AshbySource",
     "BainSource",
@@ -88,6 +90,7 @@ EXPECTED_ALL = (
 
 ADAPTER_MODULES = frozenset(
     {
+        "watcher.sources.atlassian",
         "watcher.sources.apple",
         "watcher.sources.ashby",
         "watcher.sources.bain",

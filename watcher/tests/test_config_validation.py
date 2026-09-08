@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HEAD = 'defaults:\n  terms: ["Summer 2027"]\n'
 
 VALID_COMPANY_FIELDS = {
+    "atlassian": "",
     "apple": "",
     "ashby": '    token: "example"\n',
     "bain": "",

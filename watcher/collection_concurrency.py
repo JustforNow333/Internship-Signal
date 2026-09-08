@@ -57,6 +57,7 @@ BYTEDANCE_CAREERS_PORTAL_HOSTS: Mapping[str, str] = {
 }
 
 DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
+    "atlassian": "www.atlassian.com",
     "apple": "jobs.apple.com",
     "bain": "www.bain.com",
     "bechtel": "jobs.bechtel.com",
