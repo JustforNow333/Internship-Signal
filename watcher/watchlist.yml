@@ -1580,3 +1580,11 @@ companies:
     ats: atlassian
     aliases: ["Atlassian Corporation"]
     source_url: "https://www.atlassian.com/company/careers/all-jobs"
+
+  - name: "SAP"
+    ats: successfactors
+    successfactors_host: "jobs.sap.com"
+    successfactors_locale: "en_US"
+    aliases: ["SAP SE", "SAP America"]
+    alumni_match: ["sap"]
+    source_url: "https://jobs.sap.com/search/"
