@@ -1644,3 +1644,11 @@ companies:
     aliases: ["PTC Inc", "Parametric Technology"]
     alumni_match: ["ptc"]
     source_url: "https://ptc.wd1.myworkdayjobs.com/PTC"
+
+  - name: "Ubisoft"
+    ats: smartrecruiters
+    token: "Ubisoft2"
+    aliases: ["Ubisoft Entertainment"]
+    alumni_match: ["ubisoft"]
+    source_url: "https://jobs.smartrecruiters.com/Ubisoft2"
+    note: "Live Ubisoft SmartRecruiters board; the bare Ubisoft token is a valid but empty company"
