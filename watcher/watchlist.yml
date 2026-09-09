@@ -1616,3 +1616,13 @@ companies:
     alumni_match: ["nokia"]
     source_url: "https://fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs"
     note: "Oracle HCM Candidate Experience behind the jobs.nokia.com vanity frontend"
+
+  - name: "Rakuten"
+    ats: workday
+    token: "rakuten"
+    workday_shard: "wd1"
+    workday_site: "RakutenAmericas"
+    aliases: ["Rakuten Group", "Rakuten Americas"]
+    alumni_match: ["rakuten"]
+    source_url: "https://rakuten.wd1.myworkdayjobs.com/RakutenAmericas"
+    note: "Rakuten Americas Workday board; the only reachable site on the rakuten tenant"
