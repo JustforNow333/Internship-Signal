@@ -1626,3 +1626,12 @@ companies:
     alumni_match: ["rakuten"]
     source_url: "https://rakuten.wd1.myworkdayjobs.com/RakutenAmericas"
     note: "Rakuten Americas Workday board; the only reachable site on the rakuten tenant"
+
+  - name: "Mastercard"
+    ats: workday
+    token: "mastercard"
+    workday_shard: "wd1"
+    workday_site: "CorporateCareers"
+    aliases: ["Mastercard Incorporated"]
+    alumni_match: ["mastercard"]
+    source_url: "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers"
