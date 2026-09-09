@@ -1607,3 +1607,12 @@ companies:
     alumni_match: ["tencent"]
     source_url: "https://tencent.wd1.myworkdayjobs.com/Tencent_Careers"
     note: "Authoritative Workday tenant behind careers.tencent.com; that frontend's larger count includes China-domestic postings held outside this tenant"
+
+  - name: "Nokia"
+    ats: oracle_hcm
+    oracle_hcm_host: "fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com"
+    oracle_hcm_site: "CX_1"
+    aliases: ["Nokia Corporation", "Nokia Bell Labs"]
+    alumni_match: ["nokia"]
+    source_url: "https://fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs"
+    note: "Oracle HCM Candidate Experience behind the jobs.nokia.com vanity frontend"
