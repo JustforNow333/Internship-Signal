@@ -1597,3 +1597,13 @@ companies:
     alumni_match: ["dell technologies", "dell"]
     source_url: "https://enterpriseplatform.dell.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"
     note: "Official Dell careers board; Oracle HCM Candidate Experience on Dell's verified vanity host"
+
+  - name: "Tencent"
+    ats: workday
+    token: "tencent"
+    workday_shard: "wd1"
+    workday_site: "Tencent_Careers"
+    aliases: ["Tencent Holdings", "Tencent America"]
+    alumni_match: ["tencent"]
+    source_url: "https://tencent.wd1.myworkdayjobs.com/Tencent_Careers"
+    note: "Authoritative Workday tenant behind careers.tencent.com; that frontend's larger count includes China-domestic postings held outside this tenant"
