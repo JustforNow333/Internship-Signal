@@ -1635,3 +1635,12 @@ companies:
     aliases: ["Mastercard Incorporated"]
     alumni_match: ["mastercard"]
     source_url: "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers"
+
+  - name: "PTC"
+    ats: workday
+    token: "ptc"
+    workday_shard: "wd1"
+    workday_site: "PTC"
+    aliases: ["PTC Inc", "Parametric Technology"]
+    alumni_match: ["ptc"]
+    source_url: "https://ptc.wd1.myworkdayjobs.com/PTC"
