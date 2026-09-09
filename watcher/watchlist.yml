@@ -1652,3 +1652,10 @@ companies:
     alumni_match: ["ubisoft"]
     source_url: "https://jobs.smartrecruiters.com/Ubisoft2"
     note: "Live Ubisoft SmartRecruiters board; the bare Ubisoft token is a valid but empty company"
+
+  - name: "Western Digital"
+    ats: smartrecruiters
+    token: "WesternDigital"
+    aliases: ["Western Digital Corporation", "WDC", "SanDisk"]
+    alumni_match: ["western digital", "westerndigital"]
+    source_url: "https://jobs.smartrecruiters.com/WesternDigital"
