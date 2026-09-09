@@ -198,6 +198,48 @@ def test_multi_field_invalid_entries_keep_first_error(tmp_path, ats, expected):
     assert str(caught.value) == expected
 
 
+ORACLE_HCM_HOST_ERROR = "Example: oracle_hcm_host must be an Oracle Cloud hostname"
+
+
+def _oracle_hcm_fields(host: str, site: str = "CX_1001") -> str:
+    return (
+        f'    oracle_hcm_host: "{host}"\n'
+        f'    oracle_hcm_site: "{site}"\n'
+        f'    source_url: "https://{host}/hcmUI/CandidateExperience/en/sites/'
+        f'{site}/jobs"\n'
+    )
+
+
+def test_verified_oracle_hcm_vanity_host_is_accepted(tmp_path):
+    watchlist = _load(
+        tmp_path,
+        _company("Example", "oracle_hcm", _oracle_hcm_fields("enterpriseplatform.dell.com")),
+    )
+
+    company = watchlist.companies[0]
+    assert company.oracle_hcm_host == "enterpriseplatform.dell.com"
+    assert company.oracle_hcm_site == "CX_1001"
+
+
+def test_unverified_non_oracle_cloud_host_is_still_rejected(tmp_path):
+    with pytest.raises(config.ConfigError) as caught:
+        _load(
+            tmp_path,
+            _company("Example", "oracle_hcm", _oracle_hcm_fields("careers.example.com")),
+        )
+
+    assert str(caught.value) == ORACLE_HCM_HOST_ERROR
+
+
+def test_oracle_cloud_suffix_still_accepted_alongside_the_allowlist(tmp_path):
+    watchlist = _load(
+        tmp_path,
+        _company("Example", "oracle_hcm", _oracle_hcm_fields("example.fa.us2.oraclecloud.com")),
+    )
+
+    assert watchlist.companies[0].oracle_hcm_host == "example.fa.us2.oraclecloud.com"
+
+
 def test_unknown_ats_keeps_exact_error(tmp_path):
     with pytest.raises(config.ConfigError) as caught:
         _load(tmp_path, _company("Example", "unknown"))

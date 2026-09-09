@@ -25,6 +25,13 @@ from .models import (
 # Configuration-only modes: no direct adapter is attempted for these entries.
 NON_DIRECT_ATS = frozenset({"bespoke", "github_only"})
 
+# Oracle HCM Candidate Experience is normally served from the tenant's own
+# ``*.oraclecloud.com`` host, which is also the REST API base. A vanity host is
+# accepted only after its live Candidate Experience contract has been verified
+# end to end, so this stays an explicit allowlist rather than a relaxed suffix
+# rule that would admit any unverified host.
+VERIFIED_ORACLE_HCM_HOSTS = frozenset({"enterpriseplatform.dell.com"})
+
 
 def supported_ats() -> frozenset[str]:
     """Return registered direct ATS values plus non-direct config modes.
@@ -209,7 +216,10 @@ def _validate_oracle_hcm_config(
         or parsed_host.path not in {"", "/"}
         or parsed_host.query
         or parsed_host.fragment
-        or not host.endswith(".oraclecloud.com")
+        or not (
+            host.endswith(".oraclecloud.com")
+            or host in VERIFIED_ORACLE_HCM_HOSTS
+        )
     ):
         raise ConfigError(f"{name}: oracle_hcm_host must be an Oracle Cloud hostname")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", site):

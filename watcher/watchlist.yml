@@ -1588,3 +1588,12 @@ companies:
     aliases: ["SAP SE", "SAP America"]
     alumni_match: ["sap"]
     source_url: "https://jobs.sap.com/search/"
+
+  - name: "Dell Technologies"
+    ats: oracle_hcm
+    oracle_hcm_host: "enterpriseplatform.dell.com"
+    oracle_hcm_site: "CX_1001"
+    aliases: ["Dell", "Dell EMC"]
+    alumni_match: ["dell technologies", "dell"]
+    source_url: "https://enterpriseplatform.dell.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs"
+    note: "Official Dell careers board; Oracle HCM Candidate Experience on Dell's verified vanity host"
