@@ -1659,3 +1659,12 @@ companies:
     aliases: ["Western Digital Corporation", "WDC", "SanDisk"]
     alumni_match: ["western digital", "westerndigital"]
     source_url: "https://jobs.smartrecruiters.com/WesternDigital"
+
+  - name: "Comcast"
+    ats: workday
+    token: "comcast"
+    workday_shard: "wd115"
+    workday_site: "Comcast_Careers"
+    aliases: ["Comcast Corporation", "Comcast NBCUniversal", "Xfinity"]
+    alumni_match: ["comcast"]
+    source_url: "https://comcast.wd115.myworkdayjobs.com/Comcast_Careers"
