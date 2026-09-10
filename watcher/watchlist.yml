@@ -1676,3 +1676,84 @@ companies:
     aliases: ["Garmin International", "Garmin Ltd"]
     alumni_match: ["garmin"]
     source_url: "https://careers.garmin.com/jobs"
+
+  # Feed-only fallback coverage. Each company below is matched out of the
+  # configured GitHub/Simplify listing feeds only; none has a verified direct
+  # board contract yet, so none is a direct source. Aliases carry the exact
+  # feed company_name where it differs from the common name, because feed
+  # company matching is exact after normalization.
+  - name: "Microsoft"
+    ats: github_only
+    aliases: ["Microsoft Corporation"]
+    alumni_match: ["microsoft"]
+    note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "Meta"
+    ats: github_only
+    aliases: ["Meta Platforms", "Facebook"]
+    alumni_match: ["meta", "meta platforms", "facebook"]
+    note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "Qualcomm"
+    ats: github_only
+    aliases: ["Qualcomm Technologies"]
+    alumni_match: ["qualcomm"]
+    note: "feed-only fallback; Eightfold PCSX direct contract stays unsupported"
+
+  - name: "Micron"
+    ats: github_only
+    aliases: ["Micron Technology"]
+    alumni_match: ["micron", "micron technology"]
+    note: "feed-only fallback; Eightfold PCSX direct contract stays unsupported"
+
+  - name: "Intuit"
+    ats: github_only
+    alumni_match: ["intuit"]
+    note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "Panasonic"
+    ats: github_only
+    aliases: ["Panasonic Holdings"]
+    alumni_match: ["panasonic"]
+    note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "Electronic Arts"
+    ats: github_only
+    aliases: ["EA"]
+    alumni_match: ["electronic arts", "ea"]
+    note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "Philips"
+    ats: github_only
+    aliases: ["Koninklijke Philips"]
+    alumni_match: ["philips"]
+    note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "T-Mobile"
+    ats: github_only
+    aliases: ["T-Mobile US"]
+    alumni_match: ["t-mobile", "tmobile"]
+    note: "feed-only fallback; its Workday total read as a cap, not an authoritative count"
+
+  - name: "Visa"
+    ats: github_only
+    alumni_match: ["visa"]
+    note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "LG Electronics"
+    ats: github_only
+    aliases: ["LG"]
+    alumni_match: ["lg electronics", "lg"]
+    note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "Seagate"
+    ats: github_only
+    aliases: ["Seagate Technology"]
+    alumni_match: ["seagate", "seagate technology"]
+    note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "Verizon"
+    ats: github_only
+    aliases: ["Verizon Communications"]
+    alumni_match: ["verizon"]
+    note: "feed-only fallback; no verified direct board contract yet"
