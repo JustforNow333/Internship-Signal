@@ -1763,3 +1763,11 @@ companies:
     aliases: ["Verizon Communications"]
     alumni_match: ["verizon"]
     note: "feed-only fallback; no verified direct board contract yet"
+
+  - name: "Nintendo"
+    ats: greenhouse
+    token: "nintendo"
+    aliases: ["Nintendo of America"]
+    alumni_match: ["nintendo"]
+    source_url: "https://careers.nintendo.com/jobs/"
+    note: "One Greenhouse board covering every North American studio, including Retro Studios, Next Level Games, Shiver Entertainment, and Nintendo Software Technology"
