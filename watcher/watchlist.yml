@@ -1668,3 +1668,11 @@ companies:
     aliases: ["Comcast Corporation", "Comcast NBCUniversal", "Xfinity"]
     alumni_match: ["comcast"]
     source_url: "https://comcast.wd115.myworkdayjobs.com/Comcast_Careers"
+
+  - name: "Garmin"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "careers.garmin.com"
+    aliases: ["Garmin International", "Garmin Ltd"]
+    alumni_match: ["garmin"]
+    source_url: "https://careers.garmin.com/jobs"
