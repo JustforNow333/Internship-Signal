@@ -32,6 +32,7 @@ def test_direct_ats_surface_is_unchanged():
             "lever",
             "oracle_hcm",
             "paylocity",
+            "sea",
             "shopify",
             "smartrecruiters",
             "successfactors",

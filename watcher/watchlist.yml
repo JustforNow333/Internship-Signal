@@ -1581,6 +1581,12 @@ companies:
     aliases: ["Atlassian Corporation"]
     source_url: "https://www.atlassian.com/company/careers/all-jobs"
 
+  - name: "Sea"
+    ats: sea
+    aliases: ["Sea Limited"]
+    source_url: "https://career.sea.com/jobs"
+    note: "Sea corporate board; separate Shopee, Garena, and Monee boards are not included"
+
   - name: "SAP"
     ats: successfactors
     successfactors_host: "jobs.sap.com"

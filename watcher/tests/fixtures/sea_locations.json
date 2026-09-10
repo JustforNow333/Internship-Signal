@@ -1,0 +1,421 @@
+{
+  "flatLocations": [
+    {
+      "regionId": 1,
+      "regionName": "Brazil",
+      "regionAbbr": "BR",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 2,
+      "cityName": "São Paulo",
+      "cityAbbr": "São Paulo",
+      "cityCount": 1,
+      "defaultCity": 1,
+      "careerValueCity": 13,
+      "regionTransifyKey": "region_brazil",
+      "cityTransifyKey": "city_saopaulo",
+      "displaySites": [
+        4,
+        2,
+        1
+      ]
+    },
+    {
+      "regionId": 3,
+      "regionName": "China",
+      "regionAbbr": "CN",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 5,
+      "cityName": "Shanghai",
+      "cityAbbr": "Shanghai",
+      "cityCount": 2,
+      "defaultCity": 1,
+      "careerValueCity": 3,
+      "regionTransifyKey": "region_china",
+      "cityTransifyKey": "city_shanghai",
+      "displaySites": [
+        4,
+        2,
+        1
+      ]
+    },
+    {
+      "regionId": 3,
+      "regionName": "China",
+      "regionAbbr": "CN",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 6,
+      "cityName": "Shenzhen",
+      "cityAbbr": "Shenzhen",
+      "cityCount": 2,
+      "defaultCity": 1,
+      "careerValueCity": 2,
+      "regionTransifyKey": "region_china",
+      "cityTransifyKey": "city_shenzhen",
+      "displaySites": [
+        4,
+        2
+      ]
+    },
+    {
+      "regionId": 7,
+      "regionName": "Indonesia",
+      "regionAbbr": "ID",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 8,
+      "cityName": "Bandung",
+      "cityAbbr": "Bandung",
+      "cityCount": 6,
+      "defaultCity": 1,
+      "careerValueCity": 18,
+      "regionTransifyKey": "region_indonesia",
+      "cityTransifyKey": "city_bandung",
+      "displaySites": [
+        4,
+        6
+      ]
+    },
+    {
+      "regionId": 7,
+      "regionName": "Indonesia",
+      "regionAbbr": "ID",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 9,
+      "cityName": "Bekasi",
+      "cityAbbr": "Bekasi",
+      "cityCount": 6,
+      "defaultCity": 1,
+      "careerValueCity": 19,
+      "regionTransifyKey": "region_indonesia",
+      "cityTransifyKey": "city_bekasi",
+      "displaySites": [
+        4
+      ]
+    },
+    {
+      "regionId": 7,
+      "regionName": "Indonesia",
+      "regionAbbr": "ID",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 10,
+      "cityName": "Jakarta",
+      "cityAbbr": "Jakarta",
+      "cityCount": 6,
+      "defaultCity": 1,
+      "careerValueCity": 5,
+      "regionTransifyKey": "region_indonesia",
+      "cityTransifyKey": "city_jakarta",
+      "displaySites": [
+        3,
+        4,
+        2,
+        1,
+        6
+      ]
+    },
+    {
+      "regionId": 7,
+      "regionName": "Indonesia",
+      "regionAbbr": "ID",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 11,
+      "cityName": "Medan",
+      "cityAbbr": "Medan",
+      "cityCount": 6,
+      "defaultCity": 1,
+      "careerValueCity": 20,
+      "regionTransifyKey": "region_indonesia",
+      "cityTransifyKey": "city_medan",
+      "displaySites": [
+        4,
+        6
+      ]
+    },
+    {
+      "regionId": 7,
+      "regionName": "Indonesia",
+      "regionAbbr": "ID",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 12,
+      "cityName": "Solo",
+      "cityAbbr": "Solo",
+      "cityCount": 6,
+      "defaultCity": 1,
+      "careerValueCity": 17,
+      "regionTransifyKey": "region_indonesia",
+      "cityTransifyKey": "city_solo",
+      "displaySites": [
+        4
+      ]
+    },
+    {
+      "regionId": 7,
+      "regionName": "Indonesia",
+      "regionAbbr": "ID",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 13,
+      "cityName": "Yogyakarta",
+      "cityAbbr": "Yogyakarta",
+      "cityCount": 6,
+      "defaultCity": 1,
+      "careerValueCity": 14,
+      "regionTransifyKey": "region_indonesia",
+      "cityTransifyKey": "city_yogyakarta",
+      "displaySites": [
+        3,
+        4,
+        6
+      ]
+    },
+    {
+      "regionId": 14,
+      "regionName": "Japan",
+      "regionAbbr": "JP",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 15,
+      "cityName": "Tokyo",
+      "cityAbbr": "Tokyo",
+      "cityCount": 1,
+      "defaultCity": 1,
+      "careerValueCity": 11,
+      "regionTransifyKey": "region_japan",
+      "cityTransifyKey": "city_tokyo",
+      "displaySites": [
+        4,
+        2,
+        1
+      ]
+    },
+    {
+      "regionId": 16,
+      "regionName": "Malaysia",
+      "regionAbbr": "MY",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 17,
+      "cityName": "Kuala Lumpur",
+      "cityAbbr": "Kuala Lumpur",
+      "cityCount": 3,
+      "defaultCity": 1,
+      "careerValueCity": 6,
+      "regionTransifyKey": "region_malaysia",
+      "cityTransifyKey": "city_kualalumpur",
+      "displaySites": [
+        3,
+        4,
+        2,
+        1
+      ]
+    },
+    {
+      "regionId": 16,
+      "regionName": "Malaysia",
+      "regionAbbr": "MY",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 100049,
+      "cityName": "Sabah",
+      "cityAbbr": "Sabah",
+      "cityCount": 3,
+      "defaultCity": 0,
+      "careerValueCity": 100049,
+      "regionTransifyKey": "region_malaysia",
+      "cityTransifyKey": "ATS_city_Sabah_959391",
+      "displaySites": [
+        4
+      ]
+    },
+    {
+      "regionId": 16,
+      "regionName": "Malaysia",
+      "regionAbbr": "MY",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 100050,
+      "cityName": "Sarawak",
+      "cityAbbr": "Sarawak",
+      "cityCount": 3,
+      "defaultCity": 0,
+      "careerValueCity": 100050,
+      "regionTransifyKey": "region_malaysia",
+      "cityTransifyKey": "ATS_city_Sarawak_721553",
+      "displaySites": [
+        4
+      ]
+    },
+    {
+      "regionId": 18,
+      "regionName": "Mexico",
+      "regionAbbr": "MX",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 19,
+      "cityName": "Mexico City",
+      "cityAbbr": "Mexico City",
+      "cityCount": 1,
+      "defaultCity": 1,
+      "careerValueCity": 21,
+      "regionTransifyKey": "region_mexico",
+      "cityTransifyKey": "city_mexicocity",
+      "displaySites": [
+        4,
+        2,
+        1,
+        3
+      ]
+    },
+    {
+      "regionId": 20,
+      "regionName": "Philippines",
+      "regionAbbr": "PH",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 21,
+      "cityName": "Manila",
+      "cityAbbr": "Manila",
+      "cityCount": 1,
+      "defaultCity": 1,
+      "careerValueCity": 10,
+      "regionTransifyKey": "region_philippines",
+      "cityTransifyKey": "city_manila",
+      "displaySites": [
+        3,
+        4,
+        2,
+        1
+      ]
+    },
+    {
+      "regionId": 24,
+      "regionName": "Singapore",
+      "regionAbbr": "SG",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 25,
+      "cityName": "Singapore",
+      "cityAbbr": "Singapore",
+      "cityCount": 1,
+      "defaultCity": 1,
+      "careerValueCity": 1,
+      "regionTransifyKey": "region_city_singapore",
+      "cityTransifyKey": "region_city_singapore",
+      "displaySites": [
+        3,
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "regionId": 26,
+      "regionName": "South Korea",
+      "regionAbbr": "KR",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 27,
+      "cityName": "Seoul",
+      "cityAbbr": "Seoul",
+      "cityCount": 1,
+      "defaultCity": 1,
+      "careerValueCity": 12,
+      "regionTransifyKey": "region_southkorea",
+      "cityTransifyKey": "city_seoul",
+      "displaySites": [
+        4,
+        2,
+        1
+      ]
+    },
+    {
+      "regionId": 28,
+      "regionName": "Taipei",
+      "regionAbbr": "TW",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 29,
+      "cityName": "Taipei",
+      "cityAbbr": "Taipei",
+      "cityCount": 1,
+      "defaultCity": 1,
+      "careerValueCity": 4,
+      "regionTransifyKey": "region_city_taipei",
+      "cityTransifyKey": "region_city_taipei",
+      "displaySites": [
+        4,
+        2,
+        1
+      ]
+    },
+    {
+      "regionId": 30,
+      "regionName": "Thailand",
+      "regionAbbr": "TH",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 31,
+      "cityName": "Bangkok",
+      "cityAbbr": "Bangkok",
+      "cityCount": 1,
+      "defaultCity": 1,
+      "careerValueCity": 7,
+      "regionTransifyKey": "region_thailand",
+      "cityTransifyKey": "city_bangkok",
+      "displaySites": [
+        3,
+        4,
+        2,
+        1
+      ]
+    },
+    {
+      "regionId": 32,
+      "regionName": "Vietnam",
+      "regionAbbr": "VN",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 33,
+      "cityName": "Hanoi",
+      "cityAbbr": "Hanoi",
+      "cityCount": 2,
+      "defaultCity": 1,
+      "careerValueCity": 9,
+      "regionTransifyKey": "region_vietnam",
+      "cityTransifyKey": "city_hanoi",
+      "displaySites": [
+        4,
+        2,
+        1
+      ]
+    },
+    {
+      "regionId": 32,
+      "regionName": "Vietnam",
+      "regionAbbr": "VN",
+      "defaultRegion": 1,
+      "careerValueRegion": 0,
+      "cityId": 34,
+      "cityName": "Ho Chi Minh City",
+      "cityAbbr": "Ho Chi Minh City",
+      "cityCount": 2,
+      "defaultCity": 1,
+      "careerValueCity": 8,
+      "regionTransifyKey": "region_vietnam",
+      "cityTransifyKey": "city_hochiminhcity",
+      "displaySites": [
+        3,
+        4,
+        2,
+        1
+      ]
+    }
+  ]
+}
