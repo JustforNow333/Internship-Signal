@@ -35,6 +35,7 @@ VALID_COMPANY_FIELDS = {
         '    bytedance_careers_portal: "tiktok"\n'
         '    source_url: "https://lifeattiktok.com/search"\n'
     ),
+    "dassault": "",
     "eightfold": (
         '    eightfold_host: "jobs.example.test"\n'
         '    eightfold_domain: "example.com"\n'

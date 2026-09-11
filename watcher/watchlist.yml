@@ -1771,3 +1771,10 @@ companies:
     alumni_match: ["nintendo"]
     source_url: "https://careers.nintendo.com/jobs/"
     note: "One Greenhouse board covering every North American studio, including Retro Studios, Next Level Games, Shiver Entertainment, and Nintendo Software Technology"
+
+  - name: "Dassault Systèmes"
+    ats: dassault
+    aliases: ["Dassault Systemes", "Dassault Systems", "3DS"]
+    alumni_match: ["dassault systemes", "dassault systèmes", "3ds"]
+    source_url: "https://www.3ds.com/careers/jobs"
+    note: "Official group-wide 3ds.com careers index; applications hand off to Oracle Taleo"

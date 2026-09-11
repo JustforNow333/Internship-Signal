@@ -27,6 +27,7 @@ def test_direct_ats_surface_is_unchanged():
             "ibm",
             "icims",
             "bytedance_careers",
+            "dassault",
             "google",
             "kpmg",
             "lever",

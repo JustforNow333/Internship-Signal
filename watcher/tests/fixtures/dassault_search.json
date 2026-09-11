@@ -1,0 +1,45 @@
+{
+  "autocorrected": false,
+  "estimated": false,
+  "nhits": 2,
+  "nmatches": 2,
+  "start": 0,
+  "hits": [
+    {
+      "did": 21362,
+      "url": "CARD_ID=549677&CONTENT_LANG=en&",
+      "metas": [
+        {"name": "card_id", "value": "549677"},
+        {"name": "content_funnel", "value": "549677"},
+        {"name": "content_title", "value": "STAGE – Développeur Full Stack (F/H)"},
+        {"name": "content_info_1_value", "value": "Internship"},
+        {"name": "content_info_2_value", "value": "France, Plouzane"},
+        {"name": "content_start_datetime", "value": "2026/09/10 11:09:28"},
+        {"name": "content_summary", "value": "<p>Develop a customer services platform.</p>"},
+        {"name": "content_cta_1_url", "value": "https://www.3ds.com/careers/jobs/stage-developpeur-full-stack-549677"},
+        {"name": "content_type", "value": "career"},
+        {"name": "content_lang", "value": "en"},
+        {"name": "visibility", "value": "true"},
+        {"name": "content_categories", "value": "Category/Research & Development Type/Internship Country/France Products/Dassault Systèmes"}
+      ]
+    },
+    {
+      "did": 21363,
+      "url": "CARD_ID=549700&CONTENT_LANG=en&",
+      "metas": [
+        {"name": "card_id", "value": "549700"},
+        {"name": "content_funnel", "value": "549700"},
+        {"name": "content_title", "value": "Software Engineer"},
+        {"name": "content_info_1_value", "value": "Regular"},
+        {"name": "content_info_2_value", "value": "United States, Waltham"},
+        {"name": "content_start_datetime", "value": "2026/09/10 13:15:00"},
+        {"name": "content_summary", "value": "<p>Build 3DEXPERIENCE services.</p>"},
+        {"name": "content_cta_1_url", "value": "https://www.3ds.com/careers/jobs/inge\u0301nieur-software-549700"},
+        {"name": "content_type", "value": "career"},
+        {"name": "content_lang", "value": "en"},
+        {"name": "visibility", "value": "true"},
+        {"name": "content_categories", "value": "Category/Software Type/Regular Country/United States Products/SOLIDWORKS"}
+      ]
+    }
+  ]
+}

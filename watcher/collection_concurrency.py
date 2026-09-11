@@ -62,6 +62,7 @@ DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "bain": "www.bain.com",
     "bechtel": "jobs.bechtel.com",
     "bloomberg": "bloomberg.avature.net",
+    "dassault": "www.3ds.com",
     "epic": "careers.epic.com",
     "google": "www.google.com",
     "greenhouse": "boards-api.greenhouse.io",

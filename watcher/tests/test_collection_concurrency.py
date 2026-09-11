@@ -52,6 +52,7 @@ from watcher.sources.ashby import AshbySource
 from watcher.sources.bain import BainSource
 from watcher.sources.bechtel import BechtelSource
 from watcher.sources.bloomberg import BloombergSource
+from watcher.sources.dassault import DassaultSource
 from watcher.sources.base import (
     DirectSourceDiagnostics,
     SourceError,
@@ -383,6 +384,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "bain": BainSource.endpoint(page=0, results=100),
         "bechtel": BechtelSource.endpoint(),
         "bloomberg": BloombergSource.endpoint(),
+        "dassault": DassaultSource.endpoint(),
         "epic": EpicSource.endpoint(),
         "google": GoogleSource.endpoint(),
         "greenhouse": GreenhouseSource.endpoint("token"),
