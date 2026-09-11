@@ -1411,6 +1411,46 @@ This file tracks completed watcher steps and the next handoff target.
      warning`), compileall, and `git diff --check`. The pre-existing
      Windows-Git-versus-WSL-worktree holdout-path failure is unchanged.
 
+50. Alibaba official campus practical-partial source (2026-09-11):
+   - Alibaba still cannot be classified as direct-complete. Its official
+     careers system exposes separate social/campus and domestic/overseas
+     channels, while each `totalCount` applies only to one query; there is no
+     organization-wide inventory marker joining those surfaces.
+   - The current first-party campus frontend provides a defensible official
+     slice. `POST /searchCondition/listBatch` exposes an explicit `internship`
+     category with `Alibaba Project Intern` and `Alibaba Research Intern`
+     batches, both described as open to all current students. The adapter
+     discovers the active batch IDs rather than pinning a keyword or guessing a
+     tenant.
+   - Each batch is enumerated through `POST /position/search` with the
+     frontend-published campus channel, server-honored `pageIndex`/`pageSize`,
+     stable `totalCount`, numeric posting IDs, and canonical
+     `/campus/position/{id}` URLs. It requires two matching complete snapshots,
+     exact total/unique-ID agreement, and the provider's explicit terminal
+     sentinel; API failures, malformed records, drift, duplicates, early ends,
+     and safety-cap exhaustion all fail closed without publishing rows.
+   - Live registry-built verification returned 610 rows and 610 unique IDs and
+     URLs: 361 project-intern and 249 research-intern postings, including 6
+     rows with U.S. locations. Two full identity sets matched. The run cost 21
+     requests (1 bootstrap, 2 batch discoveries, and 18 listing/terminal
+     requests), with zero failed, malformed, schema-invalid, duplicate, or
+     truncated counts.
+   - Alibaba is registered `practical_partial=True`; every row carries
+     `source_completeness=practical_partial`, and successful diagnostics remain
+     `complete=False`, `incomplete=True`, `degraded=True` with
+     `scope_not_completeness_proven`. Registry, catalog, and source tests pin it
+     outside direct-complete coverage. Practical coverage is now 247/251: 199
+     direct-complete, 3 direct practical-partial, 45 backstop, and 4 uncovered
+     (Ericsson, Huawei, Lam Research, and MediaTek).
+   - Focused source/registry/config/catalog/concurrency tests passed (`264
+     passed`). The full backend/watcher suite completed with `3078 passed, 100
+     skipped, 1 existing warning` and only the known WSL-worktree/Windows-Git
+     pointer failure in
+     `test_repository_ignores_private_holdout_artifact_paths`; the underlying
+     ignore check passes with repository-native WSL Git. Compileall and
+     `git diff --check` passed. No frontend file was changed for Alibaba, so the
+     conditional frontend test/build step was not required.
+
 ## Next
 
 - Use the product coverage report to prioritize degraded direct integrations,

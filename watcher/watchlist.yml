@@ -1794,3 +1794,10 @@ companies:
     alumni_match: ["siemens"]
     source_url: "https://jobs.siemens.com/en_US/externaljobs/SearchJobs/Internship"
     note: "Practical partial coverage: the official Internship search on Siemens' own Avature portal. The unfiltered board reports 999+ and is never completeness-proven."
+
+  - name: "Alibaba"
+    ats: alibaba
+    aliases: ["Alibaba Group", "阿里巴巴"]
+    alumni_match: ["alibaba", "alibaba group"]
+    source_url: "https://campus-talent.alibaba.com/campus/position"
+    note: "Practical partial coverage: all batches in the official campus portal's internship category; social, graduate, domestic, and overseas channels remain outside this slice."

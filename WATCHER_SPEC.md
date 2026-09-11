@@ -268,6 +268,16 @@ metadata and the native numeric Avature ID produce posting-specific
 `epic.avature.net/Careers/FolderDetail` rows. The standard Avature SearchJobs
 board is not authoritative and is never used as collection input.
 
+**Alibaba** is permanently practical-partial on the first-party campus portal.
+Discover all batches in the portal's explicit `internship` category, then
+enumerate each through the anonymous `/position/search` contract. Require two
+matching complete snapshots, stable per-batch totals and numeric IDs, unique
+canonical `/campus/position/{id}` URLs, and the provider's explicit terminal
+sentinel. The separate social, graduate, domestic, and overseas channels keep
+this slice outside direct-complete coverage regardless of clean enumeration.
+It always publishes `complete=false`, `incomplete=true`, and `degraded=true`
+with `scope_not_completeness_proven`.
+
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
 **Eightfold legacy (Netflix only)** uses the anonymous

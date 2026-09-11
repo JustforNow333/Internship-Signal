@@ -100,9 +100,15 @@ def test_every_registered_direct_adapter_reports_direct_coverage(ats: str) -> No
 
 
 def test_practical_partial_adapter_is_not_reported_as_complete_direct_coverage() -> None:
-    assert DIRECT_PRACTICAL_PARTIAL_ATS == frozenset({"ansys", "siemens"})
+    assert DIRECT_PRACTICAL_PARTIAL_ATS == frozenset(
+        {"alibaba", "ansys", "siemens"}
+    )
 
-    for name, ats in (("Ansys", "ansys"), ("Siemens", "siemens")):
+    for name, ats in (
+        ("Alibaba", "alibaba"),
+        ("Ansys", "ansys"),
+        ("Siemens", "siemens"),
+    ):
         catalog = _catalog(CompanyCfg(name=name, ats=ats))
 
         assert catalog.companies[0].coverage == "direct_practical_partial"

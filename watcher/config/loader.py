@@ -35,6 +35,7 @@ from .models import (
 )
 
 from .validation import (
+    _validate_alibaba_config,
     _validate_ansys_config,
     _validate_aliases,
     _validate_brassring_config,
@@ -166,6 +167,8 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             category_name=talentbrew_category_name,
             source_url=source_url,
         )
+    elif ats == "alibaba":
+        _validate_alibaba_config(name, source_url=source_url)
     elif ats == "ansys":
         _validate_ansys_config(
             name,

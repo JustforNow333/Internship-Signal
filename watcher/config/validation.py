@@ -300,6 +300,16 @@ def _validate_ansys_config(
         )
 
 
+def _validate_alibaba_config(name: str, *, source_url: str) -> None:
+    """Pin Alibaba to its official, intentionally partial campus inventory."""
+
+    expected_url = "https://campus-talent.alibaba.com/campus/position"
+    if source_url != expected_url:
+        raise ConfigError(
+            f"{name}: alibaba source_url must be the official campus position listing"
+        )
+
+
 def _validate_siemens_config(name: str, *, source_url: str) -> None:
     """Pin Siemens to its official, intentionally partial Internship search."""
 

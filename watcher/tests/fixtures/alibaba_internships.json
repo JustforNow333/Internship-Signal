@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "errorMsg": null,
+  "errorCode": null,
+  "content": {
+    "datas": [
+      {
+        "id": 199903920069,
+        "name": "日常实习生-AI产品经理-未来生活实验室",
+        "status": "recruit",
+        "publishTime": null,
+        "modifyTime": 1785312605000,
+        "workLocations": ["北京", "杭州"],
+        "description": "参与智能产品设计和数据分析。",
+        "requirement": "面向在校学生，具备产品与技术项目经验。",
+        "categoryType": "project",
+        "categoryName": "产品类",
+        "batchName": "阿里巴巴日常实习生",
+        "batchId": 100000560002,
+        "circleNames": ["Token Foundry"]
+      }
+    ],
+    "totalCount": 1,
+    "pageSize": 100,
+    "currentPage": 1
+  }
+}

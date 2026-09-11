@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from watcher.sources.alibaba import AlibabaSource
 from watcher.sources.atlassian import AtlassianSource
 from watcher.sources.ansys import AnsysSource
 from watcher.sources.apple import AppleSource
@@ -72,6 +73,7 @@ class DirectSourceSpec:
 
 
 DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
+    DirectSourceSpec("alibaba", AlibabaSource, practical_partial=True),
     DirectSourceSpec("atlassian", AtlassianSource),
     DirectSourceSpec("ansys", AnsysSource, practical_partial=True),
     DirectSourceSpec("apple", AppleSource),

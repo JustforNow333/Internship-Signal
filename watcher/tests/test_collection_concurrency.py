@@ -47,6 +47,7 @@ from watcher.source_health import (
     SOURCE_KIND_GITHUB_FEED,
 )
 from watcher.sources.atlassian import AtlassianSource
+from watcher.sources.alibaba import AlibabaSource
 from watcher.sources.apple import AppleSource
 from watcher.sources.ansys import AnsysSource
 from watcher.sources.ashby import AshbySource
@@ -381,6 +382,7 @@ def test_scope_limits_cannot_exceed_the_global_worker_pool():
 
 def test_direct_origin_hosts_match_the_adapter_endpoints():
     endpoints = {
+        "alibaba": AlibabaSource.endpoint(),
         "atlassian": AtlassianSource.endpoint(),
         "apple": AppleSource.endpoint(),
         "ansys": AnsysSource.search_endpoint(

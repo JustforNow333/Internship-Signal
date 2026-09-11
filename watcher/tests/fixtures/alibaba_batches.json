@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "errorMsg": null,
+  "errorCode": null,
+  "content": {
+    "graduate": [],
+    "internship": [
+      {
+        "id": 100000560002,
+        "name": "阿里巴巴日常实习生",
+        "enName": "Alibaba Project Intern",
+        "type": "talent_plan",
+        "aiRecommend": false,
+        "remark": "面向全体在校生，开放日常实习生项目",
+        "remarkEn": "Open to all current students"
+      },
+      {
+        "id": 100000560001,
+        "name": "阿里巴巴研究型实习生",
+        "enName": "Alibaba Research Intern",
+        "type": "talent_plan",
+        "aiRecommend": false,
+        "remark": "面向全体在校生，开放研究型实习生项目",
+        "remarkEn": "Open to all current students"
+      }
+    ],
+    "topTalentPlan": [],
+    "sequence": ["graduate", "internship", "topTalentPlan"]
+  }
+}
