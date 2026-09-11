@@ -69,6 +69,7 @@ from watcher.sources.lever import LeverSource
 from watcher.sources.paylocity import PaylocitySource
 from watcher.sources.sea import SeaSource
 from watcher.sources.shopify import ShopifySource
+from watcher.sources.siemens import SiemensSource
 from watcher.sources.smartrecruiters import SmartRecruitersSource
 from watcher.sources.workable import WorkableSource
 from watcher.sources.workday import (
@@ -405,6 +406,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "ashby": AshbySource.endpoint("token"),
         "sea": SeaSource.endpoint(),
         "shopify": ShopifySource.endpoint(),
+        "siemens": SiemensSource.endpoint(),
         "smartrecruiters": SmartRecruitersSource.endpoint("token"),
         "paylocity": PaylocitySource.endpoint(
             CompanyCfg(

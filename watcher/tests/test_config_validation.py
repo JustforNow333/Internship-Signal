@@ -72,6 +72,9 @@ VALID_COMPANY_FIELDS = {
     ),
     "sea": "",
     "shopify": "",
+    "siemens": (
+        '    source_url: "https://jobs.siemens.com/en_US/externaljobs/SearchJobs/Internship"\n'
+    ),
     "smartrecruiters": '    token: "Example"\n',
     "successfactors": (
         '    successfactors_host: "careers.example.test"\n'

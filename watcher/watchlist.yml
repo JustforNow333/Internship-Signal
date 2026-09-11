@@ -1787,3 +1787,10 @@ companies:
     alumni_match: ["ansys"]
     source_url: "https://careers.synopsys.com/search-jobs/ansys/44408/1"
     note: "Official Ansys-linked Synopsys keyword search; practical partial coverage only, never completeness-proven"
+
+  - name: "Siemens"
+    ats: siemens
+    aliases: ["Siemens AG", "Siemens Digital Industries"]
+    alumni_match: ["siemens"]
+    source_url: "https://jobs.siemens.com/en_US/externaljobs/SearchJobs/Internship"
+    note: "Practical partial coverage: the official Internship search on Siemens' own Avature portal. The unfiltered board reports 999+ and is never completeness-proven."

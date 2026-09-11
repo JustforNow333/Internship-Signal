@@ -36,6 +36,7 @@ def test_direct_ats_surface_is_unchanged():
             "paylocity",
             "sea",
             "shopify",
+            "siemens",
             "smartrecruiters",
             "successfactors",
             "talentbrew",

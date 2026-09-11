@@ -48,6 +48,7 @@ from .validation import (
     _validate_eightfold_config,
     _validate_oracle_hcm_config,
     _validate_paylocity_config,
+    _validate_siemens_config,
     _validate_successfactors_config,
     _validate_talentbrew_config,
     _validate_taleo_sourcing_config,
@@ -172,6 +173,8 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             site_id=talentbrew_site_id,
             source_url=source_url,
         )
+    elif ats == "siemens":
+        _validate_siemens_config(name, source_url=source_url)
     icims_variant = str(entry.get("icims_variant") or "").strip().casefold()
     icims_host = str(entry.get("icims_host") or "").strip().casefold()
     icims_portals = _string_tuple(entry.get("icims_portals", ()))

@@ -100,11 +100,14 @@ def test_every_registered_direct_adapter_reports_direct_coverage(ats: str) -> No
 
 
 def test_practical_partial_adapter_is_not_reported_as_complete_direct_coverage() -> None:
-    assert DIRECT_PRACTICAL_PARTIAL_ATS == frozenset({"ansys"})
-    catalog = _catalog(CompanyCfg(name="Ansys", ats="ansys"))
+    assert DIRECT_PRACTICAL_PARTIAL_ATS == frozenset({"ansys", "siemens"})
 
-    assert catalog.companies[0].coverage == "direct_practical_partial"
-    assert catalog.companies[0].selectable is True
+    for name, ats in (("Ansys", "ansys"), ("Siemens", "siemens")):
+        catalog = _catalog(CompanyCfg(name=name, ats=ats))
+
+        assert catalog.companies[0].coverage == "direct_practical_partial"
+        assert catalog.companies[0].coverage != "direct"
+        assert catalog.companies[0].selectable is True
 
 
 @pytest.mark.parametrize("name", ["Barclays", "Synopsys"])

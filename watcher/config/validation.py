@@ -300,6 +300,16 @@ def _validate_ansys_config(
         )
 
 
+def _validate_siemens_config(name: str, *, source_url: str) -> None:
+    """Pin Siemens to its official, intentionally partial Internship search."""
+
+    expected_url = "https://jobs.siemens.com/en_US/externaljobs/SearchJobs/Internship"
+    if source_url != expected_url:
+        raise ConfigError(
+            f"{name}: siemens source_url must be the official Internship search"
+        )
+
+
 def _validate_icims_config(
     name: str,
     *,
