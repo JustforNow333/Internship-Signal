@@ -15,6 +15,7 @@ def test_direct_ats_surface_is_unchanged():
     assert DIRECT_ATS == frozenset(
         {
             "atlassian",
+            "ansys",
             "apple",
             "ashby",
             "bain",

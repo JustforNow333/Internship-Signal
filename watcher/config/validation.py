@@ -282,6 +282,24 @@ def _validate_talentbrew_config(
         )
 
 
+def _validate_ansys_config(
+    name: str,
+    *,
+    host: str,
+    site_id: str,
+    source_url: str,
+) -> None:
+    expected_url = "https://careers.synopsys.com/search-jobs/ansys/44408/1"
+    if host != "careers.synopsys.com":
+        raise ConfigError(f"{name}: ansys entries require careers.synopsys.com")
+    if site_id != "44408":
+        raise ConfigError(f"{name}: ansys entries require TalentBrew site 44408")
+    if source_url != expected_url:
+        raise ConfigError(
+            f"{name}: ansys source_url must be the official Ansys-targeted search"
+        )
+
+
 def _validate_icims_config(
     name: str,
     *,

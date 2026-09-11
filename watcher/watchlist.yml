@@ -1778,3 +1778,12 @@ companies:
     alumni_match: ["dassault systemes", "dassault systèmes", "3ds"]
     source_url: "https://www.3ds.com/careers/jobs"
     note: "Official group-wide 3ds.com careers index; applications hand off to Oracle Taleo"
+
+  - name: "Ansys"
+    ats: ansys
+    talentbrew_host: "careers.synopsys.com"
+    talentbrew_site_id: "44408"
+    aliases: ["ANSYS, Inc."]
+    alumni_match: ["ansys"]
+    source_url: "https://careers.synopsys.com/search-jobs/ansys/44408/1"
+    note: "Official Ansys-linked Synopsys keyword search; practical partial coverage only, never completeness-proven"

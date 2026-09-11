@@ -1,0 +1,6 @@
+{
+  "filters": "<section id=\"search-filters\"></section>",
+  "results": "<section id=\"search-results\" data-keywords=\"ansys\" data-total-results=\"2\" data-total-job-results=\"2\" data-total-pages=\"1\" data-current-page=\"1\" data-records-per-page=\"100\" data-search-type=\"1\" data-organization-ids=\"44408\"><section id=\"search-results-list\" class=\"search-results-list\"><ul><li class=\"search-results-list__list-item\"><a class=\"sr-job-link\" href=\"/job/waltham/senior-application-engineer/44408/98682479840\" data-job-id=\"98682479840\"><h2>Senior Application Engineer</h2><span class=\"job-location\">Waltham, Massachusetts</span></a></li><li class=\"search-results-list__list-item\"><a class=\"sr-job-link\" href=\"/job/exton/principal-software-engineer/44408/99719320320\" data-job-id=\"99719320320\"><h2>Principal Software Engineer</h2><span class=\"job-location\">Exton, Pennsylvania</span></a></li></ul></section></section>",
+  "hasJobs": true,
+  "hasContent": false
+}

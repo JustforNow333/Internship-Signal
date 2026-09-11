@@ -94,7 +94,9 @@ class CompanyResponse(BaseModel):
     id: str
     name: str
     aliases: list[str]
-    coverage: Literal["direct", "backstop", "delayed"]
+    coverage: Literal[
+        "direct", "direct_practical_partial", "backstop", "delayed"
+    ]
     selectable: bool
 
 

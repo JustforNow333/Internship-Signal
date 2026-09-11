@@ -48,6 +48,7 @@ from watcher.source_health import (
 )
 from watcher.sources.atlassian import AtlassianSource
 from watcher.sources.apple import AppleSource
+from watcher.sources.ansys import AnsysSource
 from watcher.sources.ashby import AshbySource
 from watcher.sources.bain import BainSource
 from watcher.sources.bechtel import BechtelSource
@@ -381,6 +382,16 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
     endpoints = {
         "atlassian": AtlassianSource.endpoint(),
         "apple": AppleSource.endpoint(),
+        "ansys": AnsysSource.search_endpoint(
+            CompanyCfg(
+                name="Ansys",
+                ats="ansys",
+                talentbrew_host="careers.synopsys.com",
+                talentbrew_site_id="44408",
+            ),
+            1,
+            100,
+        ),
         "bain": BainSource.endpoint(page=0, results=100),
         "bechtel": BechtelSource.endpoint(),
         "bloomberg": BloombergSource.endpoint(),

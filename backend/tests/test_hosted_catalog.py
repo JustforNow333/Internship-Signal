@@ -6,7 +6,11 @@ import pytest
 from app.hosted.catalog import CompanyCatalog
 
 from watcher.config import NON_DIRECT_ATS, CompanyCfg, WatcherConfig
-from watcher.sources.registry import DIRECT_ATS
+from watcher.sources.registry import (
+    DIRECT_ATS,
+    DIRECT_COMPLETE_ATS,
+    DIRECT_PRACTICAL_PARTIAL_ATS,
+)
 
 
 WAVE_ONE_DIRECT_COMPANIES = {
@@ -87,11 +91,19 @@ def _catalog(*companies: CompanyCfg, backstop: bool = True) -> CompanyCatalog:
     )
 
 
-@pytest.mark.parametrize("ats", sorted(DIRECT_ATS))
+@pytest.mark.parametrize("ats", sorted(DIRECT_COMPLETE_ATS))
 def test_every_registered_direct_adapter_reports_direct_coverage(ats: str) -> None:
     catalog = _catalog(CompanyCfg(name="Example Co", ats=ats))
 
     assert catalog.companies[0].coverage == "direct"
+    assert catalog.companies[0].selectable is True
+
+
+def test_practical_partial_adapter_is_not_reported_as_complete_direct_coverage() -> None:
+    assert DIRECT_PRACTICAL_PARTIAL_ATS == frozenset({"ansys"})
+    catalog = _catalog(CompanyCfg(name="Ansys", ats="ansys"))
+
+    assert catalog.companies[0].coverage == "direct_practical_partial"
     assert catalog.companies[0].selectable is True
 
 
@@ -135,7 +147,8 @@ def test_direct_coverage_tracks_the_canonical_source_registry() -> None:
         if company.coverage == "direct"
     }
 
-    assert direct == set(DIRECT_ATS)
+    assert direct == set(DIRECT_COMPLETE_ATS)
+    assert DIRECT_ATS == DIRECT_COMPLETE_ATS | DIRECT_PRACTICAL_PARTIAL_ATS
 
 
 def test_wave_one_sources_are_exposed_as_direct_hosted_catalog_coverage():

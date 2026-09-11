@@ -10,6 +10,7 @@ from importlib import import_module
 _EXPORT_MODULES = {
     "AtlassianSource": "watcher.sources.atlassian",
     "AppleSource": "watcher.sources.apple",
+    "AnsysSource": "watcher.sources.ansys",
     "AshbySource": "watcher.sources.ashby",
     "BainSource": "watcher.sources.bain",
     "BechtelSource": "watcher.sources.bechtel",
@@ -49,6 +50,7 @@ _EXPORT_MODULES = {
 __all__ = [
     "AtlassianSource",
     "AppleSource",
+    "AnsysSource",
     "AshbySource",
     "BainSource",
     "BechtelSource",

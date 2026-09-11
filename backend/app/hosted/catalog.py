@@ -16,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from backend.app.dedupe import norm_company
 from watcher.config import CompanyCfg, WatcherConfig, load_watchlist
-from watcher.sources.registry import DIRECT_ATS
+from watcher.sources.registry import DIRECT_ATS, DIRECT_PRACTICAL_PARTIAL_ATS
 
 
 def company_slug(name: str) -> str:
@@ -104,7 +104,11 @@ def _company_lookup_keys(value: str) -> tuple[str, ...]:
 
 def _public_company(company: CompanyCfg, has_backstop: bool) -> PublicCompany:
     direct = company.ats in DIRECT_ATS
-    coverage = "direct" if direct else "backstop"
+    coverage = (
+        "direct_practical_partial"
+        if company.ats in DIRECT_PRACTICAL_PARTIAL_ATS
+        else "direct" if direct else "backstop"
+    )
     selectable = direct or has_backstop
     aliases = tuple(
         dict.fromkeys(alias.strip() for alias in company.aliases if alias.strip())

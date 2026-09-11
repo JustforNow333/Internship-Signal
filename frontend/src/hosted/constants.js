@@ -74,6 +74,7 @@ export const ALERT_FREQUENCIES = [
 
 export const COVERAGE_LABELS = {
   direct: "Directly monitored",
+  direct_practical_partial: "Practical direct coverage",
   backstop: "Backstop coverage",
   delayed: "Temporarily delayed",
 };

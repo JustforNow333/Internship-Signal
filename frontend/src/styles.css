@@ -648,6 +648,7 @@ button.danger:hover { background: #9f3021; color: white; }
 .coverage { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-faint); font-size: 10.5px; }
 .coverage-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
 .coverage-direct .coverage-dot { background: var(--sig-high); }
+.coverage-direct_practical_partial .coverage-dot { background: var(--sig-mid); }
 .coverage-backstop .coverage-dot { background: var(--sig-mid); }
 .coverage-delayed .coverage-dot { background: var(--sig-low); }
 .add-button, .selected-button { min-width: 95px; }

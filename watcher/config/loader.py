@@ -35,6 +35,7 @@ from .models import (
 )
 
 from .validation import (
+    _validate_ansys_config,
     _validate_aliases,
     _validate_brassring_config,
     _validate_company_entry,
@@ -162,6 +163,13 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             site_id=talentbrew_site_id,
             category_id=talentbrew_category_id,
             category_name=talentbrew_category_name,
+            source_url=source_url,
+        )
+    elif ats == "ansys":
+        _validate_ansys_config(
+            name,
+            host=talentbrew_host,
+            site_id=talentbrew_site_id,
             source_url=source_url,
         )
     icims_variant = str(entry.get("icims_variant") or "").strip().casefold()

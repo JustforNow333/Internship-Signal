@@ -225,7 +225,7 @@ def build_coverage_audit(
 
     # Keep the registry import deferred: loading the health package itself must
     # not import the direct adapter graph.
-    from watcher.sources.registry import DIRECT_ATS
+    from watcher.sources.registry import DIRECT_ATS, DIRECT_PRACTICAL_PARTIAL_ATS
 
     has_github_backstop = bool(config.effective_github_listing_sources())
     healthy_statuses = {
@@ -246,7 +246,15 @@ def build_coverage_audit(
         if company.ats in DIRECT_ATS:
             health = states.get(direct_health_key(company.name, company.ats))
             health_status = health.status if health is not None else None
-            if health_status in healthy_statuses:
+            if company.ats in DIRECT_PRACTICAL_PARTIAL_ATS:
+                # An intentionally useful-but-incomplete source can never be
+                # promoted to verified direct coverage by persisted state.
+                coverage_state = (
+                    COVERAGE_AUDIT_DIRECT_DEGRADED
+                    if health_status in degraded_statuses
+                    else COVERAGE_AUDIT_DIRECT_UNVERIFIED
+                )
+            elif health_status in healthy_statuses:
                 coverage_state = COVERAGE_AUDIT_DIRECT_VERIFIED
             elif health_status in degraded_statuses:
                 coverage_state = COVERAGE_AUDIT_DIRECT_DEGRADED

@@ -19,6 +19,11 @@ HEAD = 'defaults:\n  terms: ["Summer 2027"]\n'
 VALID_COMPANY_FIELDS = {
     "atlassian": "",
     "apple": "",
+    "ansys": (
+        '    talentbrew_host: "careers.synopsys.com"\n'
+        '    talentbrew_site_id: "44408"\n'
+        '    source_url: "https://careers.synopsys.com/search-jobs/ansys/44408/1"\n'
+    ),
     "ashby": '    token: "example"\n',
     "bain": "",
     "bechtel": "",
