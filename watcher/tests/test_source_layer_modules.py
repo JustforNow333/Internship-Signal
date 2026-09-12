@@ -22,6 +22,7 @@ from watcher.sources import (
     sanitize,
     transport,
 )
+from watcher.sources.registry import DIRECT_SOURCE_SPECS
 
 
 OWNERS = {
@@ -83,24 +84,39 @@ CANONICAL_IMPLEMENTATION_MODULES = (
     transport,
 )
 
-DIRECT_OWNER_IMPORT_ADAPTERS = (
-    "watcher.sources.ashby",
-    "watcher.sources.bain",
-    "watcher.sources.bloomberg",
-    "watcher.sources.epic",
+# GitHub backstop feeds are configured per watchlist entry rather than
+# registered in DIRECT_SOURCE_SPECS, so they are the one part of this
+# import-boundary surface that cannot be derived from the registry.
+GITHUB_LISTING_ADAPTERS = (
     "watcher.sources.github_listings",
     "watcher.sources.github_markdown_table",
-    "watcher.sources.greenhouse",
-    "watcher.sources.ibm",
-    "watcher.sources.icims",
-    "watcher.sources.lever",
-    "watcher.sources.oracle_hcm",
-    "watcher.sources.paylocity",
-    "watcher.sources.smartrecruiters",
-    "watcher.sources.successfactors",
-    "watcher.sources.talentbrew",
-    "watcher.sources.workable",
-    "watcher.sources.workday",
+)
+
+# watcher/sources/registry.py owns which direct adapters exist. Deriving the
+# module from each registered factory keeps this boundary test from drifting
+# behind the registry the way a hand-maintained list does.
+REGISTERED_DIRECT_ADAPTER_MODULES = tuple(
+    sorted({spec.factory.__module__ for spec in DIRECT_SOURCE_SPECS})
+)
+
+DIRECT_OWNER_IMPORT_ADAPTERS = tuple(
+    sorted({*REGISTERED_DIRECT_ADAPTER_MODULES, *GITHUB_LISTING_ADAPTERS})
+)
+
+# Infrastructure and facade modules; the adapters are appended from the
+# derived tuple above so no registered adapter is named twice.
+LAYERING_IMPORT_MODULES = (
+    "watcher.sources.base",
+    "watcher.sources.contracts",
+    "watcher.sources.diagnostics",
+    "watcher.sources.direct",
+    "watcher.sources.parsing",
+    "watcher.sources.rows",
+    "watcher.sources.sanitize",
+    "watcher.sources.transport",
+    "watcher.sources.retry",
+    "watcher.sources.registry",
+    "watcher.sources",
 )
 
 
@@ -222,6 +238,45 @@ def test_migrated_adapters_import_canonical_owners_directly(module_name):
     assert _base_facade_import_lines(module) == []
 
 
+def test_owner_import_coverage_tracks_every_registered_direct_adapter():
+    """Registering a direct adapter must extend this boundary test with it.
+
+    The previous hand-maintained tuple silently fell behind the registry, so a
+    newly registered adapter could import through the `base` facade unchecked.
+    """
+
+    registered = {spec.factory.__module__ for spec in DIRECT_SOURCE_SPECS}
+
+    assert registered, "the canonical registry must publish direct adapters"
+    # Every registered adapter is parametrized by the import-boundary test.
+    assert registered <= set(DIRECT_OWNER_IMPORT_ADAPTERS)
+    # ...and the only unregistered extras are the GitHub backstop feeds.
+    assert set(DIRECT_OWNER_IMPORT_ADAPTERS) - registered == set(
+        GITHUB_LISTING_ADAPTERS
+    )
+    assert len(DIRECT_OWNER_IMPORT_ADAPTERS) == len(
+        registered | set(GITHUB_LISTING_ADAPTERS)
+    )
+    # Each spec owns exactly one module inside the sources package, so a spec
+    # can never be dropped from coverage by colliding with another one.
+    assert len(registered) == len(DIRECT_SOURCE_SPECS)
+    assert all(name.startswith("watcher.sources.") for name in registered)
+    assert set(REGISTERED_DIRECT_ADAPTER_MODULES) == registered
+
+
+def test_cycle_coverage_includes_every_registered_direct_adapter():
+    """The import-cycle check must not fall behind the registry either."""
+
+    covered = {*LAYERING_IMPORT_MODULES, *DIRECT_OWNER_IMPORT_ADAPTERS}
+
+    assert {spec.factory.__module__ for spec in DIRECT_SOURCE_SPECS} <= covered
+    assert set(GITHUB_LISTING_ADAPTERS) <= covered
+    # The parametrization must not name any module twice.
+    assert len([*LAYERING_IMPORT_MODULES, *DIRECT_OWNER_IMPORT_ADAPTERS]) == len(
+        covered
+    )
+
+
 def test_split_modules_keep_the_reference_layering():
     source_imports = {
         module: {
@@ -264,23 +319,7 @@ def test_low_level_modules_do_not_import_collection_pipeline_or_health_layers():
 
 @pytest.mark.parametrize(
     "first",
-    [
-        "watcher.sources.base",
-        "watcher.sources.brassring",
-        "watcher.sources.taleo_sourcing",
-        "watcher.sources.ukg",
-        "watcher.sources.contracts",
-        "watcher.sources.diagnostics",
-        "watcher.sources.direct",
-        "watcher.sources.parsing",
-        "watcher.sources.rows",
-        "watcher.sources.sanitize",
-        "watcher.sources.transport",
-        "watcher.sources.retry",
-        "watcher.sources.registry",
-        "watcher.sources",
-        *DIRECT_OWNER_IMPORT_ADAPTERS,
-    ],
+    [*LAYERING_IMPORT_MODULES, *DIRECT_OWNER_IMPORT_ADAPTERS],
 )
 def test_each_module_imports_first_without_a_cycle(first):
     root = pathlib.Path(__file__).resolve().parents[2]
