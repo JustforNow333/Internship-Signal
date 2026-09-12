@@ -1,0 +1,62 @@
+{
+  "status": 200,
+  "data": {
+    "count": 2,
+    "positions": [
+      {
+        "id": 563121776085293,
+        "atsJobId": "785483",
+        "displayJobId": "785483",
+        "name": "Process Control Specialist",
+        "positionUrl": "/careers/job/563121776085293",
+        "locations": ["Tallinn,Tallinn,Estonia"],
+        "standardizedLocations": ["Tallinn, Harjumaa, Estonia"],
+        "department": "83 Supply & Logistics",
+        "efcustomTextJobfuntionAdvancefilterpcs": ["Supply & Logistics"],
+        "postedTs": 1789108266,
+        "creationTs": 1779457558,
+        "workLocationOption": "onsite",
+        "locationFlexibility": null,
+        "isHot": false,
+        "stars": 0,
+        "solrScore": 1.0
+      },
+      {
+        "id": 563121777212618,
+        "atsJobId": "790945",
+        "displayJobId": "790945",
+        "name": "CN Solution Delivery Transformation",
+        "positionUrl": "/careers/job/563121777212618",
+        "locations": ["Plano,Texas,United States"],
+        "standardizedLocations": ["Plano, Texas, United States"],
+        "department": "82 Service Delivery",
+        "efcustomTextJobfuntionAdvancefilterpcs": ["Service Delivery"],
+        "postedTs": 1789162860,
+        "creationTs": 1789096208,
+        "workLocationOption": "onsite",
+        "locationFlexibility": null,
+        "isHot": false,
+        "stars": 0,
+        "solrScore": 1.0
+      }
+    ],
+    "sortBy": "hot",
+    "appliedFilters": {},
+    "debug": {},
+    "savedSearchMetadata": {},
+    "resultsMetaData": {
+      "usedFuzzSearch": false,
+      "mocTitle": null
+    },
+    "filterDef": {
+      "allFilters": [],
+      "facets": {},
+      "smartFilters": []
+    }
+  },
+  "error": {
+    "message": "",
+    "body": ""
+  },
+  "metadata": null
+}

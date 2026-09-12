@@ -25,6 +25,7 @@ def test_direct_ats_surface_is_unchanged():
             "brassring",
             "epic",
             "eightfold",
+            "ericsson",
             "greenhouse",
             "huawei",
             "ibm",

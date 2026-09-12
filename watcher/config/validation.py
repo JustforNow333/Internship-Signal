@@ -310,6 +310,15 @@ def _validate_alibaba_config(name: str, *, source_url: str) -> None:
         )
 
 
+def _validate_ericsson_config(name: str, *, source_url: str) -> None:
+    """Pin Ericsson to its unfiltered official global careers inventory."""
+
+    if source_url != "https://jobs.ericsson.com/careers":
+        raise ConfigError(
+            f"{name}: ericsson source_url must be the official global careers listing"
+        )
+
+
 def _validate_huawei_config(name: str, *, source_url: str) -> None:
     """Pin Huawei to its official, intentionally partial internship listing."""
 

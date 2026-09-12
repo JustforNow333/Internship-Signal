@@ -48,6 +48,7 @@ from .validation import (
     _validate_icims_config,
     _validate_bytedance_careers_config,
     _validate_eightfold_config,
+    _validate_ericsson_config,
     _validate_oracle_hcm_config,
     _validate_paylocity_config,
     _validate_siemens_config,
@@ -177,6 +178,8 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             site_id=talentbrew_site_id,
             source_url=source_url,
         )
+    elif ats == "ericsson":
+        _validate_ericsson_config(name, source_url=source_url)
     elif ats == "huawei":
         _validate_huawei_config(name, source_url=source_url)
     elif ats == "siemens":

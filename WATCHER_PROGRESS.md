@@ -1497,6 +1497,45 @@ This file tracks completed watcher steps and the next handoff target.
      passed. No frontend file was changed for Huawei, so the conditional
      frontend test/build step was not required.
 
+52. Ericsson official global PCSX direct-complete source (2026-09-11):
+   - Ericsson is classified `direct_complete`. Its official careers and
+     students/early-careers pages state that all opportunities are published on
+     `jobs.ericsson.com`; regional and program links return to filtered views of
+     that same global board rather than separate inventories.
+   - The current first-party careers frontend publishes anonymous
+     `GET /api/pcsx/search` with `domain=ericsson.com`, blank query/location,
+     and zero-based `start`. No bootstrap, cookie, CSRF token, session, or
+     authentication is required. The adapter uses the shared transport's
+     transparent project user agent and does not bypass the previously observed
+     access-control response.
+   - The response provides an exact `count`, fixed ten-row pages, numeric PCSX
+     `id`, numeric-string `atsJobId`/`displayJobId`, canonical
+     `/careers/job/{id}` paths, title, location list, department/job function,
+     `postedTs`, `creationTs`, and work-location mode. The exact boundary returns
+     the successful empty terminal page. A malformed offset or absent domain
+     returns structured HTTP 422; the wrong method fails rather than yielding a
+     listing.
+   - Collection requires exact total/page arithmetic, a stable total, explicit
+     terminal, unique PCSX IDs, ATS IDs, and URLs, and two consecutive complete
+     snapshots with equal totals and both identity sets. Scope/filter/sort/fuzzy
+     drift, malformed rows, duplicates, early ends, instability, and safety-cap
+     exhaustion fail closed; passes are never unioned.
+   - Registry-built live verification retained 508 rows with 508 unique PCSX
+     IDs, ATS requisition IDs, and URLs. Two matching snapshots cost 104 GETs
+     with zero retries, failed requests, malformed/schema-invalid/duplicate
+     rows, or truncation; diagnostics reported `complete=True`,
+     `incomplete=False`, and `degraded=False`.
+   - Practical coverage is now 249/251: 200 direct-complete, 4 direct
+     practical-partial, 45 backstop, and 2 uncovered (Lam Research and
+     MediaTek).
+   - Focused Ericsson/integration validation passed (`267 passed`). The full
+     backend/watcher suite completed with `3105 passed, 100 skipped, 1 existing
+     warning` and only the known Windows-Git/WSL-worktree pointer failure in
+     `test_repository_ignores_private_holdout_artifact_paths`; repository-native
+     WSL Git confirms the path is ignored. Compileall and `git diff --check`
+     passed. No frontend file was changed for Ericsson, so the conditional
+     frontend test/build step was not required.
+
 ## Next
 
 - Use the product coverage report to prioritize degraded direct integrations,

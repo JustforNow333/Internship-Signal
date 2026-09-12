@@ -50,6 +50,7 @@ VALID_COMPANY_FIELDS = {
         '    eightfold_variant: "legacy"\n'
         '    source_url: "https://jobs.example.test/careers"\n'
     ),
+    "ericsson": '    source_url: "https://jobs.ericsson.com/careers"\n',
     "greenhouse": '    token: "example"\n',
     "huawei": (
         '    source_url: "https://career.huawei.com/en/campus-recruitment-job-list?recruitmentType=INTERN"\n'

@@ -1808,3 +1808,10 @@ companies:
     alumni_match: ["huawei", "huawei technologies"]
     source_url: "https://career.huawei.com/en/campus-recruitment-job-list?recruitmentType=INTERN"
     note: "Practical partial coverage: the official English and Chinese campus portals' explicit internship slices; social recruiting and separately linked regional stations remain outside this scope."
+
+  - name: "Ericsson"
+    ats: ericsson
+    aliases: ["Telefonaktiebolaget LM Ericsson", "Ericsson AB"]
+    alumni_match: ["ericsson"]
+    source_url: "https://jobs.ericsson.com/careers"
+    note: "Official global careers inventory; exact-count PCSX pagination with two matching complete snapshots"

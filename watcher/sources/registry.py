@@ -30,6 +30,7 @@ from watcher.sources.bytedance_careers import ByteDanceCareersSource
 from watcher.sources.dassault import DassaultSource
 from watcher.sources.epic import EpicSource
 from watcher.sources.eightfold import EightfoldSource
+from watcher.sources.ericsson import EricssonSource
 from watcher.sources.google import GoogleSource
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.huawei import HuaweiSource
@@ -87,6 +88,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("dassault", DassaultSource),
     DirectSourceSpec("epic", EpicSource),
     DirectSourceSpec("eightfold", EightfoldSource),
+    DirectSourceSpec("ericsson", EricssonSource),
     DirectSourceSpec("google", GoogleSource),
     DirectSourceSpec("greenhouse", GreenhouseSource),
     DirectSourceSpec("huawei", HuaweiSource, practical_partial=True),

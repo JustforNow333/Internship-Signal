@@ -64,6 +64,7 @@ from watcher.sources.base import (
 from watcher.sources.google import GoogleSource
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.epic import EpicSource
+from watcher.sources.ericsson import EricssonSource
 from watcher.sources.huawei import HuaweiSource
 from watcher.sources.ibm import IbmSource
 from watcher.sources.kpmg import KpmgSource
@@ -401,6 +402,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "bloomberg": BloombergSource.endpoint(),
         "dassault": DassaultSource.endpoint(),
         "epic": EpicSource.endpoint(),
+        "ericsson": EricssonSource.endpoint(),
         "google": GoogleSource.endpoint(),
         "greenhouse": GreenhouseSource.endpoint("token"),
         "huawei": HuaweiSource.endpoint(),

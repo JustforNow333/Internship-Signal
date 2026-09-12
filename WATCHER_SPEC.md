@@ -291,6 +291,20 @@ the slice outside direct-complete coverage. It always publishes
 `complete=false`, `incomplete=true`, and `degraded=true` with
 `scope_not_completeness_proven`.
 
+**Ericsson** uses the first-party global PCSX careers inventory. Enumerate the
+unfiltered anonymous `GET /api/pcsx/search` contract with domain
+`ericsson.com`, blank query/location, and zero-based `start` offsets. The
+frontend fixes pages at ten rows and publishes an exact `count`; require exact
+page arithmetic, stable totals, unique numeric PCSX and ATS IDs, canonical
+`/careers/job/{id}` URLs, and an explicit empty terminal request at the total.
+No bootstrap, session, cookie, or authentication state is required. Two
+consecutive complete snapshots must agree on total and both identity sets;
+passes are never unioned. Failed envelopes, non-default sort or filters, fuzzy
+search, malformed rows, early termination, duplicates, drift, and safety-cap
+exhaustion fail the whole source. The adapter uses a transparent project user
+agent through the shared transport and never retries access-control responses
+through alternate identities or infrastructure.
+
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
 **Eightfold legacy (Netflix only)** uses the anonymous
