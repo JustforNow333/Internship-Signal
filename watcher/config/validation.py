@@ -310,6 +310,19 @@ def _validate_alibaba_config(name: str, *, source_url: str) -> None:
         )
 
 
+def _validate_huawei_config(name: str, *, source_url: str) -> None:
+    """Pin Huawei to its official, intentionally partial internship listing."""
+
+    expected_url = (
+        "https://career.huawei.com/en/campus-recruitment-job-list"
+        "?recruitmentType=INTERN"
+    )
+    if source_url != expected_url:
+        raise ConfigError(
+            f"{name}: huawei source_url must be the official campus internship listing"
+        )
+
+
 def _validate_siemens_config(name: str, *, source_url: str) -> None:
     """Pin Siemens to its official, intentionally partial Internship search."""
 

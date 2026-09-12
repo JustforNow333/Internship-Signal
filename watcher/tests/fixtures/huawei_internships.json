@@ -1,0 +1,80 @@
+{
+  "en_US": {
+    "status": "SUCCESS",
+    "data": {
+      "pageVO": {
+        "totalRows": 1,
+        "curPage": 1,
+        "pageSize": 100,
+        "resultMode": 0,
+        "startIndex": 1,
+        "endIndex": 1,
+        "orderBy": null,
+        "filterStr": null,
+        "totalPages": 1
+      },
+      "result": [
+        {
+          "advertisementId": 41841,
+          "jobId": 121861,
+          "advertisementsIntegrationId": 224570,
+          "jobName": "Public Relations Intern",
+          "workPlace": "Mexico/Mexico City",
+          "jobAddress": "Mexico\\Mexico-Mexico City",
+          "categoryName": "Sales Class",
+          "jobFamilyName": "Public Relations Family",
+          "deptName": "Latin America Region",
+          "mainBusiness": "Support the coordination and execution of talent development programs.",
+          "jobRequire": null,
+          "jobDesc": null,
+          "lastUpdateDate": "2026-09-10",
+          "releaseDate": null,
+          "recruitScenarioId": "37",
+          "recruitSubScenarioId": "025",
+          "scenarioName": "Interns",
+          "scenarioCode": "1"
+        }
+      ]
+    },
+    "errors": null
+  },
+  "zh_CN": {
+    "status": "SUCCESS",
+    "data": {
+      "pageVO": {
+        "totalRows": 1,
+        "curPage": 1,
+        "pageSize": 100,
+        "resultMode": 0,
+        "startIndex": 1,
+        "endIndex": 1,
+        "orderBy": null,
+        "filterStr": null,
+        "totalPages": 1
+      },
+      "result": [
+        {
+          "advertisementId": 41799,
+          "jobId": 121749,
+          "advertisementsIntegrationId": 224440,
+          "jobName": "软件开发实习生",
+          "workPlace": "中国/深圳",
+          "jobAddress": "中国\\广东-深圳",
+          "categoryName": "研发类",
+          "jobFamilyName": "软件开发族",
+          "deptName": "2012实验室",
+          "mainBusiness": "参与软件模块设计、开发和测试。",
+          "jobRequire": "具备良好的编程与团队协作能力。",
+          "jobDesc": null,
+          "lastUpdateDate": "2026-09-09",
+          "releaseDate": null,
+          "recruitScenarioId": "37",
+          "recruitSubScenarioId": "025",
+          "scenarioName": "实习生",
+          "scenarioCode": "1"
+        }
+      ]
+    },
+    "errors": null
+  }
+}

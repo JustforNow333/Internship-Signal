@@ -197,7 +197,7 @@ def test_registry_origin_and_catalog_keep_partial_distinct_from_complete():
     assert isinstance(source, AnsysSource)
     assert "ansys" in DIRECT_ATS
     assert DIRECT_PRACTICAL_PARTIAL_ATS == frozenset(
-        {"alibaba", "ansys", "siemens"}
+        {"alibaba", "ansys", "huawei", "siemens"}
     )
     assert "ansys" not in DIRECT_COMPLETE_ATS
     assert direct_origin_key("ansys") == "https://careers.synopsys.com"

@@ -68,6 +68,7 @@ DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "epic": "careers.epic.com",
     "google": "www.google.com",
     "greenhouse": "boards-api.greenhouse.io",
+    "huawei": "apigw-dgg-b0.huawei.com",
     "ibm": "www-api.ibm.com",
     "kpmg": "www.kpmguscareers.com",
     "lever": "api.lever.co",

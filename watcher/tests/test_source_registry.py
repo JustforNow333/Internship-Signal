@@ -26,6 +26,7 @@ def test_direct_ats_surface_is_unchanged():
             "epic",
             "eightfold",
             "greenhouse",
+            "huawei",
             "ibm",
             "icims",
             "bytedance_careers",

@@ -278,6 +278,19 @@ this slice outside direct-complete coverage regardless of clean enumeration.
 It always publishes `complete=false`, `incomplete=true`, and `degraded=true`
 with `scope_not_completeness_proven`.
 
+**Huawei** is permanently practical-partial on the current first-party campus
+portal. Enumerate both the English and Chinese listings with the frontend's
+explicit `jobType=CR` and `recruitmentType=[INTERN]` request, one-based
+`curPage`, and server-honored `pageSize=100`. Require stable per-locale
+`totalRows`/`totalPages`, exact range arithmetic, numeric `advertisementId`,
+unique locale-specific `/job-details?advertisementId={id}` URLs, an explicit
+null terminal page, and two matching complete identity snapshots. No login,
+cookie, or CSRF bootstrap is required; only the public headers published by the
+frontend are sent. The separate social board and linked regional stations keep
+the slice outside direct-complete coverage. It always publishes
+`complete=false`, `incomplete=true`, and `degraded=true` with
+`scope_not_completeness_proven`.
+
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
 **Eightfold legacy (Netflix only)** uses the anonymous

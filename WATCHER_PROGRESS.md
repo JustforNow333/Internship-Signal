@@ -1451,6 +1451,52 @@ This file tracks completed watcher steps and the next handoff target.
      `git diff --check` passed. No frontend file was changed for Alibaba, so the
      conditional frontend test/build step was not required.
 
+51. Huawei official campus practical-partial source (2026-09-11):
+   - Huawei cannot be classified as direct-complete. The current first-party
+     careers homepage links separate campus and social job lists and also links
+     distinct legacy regional stations for Japan, Latin America, and Europe;
+     no organization-wide inventory marker joins those surfaces.
+   - The current English and Chinese campus frontends expose an explicit
+     `recruitmentType=INTERN` route. Their published component calls anonymous
+     `POST /api/apig/channelhw/recruitmentPosition/pub/getJobPage` with
+     `jobType=CR`, `recruitmentType=[INTERN]`, one-based `curPage`, and
+     server-honored `pageSize=100`. Production needs no cookie, CSRF token, or
+     session bootstrap; the adapter sends only the public application, tenant,
+     language, environment, origin, and referrer values used by the frontend.
+   - Each locale reports exact `totalRows`, `totalPages`, and range metadata,
+     and page two after the current one-page inventories returns the explicit
+     successful `{pageVO:null,result:null}` terminal sentinel. Numeric
+     `advertisementId` values produce canonical locale-specific
+     `/job-details?advertisementId={id}` URLs. Listing rows provide title,
+     workplace/address, category/family, department, responsibilities,
+     requirements, and `lastUpdateDate`; the latter is retained as source
+     modification metadata rather than misrepresented as `date_posted`.
+   - Malformed JSON returns a structured HTTP 500 error, GET on the POST-only
+     route returns HTTP 404, and a missing ordinary `Referer` returns structured
+     HTTP 412. Failed envelopes, malformed rows, changed totals/ranges,
+     duplicates, early terminals, unstable snapshots, and safety-cap exhaustion
+     all fail closed.
+   - Live registry-built verification returned 38 rows and 38 unique IDs/URLs:
+     7 from the English locale and 31 from the Chinese locale. Two complete
+     snapshots had identical per-locale totals and identity sets. The run cost
+     8 listing requests, with zero failed, malformed, schema-invalid, duplicate,
+     or truncated counts; all 38 rows retained an update date and none claimed
+     a posting date.
+   - Huawei is registered `practical_partial=True`; every row carries
+     `source_completeness=practical_partial`, and successful diagnostics remain
+     `complete=False`, `incomplete=True`, `degraded=True` with
+     `scope_not_completeness_proven`. Registry, catalog, and source tests pin it
+     outside direct-complete coverage. Practical coverage is now 248/251: 199
+     direct-complete, 4 direct practical-partial, 45 backstop, and 3 uncovered
+     (Ericsson, Lam Research, and MediaTek).
+   - Focused Huawei/integration validation passed (`296 passed`). The full
+     backend/watcher suite completed with `3090 passed, 100 skipped, 1 existing
+     warning` and only the known Windows-Git/WSL-worktree pointer failure in
+     `test_repository_ignores_private_holdout_artifact_paths`; repository-native
+     WSL Git confirms the path is ignored. Compileall and `git diff --check`
+     passed. No frontend file was changed for Huawei, so the conditional
+     frontend test/build step was not required.
+
 ## Next
 
 - Use the product coverage report to prioritize degraded direct integrations,

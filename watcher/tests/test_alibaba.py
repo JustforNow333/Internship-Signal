@@ -260,7 +260,7 @@ def test_registry_origin_and_catalog_cannot_promote_alibaba_to_direct_complete()
     assert isinstance(src, AlibabaSource)
     assert "alibaba" in DIRECT_ATS
     assert DIRECT_PRACTICAL_PARTIAL_ATS == frozenset(
-        {"alibaba", "ansys", "siemens"}
+        {"alibaba", "ansys", "huawei", "siemens"}
     )
     assert "alibaba" not in DIRECT_COMPLETE_ATS
     assert direct_origin_key("alibaba") == "https://campus-talent.alibaba.com"

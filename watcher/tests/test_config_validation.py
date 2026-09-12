@@ -51,6 +51,9 @@ VALID_COMPANY_FIELDS = {
         '    source_url: "https://jobs.example.test/careers"\n'
     ),
     "greenhouse": '    token: "example"\n',
+    "huawei": (
+        '    source_url: "https://career.huawei.com/en/campus-recruitment-job-list?recruitmentType=INTERN"\n'
+    ),
     "ibm": "",
     "google": "",
     "kpmg": "",

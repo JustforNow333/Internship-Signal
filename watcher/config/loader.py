@@ -44,6 +44,7 @@ from .validation import (
     _validate_default_terms_present,
     _validate_github_source_uniqueness,
     _validate_github_listing_sources_value,
+    _validate_huawei_config,
     _validate_icims_config,
     _validate_bytedance_careers_config,
     _validate_eightfold_config,
@@ -176,6 +177,8 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
             site_id=talentbrew_site_id,
             source_url=source_url,
         )
+    elif ats == "huawei":
+        _validate_huawei_config(name, source_url=source_url)
     elif ats == "siemens":
         _validate_siemens_config(name, source_url=source_url)
     icims_variant = str(entry.get("icims_variant") or "").strip().casefold()

@@ -1801,3 +1801,10 @@ companies:
     alumni_match: ["alibaba", "alibaba group"]
     source_url: "https://campus-talent.alibaba.com/campus/position"
     note: "Practical partial coverage: all batches in the official campus portal's internship category; social, graduate, domestic, and overseas channels remain outside this slice."
+
+  - name: "Huawei"
+    ats: huawei
+    aliases: ["Huawei Technologies", "华为"]
+    alumni_match: ["huawei", "huawei technologies"]
+    source_url: "https://career.huawei.com/en/campus-recruitment-job-list?recruitmentType=INTERN"
+    note: "Practical partial coverage: the official English and Chinese campus portals' explicit internship slices; social recruiting and separately linked regional stations remain outside this scope."
