@@ -1829,3 +1829,57 @@ companies:
     alumni_match: ["mediatek"]
     source_url: "https://careers.mediatek.com/en/jobs"
     note: "Official global careers inventory; exact-count tRPC pagination with two matching complete snapshots"
+
+  - name: "Citadel"
+    ats: github_only
+    alumni_match: ["citadel"]
+    note: "official careers listing and detail pages sit behind an active anti-bot challenge; backstop feed only"
+
+  - name: "Citadel Securities"
+    ats: github_only
+    alumni_match: ["citadel securities"]
+    note: "official careers listing and detail pages sit behind an active anti-bot challenge; backstop feed only"
+
+  - name: "D. E. Shaw"
+    ats: github_only
+    aliases: ["The D. E. Shaw Group", "D. E. Shaw Group"]
+    alumni_match: ["d. e. shaw", "de shaw", "deshaw"]
+    note: "first-party careers listing is server-rendered with no supported ATS contract; backstop feed only"
+
+  - name: "Hudson River Trading"
+    ats: greenhouse
+    token: "wehrtyou"
+    aliases: ["HRT"]
+    alumni_match: ["hudson river trading", "hrt"]
+    source_url: "https://www.hudsonrivertrading.com/careers/"
+    note: "Greenhouse board published by the official careers job-board plugin configuration"
+
+  - name: "Jane Street"
+    ats: github_only
+    aliases: ["Jane Street Capital", "Jane Street Group"]
+    alumni_match: ["jane street"]
+    note: "official first-party /jobs/main.json inventory has no supported adapter yet; backstop feed only"
+
+  - name: "Millennium Management"
+    ats: eightfold
+    eightfold_host: "mlp.eightfold.ai"
+    eightfold_domain: "mlp.com"
+    eightfold_variant: "legacy"
+    aliases: ["Millennium"]
+    alumni_match: ["millennium management", "millennium"]
+    source_url: "https://mlp.eightfold.ai/careers"
+    note: "Official legacy Eightfold public board linked from the mlp.com careers site"
+
+  - name: "Point72"
+    ats: greenhouse
+    token: "point72"
+    aliases: ["Point72 Asset Management"]
+    alumni_match: ["point72"]
+    source_url: "https://careers.point72.com/"
+    note: "Greenhouse board linked from the official careers.point72.com listing"
+
+  - name: "Two Sigma"
+    ats: github_only
+    aliases: ["Two Sigma Investments"]
+    alumni_match: ["two sigma"]
+    note: "official careers portal is Avature, which has no supported adapter; backstop feed only"
