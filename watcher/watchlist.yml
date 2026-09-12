@@ -1884,3 +1884,62 @@ companies:
     aliases: ["Two Sigma Investments"]
     alumni_match: ["two sigma"]
     note: "official careers portal is Avature, which has no supported adapter; backstop feed only"
+
+  - name: "Akuna Capital"
+    ats: greenhouse
+    token: "akunacapital"
+    aliases: ["Akuna Capital University"]
+    alumni_match: ["akuna capital", "akuna"]
+    source_url: "https://akunacapital.com/careers/"
+    note: "Greenhouse board published by the official careers page"
+
+  - name: "DRW"
+    ats: github_only
+    aliases: ["DRW Holdings", "DRW Trading"]
+    alumni_match: ["drw", "drw holdings", "drw trading"]
+    note: "first-party listings are embedded in the site's own page data with no supported ATS contract; backstop feed only"
+
+  - name: "Five Rings"
+    ats: greenhouse
+    token: "fiveringsllc"
+    aliases: ["Five Rings Capital"]
+    alumni_match: ["five rings", "five rings capital"]
+    source_url: "https://fiverings.com/careers/"
+    note: "Greenhouse board linked from the official careers page"
+
+  - name: "IMC Trading"
+    ats: github_only
+    aliases: ["IMC", "IMC Financial Markets"]
+    alumni_match: ["imc trading", "imc", "imc financial markets"]
+    note: "first-party job routes are sitemap-enumerable but no supported ATS contract is published; backstop feed only"
+
+  - name: "Jump Trading"
+    ats: greenhouse
+    token: "jumptrading"
+    aliases: ["Jump Trading Group"]
+    alumni_match: ["jump trading", "jump trading group"]
+    source_url: "https://www.jumptrading.com/hr/experienced-candidates"
+    note: "Greenhouse board published by the official experienced and student listing pages"
+
+  - name: "Optiver"
+    ats: github_only
+    aliases: ["Optiver Holding"]
+    alumni_match: ["optiver"]
+    note: "first-party jobs API is published but has no supported adapter; backstop feed only"
+
+  - name: "Susquehanna International Group"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "careers.sig.com"
+    aliases: ["SIG", "Susquehanna International Group (SIG)", "Susquehanna"]
+    alumni_match: ["susquehanna international group", "susquehanna", "sig"]
+    source_url: "https://careers.sig.com/jobs"
+    note: "Official iCIMS jibe portal linked from the corporate careers site"
+
+  - name: "Tower Research Capital"
+    ats: greenhouse
+    token: "towerresearchcapital"
+    aliases: ["Tower Research"]
+    alumni_match: ["tower research capital", "tower research"]
+    source_url: "https://tower-research.com/open-positions/"
+    note: "Greenhouse board published by the official open-positions embed configuration"

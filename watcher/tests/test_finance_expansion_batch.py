@@ -16,10 +16,11 @@ from watcher.config import load_watchlist
 from watcher.sources.eightfold import EightfoldSource
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.registry import DIRECT_ATS, build_direct_sources
+from watcher.tests.tech_universe import (
+    TECH_UNIVERSE_COMPANY_COUNT,
+    assert_batch_is_additive,
+)
 
-
-# The tech universe that was complete before this batch.
-TECH_UNIVERSE_COMPANY_COUNT = 251
 
 BATCH_COMPANIES = (
     "Citadel",
@@ -63,16 +64,19 @@ def test_batch_company_is_configured(name):
 
 
 def test_batch_is_purely_additive_to_the_tech_universe():
-    companies = watchlist().companies
-    names = [c.name for c in companies]
+    """This batch adds to the tech milestone and never reaches into it.
+
+    The milestone is checked by membership, so appending a later expansion
+    batch cannot make this assertion stale, and a tech company that went
+    missing would still fail.
+    """
+
+    names = [c.name for c in watchlist().companies]
 
     assert len(names) == len(set(names))
-    assert set(BATCH_COMPANIES) <= set(names)
-    assert len(companies) == TECH_UNIVERSE_COMPANY_COUNT + len(BATCH_COMPANIES)
-    # Removing the batch leaves the earlier milestone untouched.
-    assert len([n for n in names if n not in set(BATCH_COMPANIES)]) == (
-        TECH_UNIVERSE_COMPANY_COUNT
-    )
+    assert_batch_is_additive(BATCH_COMPANIES, set(names))
+    # The batch is additive, so it can never shrink the milestone.
+    assert len(names) >= TECH_UNIVERSE_COMPANY_COUNT + len(BATCH_COMPANIES)
 
 
 @pytest.mark.parametrize(("name", "ats"), sorted(DIRECT_BATCH_COMPANIES.items()))
