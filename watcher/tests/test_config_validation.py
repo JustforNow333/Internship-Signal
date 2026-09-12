@@ -58,6 +58,9 @@ VALID_COMPANY_FIELDS = {
     "ibm": "",
     "google": "",
     "kpmg": "",
+    "lam_research": (
+        '    source_url: "https://careers.lamresearch.com/careers"\n'
+    ),
     "icims": (
         "    icims_variant: jibe_json\n"
         '    icims_host: "jobs.example.test"\n'

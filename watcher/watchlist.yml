@@ -1815,3 +1815,10 @@ companies:
     alumni_match: ["ericsson"]
     source_url: "https://jobs.ericsson.com/careers"
     note: "Official global careers inventory; exact-count PCSX pagination with two matching complete snapshots"
+
+  - name: "Lam Research"
+    ats: lam_research
+    aliases: ["Lam Research Corporation"]
+    alumni_match: ["lam research"]
+    source_url: "https://careers.lamresearch.com/careers"
+    note: "Official global careers inventory; exact-count PCSX pagination with two matching complete snapshots"

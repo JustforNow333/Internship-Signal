@@ -72,6 +72,7 @@ DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "huawei": "apigw-dgg-b0.huawei.com",
     "ibm": "www-api.ibm.com",
     "kpmg": "www.kpmguscareers.com",
+    "lam_research": "careers.lamresearch.com",
     "lever": "api.lever.co",
     "ashby": "api.ashbyhq.com",
     "sea": "career.sea.com",

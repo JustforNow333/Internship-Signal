@@ -305,6 +305,22 @@ exhaustion fail the whole source. The adapter uses a transparent project user
 agent through the shared transport and never retries access-control responses
 through alternate identities or infrastructure.
 
+**Lam Research** uses its own first-party global PCSX careers inventory and
+remains a separate adapter because tenant authorization, defaults, fields, and
+rate behavior differ from Ericsson. Enumerate only the frontend-published
+anonymous `GET /api/pcsx/search` request with domain `lamresearch.com`, blank
+query/location, and zero-based `start`; its default sort is `timestamp` and its
+pages contain at most ten rows. Require a stable exact `count`, exact page
+arithmetic, unique numeric PCSX and ATS IDs, canonical `/careers/job/{id}` URLs,
+an empty request at the exact terminal offset, and two consecutive complete
+snapshots agreeing on total and both identity sets. Title, locations, and
+posting timestamp are required; department is optional because the live global
+inventory contains a legitimate blank. Use a conservative per-page delay and
+the shared transport's truthful project user agent. Failed envelopes, applied
+filters, fuzzy search, malformed identities, duplicates/omissions, drift,
+premature termination, retries exhausted after throttling, and safety-cap
+exhaustion fail closed; never rotate identity or bypass tenant authorization.
+
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
 **Eightfold legacy (Netflix only)** uses the anonymous

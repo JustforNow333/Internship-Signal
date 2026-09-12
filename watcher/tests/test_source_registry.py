@@ -34,6 +34,7 @@ def test_direct_ats_surface_is_unchanged():
             "dassault",
             "google",
             "kpmg",
+            "lam_research",
             "lever",
             "oracle_hcm",
             "paylocity",

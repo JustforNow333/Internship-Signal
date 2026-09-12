@@ -68,6 +68,7 @@ from watcher.sources.ericsson import EricssonSource
 from watcher.sources.huawei import HuaweiSource
 from watcher.sources.ibm import IbmSource
 from watcher.sources.kpmg import KpmgSource
+from watcher.sources.lam_research import LamResearchSource
 from watcher.sources.lever import LeverSource
 from watcher.sources.paylocity import PaylocitySource
 from watcher.sources.sea import SeaSource
@@ -408,6 +409,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "huawei": HuaweiSource.endpoint(),
         "ibm": IbmSource.endpoint(start=0, results=100, page=1),
         "kpmg": KpmgSource.endpoint(),
+        "lam_research": LamResearchSource.endpoint(),
         "lever": LeverSource.endpoint("token"),
         "ashby": AshbySource.endpoint("token"),
         "sea": SeaSource.endpoint(),

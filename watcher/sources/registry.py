@@ -37,6 +37,7 @@ from watcher.sources.huawei import HuaweiSource
 from watcher.sources.ibm import IbmSource
 from watcher.sources.icims import IcimsSource
 from watcher.sources.kpmg import KpmgSource
+from watcher.sources.lam_research import LamResearchSource
 from watcher.sources.lever import LeverSource
 from watcher.sources.oracle_hcm import OracleHcmSource
 from watcher.sources.paylocity import PaylocitySource
@@ -95,6 +96,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("ibm", IbmSource),
     DirectSourceSpec("icims", IcimsSource),
     DirectSourceSpec("kpmg", KpmgSource),
+    DirectSourceSpec("lam_research", LamResearchSource),
     DirectSourceSpec("lever", LeverSource),
     DirectSourceSpec("oracle_hcm", OracleHcmSource),
     DirectSourceSpec("paylocity", PaylocitySource),

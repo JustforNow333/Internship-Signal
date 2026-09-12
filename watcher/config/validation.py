@@ -332,6 +332,16 @@ def _validate_huawei_config(name: str, *, source_url: str) -> None:
         )
 
 
+def _validate_lam_research_config(name: str, *, source_url: str) -> None:
+    """Pin Lam Research to its unfiltered official global careers inventory."""
+
+    if source_url != "https://careers.lamresearch.com/careers":
+        raise ConfigError(
+            f"{name}: lam_research source_url must be the official global "
+            "careers listing"
+        )
+
+
 def _validate_siemens_config(name: str, *, source_url: str) -> None:
     """Pin Siemens to its official, intentionally partial Internship search."""
 

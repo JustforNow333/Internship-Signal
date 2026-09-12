@@ -1536,6 +1536,49 @@ This file tracks completed watcher steps and the next handoff target.
      passed. No frontend file was changed for Ericsson, so the conditional
      frontend test/build step was not required.
 
+53. Lam Research official global PCSX direct-complete source (2026-09-12):
+   - Lam Research is classified `direct_complete`. Its current official careers
+     overview, university-program, location, and search links converge on the
+     new first-party PCSX portal. The still-accessible legacy SuccessFactors
+     board explicitly directs candidates to that new portal, so it is not a
+     separate current inventory.
+   - The current frontend bootstrap identifies domain `lamresearch.com` and
+     scopes search to externally posted ATS positions with job descriptions.
+     Its published bundle calls anonymous `GET /api/pcsx/search` with blank
+     query/location and zero-based `start`; no cookie, login, CSRF token, or
+     session bootstrap is required.
+   - The response publishes exact `count`, default `timestamp` sort, fixed
+     ten-row pages, numeric PCSX `id`, numeric-string
+     `atsJobId`/`displayJobId`, canonical `/careers/job/{id}` paths, title,
+     locations, department, `postedTs`, `creationTs`, and work-location mode.
+     Department is optional because one live posting legitimately omits it; no
+     value is invented. A request at `start=count` returns the successful empty
+     terminal page. Invalid offset or missing domain returns structured HTTP
+     422, and the wrong method returns HTTP 401.
+   - Exact raw/total agreement is insufficient: every pass requires exact page
+     arithmetic, unique PCSX IDs, ATS IDs, and URLs, plus the explicit terminal,
+     and two consecutive complete snapshots must agree on total and both ID
+     sets. Failed envelopes, sort/filter/fuzzy drift, malformed identities,
+     duplicates, omissions, moving totals, early termination, and safety-cap
+     exhaustion fail closed; passes are never unioned.
+   - A fast audit pass exposed ordinary HTTP 429 throttling during the next
+     traversal. No identity or infrastructure was changed. The Lam-local
+     adapter therefore paces pages by 0.55 seconds; registry-built live
+     verification then retained 1,342 rows with 1,342 unique PCSX IDs, ATS
+     requisition IDs, and URLs across two matching snapshots. The run cost 272
+     requests with zero retries, failed requests, malformed/schema-invalid/
+     duplicate rows, or truncation and reported `complete=True`,
+     `incomplete=False`, and `degraded=False`.
+   - Practical coverage is now 250/251: 201 direct-complete, 4 direct
+     practical-partial, 45 backstop, and 1 uncovered (MediaTek).
+   - Focused Lam/integration validation passed (`272 passed`). The full
+     backend/watcher suite completed with `3122 passed, 100 skipped, 1 existing
+     warning` and only the known Windows-Git/WSL-worktree pointer failure in
+     `test_repository_ignores_private_holdout_artifact_paths`; repository-native
+     WSL Git confirms the path is ignored. Compileall and `git diff --check`
+     passed. No frontend file was changed for Lam, so the conditional frontend
+     test/build step was not required.
+
 ## Next
 
 - Use the product coverage report to prioritize degraded direct integrations,

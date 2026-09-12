@@ -1,0 +1,52 @@
+{
+  "status": 200,
+  "data": {
+    "count": 2,
+    "positions": [
+      {
+        "id": 1099555990963,
+        "atsJobId": "203757",
+        "displayJobId": "203757",
+        "name": "Technical Program Manager 4",
+        "positionUrl": "/careers/job/1099555990963",
+        "locations": ["US-OR-Tualatin (1034)"],
+        "standardizedLocations": ["Tualatin, OR, US"],
+        "department": "Program and Project Management",
+        "postedTs": 1789168677,
+        "creationTs": 1788461448,
+        "workLocationOption": "onsite",
+        "locationFlexibility": null,
+        "isHot": 0,
+        "stars": 0,
+        "solrScore": null
+      },
+      {
+        "id": 1099555909277,
+        "atsJobId": "203616",
+        "displayJobId": "203616",
+        "name": "Deburring Operator 2",
+        "positionUrl": "/careers/job/1099555909277",
+        "locations": ["US-CA-Fremont (1003)"],
+        "standardizedLocations": ["Fremont, CA, US"],
+        "department": "Manufacturing",
+        "postedTs": 1789162498,
+        "creationTs": 1788194167,
+        "workLocationOption": "onsite",
+        "locationFlexibility": null,
+        "isHot": 0,
+        "stars": 0,
+        "solrScore": null
+      }
+    ],
+    "sortBy": "timestamp",
+    "appliedFilters": {},
+    "resultsMetaData": {
+      "usedFuzzSearch": false
+    }
+  },
+  "error": {
+    "message": "",
+    "body": ""
+  },
+  "metadata": null
+}
