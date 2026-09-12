@@ -1855,10 +1855,11 @@ companies:
     note: "Greenhouse board published by the official careers job-board plugin configuration"
 
   - name: "Jane Street"
-    ats: github_only
+    ats: jane_street
     aliases: ["Jane Street Capital", "Jane Street Group"]
     alumni_match: ["jane street"]
-    note: "official first-party /jobs/main.json inventory has no supported adapter yet; backstop feed only"
+    source_url: "https://www.janestreet.com/join-jane-street/open-roles/"
+    note: "Official first-party /jobs/main.json inventory; ids corroborated 1:1 by position-directories.json with two matching complete snapshots"
 
   - name: "Millennium Management"
     ats: eightfold

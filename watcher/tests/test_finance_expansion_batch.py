@@ -36,13 +36,15 @@ DIRECT_BATCH_COMPANIES = {
     "Hudson River Trading": "greenhouse",
     "Point72": "greenhouse",
     "Millennium Management": "eightfold",
+    # Promoted out of the backstop once its first-party JSON inventory was
+    # proven complete; its own adapter owns that contract.
+    "Jane Street": "jane_street",
 }
 
 FALLBACK_BATCH_COMPANIES = (
     "Citadel",
     "Citadel Securities",
     "D. E. Shaw",
-    "Jane Street",
     "Two Sigma",
 )
 
@@ -105,6 +107,18 @@ def test_point72_uses_its_published_greenhouse_board():
         "https://boards-api.greenhouse.io/v1/boards/point72/jobs?content=true"
     )
     assert company_matches("Point72", cfg)
+
+
+def test_jane_street_uses_its_own_first_party_inventory_adapter():
+    cfg = company("Jane Street")
+
+    assert cfg.ats == "jane_street"
+    assert cfg.source_url == (
+        "https://www.janestreet.com/join-jane-street/open-roles/"
+    )
+    assert not cfg.token
+    assert company_matches("Jane Street", cfg)
+    assert company_matches("Jane Street Capital", cfg)
 
 
 def test_millennium_uses_the_legacy_eightfold_board_linked_from_mlp_com():

@@ -35,6 +35,7 @@ def test_direct_ats_surface_is_unchanged():
             "google",
             "kpmg",
             "lam_research",
+            "jane_street",
             "lever",
             "mediatek",
             "oracle_hcm",

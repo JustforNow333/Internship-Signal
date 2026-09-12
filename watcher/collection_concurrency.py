@@ -73,6 +73,7 @@ DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "ibm": "www-api.ibm.com",
     "kpmg": "www.kpmguscareers.com",
     "lam_research": "careers.lamresearch.com",
+    "jane_street": "www.janestreet.com",
     "lever": "api.lever.co",
     "mediatek": "careers.mediatek.com",
     "ashby": "api.ashbyhq.com",

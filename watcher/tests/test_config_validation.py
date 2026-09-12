@@ -58,6 +58,10 @@ VALID_COMPANY_FIELDS = {
     "ibm": "",
     "google": "",
     "kpmg": "",
+    "jane_street": (
+        '    source_url: '
+        '"https://www.janestreet.com/join-jane-street/open-roles/"\n'
+    ),
     "lam_research": (
         '    source_url: "https://careers.lamresearch.com/careers"\n'
     ),

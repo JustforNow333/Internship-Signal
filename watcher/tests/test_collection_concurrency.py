@@ -69,6 +69,7 @@ from watcher.sources.huawei import HuaweiSource
 from watcher.sources.ibm import IbmSource
 from watcher.sources.kpmg import KpmgSource
 from watcher.sources.lam_research import LamResearchSource
+from watcher.sources.jane_street import INVENTORY_URL as JANE_STREET_INVENTORY_URL
 from watcher.sources.lever import LeverSource
 from watcher.sources.mediatek import MediaTekSource
 from watcher.sources.paylocity import PaylocitySource
@@ -411,6 +412,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "ibm": IbmSource.endpoint(start=0, results=100, page=1),
         "kpmg": KpmgSource.endpoint(),
         "lam_research": LamResearchSource.endpoint(),
+        "jane_street": JANE_STREET_INVENTORY_URL,
         "lever": LeverSource.endpoint("token"),
         "mediatek": MediaTekSource.endpoint(),
         "ashby": AshbySource.endpoint("token"),

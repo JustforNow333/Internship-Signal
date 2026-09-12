@@ -44,6 +44,7 @@ from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.huawei import HuaweiSource
 from watcher.sources.ibm import IbmSource
 from watcher.sources.icims import IcimsSource
+from watcher.sources.jane_street import JaneStreetSource
 from watcher.sources.kpmg import KpmgSource
 from watcher.sources.lam_research import LamResearchSource
 from watcher.sources.lever import LeverSource
@@ -104,6 +105,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("huawei", HuaweiSource, practical_partial=True),
     DirectSourceSpec("ibm", IbmSource),
     DirectSourceSpec("icims", IcimsSource),
+    DirectSourceSpec("jane_street", JaneStreetSource),
     DirectSourceSpec("kpmg", KpmgSource),
     DirectSourceSpec("lam_research", LamResearchSource),
     DirectSourceSpec("lever", LeverSource),

@@ -1,0 +1,26 @@
+[
+  {
+    "id": 8631912002,
+    "position": "Software Engineer",
+    "category": "Technology",
+    "availability": "Full-Time: Experienced",
+    "city": "NYC",
+    "overview": "<h3>About the Position</h3><p>Build systems that move markets.</p>",
+    "team": "Software Engineering",
+    "duration": "Permanent",
+    "min_salary": "250,000",
+    "max_salary": "300,000"
+  },
+  {
+    "id": 4273643002,
+    "position": "Software Engineer",
+    "category": "Technology",
+    "availability": "Summer Internship",
+    "city": "LDN",
+    "overview": "<p>Spend a summer writing OCaml.</p>",
+    "team": "Software Engineering",
+    "duration": "June-September",
+    "min_salary": null,
+    "max_salary": null
+  }
+]

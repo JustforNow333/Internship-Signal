@@ -332,6 +332,16 @@ def _validate_huawei_config(name: str, *, source_url: str) -> None:
         )
 
 
+def _validate_jane_street_config(name: str, *, source_url: str) -> None:
+    """Pin Jane Street to its official open-roles listing."""
+
+    if source_url != "https://www.janestreet.com/join-jane-street/open-roles/":
+        raise ConfigError(
+            f"{name}: jane_street source_url must be the official open-roles "
+            "listing"
+        )
+
+
 def _validate_lam_research_config(name: str, *, source_url: str) -> None:
     """Pin Lam Research to its unfiltered official global careers inventory."""
 

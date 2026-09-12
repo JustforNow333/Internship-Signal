@@ -345,6 +345,32 @@ Failed envelopes, non-complete status, malformed identities, unposted rows,
 duplicates/omissions, drift, premature termination, and safety-cap exhaustion
 fail closed.
 
+**Jane Street** publishes its whole inventory as one anonymous first-party
+document, `GET /jobs/main.json`: a flat array in which every posting carries a
+stable ten-digit integer `id`. Because there is no pagination, the adapter
+reuses the shared single-payload lifecycle rather than any traversal machinery.
+Completeness rests on a second first-party document,
+`/static/position-directories.json`, which independently lists the ids that
+have a rendered posting page; the two id sets must be treated as agreeing
+exactly, which is what shows `main.json` is the authoritative inventory and not
+a filtered view. Canonical posting URLs are
+`/join-jane-street/position/{id}/`, and the trailing slash is part of the
+contract because the slashless route answers with a 301.
+
+`/jobs/internships.json` is **not** an inventory and must never be enumerated
+as one: it carries no ids, uses a different schema, and holds only closed
+internship programmes. Use it exactly as the site does, as a closed-state
+overlay matched on position, location, and duration, which narrows a row's
+`active` flag without adding or removing postings.
+
+Require an array payload, a positive integer id, non-empty position, category,
+availability, city, team, duration, and overview, and a two-sided salary range
+when either bound is present. The inventory publishes no posting date, so none
+is claimed. Malformed or schema-invalid records, a row count that disagrees
+with the payload, duplicate ids or URLs, a non-closed or malformed overlay
+entry, a payload past the record safeguard, and an inventory that does not
+produce two consecutive matching snapshots all fail closed.
+
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
 **Eightfold legacy (Netflix only)** uses the anonymous

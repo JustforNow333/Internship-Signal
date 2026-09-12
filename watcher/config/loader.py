@@ -49,6 +49,7 @@ from .validation import (
     _validate_bytedance_careers_config,
     _validate_eightfold_config,
     _validate_ericsson_config,
+    _validate_jane_street_config,
     _validate_lam_research_config,
     _validate_mediatek_config,
     _validate_oracle_hcm_config,
@@ -184,6 +185,8 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         _validate_ericsson_config(name, source_url=source_url)
     elif ats == "huawei":
         _validate_huawei_config(name, source_url=source_url)
+    elif ats == "jane_street":
+        _validate_jane_street_config(name, source_url=source_url)
     elif ats == "lam_research":
         _validate_lam_research_config(name, source_url=source_url)
     elif ats == "mediatek":
