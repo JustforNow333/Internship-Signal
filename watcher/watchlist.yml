@@ -1960,6 +1960,15 @@ companies:
     source_url: "https://www.belvederetrading.com/our-positions"
     note: "Lever board linked by the official careers page"
 
+  - name: "Radix Trading"
+    ats: greenhouse
+    token: "radixuniversity"
+    greenhouse_tokens: ["radixuniversity", "radixexperienced"]
+    aliases: ["Radix Trading, LLC"]
+    alumni_match: ["radix trading", "radix trading llc"]
+    source_url: "https://www.radixtrading.com/"
+    note: "Union of the university and experienced Greenhouse boards linked by the official careers page"
+
   - name: "Headlands Technologies"
     ats: greenhouse
     token: "headlandstechnologiesllc"

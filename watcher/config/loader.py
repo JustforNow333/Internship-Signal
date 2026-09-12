@@ -44,6 +44,7 @@ from .validation import (
     _validate_default_terms_present,
     _validate_github_source_uniqueness,
     _validate_github_listing_sources_value,
+    _validate_greenhouse_config,
     _validate_huawei_config,
     _validate_icims_config,
     _validate_bytedance_careers_config,
@@ -121,8 +122,15 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
     name = str(entry.get("name") or "").strip()
     ats = str(entry.get("ats") or "").strip()
     token = str(entry.get("token") or "").strip()
+    greenhouse_tokens = _string_tuple(entry.get("greenhouse_tokens", ()))
     _validate_company_identity(name, ats)
     _validate_token_config(name, ats, token)
+    _validate_greenhouse_config(
+        name,
+        ats=ats,
+        token=token,
+        tokens=greenhouse_tokens,
+    )
     workday_site = str(entry.get("workday_site") or "").strip()
     workday_shard = str(entry.get("workday_shard") or "").strip()
     if "workday_detail_policy" in entry:
@@ -295,6 +303,7 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         name=name,
         ats=ats,
         token=token,
+        greenhouse_tokens=greenhouse_tokens,
         workday_shard=workday_shard,
         workday_site=workday_site,
         workday_detail_policy=workday_detail_policy,

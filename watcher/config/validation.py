@@ -91,6 +91,21 @@ def _validate_token_config(name: str, ats: str, token: str) -> None:
         raise ConfigError(f"{name}: {ats} entries require token")
 
 
+def _validate_greenhouse_config(
+    name: str,
+    *,
+    ats: str,
+    token: str,
+    tokens: tuple[str, ...],
+) -> None:
+    if ats != "greenhouse" or not tokens:
+        return
+    if len(tokens) != len(set(tokens)):
+        raise ConfigError(f"{name}: greenhouse_tokens must contain unique tokens")
+    if token not in tokens:
+        raise ConfigError(f"{name}: greenhouse_tokens must include token")
+
+
 def _validate_workday_config(
     name: str,
     *,

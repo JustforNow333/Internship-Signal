@@ -248,6 +248,7 @@ def collection_config_fingerprint(config: WatcherConfig) -> str:
                 "aliases": list(company.aliases),
                 "ats": company.ats,
                 "token": company.token,
+                "greenhouse_tokens": list(company.greenhouse_tokens),
                 "workday_shard": company.workday_shard,
                 "workday_site": company.workday_site,
                 "workday_detail_policy": company.workday_detail_policy,

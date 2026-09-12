@@ -130,6 +130,7 @@ class CompanyCfg:
     name: str
     ats: str = ""
     token: str = ""
+    greenhouse_tokens: Sequence[str] = field(default_factory=tuple)
     workday_shard: str = ""
     workday_site: str = ""
     workday_detail_policy: str = WORKDAY_DETAIL_INTERNSHIP

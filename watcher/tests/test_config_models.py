@@ -27,6 +27,7 @@ EXPECTED_FIELDS = {
         ("name", "<required>"),
         ("ats", ""),
         ("token", ""),
+        ("greenhouse_tokens", "<factory:tuple>"),
         ("workday_shard", ""),
         ("workday_site", ""),
         ("workday_detail_policy", "internship_candidates"),

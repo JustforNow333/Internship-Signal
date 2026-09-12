@@ -1,6 +1,6 @@
 """Third finance-employer expansion batch: reuse-first source contracts.
 
-Five companies reuse registered direct adapters. The three audited companies
+Six companies reuse registered direct adapters. The two audited companies
 without a completeness-safe direct configuration or a current feed match stay
 out of the watchlist rather than becoming structurally inert ``github_only``
 entries.
@@ -44,6 +44,11 @@ DIRECT_BATCH_CONFIG = {
         "belvederetrading",
         "https://www.belvederetrading.com/our-positions",
     ),
+    "Radix Trading": (
+        "greenhouse",
+        "radixuniversity",
+        "https://www.radixtrading.com/",
+    ),
     "Headlands Technologies": (
         "greenhouse",
         "headlandstechnologiesllc",
@@ -63,9 +68,10 @@ DIRECT_BATCH_CONFIG = {
 
 UNCOVERED_BATCH_ALIASES = {
     "Wolverine Trading": ("Wolverine", "Wolverine Holdings"),
-    "Radix Trading": ("Radix Trading, LLC",),
     "Quantlab": ("Quantlab Financial", "Quantlab Financial, LLC"),
 }
+
+RADIX_GREENHOUSE_TOKENS = ("radixuniversity", "radixexperienced")
 
 # These labels are currently published by the configured feeds. Direct source
 # precedence remains primary, but the aliases preserve useful backstop matches.
@@ -126,6 +132,17 @@ def test_greenhouse_config_builds_the_published_board_endpoint(name, token):
         f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
     )
     assert company_matches(name, company(name))
+
+
+def test_radix_config_composes_both_official_greenhouse_boards():
+    cfg = company("Radix Trading")
+
+    assert tuple(cfg.greenhouse_tokens) == RADIX_GREENHOUSE_TOKENS
+    assert [GreenhouseSource.endpoint(token) for token in cfg.greenhouse_tokens] == [
+        "https://boards-api.greenhouse.io/v1/boards/radixuniversity/jobs?content=true",
+        "https://boards-api.greenhouse.io/v1/boards/radixexperienced/jobs?content=true",
+    ]
+    assert company_matches("Radix Trading, LLC", cfg)
 
 
 def test_belvedere_config_builds_the_published_lever_endpoint():
