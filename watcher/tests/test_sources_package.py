@@ -58,6 +58,7 @@ EXPORT_OWNERS = {
     "SourceSchemaError": "watcher.sources.contracts",
     "WorkableSource": "watcher.sources.workable",
     "WorkdaySource": "watcher.sources.workday",
+    "WolverineSource": "watcher.sources.wolverine",
     "make_row": "watcher.sources.rows",
 }
 
@@ -105,6 +106,7 @@ EXPECTED_ALL = (
     "SourceSchemaError",
     "WorkableSource",
     "WorkdaySource",
+    "WolverineSource",
     "make_row",
 )
 

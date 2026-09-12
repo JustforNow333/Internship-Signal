@@ -83,6 +83,7 @@ DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "smartrecruiters": "api.smartrecruiters.com",
     "paylocity": "recruiting.paylocity.com",
     "workable": "apply.workable.com",
+    "wolverine": "careers.wolve.com",
 }
 
 

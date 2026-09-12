@@ -1,7 +1,7 @@
 """Third finance-employer expansion batch: reuse-first source contracts.
 
-Six companies reuse registered direct adapters. The two audited companies
-without a completeness-safe direct configuration or a current feed match stay
+Seven companies reuse registered direct adapters. The one audited company
+without a completeness-safe direct configuration or a current feed match stays
 out of the watchlist rather than becoming structurally inert ``github_only``
 entries.
 """
@@ -34,6 +34,11 @@ AUDITED_BATCH_COMPANIES = (
 )
 
 DIRECT_BATCH_CONFIG = {
+    "Wolverine Trading": (
+        "wolverine",
+        "",
+        "https://www.wolve.com/open-positions",
+    ),
     "Old Mission Capital": (
         "greenhouse",
         "oldmissioncapital",
@@ -67,7 +72,6 @@ DIRECT_BATCH_CONFIG = {
 }
 
 UNCOVERED_BATCH_ALIASES = {
-    "Wolverine Trading": ("Wolverine", "Wolverine Holdings"),
     "Quantlab": ("Quantlab Financial", "Quantlab Financial, LLC"),
 }
 

@@ -64,6 +64,7 @@ from .validation import (
     _validate_token_config,
     _validate_unique_company_names,
     _validate_watchlist_sections,
+    _validate_wolverine_config,
     _validate_workday_config,
     _validated_github_listing_urls,
     _validated_github_source_fields,
@@ -201,6 +202,8 @@ def _build_company(entry: dict, default_terms: tuple[str, ...]) -> CompanyCfg:
         _validate_mediatek_config(name, source_url=source_url)
     elif ats == "siemens":
         _validate_siemens_config(name, source_url=source_url)
+    elif ats == "wolverine":
+        _validate_wolverine_config(name, source_url=source_url)
     icims_variant = str(entry.get("icims_variant") or "").strip().casefold()
     icims_host = str(entry.get("icims_host") or "").strip().casefold()
     icims_portals = _string_tuple(entry.get("icims_portals", ()))

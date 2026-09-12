@@ -61,6 +61,7 @@ from watcher.sources.taleo_sourcing import TaleoSourcingSource
 from watcher.sources.ukg import UkgSource
 from watcher.sources.workable import WorkableSource
 from watcher.sources.workday import WorkdayPacer, WorkdaySource
+from watcher.sources.wolverine import WolverineSource
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("ukg", UkgSource),
     DirectSourceSpec("workable", WorkableSource),
     DirectSourceSpec("workday", WorkdaySource, needs_workday_pacer=True),
+    DirectSourceSpec("wolverine", WolverineSource),
 )
 
 DIRECT_ATS: frozenset[str] = frozenset(spec.ats for spec in DIRECT_SOURCE_SPECS)

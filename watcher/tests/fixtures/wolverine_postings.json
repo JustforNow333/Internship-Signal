@@ -1,0 +1,92 @@
+{
+  "data": [
+    {
+      "id": "101",
+      "benefits": "<div>Health insurance and retirement benefits.</div>",
+      "benefits_header": "Benefits",
+      "compensation": "$100,000 - $150,000 / year",
+      "compensation_currency": "USD",
+      "compensation_frequency": "year",
+      "compensation_maximum": 150000.0,
+      "compensation_minimum": 100000.0,
+      "compensation_visible": true,
+      "deadline_at": null,
+      "description": "<div>Build latency-sensitive trading systems.</div>",
+      "employment_type": "full_time",
+      "employment_type_text": "Full Time",
+      "job": {
+        "id": "1001",
+        "requisition_id": "RID-0101",
+        "department": {"id": "2001", "name": "Technology"},
+        "division": {"id": "3001", "name": "Wolverine Trading"},
+        "structure_custom_group_one": {
+          "id": "4001",
+          "name": "Engineering",
+          "title": "Sub-Department"
+        }
+      },
+      "key_responsibilities": "<div>Design and test reliable software.</div>",
+      "key_responsibilities_header": "Key Responsibilities",
+      "location": {
+        "id": "5001",
+        "city": "Chicago",
+        "name": "Chicago, IL",
+        "postal_code": "60604",
+        "province": "Illinois",
+        "street_address": "175 W. Jackson Blvd."
+      },
+      "path": "/en/postings/11111111-1111-4111-8111-111111111111",
+      "reporting_to": null,
+      "skills_knowledge_expertise": "<div>Strong C++ and systems knowledge.</div>",
+      "skills_knowledge_expertise_header": "Skills, Knowledge and Expertise",
+      "title": "C++ Software Engineer",
+      "url": "https://careers.wolve.com/en/postings/11111111-1111-4111-8111-111111111111",
+      "workplace_type": "onsite",
+      "workplace_type_text": "Onsite"
+    },
+    {
+      "id": "202",
+      "benefits": "<div>Health insurance and retirement benefits.</div>",
+      "benefits_header": "Benefits",
+      "compensation": null,
+      "compensation_currency": null,
+      "compensation_frequency": null,
+      "compensation_maximum": null,
+      "compensation_minimum": null,
+      "compensation_visible": false,
+      "deadline_at": null,
+      "description": "<div>Research quantitative trading strategies.</div>",
+      "employment_type": "full_time",
+      "employment_type_text": "Full Time",
+      "job": {
+        "id": "1002",
+        "requisition_id": "RID-0202",
+        "department": {"id": "2002", "name": "Trading"},
+        "division": {"id": "3001", "name": "Wolverine Trading"},
+        "structure_custom_group_one": {
+          "id": "4002",
+          "name": "Quantitative Trading",
+          "title": "Sub-Department"
+        }
+      },
+      "key_responsibilities": "<div>Develop and evaluate models.</div>",
+      "key_responsibilities_header": "Key Responsibilities",
+      "location": {
+        "id": "5001",
+        "city": "Chicago",
+        "name": "Chicago, IL",
+        "postal_code": "60604",
+        "province": "Illinois",
+        "street_address": "175 W. Jackson Blvd."
+      },
+      "path": "/en/postings/22222222-2222-4222-8222-222222222222",
+      "reporting_to": "",
+      "skills_knowledge_expertise": "<div>Probability and programming experience.</div>",
+      "skills_knowledge_expertise_header": "Skills, Knowledge and Expertise",
+      "title": "Quantitative Trader",
+      "url": "https://careers.wolve.com/en/postings/22222222-2222-4222-8222-222222222222",
+      "workplace_type": "hybrid",
+      "workplace_type_text": "Hybrid"
+    }
+  ]
+}

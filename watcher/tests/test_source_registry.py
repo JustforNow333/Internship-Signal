@@ -50,6 +50,7 @@ def test_direct_ats_surface_is_unchanged():
             "ukg",
             "workable",
             "workday",
+            "wolverine",
         }
     )
 

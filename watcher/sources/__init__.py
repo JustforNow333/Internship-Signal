@@ -51,6 +51,7 @@ _EXPORT_MODULES = {
     "SourceSchemaError": "watcher.sources.contracts",
     "WorkableSource": "watcher.sources.workable",
     "WorkdaySource": "watcher.sources.workday",
+    "WolverineSource": "watcher.sources.wolverine",
     "make_row": "watcher.sources.rows",
 }
 
@@ -98,6 +99,7 @@ __all__ = [
     "SourceSchemaError",
     "WorkableSource",
     "WorkdaySource",
+    "WolverineSource",
     "make_row",
 ]
 

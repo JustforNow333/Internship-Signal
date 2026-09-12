@@ -1944,6 +1944,13 @@ companies:
     source_url: "https://tower-research.com/open-positions/"
     note: "Greenhouse board published by the official open-positions embed configuration"
 
+  - name: "Wolverine Trading"
+    ats: wolverine
+    aliases: ["Wolverine", "Wolverine Holdings", "Wolverine Trading, LLC"]
+    alumni_match: ["wolverine trading", "wolverine", "wolverine holdings"]
+    source_url: "https://www.wolve.com/open-positions"
+    note: "Complete Pinpoint inventory cross-checked against the official unpaginated board metadata and sitemap"
+
   - name: "Old Mission Capital"
     ats: greenhouse
     token: "oldmissioncapital"

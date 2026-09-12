@@ -119,6 +119,9 @@ VALID_COMPANY_FIELDS = {
         'e33a1c2e-8d7a-4008-851e-f7bd1d7bf788/"\n'
     ),
     "workable": '    token: "example"\n',
+    "wolverine": (
+        '    source_url: "https://www.wolve.com/open-positions"\n'
+    ),
     "workday": (
         '    token: "example"\n'
         '    workday_shard: "wd1"\n'
@@ -460,6 +463,7 @@ def test_loader_calls_validation_owner_without_duplicating_rules():
         "_validate_token_config",
         "_validate_unique_company_names",
         "_validate_watchlist_sections",
+        "_validate_wolverine_config",
         "_validate_workday_config",
         "_validated_github_listing_urls",
         "_validated_github_source_fields",

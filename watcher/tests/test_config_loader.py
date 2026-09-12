@@ -57,6 +57,7 @@ def test_loader_reuses_validation_owner_objects():
         "_validate_token_config",
         "_validate_unique_company_names",
         "_validate_watchlist_sections",
+        "_validate_wolverine_config",
         "_validate_workday_config",
         "_validated_github_listing_urls",
         "_validated_github_source_fields",

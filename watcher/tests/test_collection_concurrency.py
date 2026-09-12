@@ -84,6 +84,7 @@ from watcher.sources.workday import (
     WorkdayStartRecord,
     summarize_workday_starts,
 )
+from watcher.sources.wolverine import INVENTORY_URL as WOLVERINE_INVENTORY_URL
 
 CONCURRENT = CollectionConcurrencyCfg(
     mode=COLLECTION_MODE_CONCURRENT,
@@ -430,6 +431,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
             )
         ),
         "workable": WorkableSource.endpoint("token"),
+        "wolverine": WOLVERINE_INVENTORY_URL,
     }
 
     assert {

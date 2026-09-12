@@ -387,6 +387,15 @@ def _validate_siemens_config(name: str, *, source_url: str) -> None:
         )
 
 
+def _validate_wolverine_config(name: str, *, source_url: str) -> None:
+    """Pin Wolverine to its corporate-authorized public openings surface."""
+
+    if source_url != "https://www.wolve.com/open-positions":
+        raise ConfigError(
+            f"{name}: wolverine source_url must be the official open-positions listing"
+        )
+
+
 def _validate_icims_config(
     name: str,
     *,
