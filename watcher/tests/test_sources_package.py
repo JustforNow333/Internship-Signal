@@ -106,44 +106,6 @@ EXPECTED_ALL = (
     "make_row",
 )
 
-ADAPTER_MODULES = frozenset(
-    {
-        "watcher.sources.alibaba",
-        "watcher.sources.atlassian",
-        "watcher.sources.apple",
-        "watcher.sources.ansys",
-        "watcher.sources.ashby",
-        "watcher.sources.bain",
-        "watcher.sources.bechtel",
-        "watcher.sources.bloomberg",
-        "watcher.sources.dassault",
-        "watcher.sources.brassring",
-        "watcher.sources.epic",
-        "watcher.sources.eightfold",
-        "watcher.sources.ericsson",
-        "watcher.sources.github_listings",
-        "watcher.sources.github_markdown_table",
-        "watcher.sources.greenhouse",
-        "watcher.sources.huawei",
-        "watcher.sources.ibm",
-        "watcher.sources.icims",
-        "watcher.sources.lam_research",
-        "watcher.sources.lever",
-        "watcher.sources.mediatek",
-        "watcher.sources.oracle_hcm",
-        "watcher.sources.paylocity",
-        "watcher.sources.sea",
-        "watcher.sources.shopify",
-        "watcher.sources.smartrecruiters",
-        "watcher.sources.successfactors",
-        "watcher.sources.talentbrew",
-        "watcher.sources.taleo_sourcing",
-        "watcher.sources.ukg",
-        "watcher.sources.workable",
-        "watcher.sources.workday",
-    }
-)
-
 SUPPORT_SUBMODULES = (
     "base",
     "contracts",
@@ -155,6 +117,18 @@ SUPPORT_SUBMODULES = (
     "sanitize",
     "transport",
 )
+
+# Shared owner modules. A few of them (contracts, diagnostics, rows) own
+# documented exports too, so they are subtracted from EXPORT_OWNERS below
+# rather than being treated as adapters.
+SUPPORT_MODULES = frozenset(
+    f"watcher.sources.{short_name}" for short_name in SUPPORT_SUBMODULES
+)
+
+# EXPORT_OWNERS above is the documented package surface, so deriving the
+# adapter modules from it keeps the lazy-import isolation tests from falling
+# behind new exports the way a hand-maintained set does.
+ADAPTER_MODULES = frozenset(EXPORT_OWNERS.values()) - SUPPORT_MODULES
 
 
 def _run_clean(code: str, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -237,6 +211,34 @@ print(json.dumps(source_modules))
     loaded = set(json.loads(result.stdout))
     assert loaded == expected_source_modules
     assert loaded.isdisjoint(ADAPTER_MODULES)
+
+
+def test_lazy_import_adapter_set_covers_every_documented_adapter_export():
+    """A new adapter export must not escape the lazy-import isolation tests.
+
+    The previous hand-maintained set had drifted behind EXPORT_OWNERS, leaving
+    four exported adapters out of the isolation assertions entirely.
+    """
+
+    support_owners = {
+        owner for owner in EXPORT_OWNERS.values() if owner in SUPPORT_MODULES
+    }
+    adapter_owners = set(EXPORT_OWNERS.values()) - support_owners
+
+    assert adapter_owners, "the package must document adapter exports"
+    # Every documented adapter export is covered by the isolation tests.
+    assert adapter_owners == set(ADAPTER_MODULES)
+    # Support owners are deliberately excluded and never counted as adapters.
+    assert ADAPTER_MODULES.isdisjoint(SUPPORT_MODULES)
+    assert support_owners == {
+        "watcher.sources.contracts",
+        "watcher.sources.diagnostics",
+        "watcher.sources.rows",
+    }
+    # The documented surface and its owner mapping stay in step, so an export
+    # cannot be added to one without the other.
+    assert set(EXPORT_OWNERS) == set(EXPECTED_ALL)
+    assert all(name.startswith("watcher.sources.") for name in ADAPTER_MODULES)
 
 
 def test_explicit_adapter_import_loads_only_that_adapter():
