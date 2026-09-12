@@ -61,6 +61,9 @@ VALID_COMPANY_FIELDS = {
     "lam_research": (
         '    source_url: "https://careers.lamresearch.com/careers"\n'
     ),
+    "mediatek": (
+        '    source_url: "https://careers.mediatek.com/en/jobs"\n'
+    ),
     "icims": (
         "    icims_variant: jibe_json\n"
         '    icims_host: "jobs.example.test"\n'

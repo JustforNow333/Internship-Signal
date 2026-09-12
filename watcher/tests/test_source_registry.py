@@ -36,6 +36,7 @@ def test_direct_ats_surface_is_unchanged():
             "kpmg",
             "lam_research",
             "lever",
+            "mediatek",
             "oracle_hcm",
             "paylocity",
             "sea",

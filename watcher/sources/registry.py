@@ -39,6 +39,7 @@ from watcher.sources.icims import IcimsSource
 from watcher.sources.kpmg import KpmgSource
 from watcher.sources.lam_research import LamResearchSource
 from watcher.sources.lever import LeverSource
+from watcher.sources.mediatek import MediaTekSource
 from watcher.sources.oracle_hcm import OracleHcmSource
 from watcher.sources.paylocity import PaylocitySource
 from watcher.sources.sea import SeaSource
@@ -98,6 +99,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("kpmg", KpmgSource),
     DirectSourceSpec("lam_research", LamResearchSource),
     DirectSourceSpec("lever", LeverSource),
+    DirectSourceSpec("mediatek", MediaTekSource),
     DirectSourceSpec("oracle_hcm", OracleHcmSource),
     DirectSourceSpec("paylocity", PaylocitySource),
     DirectSourceSpec("sea", SeaSource),

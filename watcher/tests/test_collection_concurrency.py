@@ -70,6 +70,7 @@ from watcher.sources.ibm import IbmSource
 from watcher.sources.kpmg import KpmgSource
 from watcher.sources.lam_research import LamResearchSource
 from watcher.sources.lever import LeverSource
+from watcher.sources.mediatek import MediaTekSource
 from watcher.sources.paylocity import PaylocitySource
 from watcher.sources.sea import SeaSource
 from watcher.sources.shopify import ShopifySource
@@ -411,6 +412,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "kpmg": KpmgSource.endpoint(),
         "lam_research": LamResearchSource.endpoint(),
         "lever": LeverSource.endpoint("token"),
+        "mediatek": MediaTekSource.endpoint(),
         "ashby": AshbySource.endpoint("token"),
         "sea": SeaSource.endpoint(),
         "shopify": ShopifySource.endpoint(),

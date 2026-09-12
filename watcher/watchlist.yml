@@ -1822,3 +1822,10 @@ companies:
     alumni_match: ["lam research"]
     source_url: "https://careers.lamresearch.com/careers"
     note: "Official global careers inventory; exact-count PCSX pagination with two matching complete snapshots"
+
+  - name: "MediaTek"
+    ats: mediatek
+    aliases: ["MediaTek Inc.", "聯發科技"]
+    alumni_match: ["mediatek"]
+    source_url: "https://careers.mediatek.com/en/jobs"
+    note: "Official global careers inventory; exact-count tRPC pagination with two matching complete snapshots"

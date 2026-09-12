@@ -342,6 +342,16 @@ def _validate_lam_research_config(name: str, *, source_url: str) -> None:
         )
 
 
+def _validate_mediatek_config(name: str, *, source_url: str) -> None:
+    """Pin MediaTek to its unfiltered official global careers inventory."""
+
+    if source_url != "https://careers.mediatek.com/en/jobs":
+        raise ConfigError(
+            f"{name}: mediatek source_url must be the official global careers "
+            "listing"
+        )
+
+
 def _validate_siemens_config(name: str, *, source_url: str) -> None:
     """Pin Siemens to its official, intentionally partial Internship search."""
 

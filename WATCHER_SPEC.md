@@ -321,6 +321,30 @@ filters, fuzzy search, malformed identities, duplicates/omissions, drift,
 premature termination, retries exhausted after throttling, and safety-cap
 exhaustion fail closed; never rotate identity or bypass tenant authorization.
 
+**MediaTek** uses its own first-party careers portal and stays a separate
+adapter because the portal's tRPC input schema, locale enum, and property
+vocabulary are unique to it. The portal's published frontend bundle calls the
+anonymous `GET /api/trpc/job.getJobs` query; enumerate only that unfiltered
+request with locale `en_US`, empty `jobQueryInfo` and `filters`, `publishedDate`
+/`DESC` sort, one-based `page`, and the fixed hundred-row `limit`. The three
+published locales translate one shared inventory rather than partitioning it,
+so exactly one locale is enumerated and locale is never treated as scope.
+Require the explicit `status` of `complete` with no `message`, a stable exact
+`total_items`, `total_pages` matching that total at the fixed page size, an
+echoed `current_page`, exact page arithmetic, unique fifteen-character entity
+prefixed posting IDs, `posted` status, canonical `/en/jobs/{id}` URLs, an empty
+page immediately past the last one, and two consecutive complete snapshots
+agreeing on total and identity set. Title, description, published date, and
+location are required; program is optional because the live inventory publishes
+a legitimately empty one. The portal stores each property with the human label
+and the numeric code on opposite sides per property, so read the human value by
+shape rather than by key name. Note the portal's HTML routes 307-redirect once
+to set `NEXT_LOCALE` before serving; the JSON query itself needs no cookie, and
+the adapter neither rotates identity nor works around any access control.
+Failed envelopes, non-complete status, malformed identities, unposted rows,
+duplicates/omissions, drift, premature termination, and safety-cap exhaustion
+fail closed.
+
 These are clean and cover a large fraction of mid-size tech + funded startups.
 
 **Eightfold legacy (Netflix only)** uses the anonymous

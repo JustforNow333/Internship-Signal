@@ -74,6 +74,7 @@ DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "kpmg": "www.kpmguscareers.com",
     "lam_research": "careers.lamresearch.com",
     "lever": "api.lever.co",
+    "mediatek": "careers.mediatek.com",
     "ashby": "api.ashbyhq.com",
     "sea": "career.sea.com",
     "shopify": "www.shopify.com",
