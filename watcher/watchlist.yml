@@ -1943,3 +1943,43 @@ companies:
     alumni_match: ["tower research capital", "tower research"]
     source_url: "https://tower-research.com/open-positions/"
     note: "Greenhouse board published by the official open-positions embed configuration"
+
+  - name: "Old Mission Capital"
+    ats: greenhouse
+    token: "oldmissioncapital"
+    aliases: ["Old Mission"]
+    alumni_match: ["old mission capital", "old mission"]
+    source_url: "https://www.oldmissioncapital.com/careers/"
+    note: "Greenhouse board embedded by the official careers page"
+
+  - name: "Belvedere Trading"
+    ats: lever
+    token: "belvederetrading"
+    aliases: ["Belvedere Trading, LLC"]
+    alumni_match: ["belvedere trading", "belvedere trading llc"]
+    source_url: "https://www.belvederetrading.com/our-positions"
+    note: "Lever board linked by the official careers page"
+
+  - name: "Headlands Technologies"
+    ats: greenhouse
+    token: "headlandstechnologiesllc"
+    aliases: ["Headlands Technologies LLC", "Headlands Tech"]
+    alumni_match: ["headlands technologies", "headlands tech"]
+    source_url: "https://www.headlandstech.com/careers/"
+    note: "Greenhouse board linked by the official careers page"
+
+  - name: "PDT Partners"
+    ats: greenhouse
+    token: "pdtpartners"
+    aliases: ["PDT"]
+    alumni_match: ["pdt partners", "pdt"]
+    source_url: "https://pdtpartners.com/careers"
+    note: "Greenhouse postings linked individually by the official careers page"
+
+  - name: "XTX Markets"
+    ats: greenhouse
+    token: "xtxmarketstechnologies"
+    aliases: ["XTX"]
+    alumni_match: ["xtx markets", "xtx"]
+    source_url: "https://www.xtxmarkets.com/careers/"
+    note: "Greenhouse board linked by the official careers page"
