@@ -1,12 +1,20 @@
 """Canonical registry of direct ATS source adapters.
 
-This module is the single registration point for direct sources. To add one,
-append a :class:`DirectSourceSpec` to :data:`DIRECT_SOURCE_SPECS` and nothing
-else:
+:data:`DIRECT_SOURCE_SPECS` is the single source of truth for which direct ATS
+values exist and how their adapters are constructed. Nothing else may define
+direct-source membership, and appending a :class:`DirectSourceSpec` is the only
+change the two consumers that derive from this registry need:
 
 * ``watcher.config.validation`` derives the accepted direct watchlist ``ats``
   values from :data:`DIRECT_ATS`.
 * ``watcher/run.py`` builds runtime adapters with :func:`build_direct_sources`.
+
+Registering a spec is not, however, the whole job of adding a source. Depending
+on the adapter, integrating one may also require a package export in
+``watcher/sources/__init__.py``, per-ATS config fields and validation in
+``watcher/config/``, an origin host in ``watcher/collection_concurrency.py``,
+a watchlist entry, and adapter plus registry-surface tests. Register the spec
+here first, then wire up whichever of those the source actually needs.
 
 GitHub backstop feeds are configured per watchlist entry rather than per ATS,
 so they are deliberately not registered here.
