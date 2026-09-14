@@ -2062,3 +2062,50 @@ companies:
     alumni_match: ["marshall wace", "marshall wace asset management"]
     source_url: "https://www.mwam.com/join-us/"
     note: "Multiple first-party Greenhouse programme boards prevent a completeness-safe single config; verified Simplify backstop"
+
+  - name: "Virtu Financial"
+    ats: greenhouse
+    token: "virtu"
+    aliases: ["Virtu"]
+    alumni_match: ["virtu financial", "virtu"]
+    source_url: "https://www.virtu.com/careers/"
+    note: "Greenhouse board embedded by the official careers page"
+
+  - name: "Bridgewater Associates"
+    ats: greenhouse
+    token: "bridgewater89"
+    aliases: ["Bridgewater"]
+    alumni_match: ["bridgewater associates", "bridgewater"]
+    source_url: "https://www.bridgewater.com/working-at-bridgewater/job-openings"
+    note: "Greenhouse inventory published by the official first-party job-board endpoint"
+
+  - name: "Schonfeld Strategic Advisors"
+    ats: greenhouse
+    token: "schonfeld"
+    aliases: ["Schonfeld"]
+    alumni_match: ["schonfeld strategic advisors", "schonfeld"]
+    source_url: "https://www.schonfeld.com/careers/opportunities/"
+    note: "Greenhouse postings linked individually by the official opportunities page"
+
+  - name: "WorldQuant"
+    ats: greenhouse
+    token: "worldquant"
+    alumni_match: ["worldquant"]
+    source_url: "https://www.worldquant.com/career-listing/"
+    note: "Greenhouse application board published by the official career listing"
+
+  - name: "Aquatic Capital Management"
+    ats: greenhouse
+    token: "aquaticcapitalmanagement"
+    aliases: ["Aquatic"]
+    alumni_match: ["aquatic capital management", "aquatic"]
+    source_url: "https://aquatic.com/"
+    note: "Greenhouse board linked by the official careers section"
+
+  - name: "The Voleon Group"
+    ats: ashby
+    token: "voleon"
+    aliases: ["Voleon", "Voleon Capital Management"]
+    alumni_match: ["the voleon group", "voleon", "voleon capital management"]
+    source_url: "https://voleon.com/jobs/"
+    note: "Ashby board embedded by the official jobs page"
