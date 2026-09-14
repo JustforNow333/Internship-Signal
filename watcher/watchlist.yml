@@ -1999,3 +1999,66 @@ companies:
     alumni_match: ["xtx markets", "xtx"]
     source_url: "https://www.xtxmarkets.com/careers/"
     note: "Greenhouse board linked by the official careers page"
+
+  - name: "G-Research"
+    ats: workday
+    token: "gresearch"
+    workday_shard: "wd103"
+    workday_site: "G-Research"
+    alumni_match: ["g-research", "g research"]
+    source_url: "https://www.gresearch.com/vacancies/"
+    note: "Complete Workday inventory published by every current first-party vacancy detail; the duplicate corporate listing maps to one requisition"
+
+  - name: "Man Group"
+    ats: greenhouse
+    token: "mangroup"
+    aliases: ["Man Group plc"]
+    alumni_match: ["man group"]
+    source_url: "https://www.man.com/careers"
+    note: "Greenhouse board linked by the official careers page"
+
+  - name: "Qube Research & Technologies"
+    ats: greenhouse
+    token: "quberesearchandtechnologies"
+    aliases: ["QRT"]
+    alumni_match: ["qube research and technologies", "qrt"]
+    source_url: "https://www.qube-rt.com/careers/"
+    note: "Greenhouse board endpoint published by the official careers frontend"
+
+  - name: "Squarepoint Capital"
+    ats: greenhouse
+    token: "squarepointcapital"
+    aliases: ["Squarepoint"]
+    alumni_match: ["squarepoint capital", "squarepoint"]
+    source_url: "https://www.squarepoint-capital.com/open-opportunities"
+    note: "Greenhouse board endpoint published by the official opportunities frontend"
+
+  - name: "Maven Securities"
+    ats: greenhouse
+    token: "mavensecuritiesholdingltd"
+    aliases: ["Maven"]
+    alumni_match: ["maven securities", "maven"]
+    source_url: "https://www.mavensecurities.com/jobs/"
+    note: "Greenhouse board embedded by the official jobs page"
+
+  - name: "Flow Traders"
+    ats: greenhouse
+    token: "flowtraders"
+    alumni_match: ["flow traders"]
+    source_url: "https://www.flowtraders.com/careers/job-search/"
+    note: "Greenhouse board endpoint published by the official job-search frontend"
+
+  - name: "Mako Trading"
+    ats: greenhouse
+    token: "mako"
+    aliases: ["Mako"]
+    alumni_match: ["mako trading", "mako"]
+    source_url: "https://www.mako.com/opportunities"
+    note: "Greenhouse board embedded by the official opportunities page"
+
+  - name: "Marshall Wace"
+    ats: github_only
+    aliases: ["Marshall Wace Asset Management"]
+    alumni_match: ["marshall wace", "marshall wace asset management"]
+    source_url: "https://www.mwam.com/join-us/"
+    note: "Multiple first-party Greenhouse programme boards prevent a completeness-safe single config; verified Simplify backstop"
