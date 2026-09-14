@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from watcher.company_matching import company_matching_key, company_matches
+from watcher.company_matching import company_matching_key
 from watcher.config import load_watchlist
 from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.registry import DIRECT_ATS, build_direct_sources
@@ -51,6 +51,10 @@ GREENHOUSE_BATCH_CONFIG = {
         "mako",
         "https://www.mako.com/opportunities",
     ),
+    "Marshall Wace": (
+        "marshallwace",
+        "https://www.mwam.com/join-us/",
+    ),
 }
 
 WORKDAY_BATCH_CONFIG = {
@@ -62,13 +66,12 @@ WORKDAY_BATCH_CONFIG = {
     ),
 }
 
-FALLBACK_BATCH_CONFIG = {
-    "Marshall Wace": (
-        "https://www.mwam.com/join-us/",
-        "Marshall Wace",
-        "simplify",
-    ),
-}
+MARSHALL_WACE_GREENHOUSE_TOKENS = (
+    "marshallwace",
+    "mw-tech-grad",
+    "mwinternshipprogram",
+    "mw-early-career-juniors",
+)
 
 
 @pytest.fixture(scope="module")
@@ -87,7 +90,6 @@ def test_batch_is_disjoint_from_the_tech_universe_and_additive(watchlist):
     assert (
         set(GREENHOUSE_BATCH_CONFIG)
         | set(WORKDAY_BATCH_CONFIG)
-        | set(FALLBACK_BATCH_CONFIG)
     ) == set(
         AUDITED_BATCH_COMPANIES
     )
@@ -116,6 +118,16 @@ def test_direct_companies_use_the_published_greenhouse_board(
     )
 
 
+def test_marshall_wace_composes_the_published_employment_boards(watchlist):
+    cfg = company(watchlist, "Marshall Wace")
+
+    assert tuple(cfg.greenhouse_tokens) == MARSHALL_WACE_GREENHOUSE_TOKENS
+    assert [GreenhouseSource.endpoint(token) for token in cfg.greenhouse_tokens] == [
+        f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
+        for token in MARSHALL_WACE_GREENHOUSE_TOKENS
+    ]
+
+
 @pytest.mark.parametrize(
     ("name", "token", "shard", "site", "source_url"),
     [
@@ -139,26 +151,6 @@ def test_workday_companies_use_the_published_board(
         f"https://{token}.{shard}.myworkdayjobs.com/wday/cxs/"
         f"{token}/{site}/jobs"
     )
-
-
-@pytest.mark.parametrize(
-    ("name", "source_url", "feed_label", "feed_name"),
-    [
-        (name, *values)
-        for name, values in sorted(FALLBACK_BATCH_CONFIG.items())
-    ],
-)
-def test_fallback_companies_have_a_current_usable_feed_label(
-    watchlist, name, source_url, feed_label, feed_name
-):
-    cfg = company(watchlist, name)
-
-    assert cfg.ats == "github_only"
-    assert cfg.source_url == source_url
-    assert company_matches(feed_label, cfg)
-    assert feed_name in {
-        source.name for source in watchlist.effective_github_listing_sources()
-    }
 
 
 def test_batch_names_and_aliases_do_not_collide_with_the_watchlist(watchlist):

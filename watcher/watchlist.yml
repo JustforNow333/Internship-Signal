@@ -2057,11 +2057,13 @@ companies:
     note: "Greenhouse board embedded by the official opportunities page"
 
   - name: "Marshall Wace"
-    ats: github_only
+    ats: greenhouse
+    token: "marshallwace"
+    greenhouse_tokens: ["marshallwace", "mw-tech-grad", "mwinternshipprogram", "mw-early-career-juniors"]
     aliases: ["Marshall Wace Asset Management"]
     alumni_match: ["marshall wace", "marshall wace asset management"]
     source_url: "https://www.mwam.com/join-us/"
-    note: "Multiple first-party Greenhouse programme boards prevent a completeness-safe single config; verified Simplify backstop"
+    note: "Union of the professional, graduate, internship, and early-career Greenhouse boards published by the official careers pages; the separate events board is excluded"
 
   - name: "Virtu Financial"
     ats: greenhouse
