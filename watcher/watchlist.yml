@@ -2283,3 +2283,22 @@ companies:
     aliases: ["Lowes", "Lowe's Companies"]
     alumni_match: ["lowe's", "lowes"]
     note: "official careers inventory uses an unsupported Phenom contract; usable Simplify backstop only"
+
+  - name: "Chewy"
+    ats: workday
+    token: "chewy"
+    workday_shard: "wd5"
+    workday_site: "External"
+    workday_host_variant: site
+    aliases: ["Chewy.com"]
+    alumni_match: ["chewy", "chewy.com"]
+    source_url: "https://wd5.myworkdaysite.com/recruiting/chewy/External"
+    note: "Workday tenant and site published by the official Phenom careers site apply links"
+
+  - name: "The New York Times"
+    ats: greenhouse
+    token: "thenewyorktimes"
+    aliases: ["New York Times", "NYT", "The New York Times Company"]
+    alumni_match: ["the new york times", "new york times", "nyt"]
+    source_url: "https://www.nytco.com/careers/job-listings/"
+    note: "Greenhouse board published by the official nytco.com job-listing apply links"

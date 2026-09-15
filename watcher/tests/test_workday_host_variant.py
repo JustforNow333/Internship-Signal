@@ -179,10 +179,18 @@ def test_real_watchlist_builds_snap_on_the_site_layout():
         snap.token, snap.workday_shard, snap.workday_site, snap.workday_host_variant
     ) == "https://wd1.myworkdaysite.com/wday/cxs/snapchat/snap/jobs"
 
-    # Every other Workday company must stay on the default layout.
+    # The site layout stays opt-in: only companies whose own careers site
+    # publishes a myworkdaysite.com board may use it.
     others = [
         c.name
         for c in config.companies
         if c.ats == "workday" and c.workday_host_variant != WORKDAY_HOST_JOBS
     ]
-    assert others == ["Snap"]
+    assert sorted(others) == ["Chewy", "Snap"]
+
+    chewy = next(c for c in config.companies if c.name == "Chewy")
+
+    assert chewy.workday_host_variant == WORKDAY_HOST_SITE
+    assert WorkdaySource.endpoint(
+        chewy.token, chewy.workday_shard, chewy.workday_site, chewy.workday_host_variant
+    ) == "https://wd5.myworkdaysite.com/wday/cxs/chewy/External/jobs"
