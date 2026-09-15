@@ -12,7 +12,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from html import unescape
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from watcher.config import (
     WORKDAY_DETAIL_EARLY_CAREER,
@@ -571,6 +571,7 @@ class WorkdaySource:
         pages_fetched = 0
         incomplete_reasons: set[str] = set()
         seen_pages: set[str] = set()
+        largest_facet = 0
         while True:
             try:
                 payload = self._fetch_page(
@@ -578,6 +579,7 @@ class WorkdaySource:
                     {"appliedFacets": {}, "limit": self.page_size, "offset": offset, "searchText": ""},
                 )
                 postings, total_found = self._page(payload)
+                largest_facet = max(largest_facet, _max_facet_value(payload))
             except SourceError as exc:
                 # Losing a continuation page after earlier pages succeeded is
                 # incomplete collection, not a fatal source failure: the rows
@@ -609,6 +611,13 @@ class WorkdaySource:
             skip_reasons.update(page_reasons)
             offset += len(postings)
             total = self._reconcile_listing_total(total, total_found, offset)
+            # A single facet value counts postings inside the same result set,
+            # so it can never exceed the board size. When it does, the reported
+            # total is a server-side cap rather than the inventory, and stopping
+            # at it would silently claim a complete board. Facet *sums* are not
+            # usable here: multi-valued facets legitimately double-count.
+            if total is not None and largest_facet > total:
+                incomplete_reasons.add("listing_total_clamped")
             # A short page is the tenant's own end-of-board signal, so a full
             # page is the only reason to ask for another one.
             if len(postings) < self.page_size:
@@ -1376,6 +1385,36 @@ def _bounded_metadata_value(value: object, *, depth: int = 0) -> object:
             not in (None, "", [], {})
         }
     return None
+
+
+def _max_facet_value(payload: Any) -> int:
+    """Return the largest single facet value count a listing page published.
+
+    Facets are optional and tenant-defined, so anything unexpected is ignored
+    rather than raising: this only ever adds evidence that a reported total is
+    a cap, and must never fail a tenant that publishes none.
+    """
+
+    if not isinstance(payload, Mapping):
+        return 0
+    facets = payload.get("facets")
+    if not isinstance(facets, list):
+        return 0
+    largest = 0
+    for facet in facets:
+        if not isinstance(facet, Mapping):
+            continue
+        values = facet.get("values")
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, Mapping):
+                continue
+            count = value.get("count")
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                continue
+            largest = max(largest, count)
+    return largest
 
 
 def _continuation_failure_reason(error: SourceError) -> str:

@@ -711,6 +711,136 @@ def test_workday_repeated_page_stops_incomplete_and_diagnostics_do_not_leak(monk
     )
 
 
+def test_workday_clamped_total_is_reported_incomplete_not_complete(monkeypatch):
+    """A tenant whose own facets outnumber its reported total is capped.
+
+    Target and Nvidia both answer ``total: 2000`` while publishing facet
+    values counting far more postings than that. Enumeration stops at the
+    reported total and would otherwise look complete, so the clamp has to be
+    detected from the tenant's own response and fail closed.
+    """
+
+    page_size = WorkdaySource.page_size
+    payload = {
+        "jobPostings": [
+            workday_posting(f"Intern {index}", f"/job/Test/Intern_R{index}")
+            for index in range(page_size)
+        ],
+        "total": page_size,
+        "facets": [
+            {
+                "facetParameter": "timeType",
+                "values": [
+                    {"descriptor": "Full time", "count": page_size + 669},
+                    {"descriptor": "Part time", "count": 3},
+                ],
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        "watcher.sources.workday.post_json",
+        lambda *_args, **_kwargs: payload,
+    )
+    source = WorkdaySource()
+
+    rows = source.fetch(workday_company())
+
+    assert len(rows) == page_size
+    assert source.last_diagnostics.listing_incomplete is True
+    assert source.last_diagnostics.listing_incomplete_reasons == (
+        "listing_total_clamped",
+    )
+    assert source.last_health_diagnostics.complete is False
+    assert source.last_health_diagnostics.degraded is True
+
+
+def test_workday_facets_within_the_reported_total_stay_complete(monkeypatch):
+    """Applied Materials reports total 2000 with a 1999 facet value.
+
+    A facet value at or below the reported total proves nothing, so the
+    check must not fire. Facet *sums* legitimately exceed the total because
+    multi-valued facets double-count, which is why only single values count.
+    """
+
+    page_size = WorkdaySource.page_size
+    payload = {
+        "jobPostings": [
+            workday_posting(f"Intern {index}", f"/job/Test/Intern_R{index}")
+            for index in range(page_size)
+        ],
+        "total": page_size,
+        "facets": [
+            {
+                "facetParameter": "timeType",
+                "values": [{"descriptor": "Full time", "count": page_size}],
+            },
+            {
+                "facetParameter": "Location_Region_State_Province",
+                "values": [
+                    {"descriptor": "California", "count": page_size - 1},
+                    {"descriptor": "Texas", "count": page_size - 1},
+                ],
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        "watcher.sources.workday.post_json",
+        lambda *_args, **_kwargs: payload,
+    )
+    source = WorkdaySource()
+
+    rows = source.fetch(workday_company())
+
+    assert len(rows) == page_size
+    assert source.last_diagnostics.listing_incomplete is False
+    assert source.last_diagnostics.listing_incomplete_reasons == ()
+    assert source.last_health_diagnostics.complete is True
+
+
+def test_workday_missing_or_malformed_facets_do_not_change_behavior(monkeypatch):
+    """Most tenants publish no facets; the check must stay inert for them."""
+
+    for facets in (None, [], "nonsense", [{"values": "bad"}], [{"values": [{}]}]):
+        payload = {
+            "jobPostings": [workday_posting()],
+            "total": 1,
+        }
+        if facets is not None:
+            payload["facets"] = facets
+        monkeypatch.setattr(
+            "watcher.sources.workday.post_json",
+            lambda *_args, **_kwargs: payload,
+        )
+        source = WorkdaySource()
+
+        rows = source.fetch(workday_company())
+
+        assert len(rows) == 1
+        assert source.last_diagnostics.listing_incomplete is False
+        assert source.last_diagnostics.listing_incomplete_reasons == ()
+
+
+def test_workday_clamp_check_needs_a_reported_total(monkeypatch):
+    """With no reported total there is nothing to contradict."""
+
+    payload = {
+        "jobPostings": [workday_posting()],
+        "facets": [
+            {"facetParameter": "timeType", "values": [{"descriptor": "Full time", "count": 9999}]}
+        ],
+    }
+    monkeypatch.setattr(
+        "watcher.sources.workday.post_json",
+        lambda *_args, **_kwargs: payload,
+    )
+    source = WorkdaySource()
+
+    rows = source.fetch(workday_company())
+
+    assert len(rows) == 1
+    assert source.last_diagnostics.listing_incomplete_reasons == ()
+
+
 def test_ashby_fixture_to_canonical_rows():
     payload = load_fixture("ashby_chainalysis_careers.json")
     company = CompanyCfg(name="Chainalysis", ats="ashby", token="chainalysis-careers")
