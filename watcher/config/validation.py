@@ -377,6 +377,15 @@ def _validate_mediatek_config(name: str, *, source_url: str) -> None:
         )
 
 
+def _validate_optiver_config(name: str, *, source_url: str) -> None:
+    """Pin Optiver to its unfiltered official global careers inventory."""
+
+    if source_url != "https://www.optiver.com/join-us/jobs/":
+        raise ConfigError(
+            f"{name}: optiver source_url must be the official jobs inventory"
+        )
+
+
 def _validate_siemens_config(name: str, *, source_url: str) -> None:
     """Pin Siemens to its official, intentionally partial Internship search."""
 

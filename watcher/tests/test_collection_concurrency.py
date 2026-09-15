@@ -72,6 +72,7 @@ from watcher.sources.lam_research import LamResearchSource
 from watcher.sources.jane_street import INVENTORY_URL as JANE_STREET_INVENTORY_URL
 from watcher.sources.lever import LeverSource
 from watcher.sources.mediatek import MediaTekSource
+from watcher.sources.optiver import OptiverSource
 from watcher.sources.paylocity import PaylocitySource
 from watcher.sources.sea import SeaSource
 from watcher.sources.shopify import ShopifySource
@@ -416,6 +417,7 @@ def test_direct_origin_hosts_match_the_adapter_endpoints():
         "jane_street": JANE_STREET_INVENTORY_URL,
         "lever": LeverSource.endpoint("token"),
         "mediatek": MediaTekSource.endpoint(),
+        "optiver": OptiverSource.endpoint(),
         "ashby": AshbySource.endpoint("token"),
         "sea": SeaSource.endpoint(),
         "shopify": ShopifySource.endpoint(),

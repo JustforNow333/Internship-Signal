@@ -50,6 +50,7 @@ from watcher.sources.lam_research import LamResearchSource
 from watcher.sources.lever import LeverSource
 from watcher.sources.mediatek import MediaTekSource
 from watcher.sources.oracle_hcm import OracleHcmSource
+from watcher.sources.optiver import OptiverSource
 from watcher.sources.paylocity import PaylocitySource
 from watcher.sources.sea import SeaSource
 from watcher.sources.shopify import ShopifySource
@@ -112,6 +113,7 @@ DIRECT_SOURCE_SPECS: tuple[DirectSourceSpec, ...] = (
     DirectSourceSpec("lever", LeverSource),
     DirectSourceSpec("mediatek", MediaTekSource),
     DirectSourceSpec("oracle_hcm", OracleHcmSource),
+    DirectSourceSpec("optiver", OptiverSource),
     DirectSourceSpec("paylocity", PaylocitySource),
     DirectSourceSpec("sea", SeaSource),
     DirectSourceSpec("shopify", ShopifySource),

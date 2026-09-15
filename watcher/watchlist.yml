@@ -1922,10 +1922,11 @@ companies:
     note: "Greenhouse board published by the official experienced and student listing pages"
 
   - name: "Optiver"
-    ats: github_only
+    ats: optiver
     aliases: ["Optiver Holding"]
     alumni_match: ["optiver"]
-    note: "first-party jobs API is published but has no supported adapter; backstop feed only"
+    source_url: "https://www.optiver.com/join-us/jobs/"
+    note: "complete official jobs API reconciled with the server-rendered inventory"
 
   - name: "Susquehanna International Group"
     ats: icims

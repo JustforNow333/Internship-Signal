@@ -41,7 +41,7 @@ GREENHOUSE_BATCH_TOKENS = {
     "Tower Research Capital": "towerresearchcapital",
 }
 
-FALLBACK_BATCH_COMPANIES = ("Optiver",)
+FALLBACK_BATCH_COMPANIES = ()
 
 DRW_GREENHOUSE_TOKENS = ("drweng", "drwfr")
 
@@ -115,7 +115,22 @@ def test_susquehanna_uses_the_registered_icims_jibe_portal():
     assert company_matches("SIG", cfg)
 
 
-@pytest.mark.parametrize("name", sorted(set(GREENHOUSE_BATCH_TOKENS) | {"Susquehanna International Group"}))
+def test_optiver_uses_its_complete_first_party_jobs_inventory():
+    cfg = company("Optiver")
+
+    assert cfg.ats == "optiver"
+    assert cfg.source_url == "https://www.optiver.com/join-us/jobs/"
+    assert cfg.ats in DIRECT_ATS
+    assert company_matches("Optiver", cfg)
+
+
+@pytest.mark.parametrize(
+    "name",
+    sorted(
+        set(GREENHOUSE_BATCH_TOKENS)
+        | {"Optiver", "Susquehanna International Group"}
+    ),
+)
 def test_direct_batch_companies_build_from_the_registry(name):
     cfg = company(name)
 

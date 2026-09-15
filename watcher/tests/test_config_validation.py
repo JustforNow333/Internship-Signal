@@ -80,6 +80,9 @@ VALID_COMPANY_FIELDS = {
         '    source_url: "https://example.fa.oraclecloud.com/hcmUI/'
         'CandidateExperience/en/sites/CX_1/jobs"\n'
     ),
+    "optiver": (
+        '    source_url: "https://www.optiver.com/join-us/jobs/"\n'
+    ),
     "paylocity": (
         '    paylocity_company_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"\n'
         '    paylocity_module_id: "1"\n'

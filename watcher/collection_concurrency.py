@@ -76,6 +76,7 @@ DIRECT_ORIGIN_HOSTS: Mapping[str, str] = {
     "jane_street": "www.janestreet.com",
     "lever": "api.lever.co",
     "mediatek": "careers.mediatek.com",
+    "optiver": "www.optiver.com",
     "ashby": "api.ashbyhq.com",
     "sea": "career.sea.com",
     "shopify": "www.shopify.com",
