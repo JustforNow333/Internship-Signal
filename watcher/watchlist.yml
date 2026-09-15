@@ -2160,3 +2160,68 @@ companies:
     aliases: ["The Vanguard Group"]
     alumni_match: ["vanguard", "the vanguard group"]
     note: "official careers inventory uses an unsupported Findly search contract; backstop feed only"
+
+  - name: "KKR"
+    ats: greenhouse
+    token: "stage"
+    aliases: ["Kohlberg Kravis Roberts", "KKR & Co."]
+    alumni_match: ["kkr", "kohlberg kravis roberts"]
+    source_url: "https://www.kkr.com/careers/career-opportunities"
+    note: "Greenhouse board embedded by the official career-opportunities page"
+
+  - name: "PIMCO"
+    ats: workday
+    token: "pimco"
+    workday_shard: "wd1"
+    workday_site: "pimco-careers"
+    aliases: ["Pacific Investment Management Company"]
+    alumni_match: ["pimco", "pacific investment management company"]
+    source_url: "https://www.pimco.com/us/en/about-us/careers"
+    note: "Workday tenant and site linked by the official careers page"
+
+  - name: "S&P Global"
+    ats: github_only
+    aliases: ["S&P Global Inc."]
+    alumni_match: ["s&p global", "sp global"]
+    note: "official Jibe inventory currently exceeds its linked Workday board; usable Simplify backstop only"
+
+  - name: "Moody's"
+    ats: talentbrew
+    talentbrew_host: "careers.moodys.com"
+    talentbrew_site_id: "49841"
+    talentbrew_category_id: "9383648"
+    talentbrew_category_name: "Students & Early Careers"
+    aliases: ["Moody's Corporation", "Moodys"]
+    alumni_match: ["moody's", "moodys"]
+    source_url: "https://careers.moodys.com/en/search-jobs"
+    note: "Official TalentBrew Students & Early Careers category"
+
+  - name: "Nasdaq"
+    ats: workday
+    token: "nasdaq"
+    workday_shard: "wd1"
+    workday_site: "Global_External_Site"
+    aliases: ["Nasdaq, Inc."]
+    alumni_match: ["nasdaq"]
+    source_url: "https://www.nasdaq.com/about/careers"
+    note: "Workday tenant and site linked by the official careers page"
+
+  - name: "Cboe Global Markets"
+    ats: workday
+    token: "cboe"
+    workday_shard: "wd1"
+    workday_site: "External_Career_CBOE"
+    aliases: ["Cboe", "Cboe Global Markets, Inc."]
+    alumni_match: ["cboe global markets", "cboe"]
+    source_url: "https://careers.cboe.com/us/en/search-results"
+    note: "Official Phenom inventory publishes the complete linked Workday tenant and site"
+
+  - name: "CME Group"
+    ats: workday
+    token: "cmegroup"
+    workday_shard: "wd1"
+    workday_site: "cme_careers"
+    aliases: ["Chicago Mercantile Exchange", "CME Group Inc."]
+    alumni_match: ["cme group", "chicago mercantile exchange"]
+    source_url: "https://www.cmegroup.com/careers.html"
+    note: "Workday tenant and site linked by the official careers page"
