@@ -22,8 +22,14 @@ from watcher.sources.sanitize import html_to_text
 from watcher.sources.transport import get_json_response, get_text_response
 
 JIBE_JSON = "jibe_json"
+#: Jibe boards that publish no ``meta_data.canonical_url``. The posting URL is
+#: derived as ``https://{portal}/jobs/{req_id}`` instead. A published URL is
+#: still validated exactly as :data:`JIBE_JSON` validates it, so this variant
+#: only ever adds the null case and never relaxes the strict variant.
+JIBE_DERIVED_URL = "jibe_derived_url"
 CLASSIC = "classic"
-SUPPORTED_VARIANTS = frozenset({JIBE_JSON, CLASSIC})
+JIBE_VARIANTS = frozenset({JIBE_JSON, JIBE_DERIVED_URL})
+SUPPORTED_VARIANTS = frozenset({JIBE_JSON, JIBE_DERIVED_URL, CLASSIC})
 DEFAULT_JIBE_PAGE_SIZE = 100
 DEFAULT_MAX_PAGES = 1_000
 _NATIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}")
@@ -95,8 +101,8 @@ class IcimsSource(DirectRecordAdapter):
         duplicate_count = 0
 
         for portal in portals:
-            if variant == JIBE_JSON:
-                portal_rows = self._fetch_jibe_portal(company, portal)
+            if variant in JIBE_VARIANTS:
+                portal_rows = self._fetch_jibe_portal(company, portal, variant)
             else:
                 portal_rows = self._fetch_classic_portal(company, portal)
             duplicate_count += _merge_rows(rows, row_index, portal_rows)
@@ -107,7 +113,9 @@ class IcimsSource(DirectRecordAdapter):
         )
         return rows
 
-    def _fetch_jibe_portal(self, company: CompanyCfg, portal: str) -> list[dict]:
+    def _fetch_jibe_portal(
+        self, company: CompanyCfg, portal: str, variant: str = JIBE_JSON
+    ) -> list[dict]:
         expected_total: int | None = None
         raw_seen = 0
         seen_pages: set[str] = set()
@@ -155,7 +163,7 @@ class IcimsSource(DirectRecordAdapter):
             parsed = self._parse_direct_records(
                 postings,
                 company,
-                lambda posting: _parse_jibe_posting(posting, company, portal),
+                lambda posting: _parse_jibe_posting(posting, company, portal, variant),
             )
             self._duplicate_count += _merge_rows(rows, row_index, parsed)
 
@@ -302,7 +310,9 @@ def _jibe_page(payload: Any, *, page_size: int) -> tuple[list, int]:
     return jobs, total
 
 
-def _parse_jibe_posting(posting: Any, company: CompanyCfg, portal: str) -> dict:
+def _parse_jibe_posting(
+    posting: Any, company: CompanyCfg, portal: str, variant: str = JIBE_JSON
+) -> dict:
     if not isinstance(posting, dict):
         raise SourceSchemaError("icims jibe expected each job wrapper to be an object")
     data = posting.get("data")
@@ -319,6 +329,7 @@ def _parse_jibe_posting(posting: Any, company: CompanyCfg, portal: str) -> dict:
         meta.get("canonical_url"),
         portal=portal,
         native_id=native_id,
+        allow_derived=variant == JIBE_DERIVED_URL,
     )
     application_url = _application_url(
         data.get("apply_url"),
@@ -349,7 +360,7 @@ def _parse_jibe_posting(posting: Any, company: CompanyCfg, portal: str) -> dict:
             "source_requisition_id": source_id,
             "source_system": "icims",
             "source_scope": portal,
-            "icims_variant": JIBE_JSON,
+            "icims_variant": variant,
             "icims_portal": portal,
             "icims_native_id": native_id,
             "application_url": application_url,
@@ -358,8 +369,12 @@ def _parse_jibe_posting(posting: Any, company: CompanyCfg, portal: str) -> dict:
     )
 
 
-def _jibe_canonical_url(value: Any, *, portal: str, native_id: str) -> str:
+def _jibe_canonical_url(
+    value: Any, *, portal: str, native_id: str, allow_derived: bool = False
+) -> str:
     raw = str(value or "").strip()
+    if not raw and allow_derived:
+        return f"https://{portal}/jobs/{native_id}"
     try:
         parsed = urlsplit(raw)
     except ValueError as exc:

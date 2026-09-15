@@ -1,0 +1,44 @@
+{
+  "jobs": [
+    {
+      "data": {
+        "req_id": "13487",
+        "title": "Senior Kubernetes Developer, Platform Engineering",
+        "full_location": "Atlanta, Georgia; Jacksonville, Florida",
+        "additional_locations": [
+          {
+            "location_name": "OFF USA: FL Jacksonville (4800 Deer Lake Drive)",
+            "city": "Jacksonville",
+            "state": "Florida",
+            "country": "United States"
+          }
+        ],
+        "description": "<p>Build the deployment platform.</p>",
+        "qualifications": "<p>Kubernetes experience required.</p>",
+        "employment_type": "FULL_TIME",
+        "location_type": "LAT_LNG",
+        "posted_date": "2026-09-14T19:52:00+0000",
+        "apply_url": "https://careers-ice.icims.com/jobs/13487/login",
+        "meta_data": {
+          "canonical_url": null,
+          "icims": {
+            "jps_is_public": true
+          }
+        }
+      }
+    },
+    {
+      "data": {
+        "req_id": "13458",
+        "title": "QC Credit Auditor",
+        "full_location": "Jacksonville, Florida",
+        "description": "Review credit files.",
+        "employment_type": "FULL_TIME",
+        "posted_date": "2026-09-12T19:52:00+0000",
+        "apply_url": "https://careers-ice.icims.com/jobs/13458/login",
+        "meta_data": {}
+      }
+    }
+  ],
+  "totalCount": 2
+}

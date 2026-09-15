@@ -2216,6 +2216,15 @@ companies:
     source_url: "https://careers.cboe.com/us/en/search-results"
     note: "Official Phenom inventory publishes the complete linked Workday tenant and site"
 
+  - name: "Intercontinental Exchange (ICE)"
+    ats: icims
+    icims_variant: jibe_derived_url
+    icims_host: "careers.ice.com"
+    aliases: ["Intercontinental Exchange", "ICE", "NYSE", "New York Stock Exchange"]
+    alumni_match: ["intercontinental exchange", "ice", "nyse"]
+    source_url: "https://careers.ice.com/jobs"
+    note: "Authoritative Jibe inventory linked by ice.com/careers; the careers-ice iCIMS board is application infrastructure and lists a strict subset"
+
   - name: "CME Group"
     ats: workday
     token: "cmegroup"

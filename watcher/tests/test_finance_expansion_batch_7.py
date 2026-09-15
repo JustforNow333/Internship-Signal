@@ -7,6 +7,7 @@ import pytest
 from watcher.company_matching import company_matching_key, company_matches
 from watcher.config import load_watchlist
 from watcher.sources.greenhouse import GreenhouseSource
+from watcher.sources.icims import IcimsSource
 from watcher.sources.registry import DIRECT_ATS, build_direct_sources
 from watcher.sources.talentbrew import TalentBrewSource
 from watcher.sources.workday import WorkdaySource
@@ -61,6 +62,14 @@ WORKDAY_BATCH_CONFIG = {
     ),
 }
 
+ICIMS_BATCH_CONFIG = {
+    "Intercontinental Exchange (ICE)": (
+        "jibe_derived_url",
+        "careers.ice.com",
+        "https://careers.ice.com/jobs",
+    ),
+}
+
 TALENTBREW_BATCH_CONFIG = {
     "Moody's": (
         "careers.moodys.com",
@@ -73,7 +82,7 @@ TALENTBREW_BATCH_CONFIG = {
 
 FALLBACK_BATCH_COMPANIES = ("S&P Global",)
 CURRENT_FEED_LABELS = (("S&P Global", "S&P Global", "simplify"),)
-UNCOVERED_BATCH_COMPANIES = ("Intercontinental Exchange (ICE)",)
+UNCOVERED_BATCH_COMPANIES: tuple[str, ...] = ()
 
 
 @pytest.fixture(scope="module")
@@ -90,6 +99,7 @@ def test_batch_is_disjoint_from_the_tech_universe_and_additive(watchlist):
     configured_batch = (
         set(GREENHOUSE_BATCH_CONFIG)
         | set(WORKDAY_BATCH_CONFIG)
+        | set(ICIMS_BATCH_CONFIG)
         | set(TALENTBREW_BATCH_CONFIG)
         | set(FALLBACK_BATCH_COMPANIES)
     )
@@ -139,6 +149,26 @@ def test_workday_companies_use_first_party_published_tenants(
 
 
 @pytest.mark.parametrize(
+    ("name", "variant", "host", "source_url"),
+    [(name, *values) for name, values in sorted(ICIMS_BATCH_CONFIG.items())],
+)
+def test_icims_companies_use_their_authoritative_jibe_inventory(
+    watchlist, name, variant, host, source_url
+):
+    cfg = company(watchlist, name)
+
+    assert cfg.ats == "icims"
+    assert cfg.icims_variant == variant
+    assert cfg.icims_host == host
+    assert tuple(cfg.icims_portals) == ()
+    assert cfg.source_url == source_url
+    assert IcimsSource.jibe_endpoint(host, limit=100, page=1) == (
+        f"https://{host}/api/jobs?limit=100&page=1"
+    )
+    assert cfg.ats in DIRECT_ATS
+
+
+@pytest.mark.parametrize(
     ("name", "host", "site_id", "category_id", "category_name", "source_url"),
     [
         (name, *values)
@@ -168,6 +198,7 @@ def test_talentbrew_companies_pin_the_published_early_career_category(
     sorted(
         set(GREENHOUSE_BATCH_CONFIG)
         | set(WORKDAY_BATCH_CONFIG)
+        | set(ICIMS_BATCH_CONFIG)
         | set(TALENTBREW_BATCH_CONFIG)
     ),
 )
@@ -197,6 +228,21 @@ def test_fallback_companies_match_current_feed_labels(
     assert company_matches(feed_label, cfg)
 
 
+def test_no_batch_company_remains_uncovered(watchlist):
+    configured_names = {cfg.name for cfg in watchlist.companies}
+    configured_batch = (
+        set(GREENHOUSE_BATCH_CONFIG)
+        | set(WORKDAY_BATCH_CONFIG)
+        | set(ICIMS_BATCH_CONFIG)
+        | set(TALENTBREW_BATCH_CONFIG)
+        | set(FALLBACK_BATCH_COMPANIES)
+    )
+
+    assert UNCOVERED_BATCH_COMPANIES == ()
+    assert configured_batch == set(AUDITED_BATCH_COMPANIES)
+    assert configured_batch <= configured_names
+
+
 def test_uncovered_company_is_not_accidentally_claimed(watchlist):
     owners = {
         company_matching_key(label)
@@ -219,6 +265,7 @@ def test_batch_names_and_aliases_do_not_collide_with_watchlist_identities(watchl
     configured_batch = (
         set(GREENHOUSE_BATCH_CONFIG)
         | set(WORKDAY_BATCH_CONFIG)
+        | set(ICIMS_BATCH_CONFIG)
         | set(TALENTBREW_BATCH_CONFIG)
         | set(FALLBACK_BATCH_COMPANIES)
     )

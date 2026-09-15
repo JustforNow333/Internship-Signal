@@ -219,7 +219,11 @@ def test_token_backed_sources_keep_exact_missing_token_error(tmp_path, ats):
         ("ukg", "Example: ukg_host must be a hostname"),
         ("oracle_hcm", "Example: oracle_hcm entries require oracle_hcm_host"),
         ("talentbrew", "Example: talentbrew entries require a valid talentbrew_host"),
-        ("icims", "Example: icims_variant must be one of: classic, jibe_json"),
+        (
+            "icims",
+            "Example: icims_variant must be one of: "
+            "classic, jibe_derived_url, jibe_json",
+        ),
         ("successfactors", "Example: successfactors_host must be a hostname"),
         ("paylocity", "Example: paylocity_company_id must be a lower-case UUID"),
     ),

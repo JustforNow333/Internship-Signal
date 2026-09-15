@@ -61,6 +61,16 @@ def classic_company(
     )
 
 
+def jibe_derived_url_company(host: str = "careers.example.test") -> CompanyCfg:
+    return CompanyCfg(
+        name="Derived URL Example",
+        ats="icims",
+        icims_variant="jibe_derived_url",
+        icims_host=host,
+        source_url=f"https://{host}/jobs",
+    )
+
+
 def test_jibe_multi_page_maps_canonical_fields_and_namespaced_identity():
     pages = iter((json_fixture("icims_jibe_page_1.json"), json_fixture("icims_jibe_page_2.json")))
     urls = []
@@ -440,6 +450,156 @@ def test_default_watchlist_uses_verified_icims_configuration_for_eight_companies
         assert company.icims_host == host
         assert tuple(company.icims_portals) == portals
         assert company.module == ""
+
+
+def test_jibe_derived_url_variant_builds_the_portal_posting_url_itself():
+    source = IcimsSource(
+        request_json=lambda *_: json_fixture("icims_jibe_derived_url_page_1.json"),
+        jibe_page_size=2,
+    )
+
+    rows = source.fetch(jibe_derived_url_company())
+
+    assert [row["source_url"] for row in rows] == [
+        "https://careers.example.test/jobs/13487",
+        "https://careers.example.test/jobs/13458",
+    ]
+    assert [row["extra"]["source_id"] for row in rows] == [
+        "careers.example.test:13487",
+        "careers.example.test:13458",
+    ]
+    assert [row["extra"]["icims_variant"] for row in rows] == [
+        "jibe_derived_url",
+        "jibe_derived_url",
+    ]
+    assert rows[0]["location"] == (
+        "Atlanta, Georgia; Jacksonville, Florida; "
+        "OFF USA: FL Jacksonville (4800 Deer Lake Drive)"
+    )
+    assert rows[0]["extra"]["application_url"] == (
+        "https://careers-ice.icims.com/jobs/13487/login"
+    )
+    assert source.last_health_diagnostics.complete is True
+    assert source.last_health_diagnostics.degraded is False
+
+
+def test_jibe_derived_url_variant_still_rejects_a_published_foreign_url():
+    payload = json_fixture("icims_jibe_derived_url_page_1.json")
+    payload["jobs"][0]["data"]["meta_data"]["canonical_url"] = (
+        "https://other.example.test/jobs/13487"
+    )
+    source = IcimsSource(request_json=lambda *_: payload, jibe_page_size=2)
+
+    rows = source.fetch(jibe_derived_url_company())
+
+    assert [row["source_url"] for row in rows] == [
+        "https://careers.example.test/jobs/13458"
+    ]
+    assert source.last_health_diagnostics.schema_error_row_count == 1
+    assert source.last_health_diagnostics.degraded is True
+    assert source.last_health_diagnostics.complete is False
+
+    payload["jobs"] = payload["jobs"][:1]
+    payload["totalCount"] = 1
+    with pytest.raises(SourceSchemaError, match="none were valid"):
+        IcimsSource(request_json=lambda *_: payload, jibe_page_size=1).fetch(
+            jibe_derived_url_company()
+        )
+
+
+def test_jibe_derived_url_variant_accepts_a_published_matching_url():
+    payload = json_fixture("icims_jibe_derived_url_page_1.json")
+    payload["jobs"][0]["data"]["meta_data"]["canonical_url"] = (
+        "https://careers.example.test/jobs/13487?lang=en-us"
+    )
+    payload["jobs"] = payload["jobs"][:1]
+    payload["totalCount"] = 1
+
+    rows = IcimsSource(request_json=lambda *_: payload, jibe_page_size=1).fetch(
+        jibe_derived_url_company()
+    )
+
+    assert rows[0]["source_url"] == (
+        "https://careers.example.test/jobs/13487?lang=en-us"
+    )
+
+
+def test_strict_jibe_variant_still_requires_the_portal_to_publish_the_url():
+    payload = json_fixture("icims_jibe_page_1.json")
+    for job in payload["jobs"]:
+        job["data"]["meta_data"]["canonical_url"] = None
+    payload["totalCount"] = 2
+
+    with pytest.raises(SourceSchemaError, match="none were valid"):
+        IcimsSource(request_json=lambda *_: payload, jibe_page_size=2).fetch(
+            jibe_company()
+        )
+
+
+def test_jibe_derived_url_variant_keeps_exact_empty_and_duplicate_semantics():
+    source = IcimsSource(request_json=lambda *_: json_fixture("icims_jibe_zero.json"))
+    assert source.fetch(jibe_derived_url_company()) == []
+
+    duplicated = json_fixture("icims_jibe_derived_url_page_1.json")
+    duplicated["jobs"].append(copy.deepcopy(duplicated["jobs"][0]))
+    duplicated["totalCount"] = 3
+
+    duplicate_source = IcimsSource(
+        request_json=lambda *_: duplicated, jibe_page_size=3
+    )
+    rows = duplicate_source.fetch(jibe_derived_url_company())
+
+    assert len(rows) == 2
+    assert duplicate_source.last_health_diagnostics.duplicate_row_count == 1
+    assert duplicate_source.last_health_diagnostics.degraded is False
+
+
+def test_jibe_derived_url_variant_rejects_conflicting_records_for_one_id():
+    conflicting = json_fixture("icims_jibe_derived_url_page_1.json")
+    clash = copy.deepcopy(conflicting["jobs"][0])
+    clash["data"]["title"] = "Different Title"
+    conflicting["jobs"].append(clash)
+    conflicting["totalCount"] = 3
+
+    with pytest.raises(SourceSchemaError, match="conflicting"):
+        IcimsSource(request_json=lambda *_: conflicting, jibe_page_size=3).fetch(
+            jibe_derived_url_company()
+        )
+
+
+def test_default_watchlist_covers_ice_on_its_authoritative_jibe_portal():
+    companies = {
+        company.name: company
+        for company in load_watchlist(DEFAULT_WATCHLIST_PATH).companies
+    }
+
+    ice = companies["Intercontinental Exchange (ICE)"]
+
+    assert ice.ats == "icims"
+    assert ice.icims_variant == "jibe_derived_url"
+    assert ice.icims_host == "careers.ice.com"
+    assert tuple(ice.icims_portals) == ()
+    assert ice.source_url == "https://careers.ice.com/jobs"
+    assert direct_origin_key("icims", icims_host=ice.icims_host) == (
+        "https://careers.ice.com"
+    )
+
+
+def test_icims_configuration_accepts_the_derived_url_jibe_variant(tmp_path):
+    path = tmp_path / "watchlist.yml"
+    path.write_text(
+        'defaults:\n  terms: ["Summer 2027"]\ncompanies:\n'
+        '  - name: "Derived URL Example"\n    ats: icims\n'
+        '    icims_variant: jibe_derived_url\n'
+        '    icims_host: "careers.example.test"\n'
+        '    source_url: "https://careers.example.test/jobs"\n',
+        encoding="utf-8",
+    )
+
+    company = load_watchlist(path).companies[0]
+
+    assert company.icims_variant == "jibe_derived_url"
+
 
 
 @pytest.mark.parametrize(

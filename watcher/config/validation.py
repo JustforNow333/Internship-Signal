@@ -413,9 +413,10 @@ def _validate_icims_config(
     portals: tuple[str, ...],
     source_url: str,
 ) -> None:
-    if variant not in {"jibe_json", "classic"}:
+    if variant not in {"jibe_json", "jibe_derived_url", "classic"}:
         raise ConfigError(
-            f"{name}: icims_variant must be one of: classic, jibe_json"
+            f"{name}: icims_variant must be one of: "
+            "classic, jibe_derived_url, jibe_json"
         )
     if not is_valid_hostname(host):
         raise ConfigError(f"{name}: icims_host must be a hostname")
