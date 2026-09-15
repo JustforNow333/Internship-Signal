@@ -36,11 +36,12 @@ GREENHOUSE_BATCH_TOKENS = {
     "Akuna Capital": "akunacapital",
     "DRW": "drweng",
     "Five Rings": "fiveringsllc",
+    "IMC Trading": "imc",
     "Jump Trading": "jumptrading",
     "Tower Research Capital": "towerresearchcapital",
 }
 
-FALLBACK_BATCH_COMPANIES = ("IMC Trading", "Optiver")
+FALLBACK_BATCH_COMPANIES = ("Optiver",)
 
 DRW_GREENHOUSE_TOKENS = ("drweng", "drwfr")
 

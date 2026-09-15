@@ -1911,10 +1911,12 @@ companies:
     note: "Greenhouse board linked from the official careers page"
 
   - name: "IMC Trading"
-    ats: github_only
+    ats: greenhouse
+    token: "imc"
     aliases: ["IMC", "IMC Financial Markets"]
     alumni_match: ["imc trading", "imc", "imc financial markets"]
-    note: "first-party job routes are sitemap-enumerable but no supported ATS contract is published; backstop feed only"
+    source_url: "https://www.imc.com/us/search-careers"
+    note: "Greenhouse board published by official regional job pages and corroborated by the first-party job sitemap"
 
   - name: "Jump Trading"
     ats: greenhouse
