@@ -1835,11 +1835,6 @@ companies:
     alumni_match: ["citadel"]
     note: "official careers listing and detail pages sit behind an active anti-bot challenge; backstop feed only"
 
-  - name: "Citadel Securities"
-    ats: github_only
-    alumni_match: ["citadel securities"]
-    note: "official careers listing and detail pages sit behind an active anti-bot challenge; backstop feed only"
-
   - name: "D. E. Shaw"
     ats: github_only
     aliases: ["The D. E. Shaw Group", "D. E. Shaw Group"]

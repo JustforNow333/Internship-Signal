@@ -18,6 +18,7 @@ from watcher.sources.greenhouse import GreenhouseSource
 from watcher.sources.registry import DIRECT_ATS, build_direct_sources
 from watcher.tests.tech_universe import (
     TECH_UNIVERSE_COMPANY_COUNT,
+    TECH_UNIVERSE_COMPANY_NAMES,
     assert_batch_is_additive,
 )
 
@@ -33,6 +34,12 @@ BATCH_COMPANIES = (
     "Two Sigma",
 )
 
+CONFIGURED_BATCH_COMPANIES = tuple(
+    name for name in BATCH_COMPANIES if name != "Citadel Securities"
+)
+
+UNCOVERED_BATCH_COMPANIES = ("Citadel Securities",)
+
 DIRECT_BATCH_COMPANIES = {
     "Hudson River Trading": "greenhouse",
     "Point72": "greenhouse",
@@ -44,7 +51,6 @@ DIRECT_BATCH_COMPANIES = {
 
 FALLBACK_BATCH_COMPANIES = (
     "Citadel",
-    "Citadel Securities",
     "D. E. Shaw",
     "Two Sigma",
 )
@@ -58,9 +64,15 @@ def company(name: str):
     return next(c for c in watchlist().companies if c.name == name)
 
 
-@pytest.mark.parametrize("name", BATCH_COMPANIES)
+@pytest.mark.parametrize("name", CONFIGURED_BATCH_COMPANIES)
 def test_batch_company_is_configured(name):
     assert company(name).name == name
+
+
+def test_uncovered_batch_company_is_not_an_inert_backstop_entry():
+    configured_names = {cfg.name for cfg in watchlist().companies}
+
+    assert set(UNCOVERED_BATCH_COMPANIES).isdisjoint(configured_names)
 
 
 def test_batch_is_purely_additive_to_the_tech_universe():
@@ -74,9 +86,10 @@ def test_batch_is_purely_additive_to_the_tech_universe():
     names = [c.name for c in watchlist().companies]
 
     assert len(names) == len(set(names))
-    assert_batch_is_additive(BATCH_COMPANIES, set(names))
+    assert set(BATCH_COMPANIES).isdisjoint(TECH_UNIVERSE_COMPANY_NAMES)
+    assert_batch_is_additive(CONFIGURED_BATCH_COMPANIES, set(names))
     # The batch is additive, so it can never shrink the milestone.
-    assert len(names) >= TECH_UNIVERSE_COMPANY_COUNT + len(BATCH_COMPANIES)
+    assert len(names) >= TECH_UNIVERSE_COMPANY_COUNT + len(CONFIGURED_BATCH_COMPANIES)
 
 
 @pytest.mark.parametrize(("name", "ats"), sorted(DIRECT_BATCH_COMPANIES.items()))
@@ -162,19 +175,15 @@ def test_citadel_entities_stay_distinct_under_exact_label_matching():
     """The two Citadel entities must never absorb each other's feed rows."""
 
     citadel = company("Citadel")
-    securities = company("Citadel Securities")
 
     assert company_matches("Citadel", citadel)
     assert not company_matches("Citadel Securities", citadel)
-    assert company_matches("Citadel Securities", securities)
-    assert not company_matches("Citadel", securities)
 
 
 @pytest.mark.parametrize(
     ("feed_label", "name"),
     [
         ("Citadel", "Citadel"),
-        ("Citadel Securities", "Citadel Securities"),
         ("D. E. Shaw", "D. E. Shaw"),
         ("Hudson River Trading", "Hudson River Trading"),
         ("Jane Street", "Jane Street"),
@@ -196,7 +205,10 @@ def test_batch_labels_do_not_collide_with_any_other_watchlist_company():
     ambiguous = {key: names for key, names in owners.items() if len(names) > 1}
     assert ambiguous == {}
 
-    for name in BATCH_COMPANIES:
+    for name in CONFIGURED_BATCH_COMPANIES:
         cfg = company(name)
         for label in (cfg.name, *cfg.aliases):
             assert owners[company_matching_key(label)] == {name}
+
+    for name in UNCOVERED_BATCH_COMPANIES:
+        assert company_matching_key(name) not in owners
