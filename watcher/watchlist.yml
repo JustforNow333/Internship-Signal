@@ -2111,3 +2111,51 @@ companies:
     alumni_match: ["the voleon group", "voleon", "voleon capital management"]
     source_url: "https://voleon.com/jobs/"
     note: "Ashby board embedded by the official jobs page"
+
+  - name: "Bank of America"
+    ats: github_only
+    aliases: ["BofA", "Bank of America Merrill Lynch"]
+    alumni_match: ["bank of america", "bofa", "bank of america merrill lynch"]
+    note: "official recruiting scope is split between Workday professional hiring and a separate Tal.net campus board; backstop feed only"
+
+  - name: "Citi"
+    ats: github_only
+    aliases: ["Citigroup"]
+    alumni_match: ["citi", "citigroup"]
+    note: "official TalentBrew inventory uses a listing-card contract not supported by the current adapter; backstop feed only"
+
+  - name: "Wells Fargo"
+    ats: workday
+    token: "wf"
+    workday_shard: "wd1"
+    workday_site: "WellsFargoJobs"
+    aliases: ["Wells Fargo & Company"]
+    alumni_match: ["wells fargo", "wells fargo and company"]
+    source_url: "https://www.wellsfargojobs.com/en/jobs/"
+    note: "Workday tenant and site linked by the official careers surface"
+
+  - name: "Deutsche Bank"
+    ats: github_only
+    alumni_match: ["deutsche bank"]
+    note: "official careers site uses an unsupported first-party search contract; backstop feed only"
+
+  - name: "BNP Paribas"
+    ats: github_only
+    alumni_match: ["bnp paribas"]
+    note: "official global job inventory uses an unsupported first-party search contract; backstop feed only"
+
+  - name: "Fidelity Investments"
+    ats: workday
+    token: "fmr"
+    workday_shard: "wd1"
+    workday_site: "FidelityCareers"
+    aliases: ["Fidelity", "FMR LLC"]
+    alumni_match: ["fidelity investments", "fidelity", "fmr"]
+    source_url: "https://jobs.fidelity.com/en/jobs/"
+    note: "Workday tenant and site linked by the official careers surface"
+
+  - name: "Vanguard"
+    ats: github_only
+    aliases: ["The Vanguard Group"]
+    alumni_match: ["vanguard", "the vanguard group"]
+    note: "official careers inventory uses an unsupported Findly search contract; backstop feed only"
