@@ -1894,10 +1894,13 @@ companies:
     note: "Greenhouse board published by the official careers page"
 
   - name: "DRW"
-    ats: github_only
+    ats: greenhouse
+    token: "drweng"
+    greenhouse_tokens: ["drweng", "drwfr"]
     aliases: ["DRW Holdings", "DRW Trading"]
     alumni_match: ["drw", "drw holdings", "drw trading"]
-    note: "first-party listings are embedded in the site's own page data with no supported ATS contract; backstop feed only"
+    source_url: "https://www.drw.com/work-at-drw"
+    note: "Union of the English and French Greenhouse boards published by the official careers frontend"
 
   - name: "Five Rings"
     ats: greenhouse

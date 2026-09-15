@@ -34,12 +34,15 @@ BATCH_COMPANIES = (
 
 GREENHOUSE_BATCH_TOKENS = {
     "Akuna Capital": "akunacapital",
+    "DRW": "drweng",
     "Five Rings": "fiveringsllc",
     "Jump Trading": "jumptrading",
     "Tower Research Capital": "towerresearchcapital",
 }
 
-FALLBACK_BATCH_COMPANIES = ("DRW", "IMC Trading", "Optiver")
+FALLBACK_BATCH_COMPANIES = ("IMC Trading", "Optiver")
+
+DRW_GREENHOUSE_TOKENS = ("drweng", "drwfr")
 
 
 def watchlist():
@@ -79,6 +82,16 @@ def test_greenhouse_batch_companies_reuse_the_registered_adapter(name, token):
         f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
     )
     assert company_matches(name, cfg)
+
+
+def test_drw_composes_both_greenhouse_boards_published_by_its_frontend():
+    cfg = company("DRW")
+
+    assert tuple(cfg.greenhouse_tokens) == DRW_GREENHOUSE_TOKENS
+    assert [GreenhouseSource.endpoint(token) for token in cfg.greenhouse_tokens] == [
+        f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
+        for token in DRW_GREENHOUSE_TOKENS
+    ]
 
 
 def test_susquehanna_uses_the_registered_icims_jibe_portal():
