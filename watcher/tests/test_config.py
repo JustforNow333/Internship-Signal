@@ -20,6 +20,7 @@ from watcher.config import (
     resolve_analysis_cache_path,
     supported_ats,
 )
+from watcher.sources.workday import WorkdaySource
 
 
 RECENT_PRIORITY_COMPANIES = {
@@ -230,10 +231,14 @@ CONFIRMED_DIRECT_SOURCE_ADDITIONS = {
         "token": "urbancompass",
         "source_url": "https://job-boards.greenhouse.io/urbancompass",
     },
+    # Sixth Street retired its Greenhouse board -- the token now 404s -- and its
+    # own current-opportunities page embeds this Workday board instead.
     "Sixth Street": {
-        "ats": "greenhouse",
+        "ats": "workday",
         "token": "sixthstreet",
-        "source_url": "https://job-boards.greenhouse.io/sixthstreet",
+        "workday_shard": "wd1",
+        "workday_site": "sixthstreetcareers",
+        "source_url": "https://sixthstreet.wd1.myworkdayjobs.com/sixthstreetcareers",
     },
 }
 
@@ -596,6 +601,42 @@ def test_confirmed_direct_source_additions_use_exact_supported_configurations():
             assert getattr(company, field) == value
         assert company.module == ""
         assert not ({"module", "coverage_status", "platform_family", "note"} & set(entry))
+
+
+def test_sixth_street_no_longer_points_at_its_retired_greenhouse_board():
+    """Sixth Street migrated from Greenhouse to Workday.
+
+    The configured board token answered HTTP 404 on every probe while the
+    company's own current-opportunities page embedded a Workday board, so the
+    direct source was claiming a board that no longer exists. Pin the live
+    tenant and keep the dead Greenhouse identity from creeping back.
+    """
+
+    config = load_watchlist(DEFAULT_WATCHLIST_PATH)
+    company = next(c for c in config.companies if c.name == "Sixth Street")
+
+    assert company.ats == "workday"
+    assert (company.token, company.workday_shard, company.workday_site) == (
+        "sixthstreet",
+        "wd1",
+        "sixthstreetcareers",
+    )
+    assert company.source_url == (
+        "https://sixthstreet.wd1.myworkdayjobs.com/sixthstreetcareers"
+    )
+    assert WorkdaySource.endpoint(
+        company.token, company.workday_shard, company.workday_site
+    ) == (
+        "https://sixthstreet.wd1.myworkdayjobs.com/wday/cxs/"
+        "sixthstreet/sixthstreetcareers/jobs"
+    )
+    # No configured company may point at the retired Greenhouse board again.
+    assert not [
+        c
+        for c in config.companies
+        if c.ats == "greenhouse" and c.token == "sixthstreet"
+    ]
+
 
 
 def _write_watchlist(tmp_path, defaults: str, companies: str | None = None):

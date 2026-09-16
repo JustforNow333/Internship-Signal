@@ -760,10 +760,12 @@ companies:
     source_url: "https://job-boards.greenhouse.io/tpgcareers"
 
   - name: "Sixth Street"
-    ats: greenhouse
+    ats: workday
     token: "sixthstreet"
+    workday_shard: "wd1"
+    workday_site: "sixthstreetcareers"
     alumni_match: ["sixth street"]
-    source_url: "https://job-boards.greenhouse.io/sixthstreet"
+    source_url: "https://sixthstreet.wd1.myworkdayjobs.com/sixthstreetcareers"
 
   - name: "Vitol"
     ats: smartrecruiters
