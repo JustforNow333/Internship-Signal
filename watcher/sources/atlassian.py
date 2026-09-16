@@ -20,9 +20,13 @@ from watcher.sources.sanitize import html_to_text
 from watcher.sources.transport import get_json_response
 
 MAX_POSTINGS = 10_000
+# Official Atlassian iCIMS portals, as published by the first-party all-jobs
+# endpoint itself. One unlisted portal fails the whole atomic inventory, so a
+# portal Atlassian starts serving must be added here or every posting is lost.
 PORTALS = frozenset({
     'globalcareers-atlassian.icims.com',
     'campus-globalcareers-atlassian.icims.com',
+    'campus-americas.icims.com',
     'careers-americas.icims.com',
     'careers-apac-atlassian.icims.com',
 })

@@ -32,6 +32,43 @@ def test_saved_official_inventory():
     assert source.last_health_diagnostics.complete
 
 
+def test_campus_americas_portal_is_accepted():
+    """Atlassian publishes early-career roles on a campus-americas portal.
+
+    The official all-jobs endpoint served a "Software Engineer, 2027 Graduate
+    U.S." posting on campus-americas.icims.com, a portal the allowlist did not
+    carry. Because one unlisted portal fails the whole atomic inventory, every
+    Atlassian posting was lost -- including the only graduate-engineering row.
+    """
+
+    data = records()
+    data[0]['portalJobPost']['portalUrl'] = (
+        'https://campus-americas.icims.com/jobs/25583/'
+        'software-engineer%2c-2027-graduate-u.s./job'
+    )
+
+    source, rows = fetch(data)
+
+    assert len(rows) == 2
+    assert rows[0]['source_url'] == (
+        'https://campus-americas.icims.com/jobs/25583/'
+        'software-engineer%2c-2027-graduate-u.s./job'
+    )
+    assert source.last_health_diagnostics.complete
+
+
+def test_one_unlisted_portal_still_fails_the_whole_inventory():
+    """The allowlist keeps its meaning: an off-portal URL is still rejected."""
+
+    data = records()
+    data[0]['portalJobPost']['portalUrl'] = (
+        'https://careers.example.com/jobs/25583/a/job'
+    )
+
+    with pytest.raises(SourceSchemaError):
+        fetch(data)
+
+
 @pytest.mark.parametrize('payload', [None, {}, {'jobs': []}, '', [None]])
 def test_invalid_inventory_fails(payload):
     with pytest.raises(SourceSchemaError):
