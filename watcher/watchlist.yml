@@ -2466,3 +2466,45 @@ companies:
     alumni_match: ["amgen"]
     source_url: "https://amgen.wd1.myworkdayjobs.com/Careers"
     note: "Workday tenant and site linked by the official TalentBrew careers site apply links"
+
+  - name: "UnitedHealth Group"
+    ats: talentbrew
+    talentbrew_host: "careers.unitedhealthgroup.com"
+    talentbrew_site_id: "34088"
+    talentbrew_category_id: "81405"
+    talentbrew_category_name: "Technology"
+    aliases: ["Optum", "UnitedHealth", "UHG"]
+    alumni_match: ["unitedhealth group", "unitedhealth", "optum"]
+    source_url: "https://careers.unitedhealthgroup.com/search-jobs"
+    note: "Optum careers routes entirely to this shared UHG board; Technology is the published category facet covering engineering roles"
+
+  - name: "Cigna"
+    ats: workday
+    token: "cigna"
+    workday_shard: "wd5"
+    workday_site: "cignacareers"
+    aliases: ["The Cigna Group", "Cigna Group", "Evernorth"]
+    alumni_match: ["cigna", "the cigna group", "evernorth"]
+    source_url: "https://cigna.wd5.myworkdayjobs.com/cignacareers"
+    note: "Evernorth careers routes to the shared Cigna Group board; Workday tenant and site linked from it"
+
+  - name: "Stryker"
+    ats: github_only
+    alumni_match: ["stryker"]
+    note: "official Workday board yields 176 internship detail candidates against the bounded budget of 100; usable Simplify backstop only"
+
+  - name: "Medtronic"
+    ats: github_only
+    alumni_match: ["medtronic"]
+    note: "official careers hosts are unreachable from this environment and publish no derivable contract; usable Simplify backstop only"
+
+  - name: "Chevron"
+    ats: talentbrew
+    talentbrew_host: "careers.chevron.com"
+    talentbrew_site_id: "38138"
+    talentbrew_category_id: "8271696"
+    talentbrew_category_name: "Interns"
+    aliases: ["Chevron Corporation"]
+    alumni_match: ["chevron"]
+    source_url: "https://careers.chevron.com/search-jobs"
+    note: "Official Radancy TalentBrew board; Interns is the published category facet for early-career roles"
