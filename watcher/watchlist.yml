@@ -2302,3 +2302,55 @@ companies:
     alumni_match: ["the new york times", "new york times", "nyt"]
     source_url: "https://www.nytco.com/careers/job-listings/"
     note: "Greenhouse board published by the official nytco.com job-listing apply links"
+
+  - name: "General Motors"
+    ats: github_only
+    aliases: ["GM", "General Motors Company"]
+    alumni_match: ["general motors", "gm"]
+    note: "official careers search sits behind an anti-bot challenge that must not be evaded; usable Simplify backstop only"
+
+  - name: "Ford"
+    ats: talentbrew
+    talentbrew_host: "www.careers.ford.com"
+    talentbrew_site_id: "48560"
+    talentbrew_category_id: "9255664"
+    talentbrew_category_name: "Enterprise Technology"
+    aliases: ["Ford Motor Company"]
+    alumni_match: ["ford", "ford motor company"]
+    source_url: "https://www.careers.ford.com/en/search-jobs"
+    note: "Official Radancy TalentBrew board; Enterprise Technology is the published category facet covering engineering roles"
+
+  - name: "Rivian"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "careers.rivian.com"
+    aliases: ["Rivian Automotive"]
+    alumni_match: ["rivian", "rivian automotive"]
+    source_url: "https://careers.rivian.com/jobs"
+    note: "Official Jibe inventory linked by the corporate careers site; us-careers-rivian iCIMS is application infrastructure"
+
+  - name: "Lucid Motors"
+    ats: greenhouse
+    token: "lucidmotors"
+    aliases: ["Lucid", "Lucid Group"]
+    alumni_match: ["lucid motors", "lucid"]
+    source_url: "https://lucidmotors.com/careers/search"
+    note: "Greenhouse board token published by the official careers-site search client"
+
+  - name: "Toyota"
+    ats: workday
+    token: "toyota"
+    workday_shard: "wd503"
+    workday_site: "TMNA"
+    aliases: ["Toyota Motor North America"]
+    alumni_match: ["toyota", "toyota motor north america"]
+    source_url: "https://toyota.wd503.myworkdayjobs.com/TMNA"
+    note: "Workday tenant and site linked by the official careers.toyota.com site"
+
+  - name: "John Deere"
+    ats: successfactors
+    successfactors_host: "jobs.deere.com"
+    aliases: ["Deere & Company"]
+    alumni_match: ["john deere", "deere"]
+    source_url: "https://jobs.deere.com/search/"
+    note: "Official SuccessFactors career site linked by careers.deere.com"
