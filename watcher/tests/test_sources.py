@@ -755,11 +755,15 @@ def test_workday_clamped_total_is_reported_incomplete_not_complete(monkeypatch):
 
 
 def test_workday_facets_within_the_reported_total_stay_complete(monkeypatch):
-    """Applied Materials reports total 2000 with a 1999 facet value.
+    """A facet value at or below the reported total proves nothing.
 
-    A facet value at or below the reported total proves nothing, so the
-    check must not fire. Facet *sums* legitimately exceed the total because
-    multi-valued facets double-count, which is why only single values count.
+    The check must not fire on it. Facet *sums* legitimately exceed the
+    total because multi-valued facets double-count, which is why only
+    single values count: Applied Materials summed to 2003 against a correct
+    total of 2000 while its largest single value was 1999, so a sum-based
+    check would have wrongly flagged it. (That tenant has since grown past
+    the cap and is genuinely clamped, which is why this guard is synthetic
+    rather than pinned to a live board.)
     """
 
     page_size = WorkdaySource.page_size
