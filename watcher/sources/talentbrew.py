@@ -30,11 +30,13 @@ from watcher.sources.transport import get_json_response, get_text_response
 DEFAULT_PAGE_SIZE = 16
 DEFAULT_MAX_PAGES = 100
 _REFERENCE_CODE = re.compile(r"JR-[A-Z0-9-]+", re.IGNORECASE)
+# Concrete access interstitials only. "security check" is deliberately absent:
+# it is a UK clearance level named in ordinary defence and aerospace postings.
 _CHALLENGE_MARKERS = (
     "access denied",
     "captcha",
     "checking your browser",
-    "security check",
+    "request blocked",
     "verify you are human",
 )
 _HTML_VOID_ELEMENTS = frozenset(

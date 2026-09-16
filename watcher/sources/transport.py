@@ -740,6 +740,16 @@ _HTML_CHALLENGE_MARKERS = (
 
 
 def _is_access_challenge_text(text: str) -> bool:
+    """Return True only for a concrete access interstitial, not job copy.
+
+    ``_body_kind`` flags challenge-shaped pages on a deliberately broad marker
+    list, and the caller clears that flag unless this narrow check matches. A
+    phrase that occurs in ordinary postings therefore belongs in the broad list
+    only: "security check" is a UK clearance level ("this position requires the
+    ability to obtain United Kingdom Security Check"), just as "challenge" is
+    ordinary copy, so neither alone identifies a blocked response.
+    """
+
     lowered = text[:16_384].casefold()
     return any(
         marker in lowered
@@ -748,7 +758,6 @@ def _is_access_challenge_text(text: str) -> bool:
             "captcha",
             "checking your browser",
             "request blocked",
-            "security check",
             "verify you are human",
         )
     )

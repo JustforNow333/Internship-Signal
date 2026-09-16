@@ -334,3 +334,41 @@ def test_each_module_imports_first_without_a_cycle(first):
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_access_challenge_text_requires_a_concrete_interstitial_phrase():
+    """The narrow check must name a real access barrier, not job-copy prose.
+
+    ``_body_kind`` flags a page as challenge-shaped on a deliberately broad
+    marker list; ``get_text_response`` then clears it unless this narrow check
+    finds a concrete interstitial phrase. A phrase that occurs in ordinary job
+    descriptions therefore belongs in the broad list only. "Security Check" is
+    a UK clearance level named in defence and aerospace postings, which is why
+    it is not a narrow marker.
+    """
+
+    prose = (
+        "<!doctype html><html><body><p>This position requires the ability to "
+        "obtain United Kingdom Security Check.</p><p>Challenge yourself.</p>"
+        "<p>Please enable javascript for the best experience.</p></body></html>"
+    )
+
+    assert transport._body_kind(prose.encode("utf-8"), prose) == "html_challenge"
+    assert transport._is_access_challenge_text(prose) is False
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "Access Denied",
+        "Please complete the CAPTCHA",
+        "Checking your browser before you continue",
+        "Request blocked",
+        "Verify you are human",
+    ],
+)
+def test_access_challenge_text_still_detects_real_interstitials(phrase):
+    body = f"<!doctype html><html><body>{phrase}</body></html>"
+
+    assert transport._body_kind(body.encode("utf-8"), body) == "html_challenge"
+    assert transport._is_access_challenge_text(body) is True

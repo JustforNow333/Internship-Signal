@@ -572,6 +572,46 @@ def test_access_challenge_html_200_detail_is_a_failure():
     assert raised.value.error_code == "html_challenge"
 
 
+def test_uk_security_check_clearance_copy_is_not_an_access_interstitial():
+    """Boeing's UK postings state the role needs a "Security Check" clearance.
+
+    "Security Check" is the name of a real UK clearance level, so it appears
+    in ordinary defence and aerospace job copy. Treating it on its own as an
+    access interstitial rejected a page the board served normally at 200 with
+    its full content, exactly as the word "challenge" once did. A genuine
+    interstitial still names a concrete access barrier.
+    """
+
+    detail = text_fixture("talentbrew_detail_reference.html").replace(
+        "Build resilient banking technology.",
+        "This position requires the ability to obtain United Kingdom Security Check.",
+    )
+    rows = TalentBrewSource(request_text=lambda *_: detail).parse(
+        json_fixture("talentbrew_search_single.json"), company()
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["title"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<!doctype html><html><body>Access Denied</body></html>",
+        "<!doctype html><html><body>Please complete the CAPTCHA</body></html>",
+        "<!doctype html><html><body>Checking your browser before you continue</body></html>",
+        "<!doctype html><html><body>Verify you are human</body></html>",
+    ],
+)
+def test_concrete_access_interstitials_are_still_rejected(body):
+    with pytest.raises(SourceFetchError) as raised:
+        TalentBrewSource(request_text=lambda *_: body).parse(
+            json_fixture("talentbrew_search_single.json"), company()
+        )
+
+    assert raised.value.error_code == "html_challenge"
+
+
 def test_normal_job_copy_using_the_word_challenge_is_not_an_access_interstitial():
     detail = text_fixture("talentbrew_detail_reference.html").replace(
         "Build resilient banking technology.",
