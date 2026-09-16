@@ -2508,3 +2508,44 @@ companies:
     alumni_match: ["chevron"]
     source_url: "https://careers.chevron.com/search-jobs"
     note: "Official Radancy TalentBrew board; Interns is the published category facet for early-career roles"
+
+  - name: "Shell"
+    ats: workday
+    token: "shell"
+    workday_shard: "wd3"
+    workday_site: "ShellCareers"
+    aliases: ["Royal Dutch Shell"]
+    alumni_match: ["shell", "royal dutch shell"]
+    source_url: "https://shell.wd3.myworkdayjobs.com/ShellCareers"
+    note: "Workday tenant and site published by the official shell.com careers model"
+
+  - name: "BP"
+    ats: workday
+    token: "bpinternational"
+    workday_shard: "wd3"
+    workday_site: "bpCareers"
+    aliases: ["British Petroleum"]
+    alumni_match: ["bp", "british petroleum"]
+    source_url: "https://bpinternational.wd3.myworkdayjobs.com/bpCareers"
+    note: "Workday tenant and site linked by the official careers.bp.com site"
+
+  - name: "ConocoPhillips"
+    ats: workday
+    token: "conocophillips"
+    workday_shard: "wd1"
+    workday_site: "External"
+    aliases: ["Conoco"]
+    alumni_match: ["conocophillips", "conoco"]
+    source_url: "https://conocophillips.wd1.myworkdayjobs.com/External"
+    note: "Workday tenant and site linked by the official careers page"
+
+  - name: "Deloitte"
+    ats: github_only
+    alumni_match: ["deloitte"]
+    note: "official careers inventory uses an unsupported Avature portal; usable Simplify backstop only"
+
+  - name: "PwC"
+    ats: github_only
+    aliases: ["PricewaterhouseCoopers", "PricewaterhouseCoopers (PwC)"]
+    alumni_match: ["pwc", "pricewaterhousecoopers"]
+    note: "entire entry-level Workday board is campus roles, so all 444 postings are internship detail candidates against the bounded budget of 100; usable Simplify backstop only"
