@@ -2120,10 +2120,15 @@ companies:
     note: "official recruiting scope is split between Workday professional hiring and a separate Tal.net campus board; backstop feed only"
 
   - name: "Citi"
-    ats: github_only
+    ats: talentbrew
+    talentbrew_host: "jobs.citi.com"
+    talentbrew_site_id: "287"
+    talentbrew_category_id: "9378912"
+    talentbrew_category_name: "Student and Grad Programs"
     aliases: ["Citigroup"]
     alumni_match: ["citi", "citigroup"]
-    note: "official TalentBrew inventory uses a listing-card contract not supported by the current adapter; backstop feed only"
+    source_url: "https://jobs.citi.com/search-jobs"
+    note: "Official Radancy TalentBrew board; Student and Grad Programs is the published category facet for early-career roles"
 
   - name: "Wells Fargo"
     ats: workday

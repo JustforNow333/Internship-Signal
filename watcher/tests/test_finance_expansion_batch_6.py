@@ -7,6 +7,7 @@ import pytest
 from watcher.company_matching import company_matching_key, company_matches
 from watcher.config import load_watchlist
 from watcher.sources.registry import DIRECT_ATS, build_direct_sources
+from watcher.sources.talentbrew import TalentBrewSource
 from watcher.sources.workday import WorkdaySource
 from watcher.tests.tech_universe import (
     TECH_UNIVERSE_COMPANY_NAMES,
@@ -40,10 +41,21 @@ WORKDAY_BATCH_CONFIG = {
     ),
 }
 
+# Citi was a backstop entry until its real TalentBrew site id was read from
+# its own job links; the board the adapter already supports enumerates it.
+TALENTBREW_BATCH_CONFIG = {
+    "Citi": (
+        "jobs.citi.com",
+        "287",
+        "9378912",
+        "Student and Grad Programs",
+        "https://jobs.citi.com/search-jobs",
+    ),
+}
+
 FALLBACK_BATCH_COMPANIES = (
     "Bank of America",
     "BNP Paribas",
-    "Citi",
     "Deutsche Bank",
     "Vanguard",
 )
@@ -51,7 +63,6 @@ FALLBACK_BATCH_COMPANIES = (
 CURRENT_FEED_LABELS = (
     ("Bank of America", "Bank of America", "sndsh404_summer_2027"),
     ("BNP Paribas", "BNP Paribas", "sndsh404_summer_2027"),
-    ("Citi", "Citi", "sndsh404_summer_2027"),
     ("Deutsche Bank", "Deutsche Bank", "simplify"),
     ("Vanguard", "Vanguard", "simplify"),
 )
@@ -75,9 +86,11 @@ def test_batch_is_disjoint_from_the_tech_universe_and_additive(watchlist):
     )
 
     assert set(AUDITED_BATCH_COMPANIES).isdisjoint(TECH_UNIVERSE_COMPANY_NAMES)
-    assert set(WORKDAY_BATCH_CONFIG) | set(FALLBACK_BATCH_COMPANIES) == set(
-        configured_batch
-    )
+    assert (
+        set(WORKDAY_BATCH_CONFIG)
+        | set(TALENTBREW_BATCH_CONFIG)
+        | set(FALLBACK_BATCH_COMPANIES)
+    ) == set(configured_batch)
     assert_batch_is_additive(configured_batch, configured_names)
     assert set(UNCOVERED_BATCH_COMPANIES).isdisjoint(configured_names)
 
@@ -103,6 +116,30 @@ def test_workday_companies_use_first_party_published_site_tenants(
     assert WorkdaySource.endpoint(token, shard, site) == (
         f"https://{token}.{shard}.myworkdayjobs.com/wday/cxs/{token}/{site}/jobs"
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "host", "site_id", "category_id", "category_name", "source_url"),
+    [(name, *values) for name, values in sorted(TALENTBREW_BATCH_CONFIG.items())],
+)
+def test_talentbrew_companies_pin_a_published_category_facet(
+    watchlist, name, host, site_id, category_id, category_name, source_url
+):
+    cfg = company(watchlist, name)
+
+    assert cfg.ats == "talentbrew"
+    assert (
+        cfg.talentbrew_host,
+        cfg.talentbrew_site_id,
+        cfg.talentbrew_category_id,
+        cfg.talentbrew_category_name,
+    ) == (host, site_id, category_id, category_name)
+    assert cfg.source_url == source_url
+    endpoint = TalentBrewSource.search_endpoint(cfg, 1, 16)
+    assert endpoint.startswith(f"https://{host}/search-jobs/results?")
+    assert f"ID={category_id}" in endpoint
+    assert cfg.ats in DIRECT_ATS
+    assert build_direct_sources()[cfg.ats] is not None
 
 
 @pytest.mark.parametrize("name", FALLBACK_BATCH_COMPANIES)
