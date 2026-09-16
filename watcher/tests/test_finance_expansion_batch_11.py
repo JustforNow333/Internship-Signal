@@ -1,0 +1,302 @@
+"""Eleventh expansion batch: industrial and aerospace manufacturers."""
+
+from __future__ import annotations
+
+import pytest
+
+from watcher.company_matching import company_matching_key, company_matches
+from watcher.config import load_watchlist
+from watcher.sources.icims import IcimsSource
+from watcher.sources.oracle_hcm import OracleHcmSource
+from watcher.sources.registry import DIRECT_ATS, build_direct_sources
+from watcher.sources.talentbrew import TalentBrewSource
+from watcher.sources.workday import WorkdaySource
+from watcher.tests.tech_universe import (
+    TECH_UNIVERSE_COMPANY_NAMES,
+    assert_batch_is_additive,
+)
+
+
+AUDITED_BATCH_COMPANIES = (
+    "Caterpillar",
+    "GE Aerospace",
+    "Honeywell",
+    "ABB",
+    "Schneider Electric",
+    "Lockheed Martin",
+    "RTX",
+    "Boeing",
+)
+
+# Companies the watchlist already represented under the same corporate
+# identity before this batch. Batch 11 introduced none, and the audit must
+# keep proving it rather than assuming it.
+ALREADY_COVERED_BATCH_COMPANIES: tuple[str, ...] = ()
+
+WORKDAY_BATCH_CONFIG = {
+    "GE Aerospace": (
+        "geaerospace",
+        "wd5",
+        "GE_ExternalSite",
+        "https://geaerospace.wd5.myworkdayjobs.com/GE_ExternalSite",
+    ),
+}
+
+ORACLE_HCM_BATCH_CONFIG = {
+    "Honeywell": (
+        "ibqbjb.fa.ocs.oraclecloud.com",
+        "Honeywell",
+        "https://ibqbjb.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience"
+        "/en/sites/Honeywell/jobs",
+    ),
+}
+
+ICIMS_BATCH_CONFIG = {
+    "Schneider Electric": (
+        "jibe_json",
+        "careers.se.com",
+        "https://careers.se.com/jobs",
+    ),
+}
+
+TALENTBREW_BATCH_CONFIG = {
+    "Boeing": (
+        "jobs.boeing.com",
+        "185",
+        "9287",
+        "Internship",
+        "https://jobs.boeing.com/search-jobs",
+    ),
+}
+
+FALLBACK_BATCH_COMPANIES = ("Caterpillar", "ABB", "RTX")
+CURRENT_FEED_LABELS = (
+    ("Caterpillar", "Caterpillar", "simplify"),
+    ("Caterpillar Inc.", "Caterpillar", "simplify"),
+    ("ABB", "ABB", "simplify"),
+    ("RTX", "RTX", "simplify"),
+)
+UNCOVERED_BATCH_COMPANIES = ("Lockheed Martin",)
+
+
+def direct_batch_names() -> set[str]:
+    return (
+        set(WORKDAY_BATCH_CONFIG)
+        | set(ORACLE_HCM_BATCH_CONFIG)
+        | set(ICIMS_BATCH_CONFIG)
+        | set(TALENTBREW_BATCH_CONFIG)
+    )
+
+
+def configured_batch_names() -> set[str]:
+    return direct_batch_names() | set(FALLBACK_BATCH_COMPANIES)
+
+
+@pytest.fixture(scope="module")
+def watchlist():
+    return load_watchlist()
+
+
+def company(watchlist, name: str):
+    return next(c for c in watchlist.companies if c.name == name)
+
+
+def test_batch_is_disjoint_from_the_tech_universe_and_additive(watchlist):
+    configured_names = {cfg.name for cfg in watchlist.companies}
+
+    assert set(AUDITED_BATCH_COMPANIES).isdisjoint(TECH_UNIVERSE_COMPANY_NAMES)
+    assert_batch_is_additive(tuple(configured_batch_names()), configured_names)
+    assert set(UNCOVERED_BATCH_COMPANIES).isdisjoint(configured_names)
+
+
+def test_every_audited_company_has_exactly_one_outcome():
+    covered = configured_batch_names()
+
+    assert covered.isdisjoint(UNCOVERED_BATCH_COMPANIES)
+    assert covered.isdisjoint(ALREADY_COVERED_BATCH_COMPANIES)
+    assert (
+        covered
+        | set(UNCOVERED_BATCH_COMPANIES)
+        | set(ALREADY_COVERED_BATCH_COMPANIES)
+    ) == set(AUDITED_BATCH_COMPANIES)
+    assert direct_batch_names().isdisjoint(FALLBACK_BATCH_COMPANIES)
+
+    tables = (
+        WORKDAY_BATCH_CONFIG,
+        ORACLE_HCM_BATCH_CONFIG,
+        ICIMS_BATCH_CONFIG,
+        TALENTBREW_BATCH_CONFIG,
+    )
+    claimed = [name for table in tables for name in table]
+    assert sorted(claimed) == sorted(set(claimed))
+
+
+def test_batch_adds_each_company_exactly_once(watchlist):
+    """No audited company may be represented twice under any identity."""
+
+    names = [cfg.name for cfg in watchlist.companies]
+
+    assert len(names) == len(set(names))
+    for name in configured_batch_names():
+        assert names.count(name) == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "token", "shard", "site", "source_url"),
+    [(name, *values) for name, values in sorted(WORKDAY_BATCH_CONFIG.items())],
+)
+def test_workday_companies_use_first_party_published_tenants(
+    watchlist, name, token, shard, site, source_url
+):
+    cfg = company(watchlist, name)
+
+    assert cfg.ats == "workday"
+    assert (cfg.token, cfg.workday_shard, cfg.workday_site) == (token, shard, site)
+    assert cfg.workday_host_variant == "jobs"
+    assert cfg.workday_detail_policy == "internship_candidates"
+    assert cfg.source_url == source_url
+    assert WorkdaySource.endpoint(token, shard, site) == (
+        f"https://{token}.{shard}.myworkdayjobs.com/wday/cxs/{token}/{site}/jobs"
+    )
+    assert cfg.ats in DIRECT_ATS
+
+
+@pytest.mark.parametrize(
+    ("name", "host", "site", "source_url"),
+    [(name, *values) for name, values in sorted(ORACLE_HCM_BATCH_CONFIG.items())],
+)
+def test_oracle_hcm_companies_use_their_published_candidate_site(
+    watchlist, name, host, site, source_url
+):
+    cfg = company(watchlist, name)
+
+    assert cfg.ats == "oracle_hcm"
+    assert (cfg.oracle_hcm_host, cfg.oracle_hcm_site) == (host, site)
+    assert cfg.source_url == source_url
+    endpoint = OracleHcmSource.endpoint(host, site, limit=10, offset=0)
+    assert endpoint.startswith(f"https://{host}/hcmRestApi/resources/latest/")
+    # the finder clause is URL-encoded, so the site arrives as siteNumber%3D<site>
+    assert f"siteNumber%3D{site}" in endpoint
+    assert OracleHcmSource.posting_url(host, site, "1").startswith(
+        f"https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/"
+    )
+    assert cfg.ats in DIRECT_ATS
+
+
+@pytest.mark.parametrize(
+    ("name", "variant", "host", "source_url"),
+    [(name, *values) for name, values in sorted(ICIMS_BATCH_CONFIG.items())],
+)
+def test_icims_companies_use_their_published_jibe_inventory(
+    watchlist, name, variant, host, source_url
+):
+    cfg = company(watchlist, name)
+
+    assert cfg.ats == "icims"
+    assert cfg.icims_variant == variant
+    assert cfg.icims_host == host
+    assert tuple(cfg.icims_portals) == ()
+    assert cfg.source_url == source_url
+    assert IcimsSource.jibe_endpoint(host, limit=100, page=1) == (
+        f"https://{host}/api/jobs?limit=100&page=1"
+    )
+    assert cfg.ats in DIRECT_ATS
+
+
+@pytest.mark.parametrize(
+    ("name", "host", "site_id", "category_id", "category_name", "source_url"),
+    [(name, *values) for name, values in sorted(TALENTBREW_BATCH_CONFIG.items())],
+)
+def test_talentbrew_companies_pin_a_published_category_facet(
+    watchlist, name, host, site_id, category_id, category_name, source_url
+):
+    cfg = company(watchlist, name)
+
+    assert cfg.ats == "talentbrew"
+    assert (
+        cfg.talentbrew_host,
+        cfg.talentbrew_site_id,
+        cfg.talentbrew_category_id,
+        cfg.talentbrew_category_name,
+    ) == (host, site_id, category_id, category_name)
+    assert cfg.source_url == source_url
+    endpoint = TalentBrewSource.search_endpoint(cfg, 1, 16)
+    assert endpoint.startswith(f"https://{host}/search-jobs/results?")
+    assert f"ID={category_id}" in endpoint
+    assert cfg.ats in DIRECT_ATS
+
+
+@pytest.mark.parametrize("name", sorted(direct_batch_names()))
+def test_direct_batch_companies_build_from_the_registry(watchlist, name):
+    cfg = company(watchlist, name)
+
+    assert build_direct_sources()[cfg.ats] is not None
+
+
+@pytest.mark.parametrize("name", FALLBACK_BATCH_COMPANIES)
+def test_fallback_companies_are_backstop_only(watchlist, name):
+    cfg = company(watchlist, name)
+
+    assert cfg.ats == "github_only"
+    assert cfg.ats not in DIRECT_ATS
+    assert not cfg.token
+    assert not cfg.source_url
+
+
+@pytest.mark.parametrize(("feed_label", "name", "feed_name"), CURRENT_FEED_LABELS)
+def test_fallback_companies_match_current_feed_labels(
+    watchlist, feed_label, name, feed_name
+):
+    cfg = company(watchlist, name)
+
+    assert feed_name == "simplify"
+    assert company_matches(feed_label, cfg)
+
+
+def test_uncovered_companies_are_not_accidentally_claimed(watchlist):
+    owners = {
+        company_matching_key(label)
+        for cfg in watchlist.companies
+        for label in (cfg.name, *cfg.aliases)
+    }
+
+    for name in UNCOVERED_BATCH_COMPANIES:
+        assert company_matching_key(name) not in owners
+
+    assert company_matching_key("Lockheed") not in owners
+
+
+def test_batch_names_and_aliases_do_not_collide_with_watchlist_identities(watchlist):
+    owners: dict[str, set[str]] = {}
+    for cfg in watchlist.companies:
+        for label in (cfg.name, *cfg.aliases):
+            owners.setdefault(company_matching_key(label), set()).add(cfg.name)
+
+    assert {key: names for key, names in owners.items() if len(names) > 1} == {}
+
+    for name in configured_batch_names():
+        cfg = company(watchlist, name)
+        for label in (cfg.name, *cfg.aliases):
+            assert owners[company_matching_key(label)] == {name}
+
+
+def test_batch_does_not_claim_neighbouring_feed_identities(watchlist):
+    """Distinct employers with similar names must not be absorbed."""
+
+    for name, neighbour in (
+        ("ABB", "AbbVie"),
+        ("ABB", "Abbott"),
+        ("GE Aerospace", "General Electric"),
+        ("Boeing", "Boeing Defence Australia"),
+    ):
+        cfg = company(watchlist, name)
+        assert not company_matches(neighbour, cfg)
+
+
+def test_batch_does_not_pin_a_global_watchlist_total(watchlist):
+    configured_names = {cfg.name for cfg in watchlist.companies}
+
+    assert configured_batch_names() <= configured_names
+    assert len(configured_names) >= len(
+        TECH_UNIVERSE_COMPANY_NAMES | configured_batch_names()
+    )

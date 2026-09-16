@@ -2354,3 +2354,59 @@ companies:
     alumni_match: ["john deere", "deere"]
     source_url: "https://jobs.deere.com/search/"
     note: "Official SuccessFactors career site linked by careers.deere.com"
+
+  - name: "Caterpillar"
+    ats: github_only
+    alumni_match: ["caterpillar"]
+    note: "official careers search sits behind an anti-bot challenge that must not be evaded; usable Simplify backstop only"
+
+  - name: "GE Aerospace"
+    ats: workday
+    token: "geaerospace"
+    workday_shard: "wd5"
+    workday_site: "GE_ExternalSite"
+    aliases: ["GE Aviation"]
+    alumni_match: ["ge aerospace", "ge aviation"]
+    source_url: "https://geaerospace.wd5.myworkdayjobs.com/GE_ExternalSite"
+    note: "Workday tenant and site published by the official Phenom careers site apply links"
+
+  - name: "Honeywell"
+    ats: oracle_hcm
+    oracle_hcm_host: "ibqbjb.fa.ocs.oraclecloud.com"
+    oracle_hcm_site: "Honeywell"
+    aliases: ["Honeywell International"]
+    alumni_match: ["honeywell", "honeywell international"]
+    source_url: "https://ibqbjb.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/Honeywell/jobs"
+    note: "Oracle HCM host and site that the official careers site redirects to"
+
+  - name: "ABB"
+    ats: github_only
+    aliases: ["ABB Group"]
+    alumni_match: ["abb"]
+    note: "official Workday board clamps its reported total at 2000 while its own partitions count 2065 and deep offsets wrap; usable Simplify backstop only"
+
+  - name: "Schneider Electric"
+    ats: icims
+    icims_variant: jibe_json
+    icims_host: "careers.se.com"
+    aliases: ["Schneider"]
+    alumni_match: ["schneider electric", "schneider"]
+    source_url: "https://careers.se.com/jobs"
+    note: "Official Jibe inventory on the corporate careers host; careers-se iCIMS is application infrastructure"
+
+  - name: "RTX"
+    ats: github_only
+    aliases: ["Raytheon", "Raytheon Technologies", "RTX Corporation"]
+    alumni_match: ["rtx", "raytheon", "raytheon technologies"]
+    note: "official careers search sits behind an anti-bot challenge that must not be evaded; usable Simplify backstop only"
+
+  - name: "Boeing"
+    ats: talentbrew
+    talentbrew_host: "jobs.boeing.com"
+    talentbrew_site_id: "185"
+    talentbrew_category_id: "9287"
+    talentbrew_category_name: "Internship"
+    aliases: ["The Boeing Company"]
+    alumni_match: ["boeing", "the boeing company"]
+    source_url: "https://jobs.boeing.com/search-jobs"
+    note: "Official Radancy TalentBrew board; Internship is the published category facet for early-career roles"
