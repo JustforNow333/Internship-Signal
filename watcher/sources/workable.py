@@ -122,9 +122,26 @@ class WorkableSource(DirectRecordAdapter):
             rows.extend(self._parse_records(jobs, company))
             if raw_seen == total:
                 if next_cursor is not None:
-                    raise SourceSchemaError(
-                        "workable returned a cursor after total completion"
+                    # Workable pages in fixed sizes, so a total that lands on a
+                    # page boundary still advertises a next page. Prove that
+                    # page is empty rather than assuming it: one bounded extra
+                    # request. A residual page holding records means the total
+                    # under-reported the board, which still fails closed.
+                    self.pages_requested += 1
+                    residual = self._retrier.run(
+                        lambda: request_json(
+                            endpoint, {"query": "", "token": next_cursor}, self.name
+                        )
                     )
+                    residual_jobs, residual_total, _ = _strict_page(residual)
+                    if residual_total != expected_total:
+                        raise SourceSchemaError(
+                            "workable total changed during pagination"
+                        )
+                    if residual_jobs:
+                        raise SourceSchemaError(
+                            "workable returned records beyond the reported total"
+                        )
                 return self._finish(rows)
             if next_cursor is None:
                 raise SourceSchemaError("workable pagination ended before total")

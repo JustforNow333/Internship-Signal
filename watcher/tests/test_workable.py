@@ -188,16 +188,68 @@ def test_mixed_malformed_records_across_pages_retain_valid_rows_and_degrade():
             [{"total": 1, "results": [_job("ONE")], "nextPage": 42}],
             "nextPage",
         ),
-        (
-            [{"total": 1, "results": [_job("ONE")], "nextPage": "extra"}],
-            "cursor after total",
-        ),
     ],
 )
 def test_incomplete_or_inconsistent_cursor_pagination_fails(payloads, message):
     source, _ = _source(payloads)
 
     with pytest.raises(SourceSchemaError, match=message):
+        source.fetch(COMPANY)
+
+
+def test_residual_cursor_returning_no_records_completes_the_board():
+    """A board whose total lands on a page boundary emits a spare cursor.
+
+    Workable pages in fixed sizes, so a total that is an exact multiple of the
+    page size yields a next-page cursor whose page is empty. Halo Industries
+    hits this with 20 records over two pages of ten. The cursor is redundant
+    metadata, not undiscovered inventory, so the board is complete once the
+    authoritative total is reached and the residual page is proven empty.
+    """
+
+    source, calls = _source(
+        [
+            {"total": 2, "results": [_job("ONE")], "nextPage": "cursor-1"},
+            {"total": 2, "results": [_job("TWO")], "nextPage": "cursor-2"},
+            {"total": 2, "results": []},
+        ]
+    )
+
+    rows = source.fetch(COMPANY)
+
+    assert [row["title"] for row in rows] == ["Role ONE", "Role TWO"]
+    # The residual cursor is verified, not assumed: exactly one extra request.
+    assert [call.get("token") for call in calls] == [None, "cursor-1", "cursor-2"]
+    assert source.pages_requested == 3
+    assert source.last_health_diagnostics.complete is True
+    assert source.last_health_diagnostics.degraded is False
+
+
+def test_residual_cursor_hiding_more_records_still_fails_closed():
+    """If the spare cursor does hold inventory, the total was wrong."""
+
+    source, _ = _source(
+        [
+            {"total": 2, "results": [_job("ONE")], "nextPage": "cursor-1"},
+            {"total": 2, "results": [_job("TWO")], "nextPage": "cursor-2"},
+            {"total": 2, "results": [_job("THREE")]},
+        ]
+    )
+
+    with pytest.raises(SourceSchemaError, match="beyond the reported total"):
+        source.fetch(COMPANY)
+
+
+def test_residual_cursor_changing_the_total_still_fails_closed():
+    source, _ = _source(
+        [
+            {"total": 2, "results": [_job("ONE")], "nextPage": "cursor-1"},
+            {"total": 2, "results": [_job("TWO")], "nextPage": "cursor-2"},
+            {"total": 3, "results": []},
+        ]
+    )
+
+    with pytest.raises(SourceSchemaError, match="total changed"):
         source.fetch(COMPANY)
 
 
