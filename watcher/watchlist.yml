@@ -2410,3 +2410,59 @@ companies:
     alumni_match: ["boeing", "the boeing company"]
     source_url: "https://jobs.boeing.com/search-jobs"
     note: "Official Radancy TalentBrew board; Internship is the published category facet for early-career roles"
+
+  - name: "L3Harris"
+    ats: talentbrew
+    talentbrew_host: "careers.l3harris.com"
+    talentbrew_site_id: "4832"
+    talentbrew_category_id: "62394"
+    talentbrew_category_name: "Co-Op/Intern"
+    aliases: ["L3Harris Technologies"]
+    alumni_match: ["l3harris", "l3harris technologies"]
+    source_url: "https://careers.l3harris.com/search-jobs"
+    note: "Official Radancy TalentBrew board; Co-Op/Intern is the published category facet for early-career roles"
+
+  - name: "Blue Origin"
+    ats: github_only
+    alumni_match: ["blue origin"]
+    note: "official careers search answers with a Vercel security checkpoint that must not be evaded; usable Simplify and Markdown backstops only"
+
+  - name: "Johnson & Johnson"
+    ats: github_only
+    aliases: ["J&J", "Johnson and Johnson"]
+    alumni_match: ["johnson & johnson", "johnson and johnson"]
+    note: "official careers search sits behind an anti-bot challenge that must not be evaded; usable Simplify backstop only"
+
+  - name: "Moderna"
+    ats: workday
+    token: "modernatx"
+    workday_shard: "wd1"
+    workday_site: "M_tx"
+    aliases: ["ModernaTX"]
+    alumni_match: ["moderna", "modernatx"]
+    source_url: "https://modernatx.wd1.myworkdayjobs.com/M_tx"
+    note: "Workday tenant and site linked by the official careers page"
+
+  - name: "AbbVie"
+    ats: github_only
+    alumni_match: ["abbvie"]
+    note: "official careers inventory uses an unsupported Attrax contract; usable Simplify backstop only"
+
+  - name: "Bristol Myers Squibb"
+    ats: workday
+    token: "bristolmyerssquibb"
+    workday_shard: "wd5"
+    workday_site: "BMS"
+    aliases: ["Bristol-Myers Squibb", "BMS"]
+    alumni_match: ["bristol myers squibb", "bms"]
+    source_url: "https://bristolmyerssquibb.wd5.myworkdayjobs.com/BMS"
+    note: "Workday tenant and site linked by the official careers page"
+
+  - name: "Amgen"
+    ats: workday
+    token: "amgen"
+    workday_shard: "wd1"
+    workday_site: "Careers"
+    alumni_match: ["amgen"]
+    source_url: "https://amgen.wd1.myworkdayjobs.com/Careers"
+    note: "Workday tenant and site linked by the official TalentBrew careers site apply links"
