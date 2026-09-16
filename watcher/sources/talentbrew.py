@@ -618,7 +618,12 @@ def _detail_data(html: str) -> tuple[dict[str, Any], dict[str, str]]:
     parser.feed(html)
     for script in parser.json_scripts:
         try:
-            candidate = json.loads(script)
+            # ``strict=False`` only tolerates raw control characters inside
+            # string values, which RFC 8259 forbids but real boards emit:
+            # UnitedHealth Group carries literal tabs from a Knockout template
+            # in its description. Structure is still parsed strictly, so a
+            # genuinely malformed payload is still skipped.
+            candidate = json.loads(script, strict=False)
         except json.JSONDecodeError:
             continue
         candidates = candidate if isinstance(candidate, list) else [candidate]

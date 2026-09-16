@@ -572,6 +572,46 @@ def test_access_challenge_html_200_detail_is_a_failure():
     assert raised.value.error_code == "html_challenge"
 
 
+def test_jsonld_with_raw_control_characters_still_parses():
+    """UnitedHealth Group embeds literal tabs inside its JSON-LD strings.
+
+    The board serves the page normally at 200 with a complete JobPosting
+    block, but a Knockout template in the description carries raw tab
+    characters, which RFC 8259 forbids inside a string. Rejecting the whole
+    company over that discards a posting the board published correctly, so
+    control characters inside strings are tolerated. Structure is still
+    parsed strictly: only characters below 0x20 inside a string are allowed.
+    """
+
+    detail = text_fixture("talentbrew_detail_reference.html").replace(
+        "Build resilient banking technology.",
+        "Build resilient banking technology."
+        "\t\t$data.name === 'descriptionExt' || $data.name === 'qualificationExt'",
+    )
+
+    rows = TalentBrewSource(request_text=lambda *_: detail).parse(
+        json_fixture("talentbrew_search_single.json"), company()
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["title"]
+
+
+def test_structurally_broken_jsonld_is_still_rejected():
+    """Tolerating control characters must not tolerate malformed structure."""
+
+    detail = text_fixture("talentbrew_detail_reference.html")
+    broken = detail.replace('"@type": "JobPosting"', '"@type": "JobPosting",,', 1)
+    if broken == detail:
+        broken = detail.replace('"@type":"JobPosting"', '"@type":"JobPosting",,', 1)
+    assert broken != detail
+
+    with pytest.raises(SourceSchemaError):
+        TalentBrewSource(request_text=lambda *_: broken).parse(
+            json_fixture("talentbrew_search_single.json"), company()
+        )
+
+
 def test_uk_security_check_clearance_copy_is_not_an_access_interstitial():
     """Boeing's UK postings state the role needs a "Security Check" clearance.
 
