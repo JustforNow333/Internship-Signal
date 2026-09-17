@@ -127,7 +127,7 @@ def test_none_policy_selects_no_details():
     ) is None
 
 
-def test_candidate_limit_fails_before_any_detail_request():
+def test_candidate_limit_retains_authoritative_listings_as_degraded():
     payload = {
         "jobPostings": [
             posting("Software Intern", f"/job/Test/Intern-{index}_R{index}", f"R{index}")
@@ -141,12 +141,37 @@ def test_candidate_limit_fails_before_any_detail_request():
         max_detail_candidates=2,
     )
 
-    with pytest.raises(SourceSchemaError, match="detail candidate limit"):
-        source.fetch(company())
+    rows = source.fetch(company())
 
+    assert [row["title"] for row in rows] == [
+        "Software Intern",
+        "Software Intern",
+        "Software Intern",
+    ]
     assert calls == []
     assert source.last_diagnostics.detail_candidates == 3
     assert source.last_diagnostics.detail_requests == 0
+    assert source.last_diagnostics.detail_enrichment_degraded is True
+    assert (
+        source.last_diagnostics.detail_degraded_reason
+        == "detail_candidate_limit_exceeded"
+    )
+    assert source.last_diagnostics.detail_failure_reasons == ()
+    assert all(
+        row["extra"]["workday_detail_status"] == "skipped_budget"
+        for row in rows
+    )
+    health = source.last_health_diagnostics
+    assert health.succeeded is True
+    assert health.retained_row_count == 3
+    assert health.failed_request_count == 0
+    assert health.reason_codes == (
+        "material_enrichment_failed",
+        "detail_candidate_limit_exceeded",
+    )
+    assert health.incomplete is True
+    assert health.degraded is True
+    assert health.complete is False
 
 
 def test_duplicate_listing_paths_trigger_one_detail_request():

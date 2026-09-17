@@ -820,23 +820,35 @@ class WorkdaySource:
             0, len(grouped) - self._detail_candidates
         )
         for path, path_rows in grouped.items():
-            if path not in candidate_reasons:
+            reason = candidate_reasons.get(path)
+            if reason is None:
                 status = "disabled" if policy == WORKDAY_DETAIL_NONE else "not_selected"
                 for row in path_rows:
                     row["extra"]["workday_detail_status"] = status
+            else:
+                for row in path_rows:
+                    row["extra"]["workday_detail_candidate_reason"] = reason
 
         if self._detail_candidates > self._max_detail_candidates:
+            # Search is Workday's authoritative discovery inventory and every
+            # retained listing already has the required title, external path,
+            # posting-specific URL, and a stable URL fallback when the tenant
+            # omits a requisition-shaped bullet field. Detail responses enrich
+            # analysis fields; they do not establish discovery or identity.
+            # Keep the bounded zero-detail-request behavior while publishing
+            # the listing rows as explicitly incomplete/degraded enrichment.
+            for path in candidate_reasons:
+                for row in grouped[path]:
+                    row["extra"]["workday_detail_status"] = "skipped_budget"
+            self._detail_enrichment_degraded = True
+            self._detail_degraded_reason = "detail_candidate_limit_exceeded"
             self.last_diagnostics = self._diagnostics_snapshot()
-            raise SourceSchemaError(
-                "workday detail candidate limit exceeded for "
-                f"{_safe_company_name(company.name)}: "
-                f"{self._detail_candidates}>{self._max_detail_candidates}"
-            )
+            self._publish_health_diagnostics(rows)
+            self._log_detail_summary(company)
+            return rows
 
         for path, reason in candidate_reasons.items():
             path_rows = grouped[path]
-            for row in path_rows:
-                row["extra"]["workday_detail_candidate_reason"] = reason
             try:
                 payload = self._fetch_detail(
                     self.detail_endpoint(
@@ -1068,6 +1080,8 @@ class WorkdaySource:
             reasons.append("schema_invalid_records_skipped")
         if enrichment_degraded:
             reasons.append("material_enrichment_failed")
+            if diagnostics.detail_degraded_reason:
+                reasons.append(diagnostics.detail_degraded_reason)
         elif detail_failures:
             reasons.append("optional_enrichment_failed")
         if recovered_retries:

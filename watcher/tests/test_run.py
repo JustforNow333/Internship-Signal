@@ -705,6 +705,63 @@ def _workday_detail(requisition, description, *, worker_subtype="Intern"):
     }
 
 
+def test_workday_detail_budget_retains_rows_in_collection_as_degraded_success():
+    company = CompanyCfg(
+        name="Example",
+        ats="workday",
+        token="tenant",
+        workday_shard="wd5",
+        workday_site="Site",
+    )
+    postings = [
+        _workday_search_posting("Software Intern", f"R{index}")
+        for index in range(3)
+    ]
+
+    def unexpected_detail_request(_url, _source_name):
+        raise AssertionError("over-budget enrichment must make no detail request")
+
+    source = WorkdaySource(
+        min_interval_seconds=0,
+        max_detail_candidates=2,
+        request_json=lambda _url, _payload, _source_name: {
+            "jobPostings": postings,
+            "total": len(postings),
+        },
+        request_detail_json=unexpected_detail_request,
+    )
+    stats = CollectionStats()
+
+    rows, errors = collect_rows(
+        WatcherConfig(companies=(company,)),
+        direct_sources={"workday": source},
+        github_source=FakeGithub([]),
+        stats=stats,
+        run_id="detail-budget-run",
+        observed_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
+    )
+
+    assert len(rows) == 3
+    assert errors == []
+    attempt = next(
+        item
+        for item in stats.source_attempts
+        if item.source_kind == SOURCE_KIND_DIRECT
+    )
+    assert attempt.succeeded is True
+    assert attempt.rows_returned == 3
+    assert attempt.failed_request_count == 0
+    assert attempt.reason_codes == (
+        "material_enrichment_failed",
+        "detail_candidate_limit_exceeded",
+    )
+    assert attempt.incomplete is True
+    assert attempt.degraded is True
+    assert attempt.complete is False
+    assert stats.workday_succeeded == 1
+    assert stats.workday_failed == 0
+
+
 def test_workday_detail_enrichment_changes_only_technical_candidates_to_matches(
     tmp_path,
 ):
