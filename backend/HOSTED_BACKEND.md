@@ -240,7 +240,9 @@ managed credentials and `HOSTED_SECURE_COOKIES=true` in production.
 
 ## Migrations and tests
 
-Alembic requires `HOSTED_DATABASE_URL` and never uses watcher SQLite:
+Alembic requires a hosted PostgreSQL URL and never uses watcher SQLite. It
+reads `HOSTED_DATABASE_URL`, then `DATABASE_URL`, through the same resolver the
+FastAPI runtime uses, so the two cannot disagree:
 
 ```powershell
 backend\venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
@@ -265,7 +267,10 @@ a database containing data that must be retained.
 
 ## Environment variables
 
-- `HOSTED_DATABASE_URL` (required for hosted persistence and Alembic)
+- `HOSTED_DATABASE_URL` (required for hosted persistence and Alembic; when it
+  is unset or blank, the platform-standard `DATABASE_URL` is used instead, which
+  is what Railway and most managed PostgreSQL add-ons export). `postgres://`
+  and `postgresql://` URLs are normalized to `postgresql+psycopg://`.
 - `HOSTED_SESSION_LIFETIME_SECONDS`
 - `HOSTED_SESSION_COOKIE_NAME`
 - `HOSTED_SECURE_COOKIES`

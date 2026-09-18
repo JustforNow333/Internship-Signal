@@ -9,6 +9,8 @@ from urllib.parse import urlsplit
 
 from email_validator import EmailNotValidError, validate_email
 
+from .database import database_url_from_env
+
 
 def _positive_int(name: str, default: int) -> int:
     raw = os.getenv(name, str(default)).strip()
@@ -130,7 +132,7 @@ class HostedSettings:
         if not re.fullmatch(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+", cookie_name):
             raise ValueError("HOSTED_SESSION_COOKIE_NAME must be a valid cookie name")
         return cls(
-            database_url=os.getenv("HOSTED_DATABASE_URL") or None,
+            database_url=database_url_from_env(),
             session_lifetime_seconds=_positive_int(
                 "HOSTED_SESSION_LIFETIME_SECONDS", 14 * 24 * 60 * 60
             ),

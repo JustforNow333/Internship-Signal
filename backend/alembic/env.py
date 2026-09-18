@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
-import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from app.hosted import models  # noqa: F401 - registers model metadata
-from app.hosted.database import Base, normalize_database_url
+from app.hosted.database import Base, alembic_config_url, database_url_from_env
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-database_url = config.get_main_option("sqlalchemy.url") or os.getenv(
-    "HOSTED_DATABASE_URL", ""
-)
+# An explicit sqlalchemy.url (used by the PostgreSQL test fixtures) wins, then
+# the shared resolver the FastAPI runtime uses. The URL itself is never printed.
+database_url = config.get_main_option("sqlalchemy.url") or database_url_from_env()
 if not database_url:
-    raise RuntimeError("HOSTED_DATABASE_URL is required for Alembic migrations")
-config.set_main_option("sqlalchemy.url", normalize_database_url(database_url))
+    raise RuntimeError(
+        "DATABASE_URL or HOSTED_DATABASE_URL is required for Alembic migrations"
+    )
+config.set_main_option("sqlalchemy.url", alembic_config_url(database_url))
 target_metadata = Base.metadata
 
 

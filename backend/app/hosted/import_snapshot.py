@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from collections.abc import Sequence
 from contextlib import suppress
@@ -12,7 +11,7 @@ from watcher.collection_snapshot import CollectionSnapshotError
 from watcher.config import DEFAULT_WATCHLIST_PATH
 
 from .catalog import CompanyCatalog
-from .database import HostedDatabase
+from .database import HostedDatabase, database_url_from_env
 from .job_import import JobImportError, JobImportService
 from .snapshot_jobs import SnapshotReplayError, replay_snapshot_jobs
 
@@ -42,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    database_url = os.getenv("HOSTED_DATABASE_URL", "").strip()
+    database_url = database_url_from_env()
     if not database_url:
         print("Snapshot import failed: hosted_database_not_configured", file=sys.stderr)
         return 2
