@@ -4,6 +4,17 @@
   "packages": {
     "python": "3.11"
   },
+  "steps": {
+    "install": {
+      "commands": [
+        {
+          "src": "backend/requirements.txt",
+          "dest": "backend/requirements.txt"
+        },
+        "..."
+      ]
+    }
+  },
   "deploy": {
     "startCommand": "PYTHONPATH=.:backend python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
   }
