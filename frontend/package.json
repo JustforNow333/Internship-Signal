@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "start": "serve --single --no-clipboard --no-port-switching --listen tcp://0.0.0.0:${PORT:-3000} dist",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "serve": "^14.2.6"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.4.6",
