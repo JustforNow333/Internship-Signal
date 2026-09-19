@@ -281,13 +281,40 @@ a database containing data that must be retained.
 - `HOSTED_VERIFICATION_TOKEN_LIFETIME_SECONDS`
 - `HOSTED_PASSWORD_RESET_TOKEN_LIFETIME_SECONDS`
 - `HOSTED_PUBLIC_FRONTEND_URL`
+- `HOSTED_RESEND_API_KEY`, `HOSTED_RESEND_FROM_EMAIL` (sending address only,
+  such as `noreply@example.com`; set both or neither)
 - `HOSTED_SMTP_HOST`, `HOSTED_SMTP_PORT`, `HOSTED_SMTP_USERNAME`
 - `HOSTED_SMTP_PASSWORD`, `HOSTED_SMTP_FROM_EMAIL`, `HOSTED_SMTP_STARTTLS`
-- `HOSTED_SMTP_TIMEOUT_SECONDS`
+- `HOSTED_SMTP_TIMEOUT_SECONDS` (also bounds the Resend HTTPS request)
 - `VITE_HOSTED_API_MODE=live`
 - `VITE_HOSTED_API_BASE_URL` (optional with a same-origin proxy)
 
-When SMTP is absent or rejects a message, the API does not claim delivery.
+### Mail provider selection
+
+Account mail (verification and password reset) picks exactly one provider, in
+this order:
+
+1. **Resend HTTPS** when `HOSTED_RESEND_API_KEY` and `HOSTED_RESEND_FROM_EMAIL`
+   are both set. Messages are posted to the Resend REST API over HTTPS.
+2. **SMTP** when Resend is absent and `HOSTED_SMTP_HOST` plus
+   `HOSTED_SMTP_FROM_EMAIL` are set.
+3. **Disabled** otherwise: the API reports that delivery did not happen rather
+   than pretending it did.
+
+Setting only one of the two Resend values raises at startup, so a deployment
+never silently falls back to a provider the operator did not choose. The API
+key is excluded from the settings `repr` and never appears in logs, exception
+messages, or responses; provider response bodies are likewise never logged or
+returned.
+
+Railway Free, Trial, and Hobby plans block outbound SMTP, so deployments on
+those plans must configure the Resend HTTPS provider. Verification and
+password-reset links are always built from `HOSTED_PUBLIC_FRONTEND_URL`, so
+that variable must point at the public site, for example
+`https://app.example.com/verify-email?token=<opaque token>`.
+
+When no provider is configured, or a provider rejects a message, the API does
+not claim delivery.
 Forgot-password and resend-verification responses remain identical for known
 and unknown accounts. Password-reset mail is delivered after the generic
 forgot-password response, and a successful reset invalidates every outstanding

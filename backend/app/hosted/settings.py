@@ -96,14 +96,34 @@ def _public_frontend_url() -> str:
     return value
 
 
-def _smtp_from_email() -> str:
-    value = os.getenv("HOSTED_SMTP_FROM_EMAIL", "").strip()
+def _sender_email(name: str) -> str:
+    value = os.getenv(name, "").strip()
     if not value:
         return ""
     try:
         return validate_email(value, check_deliverability=False).normalized
     except EmailNotValidError:
-        raise ValueError("HOSTED_SMTP_FROM_EMAIL must be a valid email") from None
+        raise ValueError(f"{name} must be a valid email") from None
+
+
+def _resend_credentials() -> tuple[str, str]:
+    """Read the Resend pair, refusing a half-configured HTTPS mail provider.
+
+    A partially configured provider would silently fall through to SMTP (or to
+    no mail at all) on a host where SMTP cannot work, so it is rejected at
+    startup instead. The key itself is never echoed.
+    """
+
+    api_key = os.getenv("HOSTED_RESEND_API_KEY", "").strip()
+    from_email = _sender_email("HOSTED_RESEND_FROM_EMAIL")
+    if bool(api_key) != bool(from_email):
+        missing = (
+            "HOSTED_RESEND_FROM_EMAIL" if api_key else "HOSTED_RESEND_API_KEY"
+        )
+        raise ValueError(
+            f"{missing} must also be set to enable the Resend mail provider"
+        )
+    return api_key, from_email
 
 
 @dataclass(frozen=True)
@@ -123,6 +143,8 @@ class HostedSettings:
     smtp_from_email: str = field(repr=False)
     smtp_starttls: bool
     smtp_timeout_seconds: int
+    resend_api_key: str = field(repr=False)
+    resend_from_email: str
 
     @classmethod
     def from_env(cls) -> HostedSettings:
@@ -131,6 +153,7 @@ class HostedSettings:
         ).strip()
         if not re.fullmatch(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+", cookie_name):
             raise ValueError("HOSTED_SESSION_COOKIE_NAME must be a valid cookie name")
+        resend_api_key, resend_from_email = _resend_credentials()
         return cls(
             database_url=database_url_from_env(),
             session_lifetime_seconds=_positive_int(
@@ -150,11 +173,25 @@ class HostedSettings:
             smtp_port=_positive_int("HOSTED_SMTP_PORT", 587),
             smtp_username=os.getenv("HOSTED_SMTP_USERNAME", "").strip(),
             smtp_password=os.getenv("HOSTED_SMTP_PASSWORD", ""),
-            smtp_from_email=_smtp_from_email(),
+            smtp_from_email=_sender_email("HOSTED_SMTP_FROM_EMAIL"),
             smtp_starttls=_bool("HOSTED_SMTP_STARTTLS", True),
             smtp_timeout_seconds=_positive_int("HOSTED_SMTP_TIMEOUT_SECONDS", 10),
+            resend_api_key=resend_api_key,
+            resend_from_email=resend_from_email,
         )
 
     @property
     def smtp_configured(self) -> bool:
         return bool(self.smtp_host and self.smtp_from_email)
+
+    @property
+    def resend_configured(self) -> bool:
+        return bool(self.resend_api_key and self.resend_from_email)
+
+    @property
+    def mail_provider(self) -> str:
+        """The provider `configured_mailer` will select, for logs and docs."""
+
+        if self.resend_configured:
+            return "resend"
+        return "smtp" if self.smtp_configured else "disabled"

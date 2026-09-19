@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Brand, RouteLink } from "./ui.jsx";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -175,9 +175,13 @@ export function SigninPage({ navigate, client, onSignedIn }) {
     setStatus("saving");
     setServerError("");
     try {
-      await client.login(values);
-      onSignedIn?.();
-      navigate("/app/dashboard");
+      const result = await client.login(values);
+      onSignedIn?.(result);
+      navigate(
+        result?.user?.email_verified === false
+          ? "/verify-email"
+          : "/app/dashboard",
+      );
     } catch (error) {
       setStatus("error");
       setServerError(error.message || "Email or password was not recognized.");
@@ -323,25 +327,42 @@ export function VerificationPendingPage({
   token,
   deliveryAccepted,
 }) {
-  const [status, setStatus] = useState("idle");
+  const [status, setStatus] = useState(token ? "verifying" : "idle");
   const [message, setMessage] = useState("");
+  // A verification token is single-use, so it must be submitted exactly once
+  // per mount even though Strict Mode runs effects twice in development.
+  const submittedToken = useRef("");
 
-  const verify = async () => {
-    setStatus("saving");
+  const verifyToken = async (oneTimeToken) => {
+    setStatus("verifying");
     setMessage("");
     try {
-      if (token) {
-        await client.verifyEmail({ token });
-      } else {
-        const me = await client.getMe();
-        if (!me.email_verified) {
-          throw new Error("Your email has not been verified yet.");
-        }
+      await client.verifyEmail({ token: oneTimeToken });
+      setStatus("verified");
+    } catch (error) {
+      setStatus("error");
+      setMessage(error.message || "We couldn’t verify this email link.");
+    }
+  };
+
+  useEffect(() => {
+    if (!token || submittedToken.current === token) return;
+    submittedToken.current = token;
+    verifyToken(token);
+  }, [token]);
+
+  const confirmVerified = async () => {
+    setStatus("checking");
+    setMessage("");
+    try {
+      const me = await client.getMe();
+      if (!me.email_verified) {
+        throw new Error("Your email has not been verified yet.");
       }
       navigate("/onboarding");
     } catch (error) {
       setStatus("error");
-      setMessage(error.message || "We couldn’t verify this email link.");
+      setMessage(error.message || "We couldn’t confirm your verification yet.");
     }
   };
 
@@ -371,36 +392,55 @@ export function VerificationPendingPage({
     >
       <div className="verification-content">
         <span className="mail-mark" aria-hidden="true">
-          ✉
+          {status === "verified" ? "✓" : "✉"}
         </span>
-        <p>Use the verification link for</p>
-        <strong>{email || "your email address"}</strong>
-        <p>
-          {deliveryAccepted === false
-            ? "We couldn’t confirm email delivery. Try again later or contact support before requesting another link."
-            : "Open the one-time link to continue. Verification links expire for account security."}
-        </p>
-        <button
-          className="primary full large"
-          onClick={verify}
-          disabled={status === "saving"}
-        >
-          {status === "saving"
-            ? "Verifying…"
-            : token
-              ? "Verify email"
-              : "Continue after verifying"}
-        </button>
-        {email && (
-          <button
-            className="ghost full"
-            onClick={resend}
-            disabled={status === "resending"}
-          >
-            {status === "resending"
-              ? "Requesting another email…"
-              : "Resend verification email"}
-          </button>
+        {status === "verifying" ? (
+          <p role="status">Verifying your email…</p>
+        ) : status === "verified" ? (
+          <>
+            <p role="status">Your email is verified.</p>
+            <strong>{email || "You’re all set"}</strong>
+            <button
+              className="primary full large"
+              onClick={() => navigate("/onboarding")}
+            >
+              Continue to setup
+            </button>
+          </>
+        ) : (
+          <>
+            <p>Use the verification link for</p>
+            <strong>{email || "your email address"}</strong>
+            <p>
+              {token
+                ? "Verification links expire and can be used only once. Request a fresh one to try again."
+                : deliveryAccepted === false
+                  ? "We couldn’t send the verification email, so no link is on its way. Request another one below, or contact support if it keeps failing."
+                  : "Open the one-time link to continue. Verification links expire for account security."}
+            </p>
+            {!token && (
+              <button
+                className="primary full large"
+                onClick={confirmVerified}
+                disabled={status === "checking"}
+              >
+                {status === "checking"
+                  ? "Checking…"
+                  : "Continue after verifying"}
+              </button>
+            )}
+            {email && (
+              <button
+                className="ghost full"
+                onClick={resend}
+                disabled={status === "resending"}
+              >
+                {status === "resending"
+                  ? "Requesting another email…"
+                  : "Resend verification email"}
+              </button>
+            )}
+          </>
         )}
         {message && (
           <p

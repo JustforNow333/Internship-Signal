@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Protocol
 
+import httpx
+
 from .settings import HostedSettings
+
+RESEND_ENDPOINT = "https://api.resend.com/emails"
 
 
 @dataclass(frozen=True)
@@ -72,8 +76,71 @@ class SMTPMailer:
         return not rejected
 
 
+class ResendMailer:
+    """HTTPS transactional delivery for hosts that block outbound SMTP.
+
+    Provider responses are never returned or logged: a caller only learns that
+    delivery was accepted, or receives a bounded MailerDeliveryError.
+    """
+
+    def __init__(
+        self,
+        settings: HostedSettings,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.settings = settings
+        self._transport = transport
+
+    def send(self, message: OutboundMessage) -> bool:
+        payload = {
+            "from": self.settings.resend_from_email,
+            "to": [message.recipient],
+            "subject": message.subject,
+            "text": message.text,
+        }
+        try:
+            with httpx.Client(
+                timeout=self.settings.smtp_timeout_seconds,
+                transport=self._transport,
+            ) as client:
+                response = client.post(
+                    RESEND_ENDPOINT,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.settings.resend_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                )
+        except httpx.HTTPError as exc:
+            # Only the exception type crosses this boundary; httpx messages can
+            # quote the request, never the Authorization header.
+            raise MailerDeliveryError(
+                f"Resend delivery failed ({type(exc).__name__})"
+            ) from None
+        if response.status_code // 100 != 2:
+            raise MailerDeliveryError(
+                f"Resend delivery was rejected (HTTP {response.status_code})"
+            )
+        try:
+            accepted = response.json()
+        except ValueError:
+            raise MailerDeliveryError(
+                "Resend returned a malformed delivery response"
+            ) from None
+        if not isinstance(accepted, dict):
+            raise MailerDeliveryError("Resend returned a malformed delivery response")
+        return True
+
+
 def configured_mailer(settings: HostedSettings) -> Mailer:
-    return SMTPMailer(settings) if settings.smtp_configured else DisabledMailer()
+    """Explicit precedence: Resend HTTPS, then SMTP, then no delivery."""
+
+    if settings.resend_configured:
+        return ResendMailer(settings)
+    if settings.smtp_configured:
+        return SMTPMailer(settings)
+    return DisabledMailer()
 
 
 def verification_message(recipient: str, verification_url: str) -> OutboundMessage:

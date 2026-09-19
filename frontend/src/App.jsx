@@ -47,7 +47,7 @@ function locationToken(initialPath) {
 
 export default function App({ client = hostedApi, initialPath }) {
   const [path, setPath] = useState(() => currentPath(initialPath));
-  const [signupEmail, setSignupEmail] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
   const [verificationDeliveryAccepted, setVerificationDeliveryAccepted] =
     useState(null);
   const [sessionError, setSessionError] = useState("");
@@ -238,7 +238,7 @@ export default function App({ client = hostedApi, initialPath }) {
         navigate={navigate}
         client={client}
         onSignup={(email, result) => {
-          setSignupEmail(email);
+          setVerificationEmail(email);
           setVerificationDeliveryAccepted(
             result.verification_email_sent ?? null,
           );
@@ -250,9 +250,13 @@ export default function App({ client = hostedApi, initialPath }) {
       <SigninPage
         navigate={navigate}
         client={client}
-        onSignedIn={() => {
+        onSignedIn={(result) => {
           setSessionError("");
           setResource({ status: "idle", data: null, error: "" });
+          // An unverified sign-in lands on /verify-email, which needs the
+          // address to offer a resend.
+          if (result?.user?.email) setVerificationEmail(result.user.email);
+          setVerificationDeliveryAccepted(null);
         }}
       />
     );
@@ -271,7 +275,7 @@ export default function App({ client = hostedApi, initialPath }) {
       <VerificationPendingPage
         navigate={navigate}
         client={client}
-        email={signupEmail}
+        email={verificationEmail}
         token={locationToken(initialPath)}
         deliveryAccepted={verificationDeliveryAccepted}
       />

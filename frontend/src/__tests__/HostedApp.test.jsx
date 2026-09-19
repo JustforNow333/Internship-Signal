@@ -136,7 +136,7 @@ describe("hosted Internship Signal MVP", () => {
     const { unmount } = renderApp("/verify-email?token=verification-token", {
       client,
     });
-    fireEvent.click(screen.getByRole("button", { name: "Verify email" }));
+    // The emailed link verifies on arrival; no confirmation click is needed.
     await waitFor(() =>
       expect(verify).toHaveBeenCalledWith({ token: "verification-token" }),
     );

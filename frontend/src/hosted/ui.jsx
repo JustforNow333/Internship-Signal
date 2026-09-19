@@ -19,7 +19,7 @@ export function Brand({ navigate, compact = false }) {
       onClick={(event) => handleClientNavigation(event, navigate, "/")}
       aria-label="Internship Signal home"
     >
-      Internship Signal<span aria-hidden="true">.</span>
+      Internship Signal
     </a>
   );
 }
