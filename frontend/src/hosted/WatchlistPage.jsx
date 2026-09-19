@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import EmptyState from "../components/EmptyState.jsx";
 import {
   CompanyMark,
-  CoverageBadge,
   RequestCompanyDialog,
   SuccessNotice,
 } from "./ui.jsx";
@@ -125,7 +124,6 @@ export default function WatchlistPage({
                     <CompanyMark company={company} />
                     <div>
                       <h3>{company.name}</h3>
-                      <CoverageBadge coverage={company.coverage} />
                     </div>
                     {entry && (
                       <span
@@ -183,15 +181,6 @@ export default function WatchlistPage({
           </div>
         )}
       </section>
-      <div className="coverage-note">
-        <span aria-hidden="true">i</span>
-        <p>
-          <strong>About coverage</strong> Direct monitoring checks a supported
-          employer source. Backstop coverage uses a supported aggregate listing
-          when direct coverage is unavailable. Temporarily delayed sources
-          remain on your watchlist, but new alerts may take longer.
-        </p>
-      </div>
       <RequestCompanyDialog
         open={requestOpen}
         onClose={() => setRequestOpen(false)}

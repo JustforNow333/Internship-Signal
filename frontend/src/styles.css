@@ -644,13 +644,7 @@ button.danger:hover { background: #9f3021; color: white; }
 .company-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
 .company-row:last-child { border-bottom: 0; }
 .company-row.selected { background: rgba(227,239,235,.6); }
-.company-identity h3 { margin: 0 0 3px; font-family: var(--font-body); font-size: 14px; }
-.coverage { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-faint); font-size: 10.5px; }
-.coverage-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
-.coverage-direct .coverage-dot { background: var(--sig-high); }
-.coverage-direct_practical_partial .coverage-dot { background: var(--sig-mid); }
-.coverage-backstop .coverage-dot { background: var(--sig-mid); }
-.coverage-delayed .coverage-dot { background: var(--sig-low); }
+.company-identity h3 { margin: 0; font-family: var(--font-body); font-size: 14px; }
 .add-button, .selected-button { min-width: 95px; }
 .selected-button { border-color: #a7d1c2; background: var(--accent-wash); color: var(--accent-ink); }
 .preference-section { margin: 0; padding: 20px 0; border: 0; border-bottom: 1px solid var(--line); }
@@ -817,10 +811,6 @@ button.danger:hover { background: #9f3021; color: white; }
 .watch-company-actions button { padding: 6px 9px; font-size: 10.5px; }
 .danger-ghost { border-color: transparent; background: transparent; color: var(--sig-low); }
 .danger-ghost:hover { border-color: #e4b3a8; color: var(--sig-low); }
-.coverage-note { display: flex; gap: 11px; margin-top: 17px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-md); color: var(--ink-faint); font-size: 11.5px; }
-.coverage-note > span { display: grid; flex: 0 0 auto; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: var(--accent-wash); color: var(--accent); font-family: var(--font-display); font-weight: 700; }
-.coverage-note p { margin: 0; }
-.coverage-note strong { color: var(--ink-soft); }
 
 /* Settings and modals */
 .settings-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; gap: 20px; }

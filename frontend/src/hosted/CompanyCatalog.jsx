@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import EmptyState from "../components/EmptyState.jsx";
-import { CompanyMark, CoverageBadge } from "./ui.jsx";
+import { CompanyMark } from "./ui.jsx";
 
 export default function CompanyCatalog({
   companies,
@@ -65,7 +65,6 @@ export default function CompanyCatalog({
                 <CompanyMark company={company} />
                 <div className="company-identity">
                   <h3>{company.name}</h3>
-                  <CoverageBadge coverage={company.coverage} />
                 </div>
                 <button
                   type="button"

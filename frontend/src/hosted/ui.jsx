@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { ALERT_FREQUENCIES, COVERAGE_LABELS } from "./constants.js";
+import { ALERT_FREQUENCIES } from "./constants.js";
 
 function handleClientNavigation(event, navigate, path) {
   const modified =
@@ -34,15 +34,6 @@ export function RouteLink({ to, navigate, className, children, ...props }) {
     >
       {children}
     </a>
-  );
-}
-
-export function CoverageBadge({ coverage }) {
-  return (
-    <span className={`coverage coverage-${coverage}`}>
-      <span className="coverage-dot" aria-hidden="true" />
-      {COVERAGE_LABELS[coverage] || coverage}
-    </span>
   );
 }
 
