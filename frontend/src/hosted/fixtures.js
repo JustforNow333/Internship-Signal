@@ -247,6 +247,7 @@ export function makeHostedFixtures() {
       internship_season: "Summer 2027",
       alert_frequency: "as_detected",
       globally_paused: false,
+      include_recent_openings: true,
     },
     watchlist: [
       { company_id: "stripe", paused: false },

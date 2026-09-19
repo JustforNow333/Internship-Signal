@@ -218,6 +218,19 @@ function AlertsStep({
           ))}
         </select>
       </label>
+      <div className="preference-section">
+        <Toggle
+          label="Include recent openings"
+          description="When you add a company, show matching openings posted within the last 90 days."
+          checked={preferences.include_recent_openings}
+          onChange={(checked) =>
+            setPreferences({
+              ...preferences,
+              include_recent_openings: checked,
+            })
+          }
+        />
+      </div>
       <fieldset className="preference-section">
         <legend>Alert frequency</legend>
         <p>
@@ -272,7 +285,13 @@ function AlertsStep({
   );
 }
 
-function CompleteStep({ navigate, companyCount, roleCount, alertFrequency }) {
+function CompleteStep({
+  navigate,
+  companyCount,
+  roleCount,
+  alertFrequency,
+  includeRecentOpenings,
+}) {
   return (
     <section
       className="onboarding-card confirmation-card"
@@ -289,6 +308,12 @@ function CompleteStep({ navigate, companyCount, roleCount, alertFrequency }) {
         {roleCount === 1 ? "category" : "categories"}. You’ll get notified
         shortly after a scheduled scan detects a new opening that matches.
       </p>
+      {includeRecentOpenings && (
+        <p>
+          Your dashboard may also include matching openings from the last 90
+          days.
+        </p>
+      )}
       <div className="confirmation-summary">
         <span>
           <strong>{companyCount}</strong>{" "}
@@ -326,6 +351,7 @@ export default function Onboarding({
     internship_season: "Summer 2027",
     alert_frequency: "as_detected",
     globally_paused: false,
+    include_recent_openings: true,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -334,15 +360,15 @@ export default function Onboarding({
     setSaving(true);
     setError("");
     try {
-      await Promise.all([
-        savePreferences({ ...preferences, role_ids: roleIds }),
-        saveWatchlist(
-          companyIds.map((companyId) => ({
-            company_id: companyId,
-            paused: false,
-          })),
-        ),
-      ]);
+      // Ordered, not concurrent: watchlist reconciliation reads the stored
+      // matching preferences, so they have to be committed first.
+      await savePreferences({ ...preferences, role_ids: roleIds });
+      await saveWatchlist(
+        companyIds.map((companyId) => ({
+          company_id: companyId,
+          paused: false,
+        })),
+      );
       setStep(4);
     } catch (saveError) {
       setError(saveError.message || "We couldn’t activate your watchlist.");
@@ -393,6 +419,7 @@ export default function Onboarding({
             companyCount={companyIds.length}
             roleCount={roleIds.length}
             alertFrequency={preferences.alert_frequency}
+            includeRecentOpenings={preferences.include_recent_openings}
           />
         )}
       </main>

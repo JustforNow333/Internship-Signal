@@ -107,6 +107,9 @@ class PreferencesBase(BaseModel):
     internship_season: str
     alert_frequency: str
     globally_paused: bool
+    # Defaulted rather than required so a client that predates this field keeps
+    # working; the product default is on.
+    include_recent_openings: bool = True
 
     @field_validator("role_ids")
     @classmethod

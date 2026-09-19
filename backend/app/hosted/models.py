@@ -149,6 +149,11 @@ class UserPreference(TimestampMixin, Base):
     globally_paused: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Admission-only: governs whether an already-collected opening may become a
+    # *new* match row. It is not a matching rule and never expires a match.
+    include_recent_openings: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
 
     user: Mapped[User] = relationship(back_populates="preferences")
 

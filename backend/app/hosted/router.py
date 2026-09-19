@@ -16,7 +16,7 @@ from fastapi import (
     Response,
     status,
 )
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -237,6 +237,7 @@ def signup(
                 internship_season="Any season",
                 alert_frequency="as_detected",
                 globally_paused=False,
+                include_recent_openings=True,
                 created_at=now,
                 updated_at=now,
             )
@@ -445,6 +446,7 @@ def _preferences_response(preferences: UserPreference) -> PreferencesResponse:
         internship_season=preferences.internship_season,
         alert_frequency=preferences.alert_frequency,
         globally_paused=preferences.globally_paused,
+        include_recent_openings=preferences.include_recent_openings,
         created_at=preferences.created_at,
         updated_at=preferences.updated_at,
     )
@@ -483,15 +485,25 @@ def put_preferences(
         or preferences.include_remote != payload.include_remote
         or preferences.internship_season != payload.internship_season
     )
+    # Turning the catch-up on admits already-collected recent openings, so it
+    # needs a pass. Turning it off never removes matches that were admitted
+    # legitimately, so it needs none of its own.
+    recent_openings_enabled = (
+        payload.include_recent_openings and not preferences.include_recent_openings
+    )
     preferences.role_ids = list(payload.role_ids)
     preferences.preferred_locations = list(payload.preferred_locations)
     preferences.include_remote = payload.include_remote
     preferences.internship_season = payload.internship_season
     preferences.alert_frequency = payload.alert_frequency
     preferences.globally_paused = payload.globally_paused
+    preferences.include_recent_openings = payload.include_recent_openings
     now = services.clock()
     preferences.updated_at = now
-    if matching_changed:
+    if matching_changed or recent_openings_enabled:
+        # Reconciliation never enqueues notification work, so a backfilled
+        # historical match reaches Matches without creating an email.
+        db.flush()
         reconcile_user(db, identity.user.id, now=now)
     db.commit()
     return _preferences_response(preferences)
@@ -549,20 +561,30 @@ def put_watchlist(
         for company_id in set(previous_state) | set(next_state)
         if previous_state.get(company_id) != next_state.get(company_id)
     )
-    db.execute(
-        delete(UserCompanyWatch).where(UserCompanyWatch.user_id == identity.user.id)
-    )
-    watches = [
-        UserCompanyWatch(
-            user_id=identity.user.id,
-            company_id=entry.company_id,
-            paused=entry.paused,
-            created_at=now,
-            updated_at=now,
-        )
-        for entry in payload.companies
-    ]
-    db.add_all(watches)
+    # A transactional diff, not delete-and-recreate: ``created_at`` is the
+    # watch-start boundary the recent-openings admission gate reads, so it must
+    # survive an unchanged save, a pause, and a resume. Only a genuinely new
+    # watch — including re-adding a removed company — gets a new start.
+    existing = {watch.company_id: watch for watch in previous}
+    watches: list[UserCompanyWatch] = []
+    for entry in payload.companies:
+        watch = existing.get(entry.company_id)
+        if watch is None:
+            watch = UserCompanyWatch(
+                user_id=identity.user.id,
+                company_id=entry.company_id,
+                paused=entry.paused,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(watch)
+        elif watch.paused != entry.paused:
+            watch.paused = entry.paused
+            watch.updated_at = now
+        watches.append(watch)
+    for company_id, watch in existing.items():
+        if company_id not in next_state:
+            db.delete(watch)
     if affected:
         db.flush()
         reconcile_user(db, identity.user.id, now=now, company_ids=affected)

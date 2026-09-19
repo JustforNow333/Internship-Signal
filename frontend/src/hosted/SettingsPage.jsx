@@ -165,6 +165,14 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
                 ))}
               </select>
             </label>
+            <Toggle
+              checked={form.include_recent_openings}
+              onChange={(checked) =>
+                setForm({ ...form, include_recent_openings: checked })
+              }
+              label="Include recent openings"
+              description="When you add a company, show matching openings posted within the last 90 days."
+            />
           </section>
           <section className="settings-card">
             <div className="settings-card-heading">

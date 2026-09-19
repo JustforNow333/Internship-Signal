@@ -18,7 +18,11 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from alembic import command
-from app.hosted.database import HostedDatabase, normalize_database_url
+from app.hosted.database import (
+    HostedDatabase,
+    alembic_config_url,
+    normalize_database_url,
+)
 from app.hosted.mailer import InMemoryMailer
 from app.hosted.models import (
     AuthenticationSession,
@@ -154,6 +158,7 @@ def preferences_payload(**overrides):
         "internship_season": "Summer 2027",
         "alert_frequency": "as_detected",
         "globally_paused": False,
+        "include_recent_openings": True,
     }
     payload.update(overrides)
     return payload
@@ -190,8 +195,83 @@ def test_empty_database_migrates_to_expected_postgresql_schema(
         )
         revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
     assert data_type == "jsonb"
-    assert revision == "20260803_0004"
+    assert revision == "20260919_0005"
     database.dispose()
+
+
+def test_recent_openings_migration_backfills_existing_preference_rows(
+    postgres_url: str,
+) -> None:
+    """A preference row written before 20260919_0005 upgrades to true.
+
+    The row is inserted while the database is one revision back, so this
+    exercises the real backfill rather than the model default.
+    """
+
+    alembic = Config(str(BACKEND_DIR / "alembic.ini"))
+    alembic.set_main_option("sqlalchemy.url", alembic_config_url(postgres_url))
+    database = HostedDatabase(postgres_url)
+    user_id = uuid.uuid4()
+    now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    try:
+        command.downgrade(alembic, "20260803_0004")
+        with database.engine.begin() as connection:
+            assert "include_recent_openings" not in {
+                column["name"]
+                for column in inspect(connection).get_columns(
+                    "hosted_user_preferences"
+                )
+            }
+            connection.execute(
+                text(
+                    "INSERT INTO hosted_users (id, email, normalized_email, "
+                    "password_hash, is_active, created_at, updated_at) VALUES "
+                    "(:id, :email, :email, 'hash', true, :now, :now)"
+                ),
+                {"id": user_id, "email": "legacy@example.com", "now": now},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO hosted_user_preferences (user_id, role_ids, "
+                    "preferred_locations, include_remote, internship_season, "
+                    "alert_frequency, globally_paused, created_at, updated_at) "
+                    "VALUES (:id, :roles, :locations, true, 'Any season', "
+                    "'as_detected', false, :now, :now)"
+                ),
+                {
+                    "id": user_id,
+                    "roles": '["software_engineering"]',
+                    "locations": "[]",
+                    "now": now,
+                },
+            )
+        command.upgrade(alembic, "head")
+        with database.engine.connect() as connection:
+            nullable, default = connection.execute(
+                text(
+                    "SELECT is_nullable, column_default FROM "
+                    "information_schema.columns WHERE "
+                    "table_name='hosted_user_preferences' AND "
+                    "column_name='include_recent_openings'"
+                )
+            ).one()
+            backfilled = connection.scalar(
+                text(
+                    "SELECT include_recent_openings FROM hosted_user_preferences "
+                    "WHERE user_id = :id"
+                ),
+                {"id": user_id},
+            )
+        assert nullable == "NO"
+        assert "true" in (default or "")
+        assert backfilled is True
+    finally:
+        command.upgrade(alembic, "head")
+        with database.engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM hosted_users WHERE id = :id"), {"id": user_id}
+            )
+        database.dispose()
 
 
 def test_signup_hashes_password_normalizes_email_and_sets_secure_session_cookie(

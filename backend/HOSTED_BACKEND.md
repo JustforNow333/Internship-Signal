@@ -88,6 +88,61 @@ Authenticated endpoints are `GET /api/matches`, `GET /api/matches/{id}`, and
 `PATCH /api/matches/{id}`. Every lookup is ownership-scoped; another user's ID
 returns the ordinary not-found response.
 
+### Recent openings (`include_recent_openings`)
+
+Alembic revision `20260919_0005` adds `hosted_user_preferences`
+`include_recent_openings`, NOT NULL with a `true` server default, so accounts
+that predate the migration keep the product default. Signup initializes it
+explicitly, and `GET`/`PUT /api/preferences` expose it. A `PUT` that omits the
+field is accepted and stores `true`, so clients predating it keep working.
+
+When it is on, a job the platform already collected may be admitted as a *new*
+match row for a company the user has just started watching, or after a matching
+preference changes, provided its posting is no older than a fixed 90 days.
+The window is a product rule, not a setting; it lives in one place as
+`match_service.RECENT_OPENING_WINDOW_DAYS`.
+
+Admission for a job with no existing match row:
+
+1. The job must be open and must satisfy every ordinary matching rule —
+   watched, unpaused company, selected role, compatible location/remote, and
+   compatible season. The catch-up relaxes nothing.
+2. `posting_date` is authoritative whenever the source supplied one. A
+   `posting_date` on or after the watch's start date is an ordinary post-watch
+   opening and is admitted regardless of the setting. Only when `posting_date`
+   is absent does `first_seen_at >= watch.created_at` serve as the fallback
+   post-watch signal.
+3. Otherwise, with the setting off, no new row is created.
+4. Otherwise the 90-day catch-up applies, inclusive at the boundary:
+   `posting_date >= (now - 90 days).date()`, or for postings with no date,
+   `first_seen_at >= now - 90 days`. A known-but-old `posting_date` is never
+   overridden by a newer `first_seen_at`, and no date is ever rewritten or
+   invented.
+
+The same gate runs in both `reconcile_user` and `reconcile_jobs`, so a
+pre-watch posting cannot become a match merely because a later import edits the
+hosted job row.
+
+**Admission is not expiry.** The gate is consulted only when no `UserJobMatch`
+exists. Existing rows bypass it entirely and keep following the ordinary rules,
+so a match admitted on day 90 is not deactivated when the posting turns 91 days
+old. Turning the setting off never removes matches that were already admitted;
+turning it on reconciles the watched companies so eligible openings appear
+immediately.
+
+Catch-up populates Matches only. Reconciliation from a watchlist or preference
+change never calls `enqueue_import_notifications`, so a historical match creates
+no `hosted_notification_batches` or `hosted_notification_items` row and no
+email. `matched_at` stays the time the match was actually made and is never
+backdated.
+
+`PUT /api/watchlist` applies a transactional diff rather than deleting and
+recreating every row, because `UserCompanyWatch.created_at` is the watch-start
+boundary the gate reads. An unchanged entry keeps its row and `created_at`; a
+pause or resume updates `paused` and `updated_at` only; a removed company's row
+is deleted; and re-adding a removed company starts a new watch with a new
+`created_at`.
+
 ## Durable notifications and delivery
 
 Alembic revision `20260803_0004` adds:
