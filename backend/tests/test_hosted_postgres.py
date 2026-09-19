@@ -221,11 +221,14 @@ def test_signup_hashes_password_normalizes_email_and_sets_secure_session_cookie(
     assert duplicate.status_code == 409
 
 
-def test_secure_cookie_mode_sets_the_secure_attribute(client, hosted) -> None:
+def test_secure_cookie_mode_sets_secure_and_cross_site_attributes(
+    client, hosted
+) -> None:
     services, _mailer, _clock = hosted
     services.settings = replace(services.settings, secure_cookies=True)
     response = signup(client, "secure-cookie@example.com")
-    assert "Secure" in response.headers["set-cookie"]
+    cookie = response.headers["set-cookie"]
+    assert "Secure" in cookie and "SameSite=none" in cookie
 
 
 def test_signup_reports_when_the_configured_mailer_does_not_accept_delivery(

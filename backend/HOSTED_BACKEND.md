@@ -273,7 +273,10 @@ a database containing data that must be retained.
   and `postgresql://` URLs are normalized to `postgresql+psycopg://`.
 - `HOSTED_SESSION_LIFETIME_SECONDS`
 - `HOSTED_SESSION_COOKIE_NAME`
-- `HOSTED_SECURE_COOKIES`
+- `HOSTED_SECURE_COOKIES` (also selects the session cookie's SameSite
+  policy: `true` issues `Secure; SameSite=None` so a separately hosted HTTPS
+  frontend can send it on cross-site credentialed requests, `false` keeps
+  `SameSite=Lax` for local HTTP development)
 - `HOSTED_ALLOWED_FRONTEND_ORIGINS` (explicit comma-separated origins; no `*`)
 - `HOSTED_VERIFICATION_TOKEN_LIFETIME_SECONDS`
 - `HOSTED_PASSWORD_RESET_TOKEN_LIFETIME_SECONDS`

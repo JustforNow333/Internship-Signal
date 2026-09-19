@@ -87,6 +87,15 @@ def _user_response(user: User) -> UserResponse:
     )
 
 
+def _cookie_samesite(services: HostedServices) -> str:
+    """Hosted deployments serve the frontend from a different site than the API,
+    so the session cookie has to be SameSite=None; Secure to survive
+    credentialed cross-site fetches. Local HTTP development keeps Lax, which
+    browsers require because SameSite=None without Secure is rejected."""
+
+    return "none" if services.settings.secure_cookies else "lax"
+
+
 def _set_session_cookie(
     response: Response,
     raw_token: str,
@@ -101,7 +110,7 @@ def _set_session_cookie(
         path="/",
         secure=services.settings.secure_cookies,
         httponly=True,
-        samesite="lax",
+        samesite=_cookie_samesite(services),
     )
 
 
@@ -111,7 +120,7 @@ def _clear_session_cookie(response: Response, services: HostedServices) -> None:
         path="/",
         secure=services.settings.secure_cookies,
         httponly=True,
-        samesite="lax",
+        samesite=_cookie_samesite(services),
     )
 
 

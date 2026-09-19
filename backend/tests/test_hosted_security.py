@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.hosted.catalog import CompanyCatalog, company_slug
 from app.hosted.database import Base, HostedDatabase
@@ -28,7 +32,9 @@ from app.hosted.security import (
     token_hash,
     verify_password,
 )
+from app.hosted.services import HostedServices
 from app.hosted.settings import HostedSettings
+from app.main import app
 
 
 def test_argon2_password_hash_and_opaque_token_hash() -> None:
@@ -290,3 +296,184 @@ def test_forgot_password_defers_mail_delivery_until_after_response_work() -> Non
     assert len(tasks.tasks) == 1
     tasks.run()
     assert len(mailer.messages) == 1
+
+
+def _session_cookie_header(response, cookie_name: str) -> str:
+    """Return the single Set-Cookie header that carries the session cookie."""
+
+    headers = [
+        value
+        for key, value in response.headers.raw
+        if key.decode().casefold() == "set-cookie"
+        and value.decode().startswith(f"{cookie_name}=")
+    ]
+    assert len(headers) == 1, response.headers.raw
+    return headers[0].decode()
+
+
+def _cookie_attributes(header: str) -> dict[str, str]:
+    attributes: dict[str, str] = {}
+    for part in header.split(";")[1:]:
+        name, _, value = part.strip().partition("=")
+        attributes[name.casefold()] = value
+    return attributes
+
+
+@pytest.fixture
+def sqlite_hosted(monkeypatch):
+    """Hosted app wired to in-memory SQLite so cookie policy is testable
+    without the PostgreSQL-backed hosted suite."""
+
+    monkeypatch.delenv("HOSTED_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv(
+        "HOSTED_ALLOWED_FRONTEND_ORIGINS", "https://frontend.example.com"
+    )
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    services = HostedServices(
+        settings=HostedSettings.from_env(),
+        database=SimpleNamespace(
+            session_factory=sessionmaker(bind=engine, expire_on_commit=False)
+        ),
+        mailer=InMemoryMailer(),
+        clock=lambda: datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        catalog=CompanyCatalog(()),
+    )
+    previous = app.state.hosted_services
+    app.state.hosted_services = services
+    try:
+        with TestClient(app, base_url="https://testserver") as test_client:
+            yield test_client, services
+    finally:
+        app.state.hosted_services = previous
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def _signup(client, email: str = "student@example.com"):
+    response = client.post(
+        "/api/auth/signup", json={"email": email, "password": "secure password"}
+    )
+    assert response.status_code == 201, response.text
+    return response
+
+
+def test_secure_deployments_issue_cross_site_capable_session_cookies(
+    sqlite_hosted,
+) -> None:
+    client, services = sqlite_hosted
+    services.settings = replace(services.settings, secure_cookies=True)
+
+    for response in (
+        _signup(client),
+        client.post(
+            "/api/auth/login",
+            json={"email": "student@example.com", "password": "secure password"},
+        ),
+    ):
+        header = _session_cookie_header(
+            response, services.settings.session_cookie_name
+        )
+        attributes = _cookie_attributes(header)
+        assert attributes["samesite"].casefold() == "none"
+        assert "secure" in attributes
+        assert "httponly" in attributes
+        assert attributes["path"] == "/"
+
+
+def test_local_development_keeps_lax_cookies_without_the_secure_attribute(
+    sqlite_hosted,
+) -> None:
+    client, services = sqlite_hosted
+    assert services.settings.secure_cookies is False
+
+    for response in (
+        _signup(client),
+        client.post(
+            "/api/auth/login",
+            json={"email": "student@example.com", "password": "secure password"},
+        ),
+    ):
+        header = _session_cookie_header(
+            response, services.settings.session_cookie_name
+        )
+        attributes = _cookie_attributes(header)
+        assert attributes["samesite"].casefold() == "lax"
+        assert "secure" not in attributes
+        assert "httponly" in attributes
+        assert attributes["path"] == "/"
+
+
+@pytest.mark.parametrize("secure_cookies", [True, False])
+def test_logout_clears_the_cookie_with_a_matching_policy(
+    sqlite_hosted, secure_cookies: bool
+) -> None:
+    client, services = sqlite_hosted
+    services.settings = replace(services.settings, secure_cookies=secure_cookies)
+    _signup(client)
+    assert client.get("/api/me").status_code == 200
+
+    logout = client.post("/api/auth/logout")
+    assert logout.status_code == 204
+    attributes = _cookie_attributes(
+        _session_cookie_header(logout, services.settings.session_cookie_name)
+    )
+    assert attributes["max-age"] == "0"
+    assert attributes["path"] == "/"
+    assert attributes["samesite"].casefold() == ("none" if secure_cookies else "lax")
+    assert ("secure" in attributes) is secure_cookies
+    assert "httponly" in attributes
+    assert client.get("/api/me").status_code == 401
+
+
+def test_session_token_stays_out_of_javascript_reachable_surfaces(
+    sqlite_hosted,
+) -> None:
+    client, services = sqlite_hosted
+    services.settings = replace(services.settings, secure_cookies=True)
+    response = _signup(client)
+    header = _session_cookie_header(response, services.settings.session_cookie_name)
+    raw_token = header.split(";")[0].split("=", 1)[1]
+
+    assert "httponly" in _cookie_attributes(header)
+    assert raw_token not in response.text
+    assert raw_token not in client.get("/api/me").text
+
+
+def test_hosted_cors_stays_credentialed_and_origin_restricted(sqlite_hosted) -> None:
+    client, _services = sqlite_hosted
+    # CORS is configured once, when app.main is imported, so the allowed
+    # origins come from the middleware rather than the fixture's settings.
+    cors = next(
+        middleware
+        for middleware in app.user_middleware
+        if middleware.cls is CORSMiddleware
+    )
+    allowed_origins = cors.kwargs["allow_origins"]
+
+    assert cors.kwargs["allow_credentials"] is True
+    assert allowed_origins and "*" not in allowed_origins
+
+    allowed = client.options(
+        "/api/auth/login",
+        headers={
+            "Origin": allowed_origins[0],
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert allowed.headers["access-control-allow-credentials"] == "true"
+    assert allowed.headers["access-control-allow-origin"] == allowed_origins[0]
+
+    rejected = client.options(
+        "/api/auth/login",
+        headers={
+            "Origin": "https://attacker.example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert "access-control-allow-origin" not in rejected.headers
