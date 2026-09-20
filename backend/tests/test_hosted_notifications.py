@@ -86,37 +86,43 @@ def notification_postgres_url() -> str:
     isolated_url = parsed.set(database=database_name).render_as_string(
         hide_password=False
     )
-    alembic = Config(str(BACKEND_DIR / "alembic.ini"))
-    alembic.set_main_option("sqlalchemy.url", isolated_url.replace("%", "%%"))
-    existing_logger = logging.getLogger("hosted.notifications.migration.existing")
-    existing_logger.disabled = False
-    command.upgrade(alembic, "head")
-    command.downgrade(alembic, "20260803_0003")
-    migration_database = HostedDatabase(isolated_url)
+    # The database exists from here on, so its teardown has to run even when
+    # the migration or drift check below raises during fixture setup;
+    # otherwise a failed run leaks the scratch database.
     try:
-        remaining = set(inspect(migration_database.engine).get_table_names())
-        assert not {
-            "hosted_notification_batches",
-            "hosted_notification_items",
-            "hosted_notification_attempts",
-        } & remaining
+        alembic = Config(str(BACKEND_DIR / "alembic.ini"))
+        alembic.set_main_option("sqlalchemy.url", isolated_url.replace("%", "%%"))
+        existing_logger = logging.getLogger("hosted.notifications.migration.existing")
+        existing_logger.disabled = False
+        command.upgrade(alembic, "head")
+        command.downgrade(alembic, "20260803_0003")
+        migration_database = HostedDatabase(isolated_url)
+        try:
+            remaining = set(inspect(migration_database.engine).get_table_names())
+            assert not {
+                "hosted_notification_batches",
+                "hosted_notification_items",
+                "hosted_notification_attempts",
+            } & remaining
+        finally:
+            migration_database.dispose()
+        command.upgrade(alembic, "head")
+        command.check(alembic)
+        assert not existing_logger.disabled
+        yield isolated_url
     finally:
-        migration_database.dispose()
-    command.upgrade(alembic, "head")
-    command.check(alembic)
-    assert not existing_logger.disabled
-    yield isolated_url
-    with psycopg.connect(
-        _psycopg_url(admin_url.render_as_string(hide_password=False)), autocommit=True
-    ) as connection:
-        connection.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = %s AND pid <> pg_backend_pid()",
-            (database_name,),
-        )
-        connection.execute(
-            sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name))
-        )
+        with psycopg.connect(
+            _psycopg_url(admin_url.render_as_string(hide_password=False)),
+            autocommit=True,
+        ) as connection:
+            connection.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (database_name,),
+            )
+            connection.execute(
+                sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name))
+            )
 
 
 @pytest.fixture(autouse=True)

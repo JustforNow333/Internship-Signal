@@ -84,27 +84,32 @@ def job_postgres_url() -> str:
     isolated_url = parsed.set(database=database_name).render_as_string(
         hide_password=False
     )
-    alembic = Config(str(BACKEND_DIR / "alembic.ini"))
-    alembic.set_main_option("sqlalchemy.url", isolated_url.replace("%", "%%"))
-    existing_logger = logging.getLogger("hosted.jobs.migration.existing")
-    existing_logger.disabled = False
-    command.upgrade(alembic, "head")
-    if existing_logger.disabled:
-        pytest.fail("Alembic migration disabled an existing application logger")
-    command.check(alembic)
-    yield isolated_url
-    with psycopg.connect(
-        _psycopg_url(admin_url.render_as_string(hide_password=False)),
-        autocommit=True,
-    ) as connection:
-        connection.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = %s AND pid <> pg_backend_pid()",
-            (database_name,),
-        )
-        connection.execute(
-            sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name))
-        )
+    # The database exists from here on, so its teardown has to run even when
+    # the migration or drift check below raises during fixture setup;
+    # otherwise a failed run leaks the scratch database.
+    try:
+        alembic = Config(str(BACKEND_DIR / "alembic.ini"))
+        alembic.set_main_option("sqlalchemy.url", isolated_url.replace("%", "%%"))
+        existing_logger = logging.getLogger("hosted.jobs.migration.existing")
+        existing_logger.disabled = False
+        command.upgrade(alembic, "head")
+        if existing_logger.disabled:
+            pytest.fail("Alembic migration disabled an existing application logger")
+        command.check(alembic)
+        yield isolated_url
+    finally:
+        with psycopg.connect(
+            _psycopg_url(admin_url.render_as_string(hide_password=False)),
+            autocommit=True,
+        ) as connection:
+            connection.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (database_name,),
+            )
+            connection.execute(
+                sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name))
+            )
 
 
 @pytest.fixture(autouse=True)
@@ -226,7 +231,7 @@ def test_phase2_migration_creates_postgresql_tables_and_jsonb(
             "SELECT version_num FROM alembic_version"
         ).scalar_one()
     assert source_metadata_type == "jsonb"
-    assert revision == "20260803_0004"
+    assert revision == "20260919_0006"
     database.dispose()
 
 
