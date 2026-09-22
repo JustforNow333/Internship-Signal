@@ -281,10 +281,11 @@ contains no description, requirements, raw source metadata, internal IDs,
 tracking pixels, or external images. Logs contain only bounded batch IDs,
 counts, outcome codes, and timings.
 
-Phase 3A is deliberately one-shot. It does not run the watcher, import on a
-schedule, loop as a daemon, or install deployment scheduling. Nothing in this
-repository invokes `app.hosted.deliver_notifications`, so until a scheduler is
-added in a later task, batches stay pending until an operator runs the command.
+Delivery is deliberately one-shot. It does not run the watcher, import on a
+schedule, or loop as a daemon, and this repository still installs no deployment
+scheduling: nothing here invokes `app.hosted.deliver_notifications`. Batches
+stay pending until an operator, or a scheduler an operator configures by hand,
+runs the command. See [Scheduled hosted pipeline](#scheduled-hosted-pipeline).
 
 ## Offline snapshot import
 
@@ -302,7 +303,10 @@ deduplication and analysis pipeline using the captured UTC date. It does not
 collect from the network, open watcher SQLite, send email, mark watcher-seen
 jobs, persist health/comparison state, or prime watcher notifications. It does
 create Phase 2B matches and eligible Phase 3A notification work transactionally.
-Imports remain operator-only CLI operations; there is no HTTP import route.
+There is no HTTP import route. This CLI and the scheduled
+`app.hosted.collect_and_import` command share one implementation,
+`import_snapshot.import_snapshot_into_hosted`; this one replays a snapshot file
+an operator already has, while the scheduled command collects one first.
 
 Collection snapshots do not currently contain a unique content fingerprint;
 their existing digest covers collection configuration. Phase 2A therefore uses
@@ -322,6 +326,169 @@ SELECT source_identifier, source_type, status, started_at, completed_at,
 FROM hosted_job_import_runs
 ORDER BY created_at DESC;
 ```
+
+## Scheduled hosted pipeline
+
+The hosted product runs as **two independent one-shot commands**. They are
+never merged into a daemon and never run inside Uvicorn, so a collection
+failure can never stop already-created notification work from being delivered,
+and a mail-provider outage can never stop new postings from being collected.
+
+```
+A: collect_and_import    sources -> snapshot -> hosted jobs -> matches -> notification work
+B: deliver_notifications due batches -> Resend/SMTP -> email
+```
+
+### A. Hosted collection and import
+
+```bash
+PYTHONPATH=.:backend python -m app.hosted.collect_and_import
+```
+
+```powershell
+$env:PYTHONPATH = ".;backend"
+backend\venv\Scripts\python.exe -m app.hosted.collect_and_import
+```
+
+It collects once with the existing watcher source adapters, freezes the result
+as a validated collection snapshot in a private temporary directory, and
+replays that snapshot through the same `import_snapshot_into_hosted` path the
+operator CLI uses. There is one hosted import path, not two, so job identity,
+deduplication, snapshot validation, matching, and notification enqueueing
+cannot drift between them.
+
+`--watchlist` overrides the watcher configuration; there are no other options.
+Runs are recorded in `hosted_job_import_runs` with
+`source_type = 'hosted_collection'`, which distinguishes scheduled collection
+from an operator's manual `collection_snapshot` replay.
+
+**It does not touch legacy watcher state.** Collection in `watcher.collection`
+is network and parsing only: no seen store is opened, no source-health or
+analysis-cache database is written, and the digest sender is never reached.
+Running this command therefore cannot suppress, duplicate, or advance the
+legacy personal digest, and `.github/workflows/watcher.yml` is unaffected.
+
+**Temporary artifacts.** The snapshot lives in a `tempfile.mkdtemp()` workspace
+outside the repository and is removed on success, on failure, and on an
+unexpected error alike. No runtime snapshot is ever written to a tracked path.
+
+**Exit codes.** `0` success, `1` collection/validation/import failure, `2`
+`HOSTED_DATABASE_URL` (or `DATABASE_URL`) not configured. Logs are counts and a
+truncated fingerprint only - never posting text, company names, source URLs, or
+raw source errors. A failure never prints an import summary, because the
+`HOSTED-JOB-IMPORT` line is emitted only after the import transaction commits.
+
+**Idempotency.** The snapshot is written deterministically, so re-running the
+identical collection produces the same SHA-256 source fingerprint and the
+import is a recognised `already_imported` no-op. A later collection of the same
+posting is a new fingerprint but the same `watcher_job_id`, so the job is
+upserted, no duplicate match is created, and no alert repeats.
+
+### B. Notification delivery
+
+```bash
+PYTHONPATH=.:backend python -m app.hosted.deliver_notifications --limit 25
+```
+
+Unchanged by scheduling: it is still the bounded, leased, one-shot worker
+described above, and it still selects Resend HTTPS before SMTP through
+`configured_notification_transport`.
+
+### Recommended Railway schedules
+
+**Scheduling is not enabled by this repository.** No cron, no worker service,
+and no GitHub Actions schedule is created here; the workflow in
+`.github/workflows/watcher.yml` remains the legacy watcher only and never
+contacts the hosted database. Everything below is a plan an operator applies by
+hand in the Railway dashboard.
+
+A Railway cron service runs its start command on a schedule and exits, which
+is what both commands already do. Schedules use standard five-field cron
+expressions in UTC.
+
+Confirm the minimum cron interval allowed on the current Railway plan before
+applying the five-minute schedule below; if a shorter interval than the plan
+permits is rejected, use `*/15 * * * *` instead. The only cost is latency:
+`as_detected` alerts would be delivered up to fifteen minutes after the import
+that created them, and the rolling three-hour and daily windows are unaffected.
+
+Overlapping runs are safe either way, so neither schedule depends on the
+platform skipping a run. The delivery worker claims batches with
+`FOR UPDATE SKIP LOCKED` under a token and a 10-minute lease, and collection
+claims each source fingerprint exactly once and rejects a `running` one, so two
+concurrent passes cannot double-send or double-import.
+
+| Service | Command | Schedule | Why |
+| --- | --- | --- | --- |
+| `hosted-collection` | `python -m app.hosted.collect_and_import` | `17 * * * *` | Hourly matches the legacy watcher cadence and the rate at which sources change. The off-the-hour minute keeps it clear of the GitHub Actions watcher run. |
+| `hosted-notifications` | `python -m app.hosted.deliver_notifications --limit 25` | `*/5 * * * *` | Five minutes keeps `as_detected` alerts prompt while staying far inside the 10-minute lease and the retry backoff. |
+
+Both need `PYTHONPATH=.:backend` and the same `HOSTED_DATABASE_URL`/
+`DATABASE_URL` the API uses. `hosted-notifications` additionally needs the mail
+provider variables (`HOSTED_RESEND_API_KEY`, `HOSTED_RESEND_FROM_EMAIL`) and
+`HOSTED_PUBLIC_FRONTEND_URL` for the links in the digest. `hosted-collection`
+needs no mail variables at all, because an import creates notification work but
+never delivers it.
+
+**Railway requires these as two separate services**, each with its own start
+command and cron schedule, alongside the existing API service. They can share
+the repository and the PostgreSQL plugin; they must not share a schedule, and
+neither belongs in the API service's start command.
+
+### First run after scheduling is enabled
+
+Production may already hold pending notification batches created before any
+worker existed. Enabling a five-minute schedule against that backlog would
+deliver all of it at once. Inspect first, with read-only SQL:
+
+```sql
+-- What state is the backlog in?
+SELECT status, frequency, count(*) AS batches
+FROM hosted_notification_batches
+GROUP BY status, frequency
+ORDER BY status, frequency;
+
+-- How old is the pending work, and is any of it already due?
+SELECT count(*) AS pending_batches,
+       min(due_at) AS oldest_due_at,
+       max(due_at) AS newest_due_at,
+       count(*) FILTER (WHERE due_at <= now()) AS already_due
+FROM hosted_notification_batches
+WHERE status = 'pending';
+
+-- How many alerts would actually be sent?
+SELECT i.status, count(*) AS items
+FROM hosted_notification_items AS i
+JOIN hosted_notification_batches AS b ON b.id = i.batch_id
+WHERE b.status = 'pending'
+GROUP BY i.status;
+
+-- Is collection actually reaching the database?
+SELECT source_type, status, count(*) AS runs,
+       max(completed_at) AS most_recent
+FROM hosted_job_import_runs
+GROUP BY source_type, status
+ORDER BY most_recent DESC NULLS LAST;
+```
+
+Then run the worker once by hand, deliberately small, and inspect again before
+adding the cron schedule:
+
+```bash
+PYTHONPATH=.:backend python -m app.hosted.deliver_notifications --limit 5
+```
+
+Check the resulting `hosted_notification_attempts` rows and the batches' new
+`status`/`last_error_code` before raising the limit or enabling `*/5 * * * *`.
+
+Nothing here resends history. `permanent_failed` and `cancelled` batches are
+terminal: the worker only claims `pending` batches whose `due_at` and
+`next_attempt_at` have passed, and no command in this repository moves a
+terminal batch back to `pending`. A batch that failed while no mail provider
+was configured recorded `mail_not_configured` as a permanent failure on its
+first attempt and will **not** retry once Resend is configured - configure the
+provider before scheduling the worker, and treat any pre-existing
+`permanent_failed` rows as a separate, deliberate decision.
 
 ## Local startup
 
@@ -414,6 +581,10 @@ a database containing data that must be retained.
 - `HOSTED_SMTP_TIMEOUT_SECONDS` (also bounds the Resend HTTPS request)
 - `VITE_HOSTED_API_MODE=live`
 - `VITE_HOSTED_API_BASE_URL` (optional with a same-origin proxy)
+
+`app.hosted.collect_and_import` needs only the database URL.
+`app.hosted.deliver_notifications` needs the database URL, the mail provider
+variables, and `HOSTED_PUBLIC_FRONTEND_URL`. Both need `PYTHONPATH=.:backend`.
 
 ### Mail provider selection
 
