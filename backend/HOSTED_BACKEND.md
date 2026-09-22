@@ -155,7 +155,8 @@ Alembic revision `20260803_0004` adds:
   to both its batch and source import run. Items are pending, sent, or cancelled.
 - `hosted_notification_attempts`: unique positive attempt numbers per batch,
   start/completion timestamps, typed outcome, and bounded error code. Recipient
-  addresses, message bodies, credentials, and raw SMTP errors are never stored.
+  addresses, message bodies, credentials, and raw provider errors are never
+  stored.
 
 Notification creation is part of the successful import transaction. It accepts
 only match rows newly inserted by that import when the user is active, verified,
@@ -176,6 +177,39 @@ Batch windows are deterministic and UTC-based:
 Only an unclaimed pending batch accepts new rolling items. Phase 3A has no user
 timezone or preferred delivery-hour fields.
 
+### Changing alert frequency
+
+Switching between the active delivery frequencies never discards a pending
+alert. `hosted_notification_items` is unique on `user_job_match_id` for the
+row's whole lifetime, so a cancelled item can never be replaced; pending items
+are therefore **re-homed** - the existing row keeps its identity,
+`user_job_match_id`, and `source_import_run_id`, and only its `batch_id` moves
+to a batch for the user's current frequency. No second item is created, and a
+re-homed item keeps `status = 'pending'` with no `cancellation_reason`.
+
+The new window is measured from the moment the change is processed, using the
+ordinary batch rules above: `as_detected` is due immediately, `three_hour` and
+`daily` join or open a rolling batch due three or twenty-four hours later. An
+existing unclaimed pending batch for the target frequency is reused. Because
+`(user_id, source_import_run_id)` is unique for `as_detected`, a round trip back
+to `as_detected` reclaims the slot it previously retired rather than duplicating
+it; that is only ever done for a batch this mechanism itself emptied and that
+never reached a mail provider.
+
+Both sides are covered. `PUT /api/preferences` re-homes the user's pending
+batches; a batch a worker has already claimed is `processing` rather than
+`pending`, so the request leaves it alone and the worker re-homes it inside the
+transaction holding its lease. The worker does this before `send_started_at` is
+written, so a move can never duplicate a message, and the lease-recovery path
+still routes an already-submitted batch to `uncertain`. Once a batch's pending
+items have left, that batch alone is cancelled with `frequency_changed`; the
+moved items are untouched.
+
+Pausing is unchanged. `paused` is not a delivery frequency, so moving to it
+re-homes nothing and the worker still cancels the batch and its items with
+`frequency_paused`. Returning to an active frequency re-homes whatever is still
+pending, and never revives an item that was already cancelled.
+
 Run one bounded delivery pass from the repository root:
 
 ```powershell
@@ -187,22 +221,57 @@ backend\venv\Scripts\python.exe -m app.hosted.deliver_notifications --limit 25
 The limit must be 1 through 100. The command recovers expired leases, then
 claims due pending rows with `FOR UPDATE SKIP LOCKED`, a random token, and a
 10-minute lease. It commits the claim before rendering or network I/O and never
-holds a database transaction open during SMTP. Immediately before transport it
-revalidates the account, current frequency, matches, dismissals, and job-open
+holds a database transaction open during transport. Immediately before transport
+it revalidates the account, current frequency, matches, dismissals, and job-open
 state; writes `send_started_at` plus the new attempt; and commits again. Token
 verification protects every result update.
 
+Job-alert delivery picks its transport with `configured_notification_transport`,
+which follows the same precedence as hosted account mail and reads the same
+settings:
+
+1. **Resend HTTPS** when `HOSTED_RESEND_API_KEY` and `HOSTED_RESEND_FROM_EMAIL`
+   are both set.
+2. **SMTP** when Resend is absent and `HOSTED_SMTP_HOST` plus
+   `HOSTED_SMTP_FROM_EMAIL` are set.
+3. **Unavailable** otherwise: every batch records a bounded permanent
+   `mail_not_configured` rather than appearing delivered.
+
+There are no separate job-alert mail variables, so account mail and job-alert
+mail cannot drift onto different providers, and a half-configured Resend pair is
+still rejected when settings load. Railway Free, Trial, and Hobby plans block
+outbound SMTP, so those deployments must configure Resend for job alerts exactly
+as they already must for verification mail.
+
 An expired lease without `send_started_at` safely returns to pending. An
 expired lease after that marker completes the in-flight attempt as `uncertain`
-and never retries automatically because SMTP acceptance cannot be proven.
+and never retries automatically because provider acceptance cannot be proven.
 Explicit retryable failures wait 1 minute, 5 minutes, 15 minutes, then 1 hour.
 The fifth failed attempt becomes `permanent_failed` with `retry_exhausted`.
-Authentication, sender rejection, definitive recipient rejection, and SMTP 5xx
-data rejection are permanent. Safe pre-submission connection failures and SMTP
-4xx rejection retry. Disconnects, timeouts, and unexpected errors after
-submission may have begun become terminal `uncertain`.
 
-Every attempt reuses the batch's Message-ID. Mail resolves the current verified
+Both transports classify conservatively and by phase, so the retry and
+uncertainty guarantees are identical:
+
+- **SMTP.** Authentication, sender rejection, definitive recipient rejection,
+  and SMTP 5xx data rejection are permanent. Safe pre-submission connection
+  failures and SMTP 4xx rejection retry. Disconnects, timeouts, and unexpected
+  errors after submission may have begun become terminal `uncertain`.
+- **Resend.** A 2xx is `sent`. 401/403 is permanent
+  (`resend_authentication_failed`); other 4xx is permanent
+  (`resend_request_rejected`). 408, 429, and 5xx retry
+  (`resend_request_timeout`, `resend_rate_limited`, `resend_server_error`).
+  Connect and pool failures, which are known to precede submission, retry as
+  `resend_connection_failed_before_submission`. Any other transport failure may
+  have reached the wire and becomes `resend_uncertain_after_submission`; an
+  unrecognized status becomes `resend_response_unknown`.
+
+Only the exception type and the HTTP status are ever consulted. API keys,
+recipient addresses, message bodies, and provider response bodies never reach a
+log, an exception message, or a persisted error code.
+
+Every attempt reuses the batch's Message-ID; the Resend transport forwards it as
+a custom `Message-ID` header, so it is stable over HTTPS too. Mail resolves the
+current verified
 account email only at send time and includes plain text plus escaped, simple
 HTML. It shows company, role, location, remote status, posting date/deadline,
 human-readable allowlisted match reasons, application URL, matches dashboard,
@@ -213,7 +282,9 @@ tracking pixels, or external images. Logs contain only bounded batch IDs,
 counts, outcome codes, and timings.
 
 Phase 3A is deliberately one-shot. It does not run the watcher, import on a
-schedule, loop as a daemon, or install deployment scheduling.
+schedule, loop as a daemon, or install deployment scheduling. Nothing in this
+repository invokes `app.hosted.deliver_notifications`, so until a scheduler is
+added in a later task, batches stay pending until an operator runs the command.
 
 ## Offline snapshot import
 
@@ -346,8 +417,9 @@ a database containing data that must be retained.
 
 ### Mail provider selection
 
-Account mail (verification and password reset) picks exactly one provider, in
-this order:
+Account mail (verification and password reset) and hosted job-alert mail read
+the same `HOSTED_RESEND_*` and `HOSTED_SMTP_*` settings and pick exactly one
+provider each, in this order:
 
 1. **Resend HTTPS** when `HOSTED_RESEND_API_KEY` and `HOSTED_RESEND_FROM_EMAIL`
    are both set. Messages are posted to the Resend REST API over HTTPS.
@@ -363,7 +435,10 @@ messages, or responses; provider response bodies are likewise never logged or
 returned.
 
 Railway Free, Trial, and Hobby plans block outbound SMTP, so deployments on
-those plans must configure the Resend HTTPS provider. Verification and
+those plans must configure the Resend HTTPS provider. This covers job alerts as
+well as account mail: `mailer.configured_mailer` and
+`notification_mail.configured_notification_transport` apply the same precedence
+to the same settings. Verification and
 password-reset links are always built from `HOSTED_PUBLIC_FRONTEND_URL`, so
 that variable must point at the public site, for example
 `https://app.example.com/verify-email?token=<opaque token>`.
@@ -376,5 +451,6 @@ forgot-password response, and a successful reset invalidates every outstanding
 reset token plus every active session for that user.
 
 Only `HOSTED_DATABASE_URL` is required by the snapshot-import command. Imports
-create durable notification work but do not deliver it, so SMTP is not required.
+create durable notification work but do not deliver it, so no mail provider is
+required for an import.
 Watcher email and watcher SQLite settings are neither required nor used.

@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from contextlib import suppress
 
 from .database import HostedDatabase
-from .notification_mail import SMTPNotificationTransport
+from .notification_mail import configured_notification_transport
 from .notification_worker import MAX_LIMIT, MIN_LIMIT, NotificationDeliveryWorker
 from .settings import HostedSettings
 
@@ -44,7 +44,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         database = HostedDatabase(settings.database_url)
         worker = NotificationDeliveryWorker(
             database,
-            SMTPNotificationTransport(settings),
+            configured_notification_transport(settings),
             settings.public_frontend_url,
         )
         summary = worker.run(limit=args.limit)

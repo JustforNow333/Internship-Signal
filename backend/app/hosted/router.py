@@ -39,6 +39,7 @@ from .models import (
     UserJobMatch,
     UserPreference,
 )
+from .notification_enqueue import DELIVERY_FREQUENCIES, rehome_user_pending_items
 from .schemas import (
     MATCH_MAX_OFFSET,
     MATCH_PAGE_LIMIT,
@@ -479,6 +480,7 @@ def put_preferences(
         )
     # Alert frequency and the global pause govern Phase 3 delivery only, so
     # they deliberately do not trigger match reconciliation.
+    previous_frequency = preferences.alert_frequency
     matching_changed = (
         list(preferences.role_ids) != list(payload.role_ids)
         or list(preferences.preferred_locations) != list(payload.preferred_locations)
@@ -505,6 +507,17 @@ def put_preferences(
         # historical match reaches Matches without creating an email.
         db.flush()
         reconcile_user(db, identity.user.id, now=now)
+    if (
+        payload.alert_frequency != previous_frequency
+        and payload.alert_frequency in DELIVERY_FREQUENCIES
+    ):
+        # Moving to an active delivery frequency carries already-pending alerts
+        # across instead of losing them. Moving to ``paused`` is untouched: that
+        # keeps the existing cancel-on-pause contract.
+        db.flush()
+        rehome_user_pending_items(
+            db, user_id=identity.user.id, frequency=payload.alert_frequency, now=now
+        )
     db.commit()
     return _preferences_response(preferences)
 

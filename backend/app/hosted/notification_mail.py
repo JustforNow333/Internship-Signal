@@ -1,4 +1,11 @@
-"""Typed hosted notification transport and privacy-safe digest rendering."""
+"""Typed hosted notification transports and privacy-safe digest rendering.
+
+Job-alert delivery uses the same provider precedence as hosted account mail -
+Resend HTTPS first, then SMTP - because Railway Free/Trial/Hobby block outbound
+SMTP. Neither transport lets an API key, a recipient address, a message body, or
+a provider response body reach a log or a persisted error string: callers only
+ever see a bounded, provider-neutral error code.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +16,12 @@ from datetime import date
 from email.message import EmailMessage
 from typing import Literal, Protocol
 
+import httpx
+
 from .matching import bounded_reasons
 from .settings import HostedSettings
+
+RESEND_ENDPOINT = "https://api.resend.com/emails"
 
 DeliveryOutcome = Literal[
     "sent", "retryable_failure", "permanent_failure", "uncertain"
@@ -144,6 +155,121 @@ class SMTPNotificationTransport:
                 if submission_started
                 else "unexpected_before_submission",
             )
+
+
+class ResendNotificationTransport:
+    """Hosted job-alert delivery over the Resend HTTPS API.
+
+    Outcomes are classified conservatively and by phase, exactly like the SMTP
+    transport, so the worker's retry and uncertainty guarantees are unchanged.
+    A failure never returns "sent", and an ambiguous failure never returns a
+    retryable outcome that could duplicate a message.
+    """
+
+    def __init__(
+        self,
+        settings: HostedSettings,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.settings = settings
+        self._transport = transport
+
+    def send(self, message: NotificationEmail) -> DeliveryResult:
+        if not self.settings.resend_configured:
+            return DeliveryResult("permanent_failure", "mail_not_configured")
+
+        payload = {
+            "from": self.settings.resend_from_email,
+            "to": [message.recipient],
+            "subject": message.subject,
+            "text": message.text,
+            "html": message.html,
+            # Resend forwards custom headers, so the batch's deterministic
+            # Message-ID survives every attempt just as it does over SMTP.
+            "headers": {"Message-ID": message.message_id},
+        }
+        submission_started = False
+        try:
+            with httpx.Client(
+                timeout=self.settings.smtp_timeout_seconds,
+                transport=self._transport,
+            ) as client:
+                submission_started = True
+                response = client.post(
+                    RESEND_ENDPOINT,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.settings.resend_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                )
+        except (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.PoolTimeout,
+            httpx.ProxyError,
+        ):
+            # Definitively before the request reached the provider.
+            return DeliveryResult(
+                "retryable_failure", "resend_connection_failed_before_submission"
+            )
+        except Exception:  # noqa: BLE001 - transport boundary must classify safely
+            # Anything else may have been written to the wire already. Only the
+            # exception type is ever considered; httpx messages can quote the
+            # request, and would therefore quote the Authorization header.
+            return DeliveryResult(
+                "uncertain" if submission_started else "retryable_failure",
+                "resend_uncertain_after_submission"
+                if submission_started
+                else "resend_connection_failed_before_submission",
+            )
+        return _resend_outcome(response.status_code)
+
+
+class UnavailableNotificationTransport:
+    """The explicit no-provider transport.
+
+    Reporting a bounded permanent failure keeps an unconfigured deployment
+    visible in batch state instead of pretending a message was delivered.
+    """
+
+    def send(self, message: NotificationEmail) -> DeliveryResult:
+        return DeliveryResult("permanent_failure", "mail_not_configured")
+
+
+def configured_notification_transport(
+    settings: HostedSettings,
+) -> NotificationTransport:
+    """Explicit precedence: Resend HTTPS, then SMTP, then no delivery.
+
+    This mirrors ``mailer.configured_mailer`` and reads the same
+    ``HOSTED_RESEND_*`` settings, so account mail and job-alert mail cannot
+    drift onto different providers. A half-configured Resend pair is already
+    rejected when settings are loaded.
+    """
+
+    if settings.resend_configured:
+        return ResendNotificationTransport(settings)
+    if settings.smtp_configured:
+        return SMTPNotificationTransport(settings)
+    return UnavailableNotificationTransport()
+
+
+def _resend_outcome(status_code: int) -> DeliveryResult:
+    if 200 <= status_code < 300:
+        return DeliveryResult("sent")
+    if status_code in {401, 403}:
+        return DeliveryResult("permanent_failure", "resend_authentication_failed")
+    if status_code == 408:
+        return DeliveryResult("retryable_failure", "resend_request_timeout")
+    if status_code == 429:
+        return DeliveryResult("retryable_failure", "resend_rate_limited")
+    if 500 <= status_code < 600:
+        return DeliveryResult("retryable_failure", "resend_server_error")
+    if 400 <= status_code < 500:
+        return DeliveryResult("permanent_failure", "resend_request_rejected")
+    return DeliveryResult("uncertain", "resend_response_unknown")
 
 
 def build_digest_email(

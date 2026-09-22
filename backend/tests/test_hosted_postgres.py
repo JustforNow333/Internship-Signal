@@ -671,3 +671,136 @@ def test_persistence_across_service_and_client_recreation(postgres_url: str) -> 
     second_client.close()
     second_services.database.dispose()
     app.state.hosted_services = previous
+
+
+def test_changing_alert_frequency_over_http_keeps_the_pending_alert(
+    client, hosted
+) -> None:
+    """The real PUT /api/preferences path, end to end, on real PostgreSQL.
+
+    This is the reported production sequence: sign up, verify, choose Daily,
+    watch a company, receive a genuinely new posting, then switch to
+    "As soon as detected" before the digest is delivered.
+    """
+
+    from app.hosted.catalog import CompanyCatalog
+    from app.hosted.job_import import JobImportService
+    from app.hosted.models import HostedNotificationBatch, HostedNotificationItem
+    from app.hosted.notification_mail import DeliveryResult, NotificationEmail
+    from app.hosted.notification_worker import NotificationDeliveryWorker
+
+    services, mailer, clock = hosted
+    signup(client)
+    assert (
+        client.post(
+            "/api/auth/verify-email",
+            json={"token": message_token(mailer.messages[0].text)},
+        ).status_code
+        == 200
+    )
+    company = next(
+        company for company in services.catalog.companies if company.selectable
+    )
+    assert (
+        client.put(
+            "/api/preferences",
+            json=preferences_payload(
+                alert_frequency="daily", internship_season="Any season"
+            ),
+        ).status_code
+        == 200
+    )
+    assert (
+        client.put(
+            "/api/watchlist",
+            json={"companies": [{"company_id": company.id, "paused": False}]},
+        ).status_code
+        == 200
+    )
+
+    clock.advance(days=1)
+    imported_at = clock()
+    JobImportService(
+        services.database,
+        CompanyCatalog((company,)),
+        clock=clock,
+    ).import_jobs(
+        [
+            {
+                "id": "watcher-http-job-1",
+                "company": company.name,
+                "title": "Backend Software Engineer Intern",
+                "location": "New York, NY",
+                "remote_status": "Hybrid",
+                "description": "Build production APIs.",
+                "requirements": "Python and SQL",
+                "source_url": "https://example.com/jobs/http-1",
+                "date_posted": imported_at.date().isoformat(),
+                "deadline": "2026-12-01",
+                "deadline_days_left": 120,
+                "internship_type": "Summer 2027 Internship",
+                "role_classification": {"role": "swe", "role_track": "backend"},
+                "extra": {"source": "direct", "source_adapter": "workday"},
+            }
+        ],
+        source_fingerprint="a" * 64,
+        source_identifier="snapshot-http.json.gz",
+        source_type="collection_snapshot",
+    )
+
+    with services.database.session_factory() as db:
+        batch = db.scalar(select(HostedNotificationBatch))
+        item = db.scalar(select(HostedNotificationItem))
+        assert (batch.frequency, batch.status) == ("daily", "pending")
+        assert batch.due_at == imported_at + timedelta(hours=24)
+        assert item.status == "pending"
+        original_batch_id = batch.id
+        match_id = item.user_job_match_id
+
+    clock.advance(hours=2)
+    switched_at = clock()
+    assert (
+        client.put(
+            "/api/preferences",
+            json=preferences_payload(
+                alert_frequency="as_detected", internship_season="Any season"
+            ),
+        ).status_code
+        == 200
+    )
+
+    with services.database.session_factory() as db:
+        items = list(db.scalars(select(HostedNotificationItem)))
+        assert len(items) == 1
+        moved = items[0]
+        # The alert is carried across rather than discarded.
+        assert (moved.status, moved.cancellation_reason) == ("pending", None)
+        assert moved.user_job_match_id == match_id
+        assert moved.batch_id != original_batch_id
+        retired = db.get(HostedNotificationBatch, original_batch_id)
+        assert (retired.status, retired.last_error_code) == (
+            "cancelled",
+            "frequency_changed",
+        )
+        target = db.get(HostedNotificationBatch, moved.batch_id)
+        assert (target.frequency, target.status) == ("as_detected", "pending")
+        assert target.due_at == switched_at
+
+    sent: list[NotificationEmail] = []
+
+    class CapturingTransport:
+        def send(self, message: NotificationEmail) -> DeliveryResult:
+            sent.append(message)
+            return DeliveryResult("sent")
+
+    summary = NotificationDeliveryWorker(
+        services.database,
+        CapturingTransport(),
+        services.settings.public_frontend_url,
+        clock=clock,
+    ).run()
+    assert (summary.sent, summary.cancelled) == (1, 0)
+    assert len(sent) == 1
+    assert sent[0].recipient == "student@example.com"
+    with services.database.session_factory() as db:
+        assert db.scalar(select(HostedNotificationItem.status)) == "sent"

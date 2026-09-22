@@ -1,4 +1,5 @@
-"""Transactional notification creation for newly inserted import matches."""
+"""Transactional notification creation for newly inserted import matches,
+plus the re-homing that keeps pending work alive across frequency changes."""
 
 from __future__ import annotations
 
@@ -24,6 +25,10 @@ ROLLING_DELAYS = {
     "three_hour": timedelta(hours=3),
     "daily": timedelta(hours=24),
 }
+
+# The bounded reason recorded on a batch that re-homing emptied. The moved
+# items stay pending; only the retired batch carries this code.
+REHOMED_BATCH_CODE = "frequency_changed"
 
 
 def enqueue_import_notifications(
@@ -96,6 +101,208 @@ def enqueue_import_notifications(
         if inserted is not None:
             created += 1
     return created
+
+
+def rehome_pending_items(
+    db: Session,
+    batch: HostedNotificationBatch,
+    *,
+    frequency: str,
+    now: datetime,
+) -> int:
+    """Move ``batch``'s pending items onto delivery work for ``frequency``.
+
+    Changing between active delivery frequencies must never discard a valid
+    alert. ``HostedNotificationItem`` is unique on ``user_job_match_id`` for the
+    row's whole lifetime, so a cancelled item can never be replaced; the item is
+    therefore re-pointed at a batch for the user's current frequency instead.
+    Provenance (``user_job_match_id`` and ``source_import_run_id``) is untouched.
+
+    Returns the number of items moved. An item whose target cannot be resolved
+    safely is left in place rather than dropped, so the caller must re-check for
+    remaining pending items before retiring ``batch``.
+    """
+
+    if frequency not in DELIVERY_FREQUENCIES or frequency == batch.frequency:
+        return 0
+
+    items = list(
+        db.scalars(
+            select(HostedNotificationItem)
+            .where(
+                HostedNotificationItem.batch_id == batch.id,
+                HostedNotificationItem.status == "pending",
+            )
+            .order_by(
+                HostedNotificationItem.created_at, HostedNotificationItem.id
+            )
+            .with_for_update()
+        )
+    )
+    if not items:
+        return 0
+
+    moved = 0
+    targets: dict[uuid.UUID | None, HostedNotificationBatch] = {}
+    for item in items:
+        # Rolling frequencies share one target per user; as-detected keeps one
+        # batch per source import run, which is what its unique key and its
+        # source_import_frequency check constraint both require.
+        key = item.source_import_run_id if frequency == "as_detected" else None
+        target = targets.get(key)
+        if target is None:
+            target = _rehome_target(
+                db,
+                user_id=batch.user_id,
+                frequency=frequency,
+                import_run_id=item.source_import_run_id,
+                now=now,
+            )
+            if target is None:
+                continue
+            targets[key] = target
+        item.batch_id = target.id
+        item.updated_at = now
+        moved += 1
+    if moved:
+        db.flush()
+    return moved
+
+
+def rehome_user_pending_items(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    frequency: str,
+    now: datetime,
+) -> int:
+    """Re-home every pending batch a user holds under a different frequency.
+
+    Batches a delivery worker has already claimed are skipped: those are
+    ``processing`` rather than ``pending``, and the worker re-homes them itself
+    inside the transaction that holds their lease.
+    """
+
+    if frequency not in DELIVERY_FREQUENCIES:
+        return 0
+    batches = list(
+        db.scalars(
+            select(HostedNotificationBatch)
+            .where(
+                HostedNotificationBatch.user_id == user_id,
+                HostedNotificationBatch.status == "pending",
+                HostedNotificationBatch.frequency != frequency,
+            )
+            .order_by(
+                HostedNotificationBatch.created_at, HostedNotificationBatch.id
+            )
+            .with_for_update(skip_locked=True)
+        )
+    )
+    moved = 0
+    for batch in batches:
+        moved += rehome_pending_items(db, batch, frequency=frequency, now=now)
+        if not pending_item_count(db, batch):
+            retire_rehomed_batch(batch, now)
+    return moved
+
+
+def pending_item_count(db: Session, batch: HostedNotificationBatch) -> int:
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(HostedNotificationItem)
+            .where(
+                HostedNotificationItem.batch_id == batch.id,
+                HostedNotificationItem.status == "pending",
+            )
+        )
+        or 0
+    )
+
+
+def retire_rehomed_batch(
+    batch: HostedNotificationBatch, now: datetime
+) -> None:
+    """Cancel a batch that re-homing emptied.
+
+    Only the batch is cancelled. Its items have already moved and stay pending,
+    so none of them is given a ``cancellation_reason``.
+    """
+
+    batch.status = "cancelled"
+    batch.cancelled_at = now
+    batch.last_error_code = REHOMED_BATCH_CODE
+    batch.processing_token = None
+    batch.processing_started_at = None
+    batch.lease_expires_at = None
+    batch.updated_at = now
+
+
+def _rehome_target(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    frequency: str,
+    import_run_id: uuid.UUID,
+    now: datetime,
+) -> HostedNotificationBatch | None:
+    """Resolve the batch a re-homed item should join, or None when unsafe.
+
+    The new due window is measured from the moment the change is processed, so
+    a move behaves exactly like a fresh enqueue under the new frequency.
+    """
+
+    if frequency != "as_detected":
+        return _batch_for_item(
+            db,
+            user_id=user_id,
+            frequency=frequency,
+            import_run_id=None,
+            now=now,
+        )
+
+    existing = db.scalar(
+        select(HostedNotificationBatch)
+        .where(
+            HostedNotificationBatch.user_id == user_id,
+            HostedNotificationBatch.source_import_run_id == import_run_id,
+        )
+        .with_for_update()
+    )
+    if existing is None:
+        return _new_batch(
+            db,
+            user_id=user_id,
+            frequency="as_detected",
+            import_run_id=import_run_id,
+            due_at=now,
+            now=now,
+        )
+    if existing.status == "pending":
+        return existing
+    if (
+        existing.status == "cancelled"
+        and existing.last_error_code == REHOMED_BATCH_CODE
+        and existing.send_started_at is None
+    ):
+        # This is the slot an earlier re-home of these same never-submitted
+        # items retired. (user_id, source_import_run_id) is unique, so the slot
+        # is reclaimed rather than duplicated. Nothing was ever handed to a mail
+        # provider from it, so reviving it cannot resend anything.
+        existing.status = "pending"
+        existing.cancelled_at = None
+        existing.last_error_code = None
+        existing.due_at = now
+        existing.next_attempt_at = now
+        existing.processing_token = None
+        existing.processing_started_at = None
+        existing.lease_expires_at = None
+        existing.updated_at = now
+        return existing
+    # A batch that has reached a terminal or in-flight delivery state keeps its
+    # slot. The item stays where it is and is still delivered.
+    return None
 
 
 def _batch_for_item(

@@ -30,6 +30,10 @@ from app.hosted.models import (
     UserJobMatch,
     UserPreference,
 )
+from app.hosted.notification_enqueue import (
+    DELIVERY_FREQUENCIES,
+    rehome_user_pending_items,
+)
 from app.hosted.notification_mail import DeliveryResult, NotificationEmail
 from app.hosted.notification_worker import NotificationDeliveryWorker
 from app.hosted.security import hash_password
@@ -439,12 +443,17 @@ def test_notification_failure_rolls_back_import_and_matches(
         ("unverified", "email_unverified"),
         ("global", "globally_paused"),
         ("paused", "frequency_paused"),
-        ("different", "frequency_changed"),
     ],
 )
 def test_delivery_time_user_cancellation(
     database, catalog, clock, change, code
 ) -> None:
+    """Account-level withdrawal still cancels the batch and its items.
+
+    An active-frequency change is deliberately not in this list any more: it is
+    covered by the re-homing tests below, which prove the alert survives.
+    """
+
     with database.session_factory.begin() as db:
         user_id = create_user(db, clock(), f"{change}@example.com")
     import_jobs(database, catalog, clock, [final_job()], "a")
@@ -457,10 +466,8 @@ def test_delivery_time_user_cancellation(
             user.email_verified_at = None
         elif change == "global":
             preference.globally_paused = True
-        elif change == "paused":
-            preference.alert_frequency = "paused"
         else:
-            preference.alert_frequency = "daily"
+            preference.alert_frequency = "paused"
     transport = RecordingTransport()
     summary = worker(database, clock, transport).run()
     assert summary.cancelled == 1
@@ -499,6 +506,392 @@ def test_delivery_time_item_cancellation(database, catalog, clock, change, code)
         item = db.scalar(select(HostedNotificationItem))
         assert (item.status, item.cancellation_reason) == ("cancelled", code)
         assert db.scalar(select(HostedNotificationBatch.status)) == "cancelled"
+
+
+
+def change_frequency(
+    database: HostedDatabase,
+    clock: MutableClock,
+    user_id: uuid.UUID,
+    frequency: str,
+    *,
+    rehome: bool = True,
+) -> None:
+    """Mirror what ``PUT /api/preferences`` does for an alert-frequency change.
+
+    ``rehome=False`` reproduces the other half of the race: the preference is
+    already current when a worker reaches a batch the request never re-homed.
+    """
+
+    with database.session_factory.begin() as db:
+        preference = db.get(UserPreference, user_id)
+        preference.alert_frequency = frequency
+        preference.updated_at = clock()
+        if rehome and frequency in DELIVERY_FREQUENCIES:
+            db.flush()
+            rehome_user_pending_items(
+                db, user_id=user_id, frequency=frequency, now=clock()
+            )
+
+
+def sole_item(database: HostedDatabase) -> HostedNotificationItem:
+    with database.session_factory() as db:
+        items = list(db.scalars(select(HostedNotificationItem)))
+        assert len(items) == 1
+        return items[0]
+
+
+def batches_by_frequency(
+    database: HostedDatabase,
+) -> dict[str, list[HostedNotificationBatch]]:
+    grouped: dict[str, list[HostedNotificationBatch]] = {}
+    with database.session_factory() as db:
+        for batch in db.scalars(
+            select(HostedNotificationBatch).order_by(
+                HostedNotificationBatch.created_at, HostedNotificationBatch.id
+            )
+        ):
+            grouped.setdefault(batch.frequency, []).append(batch)
+    return grouped
+
+
+REHOMING_WINDOWS = {
+    "as_detected": timedelta(0),
+    "three_hour": timedelta(hours=3),
+    "daily": timedelta(hours=24),
+}
+
+
+@pytest.mark.parametrize(
+    ("start", "target"),
+    [
+        ("daily", "as_detected"),
+        ("as_detected", "daily"),
+        ("daily", "three_hour"),
+        ("three_hour", "as_detected"),
+        ("three_hour", "daily"),
+        ("as_detected", "three_hour"),
+    ],
+)
+def test_active_frequency_change_rehomes_pending_work(
+    database, catalog, clock, start, target
+) -> None:
+    """Switching between active frequencies moves the alert; it never drops it."""
+
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "move@example.com", frequency=start)
+    result = import_jobs(database, catalog, clock, [final_job()], "a")
+    before = sole_item(database)
+    original_batch_id = before.batch_id
+    match_id = before.user_job_match_id
+
+    clock.advance(hours=1)
+    changed_at = clock()
+    change_frequency(database, clock, user_id, target)
+
+    after = sole_item(database)
+    # The one lifetime item per match is preserved, not replaced.
+    assert after.id == before.id
+    assert after.status == "pending"
+    assert after.cancellation_reason is None
+    assert after.cancelled_at is None
+    # Provenance survives the move.
+    assert after.user_job_match_id == match_id
+    assert after.source_import_run_id == result.run_id
+    assert after.batch_id != original_batch_id
+
+    with database.session_factory() as db:
+        old = db.get(HostedNotificationBatch, original_batch_id)
+        new = db.get(HostedNotificationBatch, after.batch_id)
+        # The emptied batch is retired only once its items have left.
+        assert (old.status, old.last_error_code) == ("cancelled", "frequency_changed")
+        assert old.cancelled_at == changed_at
+        # The new window is measured from the moment the change was processed.
+        assert new.frequency == target
+        assert new.status == "pending"
+        assert new.due_at == changed_at + REHOMING_WINDOWS[target]
+        assert new.next_attempt_at == new.due_at
+        assert db.scalar(select(func.count()).select_from(HostedNotificationItem)) == 1
+
+
+def test_daily_to_as_detected_still_delivers_the_alert_exactly_once(
+    database, catalog, clock
+) -> None:
+    """The exact production report: Daily, then As soon as detected."""
+
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "daily@example.com", frequency="daily")
+    import_jobs(database, catalog, clock, [final_job()], "a")
+    clock.advance(hours=2)
+    change_frequency(database, clock, user_id, "as_detected")
+
+    transport = RecordingTransport()
+    summary = worker(database, clock, transport).run()
+    assert (summary.sent, summary.cancelled) == (1, 0)
+    assert len(transport.messages) == 1
+    assert transport.messages[0].subject == "New internship matches (1)"
+
+    item = sole_item(database)
+    assert item.status == "sent"
+    with database.session_factory() as db:
+        statuses = sorted(
+            db.scalars(select(HostedNotificationBatch.status))
+        )
+        assert statuses == ["cancelled", "sent"]
+
+    # A second pass must not send the same alert again.
+    repeat = RecordingTransport()
+    again = worker(database, clock, repeat).run()
+    assert (again.claimed, again.sent) == (0, 0)
+    assert not repeat.messages
+
+
+def test_a_worker_that_already_claimed_the_batch_rehomes_instead_of_cancelling(
+    database, catalog, clock
+) -> None:
+    """Case B: the lease is held when the preference changes."""
+
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "race@example.com", frequency="daily")
+    import_jobs(database, catalog, clock, [final_job()], "a")
+    clock.advance(hours=25)
+
+    transport = RecordingTransport()
+    running = worker(database, clock, transport)
+    claims = running.claim_due_batches(limit=25)
+    assert len(claims) == 1
+    claimed_batch_id, token = claims[0]
+
+    # The request-side pass must leave a claimed batch alone: it is
+    # ``processing``, so only the worker holding the lease may move its rows.
+    change_frequency(database, clock, user_id, "as_detected")
+    assert sole_item(database).batch_id == claimed_batch_id
+
+    # The worker now re-homes the work it holds rather than discarding it, and
+    # submits nothing for the retired batch.
+    assert running._prepare_delivery(claimed_batch_id, token) is None
+    assert not transport.messages
+
+    item = sole_item(database)
+    assert (item.status, item.cancellation_reason) == ("pending", None)
+    assert item.batch_id != claimed_batch_id
+    with database.session_factory() as db:
+        old = db.get(HostedNotificationBatch, claimed_batch_id)
+        assert (old.status, old.last_error_code) == ("cancelled", "frequency_changed")
+        assert old.processing_token is None
+        assert old.attempt_count == 0
+        assert db.scalar(select(func.count()).select_from(HostedNotificationAttempt)) == 0
+
+    delivered = RecordingTransport()
+    summary = worker(database, clock, delivered).run()
+    assert (summary.sent, len(delivered.messages)) == (1, 1)
+    assert sole_item(database).status == "sent"
+
+
+def test_a_frequency_change_the_request_missed_is_rehomed_by_the_worker(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "missed@example.com", frequency="daily")
+    import_jobs(database, catalog, clock, [final_job()], "a")
+    change_frequency(database, clock, user_id, "three_hour", rehome=False)
+    clock.advance(hours=25)
+
+    transport = RecordingTransport()
+    summary = worker(database, clock, transport).run()
+    # Nothing is sent yet: the work moved into a three-hour window that is not
+    # due, which is correct rather than lossy.
+    assert (summary.sent, summary.cancelled) == (0, 1)
+    assert not transport.messages
+    item = sole_item(database)
+    assert (item.status, item.cancellation_reason) == ("pending", None)
+    with database.session_factory() as db:
+        moved = db.get(HostedNotificationBatch, item.batch_id)
+        assert (moved.frequency, moved.status) == ("three_hour", "pending")
+        assert moved.due_at == clock() + timedelta(hours=3)
+
+    clock.advance(hours=4)
+    delivered = RecordingTransport()
+    assert worker(database, clock, delivered).run().sent == 1
+    assert sole_item(database).status == "sent"
+
+
+def test_every_pending_item_survives_a_frequency_change(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "many@example.com", frequency="daily")
+    import_jobs(
+        database, catalog, clock, [final_job(1), final_job(2), final_job(3)], "a"
+    )
+    with database.session_factory() as db:
+        before = {
+            item.id: (item.user_job_match_id, item.source_import_run_id)
+            for item in db.scalars(select(HostedNotificationItem))
+        }
+    assert len(before) == 3
+
+    clock.advance(hours=1)
+    change_frequency(database, clock, user_id, "as_detected")
+
+    with database.session_factory() as db:
+        items = list(db.scalars(select(HostedNotificationItem)))
+        assert len(items) == 3
+        assert all(item.status == "pending" for item in items)
+        assert {
+            item.id: (item.user_job_match_id, item.source_import_run_id)
+            for item in items
+        } == before
+        # One import run means one as-detected batch holds all three.
+        assert len({item.batch_id for item in items}) == 1
+
+    transport = RecordingTransport()
+    assert worker(database, clock, transport).run().sent == 1
+    assert transport.messages[0].subject == "New internship matches (3)"
+
+
+def test_rehoming_reuses_an_existing_compatible_rolling_batch(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "reuse@example.com", frequency="three_hour")
+    import_jobs(database, catalog, clock, [final_job(1)], "a")
+    rolling = batches_by_frequency(database)["three_hour"][0]
+
+    # A second import lands under a daily preference the request never saw, so
+    # the user now holds one pending batch per frequency.
+    change_frequency(database, clock, user_id, "daily", rehome=False)
+    clock.advance(hours=1)
+    import_jobs(database, catalog, clock, [final_job(2)], "b")
+    assert len(batches_by_frequency(database)["daily"]) == 1
+
+    clock.advance(hours=1)
+    change_frequency(database, clock, user_id, "three_hour")
+
+    grouped = batches_by_frequency(database)
+    # The daily work joins the batch that already exists rather than opening
+    # another three-hour window.
+    assert len(grouped["three_hour"]) == 1
+    assert grouped["three_hour"][0].id == rolling.id
+    assert grouped["three_hour"][0].status == "pending"
+    # Its window is unchanged: joining a rolling batch never moves its due time.
+    assert grouped["three_hour"][0].due_at == rolling.due_at
+    assert [batch.status for batch in grouped["daily"]] == ["cancelled"]
+    with database.session_factory() as db:
+        items = list(db.scalars(select(HostedNotificationItem)))
+        assert len(items) == 2
+        assert all(item.status == "pending" for item in items)
+        assert {item.batch_id for item in items} == {rolling.id}
+
+
+def test_a_round_trip_through_another_frequency_keeps_the_alert(
+    database, catalog, clock
+) -> None:
+    """as_detected -> daily -> as_detected reclaims the per-import-run slot."""
+
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "round@example.com", frequency="as_detected")
+    result = import_jobs(database, catalog, clock, [final_job()], "a")
+    first_batch_id = sole_item(database).batch_id
+
+    clock.advance(hours=1)
+    change_frequency(database, clock, user_id, "daily")
+    assert sole_item(database).batch_id != first_batch_id
+
+    clock.advance(hours=1)
+    returned_at = clock()
+    change_frequency(database, clock, user_id, "as_detected")
+
+    item = sole_item(database)
+    assert (item.status, item.cancellation_reason) == ("pending", None)
+    with database.session_factory() as db:
+        # (user_id, source_import_run_id) is unique, so the original slot is
+        # reclaimed rather than duplicated.
+        assert item.batch_id == first_batch_id
+        revived = db.get(HostedNotificationBatch, first_batch_id)
+        assert (revived.status, revived.last_error_code) == ("pending", None)
+        assert revived.cancelled_at is None
+        assert revived.due_at == returned_at
+        assert revived.source_import_run_id == result.run_id
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(HostedNotificationBatch)
+                .where(HostedNotificationBatch.frequency == "as_detected")
+            )
+            == 1
+        )
+
+    transport = RecordingTransport()
+    assert worker(database, clock, transport).run().sent == 1
+    assert sole_item(database).status == "sent"
+
+
+def test_pausing_still_cancels_and_resuming_rehomes_what_is_left(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "pause@example.com", frequency="daily")
+    import_jobs(database, catalog, clock, [final_job()], "a")
+
+    # Pausing is not an active delivery frequency, so nothing is re-homed and
+    # the existing cancel-on-pause contract is untouched.
+    clock.advance(hours=1)
+    change_frequency(database, clock, user_id, "paused")
+    item = sole_item(database)
+    assert (item.status, item.cancellation_reason) == ("pending", None)
+    with database.session_factory() as db:
+        assert db.scalar(select(HostedNotificationBatch.status)) == "pending"
+
+    # Resuming before the worker ran carries the still-pending alert across.
+    clock.advance(hours=1)
+    resumed_at = clock()
+    change_frequency(database, clock, user_id, "as_detected")
+    item = sole_item(database)
+    assert (item.status, item.cancellation_reason) == ("pending", None)
+    with database.session_factory() as db:
+        moved = db.get(HostedNotificationBatch, item.batch_id)
+        assert (moved.frequency, moved.due_at) == ("as_detected", resumed_at)
+
+    transport = RecordingTransport()
+    assert worker(database, clock, transport).run().sent == 1
+
+
+def test_a_paused_user_whose_batch_reaches_the_worker_is_still_cancelled(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "stop@example.com", frequency="daily")
+    import_jobs(database, catalog, clock, [final_job()], "a")
+    change_frequency(database, clock, user_id, "paused")
+    clock.advance(hours=25)
+
+    transport = RecordingTransport()
+    assert worker(database, clock, transport).run().cancelled == 1
+    assert not transport.messages
+    item = sole_item(database)
+    assert (item.status, item.cancellation_reason) == ("cancelled", "frequency_paused")
+
+
+def test_a_cancelled_historical_notification_is_never_resent(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "history@example.com", frequency="daily")
+    import_jobs(database, catalog, clock, [final_job()], "a")
+    change_frequency(database, clock, user_id, "paused")
+    clock.advance(hours=25)
+    assert worker(database, clock, RecordingTransport()).run().cancelled == 1
+    assert sole_item(database).status == "cancelled"
+
+    # Returning to an active frequency must not revive cancelled history.
+    clock.advance(hours=1)
+    change_frequency(database, clock, user_id, "as_detected")
+    item = sole_item(database)
+    assert (item.status, item.cancellation_reason) == ("cancelled", "frequency_paused")
+    transport = RecordingTransport()
+    assert worker(database, clock, transport).run().sent == 0
+    assert not transport.messages
 
 
 def test_saved_match_delivers_and_two_workers_cannot_claim_same_batch(

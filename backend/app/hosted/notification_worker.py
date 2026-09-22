@@ -21,6 +21,12 @@ from .models import (
     UserJobMatch,
     UserPreference,
 )
+from .notification_enqueue import (
+    DELIVERY_FREQUENCIES,
+    pending_item_count,
+    rehome_pending_items,
+    retire_rehomed_batch,
+)
 from .notification_mail import (
     DeliveryResult,
     DigestJob,
@@ -49,6 +55,8 @@ BATCH_CANCELLATION_CODES = frozenset(
         "email_unverified",
         "globally_paused",
         "frequency_paused",
+        # Recorded only on a batch that re-homing emptied, and on historical
+        # rows cancelled before re-homing existed. Never applied to an item.
         "frequency_changed",
         "no_valid_items",
     }
@@ -58,6 +66,15 @@ ITEM_CANCELLATION_CODES = frozenset(
 )
 ERROR_CODES = frozenset(
     {
+        "mail_not_configured",
+        "resend_authentication_failed",
+        "resend_request_rejected",
+        "resend_rate_limited",
+        "resend_request_timeout",
+        "resend_server_error",
+        "resend_response_unknown",
+        "resend_connection_failed_before_submission",
+        "resend_uncertain_after_submission",
         "smtp_not_configured",
         "smtp_authentication_failed",
         "sender_rejected",
@@ -261,13 +278,34 @@ class NotificationDeliveryWorker:
                 return None
             user = db.get(User, batch.user_id)
             preferences = db.get(UserPreference, batch.user_id)
-            cancellation = _user_cancellation(batch, user, preferences)
+            cancellation = _user_cancellation(user, preferences)
             if cancellation is not None:
                 _cancel_batch(batch, cancellation, now)
                 for item in batch.items:
                     if item.status == "pending":
                         _cancel_item(item, cancellation, now)
                 return None
+
+            assert preferences is not None
+            if (
+                preferences.alert_frequency != batch.frequency
+                and preferences.alert_frequency in DELIVERY_FREQUENCIES
+            ):
+                # The user changed frequency after this batch was claimed.
+                # Nothing has been submitted for this attempt yet -
+                # ``send_started_at`` is written further down, and the lease
+                # recovery path routes an already-submitted batch to
+                # ``uncertain`` rather than back here - so moving the pending
+                # rows cannot duplicate an email. They are re-homed onto the
+                # current frequency instead of being discarded.
+                rehome_pending_items(
+                    db, batch, frequency=preferences.alert_frequency, now=now
+                )
+                if not pending_item_count(db, batch):
+                    retire_rehomed_batch(batch, now)
+                    return None
+                # Anything that could not be moved safely is still delivered
+                # here rather than dropped.
 
             rows = db.execute(
                 select(HostedNotificationItem, UserJobMatch, HostedJob)
@@ -418,10 +456,16 @@ def validate_limit(value: int) -> int:
 
 
 def _user_cancellation(
-    batch: HostedNotificationBatch,
     user: User | None,
     preferences: UserPreference | None,
 ) -> str | None:
+    """Account-level reasons to withdraw a batch entirely.
+
+    An active-frequency change is deliberately not one of them: the caller
+    re-homes the batch's pending items instead of cancelling them. Pausing and
+    the global pause still cancel, which keeps the unsubscribe contract intact.
+    """
+
     if user is None or not user.is_active:
         return "user_inactive"
     if user.email_verified_at is None:
@@ -430,8 +474,6 @@ def _user_cancellation(
         return "globally_paused"
     if preferences.alert_frequency == "paused":
         return "frequency_paused"
-    if preferences.alert_frequency != batch.frequency:
-        return "frequency_changed"
     return None
 
 
