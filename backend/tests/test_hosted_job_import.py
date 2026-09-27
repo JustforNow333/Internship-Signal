@@ -231,7 +231,7 @@ def test_phase2_migration_creates_postgresql_tables_and_jsonb(
             "SELECT version_num FROM alembic_version"
         ).scalar_one()
     assert source_metadata_type == "jsonb"
-    assert revision == "20260919_0006"
+    assert revision == "20260926_0007"
     database.dispose()
 
 
@@ -460,7 +460,7 @@ def test_invalid_and_unsupported_jobs_are_skipped_with_exact_counters(
         assert len(db.scalars(select(HostedJob)).all()) == 1
 
 
-def test_mapper_applies_internship_scope_before_role_mapping(
+def test_mapper_applies_career_level_scope_before_role_mapping(
     catalog: CompanyCatalog,
 ) -> None:
     mapped = map_final_jobs(
@@ -487,7 +487,8 @@ def test_mapper_applies_internship_scope_before_role_mapping(
     )
 
     assert [job.watcher_job_id for job in mapped.jobs] == ["supported-intern"]
-    assert mapped.skipped_reasons == {"invalid_role": 1, "not_internship": 2}
+    assert mapped.jobs[0].career_level == "internship"
+    assert mapped.skipped_reasons == {"invalid_role": 1, "career_level_unknown": 2}
 
 
 def test_closed_internship_can_map_for_lifecycle_updates(
@@ -502,7 +503,7 @@ def test_closed_internship_can_map_for_lifecycle_updates(
     assert mapped.jobs[0].is_open is False
 
 
-def test_open_full_time_role_cannot_enter_hosted_jobs(import_service) -> None:
+def test_generic_full_time_title_cannot_enter_hosted_jobs(import_service) -> None:
     service, database, _clock = import_service
     result = import_jobs(
         service,
@@ -517,7 +518,7 @@ def test_open_full_time_role_cannot_enter_hosted_jobs(import_service) -> None:
 
     assert result.counters.jobs_inserted == 0
     assert result.counters.jobs_skipped == 1
-    assert result.skipped_reasons == {"not_internship": 1}
+    assert result.skipped_reasons == {"career_level_unknown": 1}
     with database.session_factory() as db:
         assert db.scalar(select(HostedJob)) is None
 
@@ -683,11 +684,11 @@ def test_concurrent_duplicate_is_rejected_while_first_import_runs(
     errors: list[Exception] = []
     original_upsert = service._upsert_job
 
-    def blocking_upsert(db, mapped, observed_at):
+    def blocking_upsert(db, mapped, observed_at, **kwargs):
         entered.set()
         if not release.wait(timeout=10):
             raise RuntimeError("test synchronization timeout")
-        return original_upsert(db, mapped, observed_at)
+        return original_upsert(db, mapped, observed_at, **kwargs)
 
     service._upsert_job = blocking_upsert
 
@@ -786,9 +787,9 @@ def test_concurrent_distinct_sources_insert_one_watcher_job(import_service) -> N
     for item in (first, second):
         original = item._upsert_job
 
-        def synchronized_upsert(db, mapped, observed_at, *, delegate=original):
+        def synchronized_upsert(db, mapped, observed_at, *, delegate=original, **kwargs):
             barrier.wait(timeout=10)
-            return delegate(db, mapped, observed_at)
+            return delegate(db, mapped, observed_at, **kwargs)
 
         item._upsert_job = synchronized_upsert
 
@@ -1129,3 +1130,112 @@ def test_snapshot_replay_requires_explicit_config_mismatch_override(
         allow_collection_config_mismatch=True,
     )
     assert allowed.jobs == ()
+
+
+def test_mapper_persists_selectable_career_levels_and_skips_the_rest(
+    catalog: CompanyCatalog,
+) -> None:
+    full_time = {"internship_type": "FullTime"}
+    mapped = map_final_jobs(
+        [
+            final_job(id="intern"),
+            final_job(id="new-grad", title="Software Engineer, New Grad", **full_time),
+            final_job(id="junior", title="Jr. Backend Software Engineer", **full_time),
+            final_job(id="senior", title="Senior Backend Software Engineer", **full_time),
+            final_job(id="staff", title="Staff Software Engineer", **full_time),
+            final_job(id="mid", title="Software Engineer II", **full_time),
+            final_job(id="ladder", title="Senior Associate, Software Engineer", **full_time),
+            final_job(id="generic", title="Backend Software Engineer", **full_time),
+            final_job(id="manager", title="Engineering Manager", **full_time),
+            final_job(
+                id="conflict",
+                title="2026 New Grad Software Engineer Intern",
+            ),
+        ],
+        catalog,
+    )
+
+    assert {job.watcher_job_id: job.career_level for job in mapped.jobs} == {
+        "intern": "internship",
+        "new-grad": "new_grad_junior",
+        "junior": "new_grad_junior",
+        "senior": "senior_plus",
+        "staff": "senior_plus",
+    }
+    assert mapped.skipped_reasons == {
+        "career_level_mid_level": 2,
+        "career_level_unknown": 3,
+    }
+    assert all(
+        job.business_values()["career_level"] == job.career_level
+        for job in mapped.jobs
+    )
+
+
+def test_career_level_ignores_posting_text(catalog: CompanyCatalog) -> None:
+    mapped = map_final_jobs(
+        [
+            final_job(
+                title="Backend Software Engineer",
+                internship_type="FullTime",
+                description="Senior staff role. New grads welcome.",
+                requirements="8+ years of experience",
+            )
+        ],
+        catalog,
+    )
+    assert mapped.jobs == ()
+    assert mapped.skipped_reasons == {"career_level_unknown": 1}
+
+
+def test_other_engineering_stays_internship_only(catalog: CompanyCatalog) -> None:
+    other = {"role": "it", "role_track": "it_support"}
+    mapped = map_final_jobs(
+        [
+            final_job(id="intern", role_classification=other),
+            final_job(
+                id="senior",
+                title="Senior Support Engineer",
+                internship_type="FullTime",
+                role_classification=other,
+            ),
+        ],
+        catalog,
+    )
+    assert [(job.watcher_job_id, job.role_id) for job in mapped.jobs] == [
+        ("intern", "other_engineering")
+    ]
+    assert mapped.skipped_reasons == {"invalid_role": 1}
+
+
+def test_a_career_level_change_is_a_meaningful_update(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job()], "a")
+    clock.advance(hours=1)
+    result = import_jobs(
+        service,
+        [
+            final_job(
+                title="Senior Backend Software Engineer",
+                internship_type="FullTime",
+            )
+        ],
+        "b",
+    )
+    assert (result.counters.jobs_updated, result.counters.jobs_unchanged) == (1, 0)
+    with database.session_factory() as db:
+        job = db.scalar(select(HostedJob))
+    assert job.career_level == "senior_plus"
+    assert job.first_seen_in_backfill is False
+
+
+def test_snapshot_cli_accepts_the_explicit_backfill_flag() -> None:
+    from app.hosted.import_snapshot import build_parser
+
+    assert build_parser().parse_args(["--snapshot", "x"]).career_stage_backfill is False
+    assert (
+        build_parser()
+        .parse_args(["--snapshot", "x", "--career-stage-backfill"])
+        .career_stage_backfill
+        is True
+    )

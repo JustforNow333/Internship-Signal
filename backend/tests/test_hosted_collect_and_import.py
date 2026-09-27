@@ -175,18 +175,20 @@ def batch_for(
     posting_date: str,
     identifier: str = "1",
     fingerprint: str | None = None,
+    title: str = "Backend Software Engineer Intern",
+    internship_type: str = "Summer 2027 Internship",
 ) -> CollectionBatch:
     row = make_row(
         source="direct",
         source_adapter="workday",
         company=company_name,
-        title="Backend Software Engineer Intern",
+        title=title,
         location="New York, NY",
         description="Build backend APIs and production services.",
         requirements="Python and SQL",
         source_url=f"https://example.com/jobs/collection-{identifier}",
         date_posted=posting_date,
-        internship_type="Summer 2027 Internship",
+        internship_type=internship_type,
         extra={"source_requisition_id": f"COLLECT-{identifier}", "active": True},
     )
     return CollectionBatch.create(
@@ -550,3 +552,51 @@ def test_the_notification_worker_runs_independently_after_a_collection(
     )
     assert deliver_notifications.main(["--limit", "5"]) == 0
     assert isinstance(chosen["transport"], ResendNotificationTransport)
+
+
+def test_career_stage_backfill_collection_is_silent_and_recorded(
+    database, watcher_config, watched_company, capsys
+) -> None:
+    user_id = create_user(database, watched_company.id)
+    with database.session_factory.begin() as db:
+        db.get(UserPreference, user_id).career_levels = ["senior_plus"]
+    batch = batch_for(
+        watcher_config,
+        watched_company.name,
+        posting_date=NOW.date().isoformat(),
+        title="Senior Backend Software Engineer",
+        internship_type="",
+    )
+
+    assert (
+        collect_main(["--career-stage-backfill"], collector=collector_for(batch))
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert "mode=backfill" in output
+    assert "inserted=1" in output
+    assert counts(database) == {
+        "jobs": 1,
+        "runs": 1,
+        "matches": 1,
+        "batches": 0,
+        "items": 0,
+    }
+    with database.session_factory() as db:
+        run = db.scalar(select(HostedJobImportRun))
+        job = db.scalar(select(HostedJob))
+    assert run.source_type == "hosted_collection_backfill"
+    assert (job.career_level, job.first_seen_in_backfill) == ("senior_plus", True)
+
+
+def test_standard_collection_reports_standard_mode(
+    database, watcher_config, watched_company, capsys
+) -> None:
+    batch = batch_for(
+        watcher_config, watched_company.name, posting_date=NOW.date().isoformat()
+    )
+    assert collect_main([], collector=collector_for(batch)) == 0
+    assert "mode=standard" in capsys.readouterr().out
+    with database.session_factory() as db:
+        assert db.scalar(select(HostedJob)).first_seen_in_backfill is False

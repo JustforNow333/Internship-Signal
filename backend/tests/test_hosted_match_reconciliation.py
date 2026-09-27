@@ -235,6 +235,7 @@ def create_job(
     location: str = "New York, NY",
     remote_status: str = "",
     role_id: str = "software_engineering",
+    career_level: str = "internship",
     is_open: bool = True,
 ) -> uuid.UUID:
     now = clock()
@@ -246,6 +247,7 @@ def create_job(
         location=location,
         remote_status=remote_status,
         role_id=role_id,
+        career_level=career_level,
         description="",
         requirements="",
         application_url="https://example.com/apply",
@@ -289,6 +291,7 @@ def test_reconciliation_creates_a_new_match(hosted) -> None:
     assert [reason["code"] for reason in match.match_reasons] == [
         "company_watched",
         "role_selected",
+        "career_level_selected",
         "location_preferred",
         "season_any",
     ]

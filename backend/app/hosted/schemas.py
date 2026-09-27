@@ -18,6 +18,7 @@ from pydantic import (
     model_validator,
 )
 
+from .career_level import DEFAULT_CAREER_LEVELS, SELECTABLE_CAREER_LEVELS
 from .security import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, normalized_email
 
 ROLE_IDS = {
@@ -102,6 +103,11 @@ class CompanyResponse(BaseModel):
 
 class PreferencesBase(BaseModel):
     role_ids: list[str]
+    # Defaulted rather than required so a client that predates career stages
+    # keeps its internship-only behavior.
+    career_levels: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_CAREER_LEVELS)
+    )
     preferred_locations: list[str]
     include_remote: bool
     internship_season: str
@@ -121,6 +127,19 @@ class PreferencesBase(BaseModel):
         unsupported = sorted(set(values) - ROLE_IDS)
         if unsupported:
             raise ValueError("Unsupported role ID.")
+        return values
+
+    @field_validator("career_levels")
+    @classmethod
+    def valid_career_levels(cls, values: list[str]) -> list[str]:
+        if not 1 <= len(values) <= len(SELECTABLE_CAREER_LEVELS):
+            raise ValueError(
+                f"Select between 1 and {len(SELECTABLE_CAREER_LEVELS)} career stages."
+            )
+        if len(values) != len(set(values)):
+            raise ValueError("career_levels must not contain duplicates.")
+        if set(values) - set(SELECTABLE_CAREER_LEVELS):
+            raise ValueError("Unsupported career stage.")
         return values
 
     @field_validator("preferred_locations")
@@ -238,6 +257,7 @@ class MatchResponse(BaseModel):
     remote: bool
     remote_status: str
     role_id: str
+    career_level: str
     application_url: str | None
     posting_date: date | None
     deadline: date | None

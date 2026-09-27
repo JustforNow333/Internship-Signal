@@ -234,7 +234,9 @@ def final_job(index: int = 1, **overrides) -> dict:
         "description": "Build production APIs.",
         "requirements": "Python and SQL",
         "source_url": f"https://example.com/jobs/{index}",
-        "date_posted": "2026-08-01",
+        # Posted on the day every default watch starts, so these imports are
+        # genuinely new openings rather than silent recent-opening catch-up.
+        "date_posted": "2026-08-03",
         "deadline": "2026-09-01",
         "deadline_days_left": 30,
         "internship_type": "Summer 2027 Internship",
@@ -1249,3 +1251,233 @@ def test_verified_snapshot_notification_smoke(database, clock) -> None:
         f"matches_created={first.counters.matches_created} "
         f"notification_items={item_count} watcher_files={len(watcher_before)}"
     )
+
+
+def _notified_watcher_job_ids(database: HostedDatabase) -> set[str]:
+    with database.session_factory() as db:
+        return set(
+            db.scalars(
+                select(HostedJob.watcher_job_id)
+                .join(UserJobMatch, UserJobMatch.job_id == HostedJob.id)
+                .join(
+                    HostedNotificationItem,
+                    HostedNotificationItem.user_job_match_id == UserJobMatch.id,
+                )
+            )
+        )
+
+
+def _matched_watcher_job_ids(database: HostedDatabase) -> set[str]:
+    with database.session_factory() as db:
+        return set(
+            db.scalars(
+                select(HostedJob.watcher_job_id).join(
+                    UserJobMatch, UserJobMatch.job_id == HostedJob.id
+                )
+            )
+        )
+
+
+def test_import_time_historical_catch_up_is_silent_but_new_openings_notify(
+    database, catalog, clock
+) -> None:
+    """A pre-watch posting first collected after the watch began is catch-up.
+
+    It still reaches Matches through the recent-openings admission, but it was
+    merely discovered late, so it must not create notification work. Postings
+    dated on or after the watch start, and undated postings first detected
+    after it, remain genuinely new and notify normally.
+    """
+
+    with database.session_factory.begin() as db:
+        create_user(db, clock(), "catchup@example.com")
+    clock.advance(hours=1)
+
+    result = import_jobs(
+        database,
+        catalog,
+        clock,
+        [
+            final_job(1, date_posted="2026-07-20"),
+            final_job(2, date_posted="2026-08-03"),
+            final_job(3, date_posted=""),
+        ],
+        "c",
+    )
+
+    assert result.counters.matches_created == 3
+    assert _matched_watcher_job_ids(database) == {
+        "watcher-job-1",
+        "watcher-job-2",
+        "watcher-job-3",
+    }
+    assert _notified_watcher_job_ids(database) == {"watcher-job-2", "watcher-job-3"}
+
+
+# --- career-stage backfill --------------------------------------------------
+
+
+def _select_career_levels(database, user_id, levels, *, recent=True) -> None:
+    with database.session_factory.begin() as db:
+        preference = db.get(UserPreference, user_id)
+        preference.career_levels = list(levels)
+        preference.include_recent_openings = recent
+
+
+def _senior(index: int, **overrides) -> dict:
+    return final_job(
+        index,
+        title=f"Senior Backend Software Engineer {index}",
+        internship_type="",
+        **overrides,
+    )
+
+
+def test_career_stage_backfill_stores_and_matches_but_never_notifies(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        senior_user = create_user(db, clock(), "senior@example.com")
+        create_user(db, clock(), "intern@example.com")
+    _select_career_levels(database, senior_user, ["internship", "senior_plus"])
+    clock.advance(hours=1)
+
+    result = JobImportService(database, catalog, clock=clock).import_jobs(
+        [
+            _senior(1, date_posted="2026-07-20"),
+            _senior(2, date_posted=""),
+            _senior(3, date_posted="2026-08-03"),
+            final_job(4, title="Software Engineer II", internship_type=""),
+            final_job(5, title="Backend Software Engineer", internship_type=""),
+            final_job(6),
+        ],
+        source_fingerprint="d" * 64,
+        source_identifier="backfill.json.gz",
+        source_type="hosted_collection_backfill",
+        backfill=True,
+    )
+
+    assert result.counters.jobs_inserted == 4
+    assert result.skipped_reasons == {
+        "career_level_mid_level": 1,
+        "career_level_unknown": 1,
+    }
+    with database.session_factory() as db:
+        jobs = {job.watcher_job_id: job for job in db.scalars(select(HostedJob))}
+        run = db.scalar(select(HostedJobImportRun))
+        assert run.source_type == "hosted_collection_backfill"
+        assert db.scalar(select(func.count()).select_from(HostedNotificationItem)) == 0
+        assert db.scalar(select(func.count()).select_from(HostedNotificationBatch)) == 0
+    assert {key: job.career_level for key, job in jobs.items()} == {
+        "watcher-job-1": "senior_plus",
+        "watcher-job-2": "senior_plus",
+        "watcher-job-3": "senior_plus",
+        "watcher-job-6": "internship",
+    }
+    assert all(job.first_seen_in_backfill for job in jobs.values())
+    # Stored state is accurate: the senior user matches every senior posting
+    # and the internship; the internship-only user matches only the internship.
+    assert result.counters.matches_created == 5
+
+
+def test_an_undated_backfilled_job_does_not_become_a_false_new_alert(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "later@example.com")
+    clock.advance(hours=1)
+    JobImportService(database, catalog, clock=clock).import_jobs(
+        [_senior(1, date_posted="")],
+        source_fingerprint="e" * 64,
+        source_identifier="backfill.json.gz",
+        source_type="hosted_collection_backfill",
+        backfill=True,
+    )
+    assert _matched_watcher_job_ids(database) == set()
+
+    # The user opts into Senior+ without recent-opening catch-up. The undated
+    # backfilled posting was first stored after the watch began, yet it must
+    # not be admitted as a newly posted opening.
+    _select_career_levels(database, user_id, ["senior_plus"], recent=False)
+    with database.session_factory.begin() as db:
+        reconcile_user(db, user_id, now=clock())
+    assert _matched_watcher_job_ids(database) == set()
+
+    # A later ordinary import that changes the posting still cannot alert.
+    clock.advance(hours=1)
+    import_jobs(
+        database,
+        catalog,
+        clock,
+        [_senior(1, date_posted="", description="Updated description")],
+        "f",
+    )
+    assert _matched_watcher_job_ids(database) == set()
+    assert _notified_watcher_job_ids(database) == set()
+
+
+def test_ordinary_imports_after_a_backfill_notify_genuinely_new_jobs(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        user_id = create_user(db, clock(), "senior@example.com")
+    _select_career_levels(database, user_id, ["senior_plus"])
+    clock.advance(hours=1)
+    JobImportService(database, catalog, clock=clock).import_jobs(
+        [_senior(1, date_posted="2026-07-20")],
+        source_fingerprint="9" * 64,
+        source_identifier="backfill.json.gz",
+        source_type="hosted_collection_backfill",
+        backfill=True,
+    )
+    clock.advance(days=1)
+
+    import_jobs(
+        database,
+        catalog,
+        clock,
+        [
+            _senior(1, date_posted="2026-07-20"),
+            _senior(2, date_posted="2026-08-04"),
+            _senior(3, date_posted=""),
+        ],
+        "8",
+    )
+
+    assert _matched_watcher_job_ids(database) == {
+        "watcher-job-1",
+        "watcher-job-2",
+        "watcher-job-3",
+    }
+    assert _notified_watcher_job_ids(database) == {"watcher-job-2", "watcher-job-3"}
+    with database.session_factory() as db:
+        flags = {
+            job.watcher_job_id: job.first_seen_in_backfill
+            for job in db.scalars(select(HostedJob))
+        }
+    assert flags == {
+        "watcher-job-1": True,
+        "watcher-job-2": False,
+        "watcher-job-3": False,
+    }
+
+
+def test_internship_only_users_never_match_other_career_levels(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        create_user(db, clock(), "intern@example.com")
+    clock.advance(hours=1)
+    import_jobs(
+        database,
+        catalog,
+        clock,
+        [
+            final_job(1),
+            _senior(2),
+            final_job(3, title="Software Engineer, New Grad", internship_type=""),
+        ],
+        "7",
+    )
+    assert _matched_watcher_job_ids(database) == {"watcher-job-1"}
+    assert _notified_watcher_job_ids(database) == {"watcher-job-1"}

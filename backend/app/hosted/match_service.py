@@ -15,12 +15,13 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from .matching import (
     MatchDecision,
     evaluate_match,
     job_from_model,
+    needs_job_description,
     preferences_from_model,
 )
 from .models import (
@@ -39,6 +40,11 @@ CHUNK_SIZE = 500
 # this. It is deliberately a fixed product rule, not a setting.
 RECENT_OPENING_WINDOW_DAYS = 90
 
+# Why a matching job may become a new match row. Only a genuinely new opening
+# may notify; a catch-up admission was merely discovered late.
+ADMISSION_NEW_OPENING = "new_opening"
+ADMISSION_CATCH_UP = "catch_up"
+
 
 @dataclass(frozen=True)
 class ReconciliationOutcome:
@@ -46,7 +52,8 @@ class ReconciliationOutcome:
 
     ``created`` counts only newly inserted ``(user_id, job_id)`` rows. It never
     counts reactivated history, timestamp-only updates, or saved/dismissed
-    changes.
+    changes. ``new_opening_match_ids`` is the subset of ``created_match_ids``
+    admitted as genuinely new openings: the only rows an import may notify.
     """
 
     created: int = 0
@@ -54,6 +61,7 @@ class ReconciliationOutcome:
     deactivated: int = 0
     refreshed: int = 0
     created_match_ids: tuple[uuid.UUID, ...] = ()
+    new_opening_match_ids: tuple[uuid.UUID, ...] = ()
 
     def merged(self, other: ReconciliationOutcome) -> ReconciliationOutcome:
         return ReconciliationOutcome(
@@ -62,6 +70,9 @@ class ReconciliationOutcome:
             deactivated=self.deactivated + other.deactivated,
             refreshed=self.refreshed + other.refreshed,
             created_match_ids=self.created_match_ids + other.created_match_ids,
+            new_opening_match_ids=(
+                self.new_opening_match_ids + other.new_opening_match_ids
+            ),
         )
 
 
@@ -76,7 +87,27 @@ def admits_new_match(
     include_recent_openings: bool,
     now: datetime,
 ) -> bool:
-    """Whether an otherwise-matching job may become a *new* match row.
+    """Whether an otherwise-matching job may become a *new* match row."""
+
+    return (
+        admission_kind(
+            job,
+            watch,
+            include_recent_openings=include_recent_openings,
+            now=now,
+        )
+        is not None
+    )
+
+
+def admission_kind(
+    job: HostedJob,
+    watch: UserCompanyWatch | None,
+    *,
+    include_recent_openings: bool,
+    now: datetime,
+) -> str | None:
+    """Why an otherwise-matching job may become a *new* match row, if at all.
 
     This is an admission gate, not a matching rule: it is consulted only when
     no ``UserJobMatch`` exists yet. Existing rows bypass it entirely so they
@@ -86,27 +117,34 @@ def admits_new_match(
     ``posting_date`` is the authoritative posting-time signal whenever the
     source supplied one; ``first_seen_at`` is only a fallback for postings with
     no trustworthy date. A known-but-old posting date is never overridden by a
-    newer ``first_seen_at``.
+    newer ``first_seen_at``, and a job first stored by an explicit backfill
+    import was already posted before it was stored, so its ``first_seen_at``
+    never makes it a new opening.
     """
 
     if watch is None or not job.is_open:
-        return False
+        return None
 
     watch_started = _aware(watch.created_at)
     if job.posting_date is not None:
         if job.posting_date >= watch_started.date():
             # Posted on or after the watch began: an ordinary new opening.
-            return True
-    elif _aware(job.first_seen_at) >= watch_started:
-        return True
+            return ADMISSION_NEW_OPENING
+    elif (
+        not job.first_seen_in_backfill
+        and _aware(job.first_seen_at) >= watch_started
+    ):
+        return ADMISSION_NEW_OPENING
 
     if not include_recent_openings:
-        return False
+        return None
 
     cutoff = now - timedelta(days=RECENT_OPENING_WINDOW_DAYS)
     if job.posting_date is not None:
-        return job.posting_date >= cutoff.date()
-    return _aware(job.first_seen_at) >= cutoff
+        recent = job.posting_date >= cutoff.date()
+    else:
+        recent = _aware(job.first_seen_at) >= cutoff
+    return ADMISSION_CATCH_UP if recent else None
 
 
 def reconcile_jobs(
@@ -161,12 +199,23 @@ def reconcile_user(
         else list(watches)
     )
 
+    pure_preferences = preferences_from_model(preferences)
     candidate_ids: list[uuid.UUID] = []
-    if scoped:
+    if scoped and pure_preferences.role_ids and pure_preferences.career_levels:
+        # Only an open job in a selected role and career stage can create or
+        # keep a match, so the rest never leaves the database. Existing match
+        # rows are added below regardless, so stale ones still deactivate.
         for chunk in _chunks(sorted(scoped)):
             candidate_ids.extend(
                 db.scalars(
-                    select(HostedJob.id).where(HostedJob.company_id.in_(chunk))
+                    select(HostedJob.id).where(
+                        HostedJob.company_id.in_(chunk),
+                        HostedJob.career_level.in_(
+                            sorted(pure_preferences.career_levels)
+                        ),
+                        HostedJob.role_id.in_(sorted(pure_preferences.role_ids)),
+                        HostedJob.is_open.is_(True),
+                    )
                 )
             )
     existing_query = select(UserJobMatch.job_id).where(
@@ -180,13 +229,15 @@ def reconcile_user(
     candidate_ids.extend(db.scalars(existing_query))
 
     unique_ids = _ordered_unique(candidate_ids)
-    pure_preferences = preferences_from_model(preferences)
     include_recent_openings = bool(preferences.include_recent_openings)
+    include_description = needs_job_description(pure_preferences)
     outcome = ReconciliationOutcome()
     for chunk in _chunks(unique_ids):
         jobs = {
             job.id: job
-            for job in db.scalars(select(HostedJob).where(HostedJob.id.in_(chunk)))
+            for job in db.scalars(
+                _job_rows(chunk, include_description=include_description)
+            )
         }
         existing = {
             match.job_id: match
@@ -203,7 +254,7 @@ def reconcile_user(
                 continue
             watch = watches.get(job.company_id)
             decision = evaluate_match(
-                job_from_model(job),
+                job_from_model(job, include_description=include_description),
                 pure_preferences,
                 watching=watch is not None,
                 watch_paused=bool(watch is not None and watch.paused),
@@ -215,7 +266,7 @@ def reconcile_user(
                     user_id=user_id,
                     job_id=job_id,
                     decision=decision,
-                    may_create=admits_new_match(
+                    admission=admission_kind(
                         job,
                         watch,
                         include_recent_openings=include_recent_openings,
@@ -235,7 +286,7 @@ def _reconcile_job_chunk(
 ) -> ReconciliationOutcome:
     jobs = {
         job.id: job
-        for job in db.scalars(select(HostedJob).where(HostedJob.id.in_(job_ids)))
+        for job in db.scalars(_job_rows(job_ids, include_description=True))
     }
     if not jobs:
         return ReconciliationOutcome()
@@ -312,7 +363,7 @@ def _reconcile_job_chunk(
                 user_id=user_id,
                 job_id=job_id,
                 decision=decision,
-                may_create=admits_new_match(
+                admission=admission_kind(
                     job,
                     watch,
                     include_recent_openings=recent_openings.get(user_id, True),
@@ -331,13 +382,13 @@ def _apply(
     user_id: uuid.UUID,
     job_id: uuid.UUID,
     decision: MatchDecision,
-    may_create: bool,
+    admission: str | None,
     now: datetime,
 ) -> ReconciliationOutcome:
     reasons = [dict(reason) for reason in decision.reasons]
     if decision.matches:
         if existing is None:
-            if not may_create:
+            if admission is None:
                 # Admission refused: the posting predates this watch and the
                 # user has not opted into the recent-openings catch-up.
                 return ReconciliationOutcome()
@@ -363,7 +414,13 @@ def _apply(
             )
             if inserted is None:
                 return ReconciliationOutcome()
-            return ReconciliationOutcome(created=1, created_match_ids=(inserted,))
+            return ReconciliationOutcome(
+                created=1,
+                created_match_ids=(inserted,),
+                new_opening_match_ids=(
+                    (inserted,) if admission == ADMISSION_NEW_OPENING else ()
+                ),
+            )
         if existing.no_longer_matches_at is not None:
             existing.no_longer_matches_at = None
             existing.match_reasons = reasons
@@ -384,6 +441,15 @@ def _apply(
         existing.updated_at = now
         return ReconciliationOutcome(deactivated=1)
     return ReconciliationOutcome()
+
+
+def _job_rows(job_ids: Sequence[uuid.UUID], *, include_description: bool):
+    """Load hosted jobs without posting text reconciliation never reads."""
+
+    deferred = [defer(HostedJob.requirements), defer(HostedJob.source_metadata)]
+    if not include_description:
+        deferred.append(defer(HostedJob.description))
+    return select(HostedJob).where(HostedJob.id.in_(job_ids)).options(*deferred)
 
 
 def _ordered_unique(values: Iterable[uuid.UUID]) -> list[uuid.UUID]:

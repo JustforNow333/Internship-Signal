@@ -20,6 +20,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .career_level import DEFAULT_CAREER_LEVELS
 from .dependencies import CurrentIdentity, get_current_identity, get_db, get_services
 from .mailer import (
     MailerDeliveryError,
@@ -233,6 +234,7 @@ def signup(
             UserPreference(
                 user_id=user.id,
                 role_ids=["software_engineering"],
+                career_levels=list(DEFAULT_CAREER_LEVELS),
                 preferred_locations=[],
                 include_remote=True,
                 internship_season="Any season",
@@ -442,6 +444,7 @@ def companies(
 def _preferences_response(preferences: UserPreference) -> PreferencesResponse:
     return PreferencesResponse(
         role_ids=list(preferences.role_ids),
+        career_levels=list(preferences.career_levels),
         preferred_locations=list(preferences.preferred_locations),
         include_remote=preferences.include_remote,
         internship_season=preferences.internship_season,
@@ -483,6 +486,7 @@ def put_preferences(
     previous_frequency = preferences.alert_frequency
     matching_changed = (
         list(preferences.role_ids) != list(payload.role_ids)
+        or list(preferences.career_levels) != list(payload.career_levels)
         or list(preferences.preferred_locations) != list(payload.preferred_locations)
         or preferences.include_remote != payload.include_remote
         or preferences.internship_season != payload.internship_season
@@ -494,6 +498,7 @@ def put_preferences(
         payload.include_recent_openings and not preferences.include_recent_openings
     )
     preferences.role_ids = list(payload.role_ids)
+    preferences.career_levels = list(payload.career_levels)
     preferences.preferred_locations = list(payload.preferred_locations)
     preferences.include_remote = payload.include_remote
     preferences.internship_season = payload.internship_season
@@ -616,6 +621,7 @@ def _match_response(match: UserJobMatch, job: HostedJob) -> MatchResponse:
         remote=is_remote(job_from_model(job)),
         remote_status=job.remote_status,
         role_id=job.role_id,
+        career_level=job.career_level,
         application_url=job.application_url,
         posting_date=job.posting_date,
         deadline=job.deadline,

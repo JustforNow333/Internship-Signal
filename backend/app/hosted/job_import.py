@@ -108,7 +108,18 @@ class JobImportService:
         source_identifier: str,
         source_type: str,
         retry_failed: bool = False,
+        backfill: bool = False,
     ) -> JobImportResult:
+        """Persist one final-job sequence, reconcile matches, and enqueue alerts.
+
+        ``backfill`` marks an explicit, operator-requested controlled import,
+        such as the first import after a new career stage becomes storable.
+        Its matches still reconcile so stored state is accurate, but it creates
+        no notification work, and the jobs it first stores are marked so their
+        new ``first_seen_at`` never makes them look newly posted later. It is
+        never inferred from dates.
+        """
+
         fingerprint = _validated_fingerprint(source_fingerprint)
         identifier = _validated_source_identifier(source_identifier)
         import_source_type = _validated_source_type(source_type)
@@ -150,7 +161,9 @@ class JobImportService:
                     raise ImportAlreadyRunning()
                 affected_job_ids: list[uuid.UUID] = []
                 for mapped_job in mapped.jobs:
-                    outcome, job_id = self._upsert_job(db, mapped_job, observed_at)
+                    outcome, job_id = self._upsert_job(
+                        db, mapped_job, observed_at, backfill=backfill
+                    )
                     if outcome == "inserted":
                         inserted += 1
                         affected_job_ids.append(job_id)
@@ -165,12 +178,15 @@ class JobImportService:
                 reconciliation = reconcile_jobs(
                     db, affected_job_ids, now=observed_at
                 )
-                enqueue_import_notifications(
-                    db,
-                    reconciliation.created_match_ids,
-                    import_run_id=run.id,
-                    now=observed_at,
-                )
+                # Only genuinely new openings notify. Recent-opening catch-up
+                # and every match an explicit backfill creates stay silent.
+                if not backfill:
+                    enqueue_import_notifications(
+                        db,
+                        reconciliation.new_opening_match_ids,
+                        import_run_id=run.id,
+                        now=observed_at,
+                    )
 
                 run.status = "succeeded"
                 run.completed_at = observed_at
@@ -356,6 +372,8 @@ class JobImportService:
         db: Session,
         mapped: MappedJob,
         observed_at: datetime,
+        *,
+        backfill: bool,
     ) -> tuple[str, uuid.UUID]:
         values = mapped.business_values()
         inserted_id = db.scalar(
@@ -366,6 +384,7 @@ class JobImportService:
                 first_seen_at=observed_at,
                 last_seen_at=observed_at,
                 closed_at=None if mapped.is_open else observed_at,
+                first_seen_in_backfill=backfill,
                 created_at=observed_at,
                 updated_at=observed_at,
             )

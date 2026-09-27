@@ -14,10 +14,13 @@ from dataclasses import dataclass, field
 
 from watcher.eligibility import OUTSIDE_US, assess_us_location
 
+from .career_level import DEFAULT_CAREER_LEVELS, INTERNSHIP
+
 # Reason codes are an allowlist. Nothing derived from posting descriptions,
 # raw preference payloads, or source metadata may be persisted here.
 REASON_COMPANY_WATCHED = "company_watched"
 REASON_ROLE_SELECTED = "role_selected"
+REASON_CAREER_LEVEL_SELECTED = "career_level_selected"
 REASON_LOCATION_ANY = "location_any"
 REASON_LOCATION_PREFERRED = "location_preferred"
 REASON_LOCATION_UNITED_STATES = "location_united_states"
@@ -30,6 +33,7 @@ REASON_CODES = frozenset(
     {
         REASON_COMPANY_WATCHED,
         REASON_ROLE_SELECTED,
+        REASON_CAREER_LEVEL_SELECTED,
         REASON_LOCATION_ANY,
         REASON_LOCATION_PREFERRED,
         REASON_LOCATION_UNITED_STATES,
@@ -40,8 +44,8 @@ REASON_CODES = frozenset(
     }
 )
 
-# One reason per decided dimension (company, role, location, season) plus
-# headroom. Persisted reason lists are truncated to this bound.
+# One reason per decided dimension (company, role, career level, location,
+# season) plus headroom. Persisted reason lists are truncated to this bound.
 MAX_REASONS = 6
 MAX_REASON_VALUE_LENGTH = 120
 
@@ -65,6 +69,7 @@ class MatchJob:
 
     company_id: str
     role_id: str
+    career_level: str = INTERNSHIP
     title: str = ""
     location: str = ""
     remote_status: str = ""
@@ -77,6 +82,7 @@ class MatchPreferences:
     """The hosted preferences a match decision may read."""
 
     role_ids: frozenset[str] = field(default_factory=frozenset)
+    career_levels: frozenset[str] = frozenset(DEFAULT_CAREER_LEVELS)
     preferred_locations: tuple[str, ...] = ()
     include_remote: bool = True
     internship_season: str = "Any season"
@@ -98,28 +104,36 @@ def evaluate_match(
     """Return whether ``job`` matches ``preferences`` and why.
 
     Every hard constraint must pass. Reasons are deterministic, ordered
-    company -> role -> location -> season, and bounded by ``MAX_REASONS``.
+    company -> role -> career level -> location -> season, and bounded by
+    ``MAX_REASONS``. Internship season applies to internships only, so other
+    career levels carry no season reason.
     """
 
     if not watching or watch_paused or not job.is_open:
         return MatchDecision(False)
     if job.role_id not in preferences.role_ids:
         return MatchDecision(False)
+    if job.career_level not in preferences.career_levels:
+        return MatchDecision(False)
 
     location_reason = _location_reason(job, preferences)
     if location_reason is None:
         return MatchDecision(False)
-    season_reason = _season_reason(job, preferences)
-    if season_reason is None:
-        return MatchDecision(False)
+    season_reason = None
+    if job.career_level == INTERNSHIP:
+        season_reason = _season_reason(job, preferences)
+        if season_reason is None:
+            return MatchDecision(False)
 
-    reasons = (
+    reasons = [
         _reason(REASON_COMPANY_WATCHED, job.company_id),
         _reason(REASON_ROLE_SELECTED, job.role_id),
+        _reason(REASON_CAREER_LEVEL_SELECTED, job.career_level),
         _reason(location_reason),
-        _reason(season_reason),
-    )
-    return MatchDecision(True, reasons[:MAX_REASONS])
+    ]
+    if season_reason is not None:
+        reasons.append(_reason(season_reason))
+    return MatchDecision(True, tuple(reasons[:MAX_REASONS]))
 
 
 def bounded_reasons(value: object) -> tuple[dict[str, str], ...]:
@@ -264,26 +278,49 @@ def preferences_from_model(preferences: object) -> MatchPreferences:
     """Build the pure input from the stored ``UserPreference`` row."""
 
     role_ids = getattr(preferences, "role_ids", None) or []
+    career_levels = getattr(preferences, "career_levels", None) or list(
+        DEFAULT_CAREER_LEVELS
+    )
     locations = getattr(preferences, "preferred_locations", None) or []
     return MatchPreferences(
         role_ids=frozenset(_strings(role_ids)),
+        career_levels=frozenset(_strings(career_levels)),
         preferred_locations=tuple(_strings(locations)),
         include_remote=bool(getattr(preferences, "include_remote", True)),
         internship_season=str(getattr(preferences, "internship_season", "") or ""),
     )
 
 
-def job_from_model(job: object) -> MatchJob:
-    """Build the pure input from the stored ``HostedJob`` row."""
+def job_from_model(job: object, *, include_description: bool = True) -> MatchJob:
+    """Build the pure input from the stored ``HostedJob`` row.
+
+    ``description`` is read only by the United States location check, so a
+    caller that knows no preference needs it may pass
+    ``include_description=False`` and avoid loading the posting text.
+    """
 
     return MatchJob(
         company_id=str(getattr(job, "company_id", "") or ""),
         role_id=str(getattr(job, "role_id", "") or ""),
+        career_level=str(getattr(job, "career_level", "") or ""),
         title=str(getattr(job, "title", "") or ""),
         location=str(getattr(job, "location", "") or ""),
         remote_status=str(getattr(job, "remote_status", "") or ""),
-        description=str(getattr(job, "description", "") or ""),
+        description=(
+            str(getattr(job, "description", "") or "")
+            if include_description
+            else ""
+        ),
         is_open=bool(getattr(job, "is_open", False)),
+    )
+
+
+def needs_job_description(preferences: MatchPreferences) -> bool:
+    """Whether any preferred location triggers the United States check."""
+
+    return any(
+        _normalized(location) in _US_COUNTRY_KEYS
+        for location in preferences.preferred_locations
     )
 
 

@@ -24,10 +24,16 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
+from .career_level import CAREER_LEVELS, DEFAULT_CAREER_LEVELS
 from .database import Base
 
 JsonList = JSON().with_variant(JSONB(), "postgresql")
 JsonObject = JSON().with_variant(JSONB(), "postgresql")
+
+CAREER_LEVEL_SQL_VALUES = ", ".join(f"'{value}'" for value in CAREER_LEVELS)
+DEFAULT_CAREER_LEVELS_JSON = "[" + ", ".join(
+    f'"{value}"' for value in DEFAULT_CAREER_LEVELS
+) + "]"
 
 
 class TimestampMixin:
@@ -134,6 +140,14 @@ class UserPreference(TimestampMixin, Base):
         ForeignKey("hosted_users.id", ondelete="CASCADE"), primary_key=True
     )
     role_ids: Mapped[list[str]] = mapped_column(JsonList, nullable=False, default=list)
+    # Selectable career stages; values are validated by the API schema. Rows
+    # created before career stages existed were internship-only.
+    career_levels: Mapped[list[str]] = mapped_column(
+        JsonList,
+        nullable=False,
+        default=lambda: list(DEFAULT_CAREER_LEVELS),
+        server_default=text(f"'{DEFAULT_CAREER_LEVELS_JSON}'"),
+    )
     preferred_locations: Mapped[list[str]] = mapped_column(
         JsonList, nullable=False, default=list
     )
@@ -200,6 +214,10 @@ class HostedJob(TimestampMixin, Base):
             name="role_id",
         ),
         CheckConstraint(
+            f"career_level IN ({CAREER_LEVEL_SQL_VALUES})",
+            name="career_level",
+        ),
+        CheckConstraint(
             "last_seen_at >= first_seen_at",
             name="seen_timestamps",
         ),
@@ -207,13 +225,21 @@ class HostedJob(TimestampMixin, Base):
             "closed_at IS NULL OR closed_at >= first_seen_at",
             name="closed_timestamp",
         ),
+        # Reconciliation prefilters candidates by company, stage, and role. The
+        # leading company_id column also serves plain per-company lookups.
+        Index(
+            "ix_hosted_jobs_company_career_level_role",
+            "company_id",
+            "career_level",
+            "role_id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     watcher_job_id: Mapped[str] = mapped_column(
         String(128), nullable=False, unique=True
     )
-    company_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    company_id: Mapped[str] = mapped_column(String(120), nullable=False)
     company_name: Mapped[str] = mapped_column(String(200), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     location: Mapped[str] = mapped_column(String(500), nullable=False, default="")
@@ -221,6 +247,7 @@ class HostedJob(TimestampMixin, Base):
         String(120), nullable=False, default=""
     )
     role_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    career_level: Mapped[str] = mapped_column(String(32), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     requirements: Mapped[str] = mapped_column(Text, nullable=False, default="")
     application_url: Mapped[str | None] = mapped_column(String(2048))
@@ -234,6 +261,12 @@ class HostedJob(TimestampMixin, Base):
         DateTime(timezone=True), nullable=False
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set once, on insertion by an explicit backfill import. Such a job was
+    # already posted before FindSooner began storing it, so its first_seen_at
+    # is never evidence that it was newly posted.
+    first_seen_in_backfill: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     source_metadata: Mapped[dict[str, object]] = mapped_column(
         JsonObject, nullable=False, default=dict
     )
@@ -283,7 +316,8 @@ class UserJobMatch(TimestampMixin, Base):
         ),
         # Import reconciliation fans out from the changed jobs. Per-user and
         # per-company reconciliation is served by the unique (user_id, job_id)
-        # index together with ix_hosted_jobs_company_id on the job side.
+        # index together with ix_hosted_jobs_company_career_level_role on the
+        # job side.
         Index("ix_hosted_user_job_matches_job", "job_id"),
     )
 

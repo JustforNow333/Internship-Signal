@@ -11,8 +11,15 @@ from datetime import date
 from urllib.parse import urlsplit
 
 from backend.app.normalize import parse_date
-from watcher.filters import is_internship, is_open
+from watcher.filters import is_open
 
+from .career_level import (
+    INTERNSHIP,
+    MID_LEVEL,
+    PERSISTED_CAREER_LEVELS,
+    UNKNOWN,
+    classify_career_level,
+)
 from .catalog import CompanyCatalog
 
 MAX_POSTING_TEXT_LENGTH = 500_000
@@ -80,6 +87,12 @@ _RELATIVE_POSTING_DATE_RE = re.compile(
     r"(?:posted\s+)?(?:today|yesterday|\d+\+?\s+days?\s+ago)",
     re.IGNORECASE,
 )
+# Classified stages the hosted catalog does not store yet, each with its own
+# bounded skip reason so shadow imports can be inspected before exposure.
+CAREER_LEVEL_SKIP_REASONS = {
+    MID_LEVEL: "career_level_mid_level",
+    UNKNOWN: "career_level_unknown",
+}
 FINAL_JOBS_STRUCTURE_REASONS = frozenset(
     {
         "final_jobs_not_sequence",
@@ -117,6 +130,7 @@ class MappedJob:
     location: str
     remote_status: str
     role_id: str
+    career_level: str
     description: str
     requirements: str
     application_url: str | None
@@ -133,6 +147,7 @@ class MappedJob:
             "location": self.location,
             "remote_status": self.remote_status,
             "role_id": self.role_id,
+            "career_level": self.career_level,
             "description": self.description,
             "requirements": self.requirements,
             "application_url": self.application_url,
@@ -237,9 +252,10 @@ def _map_final_job(
         allow_relative=True,
     )
     deadline = _optional_date(job.get("deadline"), "invalid_deadline")
-    if not is_internship(dict(job)):
-        raise _SkipJob("not_internship")
-    role_id = _hosted_role_id(job)
+    career_level = classify_career_level(job)
+    if career_level not in PERSISTED_CAREER_LEVELS:
+        raise _SkipJob(CAREER_LEVEL_SKIP_REASONS[career_level])
+    role_id = _hosted_role_id(job, career_level=career_level)
     open_status = _open_status(job)
     source_metadata = safe_source_metadata(job.get("extra"))
     return MappedJob(
@@ -250,6 +266,7 @@ def _map_final_job(
         location=location,
         remote_status=remote_status,
         role_id=role_id,
+        career_level=career_level,
         description=description,
         requirements=requirements,
         application_url=application_url,
@@ -326,7 +343,7 @@ def _optional_date(
     return parsed
 
 
-def _hosted_role_id(job: Mapping[str, object]) -> str:
+def _hosted_role_id(job: Mapping[str, object], *, career_level: str) -> str:
     classification = job.get("role_classification")
     if not isinstance(classification, Mapping):
         raise _SkipJob("invalid_role")
@@ -336,7 +353,9 @@ def _hosted_role_id(job: Mapping[str, object]) -> str:
         return direct
     role = str(classification.get("role") or "").strip()
     if track in _OTHER_ENGINEERING_TRACKS:
-        if is_internship(dict(job)):
+        # The role classifier is still tuned for internships, so the broad
+        # other-engineering bucket stays internship-only.
+        if career_level == INTERNSHIP:
             return "other_engineering"
         raise _SkipJob("invalid_role")
     fallback = _WATCHER_ROLE_FALLBACKS.get(role)

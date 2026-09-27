@@ -201,7 +201,7 @@ def test_empty_database_migrates_to_expected_postgresql_schema(
         )
         revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
     assert data_type == "jsonb"
-    assert revision == "20260919_0006"
+    assert revision == "20260926_0007"
     database.dispose()
 
 
@@ -274,6 +274,150 @@ def test_recent_openings_migration_backfills_existing_preference_rows(
     finally:
         command.upgrade(alembic, "head")
         with database.engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM hosted_users WHERE id = :id"), {"id": user_id}
+            )
+        database.dispose()
+
+
+def test_career_levels_migration_backfills_existing_jobs_and_users(
+    postgres_url: str,
+) -> None:
+    """Rows written before 20260926_0007 upgrade to internship-only.
+
+    Legacy rows are inserted one revision back so the real backfill runs, then
+    the constraints, defaults, and index the revision promises are asserted.
+    """
+
+    alembic = Config(str(BACKEND_DIR / "alembic.ini"))
+    alembic.set_main_option("sqlalchemy.url", alembic_config_url(postgres_url))
+    database = HostedDatabase(postgres_url)
+    user_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    now = datetime(2026, 9, 26, 1, 48, 53, tzinfo=UTC)
+    try:
+        command.downgrade(alembic, "20260919_0006")
+        with database.engine.begin() as connection:
+            assert "career_level" not in {
+                column["name"]
+                for column in inspect(connection).get_columns("hosted_jobs")
+            }
+            connection.execute(
+                text(
+                    "INSERT INTO hosted_users (id, email, normalized_email, "
+                    "password_hash, is_active, created_at, updated_at) VALUES "
+                    "(:id, :email, :email, 'hash', true, :now, :now)"
+                ),
+                {"id": user_id, "email": "legacy@example.com", "now": now},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO hosted_user_preferences (user_id, role_ids, "
+                    "preferred_locations, include_remote, internship_season, "
+                    "alert_frequency, globally_paused, created_at, updated_at) "
+                    "VALUES (:id, :roles, '[]', true, 'Any season', "
+                    "'as_detected', false, :now, :now)"
+                ),
+                {"id": user_id, "roles": '["software_engineering"]', "now": now},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO hosted_jobs (id, watcher_job_id, company_id, "
+                    "company_name, title, location, remote_status, role_id, "
+                    "description, requirements, is_open, first_seen_at, "
+                    "last_seen_at, source_metadata, created_at, updated_at) "
+                    "VALUES (:id, 'legacy-job', 'stripe', 'Stripe', "
+                    "'Software Engineer Intern', '', '', 'software_engineering', "
+                    "'', '', true, :now, :now, '{}', :now, :now)"
+                ),
+                {"id": job_id, "now": now},
+            )
+        command.upgrade(alembic, "head")
+        with database.engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT career_level, first_seen_in_backfill FROM hosted_jobs "
+                    "WHERE id = :id"
+                ),
+                {"id": job_id},
+            ).one() == ("internship", False)
+            assert connection.scalar(
+                text(
+                    "SELECT career_levels FROM hosted_user_preferences "
+                    "WHERE user_id = :id"
+                ),
+                {"id": user_id},
+            ) == ["internship"]
+            columns = {
+                (row.table_name, row.column_name): (
+                    row.is_nullable,
+                    row.column_default,
+                    row.data_type,
+                )
+                for row in connection.execute(
+                    text(
+                        "SELECT table_name, column_name, is_nullable, "
+                        "column_default, data_type FROM information_schema.columns "
+                        "WHERE column_name IN ('career_level', "
+                        "'first_seen_in_backfill', 'career_levels')"
+                    )
+                )
+            }
+            indexes = {
+                index["name"]: index["column_names"]
+                for index in inspect(connection).get_indexes("hosted_jobs")
+            }
+        # The importer must always classify: no default hides a missing value.
+        assert columns[("hosted_jobs", "career_level")][:2] == ("NO", None)
+        assert columns[("hosted_jobs", "first_seen_in_backfill")][0] == "NO"
+        nullable, default, data_type = columns[
+            ("hosted_user_preferences", "career_levels")
+        ]
+        assert (nullable, data_type) == ("NO", "jsonb")
+        assert "internship" in (default or "")
+        assert indexes["ix_hosted_jobs_company_career_level_role"] == [
+            "company_id",
+            "career_level",
+            "role_id",
+        ]
+        assert "ix_hosted_jobs_company_id" not in indexes
+
+        with pytest.raises(IntegrityError):
+            with database.engine.begin() as connection:
+                connection.execute(
+                    text("UPDATE hosted_jobs SET career_level = 'executive'")
+                )
+        with pytest.raises(IntegrityError):
+            with database.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO hosted_jobs (id, watcher_job_id, company_id, "
+                        "company_name, title, location, remote_status, role_id, "
+                        "description, requirements, is_open, first_seen_at, "
+                        "last_seen_at, source_metadata, created_at, updated_at) "
+                        "VALUES (:id, 'no-level', 'stripe', 'Stripe', 'Engineer', "
+                        "'', '', 'software_engineering', '', '', true, :now, "
+                        ":now, '{}', :now, :now)"
+                    ),
+                    {"id": uuid.uuid4(), "now": now},
+                )
+
+        command.downgrade(alembic, "20260919_0006")
+        with database.engine.connect() as connection:
+            assert "career_level" not in {
+                column["name"]
+                for column in inspect(connection).get_columns("hosted_jobs")
+            }
+            assert "ix_hosted_jobs_company_id" in {
+                index["name"]
+                for index in inspect(connection).get_indexes("hosted_jobs")
+            }
+    finally:
+        command.upgrade(alembic, "head")
+        with database.engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM hosted_jobs WHERE id = :id"), {"id": job_id}
+            )
             connection.execute(
                 text("DELETE FROM hosted_users WHERE id = :id"), {"id": user_id}
             )

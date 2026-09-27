@@ -172,6 +172,7 @@ def add_job(
     company_id: str = "google",
     watcher_job_id: str | None = None,
     role_id: str = "software_engineering",
+    career_level: str = "internship",
     title: str = "Software Engineer Intern",
     location: str = "New York, NY",
     posting_date: date | None = None,
@@ -191,6 +192,7 @@ def add_job(
                 location=location,
                 remote_status="",
                 role_id=role_id,
+                career_level=career_level,
                 description="",
                 requirements="",
                 application_url="https://example.com/job",
@@ -705,3 +707,215 @@ def test_backfilled_matches_keep_the_time_they_were_matched(hosted) -> None:
     put_watchlist(hosted, [("google", False)])
 
     assert match_for(hosted, old).matched_at == hosted.clock()
+
+
+# --- career levels --------------------------------------------------------
+
+
+def test_new_accounts_and_legacy_clients_are_internship_only(hosted) -> None:
+    signup(hosted)
+    assert hosted.client.get("/api/preferences").json()["career_levels"] == [
+        "internship"
+    ]
+    payload = preferences_payload()
+    payload.pop("career_levels", None)
+    response = hosted.client.put("/api/preferences", json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["career_levels"] == ["internship"]
+    with hosted.services.database.session_factory() as db:
+        assert db.scalar(select(UserPreference)).career_levels == ["internship"]
+
+
+def test_career_levels_accept_any_selectable_multi_select(hosted) -> None:
+    signup(hosted)
+    for levels in (
+        ["new_grad_junior"],
+        ["senior_plus"],
+        ["internship", "new_grad_junior"],
+        ["internship", "new_grad_junior", "senior_plus"],
+    ):
+        assert put_preferences(hosted, career_levels=levels)["career_levels"] == levels
+        assert (
+            hosted.client.get("/api/preferences").json()["career_levels"] == levels
+        )
+
+
+@pytest.mark.parametrize(
+    "levels",
+    [
+        [],
+        ["internship", "internship"],
+        ["mid_level"],
+        ["unknown"],
+        ["internship", "unknown"],
+        ["executive"],
+        ["internship", "new_grad_junior", "senior_plus", "mid_level"],
+    ],
+)
+def test_invalid_career_levels_are_rejected(hosted, levels) -> None:
+    signup(hosted)
+    response = hosted.client.put(
+        "/api/preferences", json=preferences_payload(career_levels=levels)
+    )
+    assert response.status_code == 422
+    assert hosted.client.get("/api/preferences").json()["career_levels"] == [
+        "internship"
+    ]
+
+
+def test_match_response_includes_career_level(hosted) -> None:
+    signup(hosted)
+    put_preferences(hosted, career_levels=["internship", "senior_plus"])
+    add_job(hosted, title="Senior Software Engineer", career_level="senior_plus")
+    put_watchlist(hosted, [("google", False)])
+    items = hosted.client.get("/api/matches").json()["items"]
+    assert [item["career_level"] for item in items] == ["senior_plus"]
+    assert [reason["code"] for reason in items[0]["match_reasons"]] == [
+        "company_watched",
+        "role_selected",
+        "career_level_selected",
+        "location_preferred",
+    ]
+
+
+def test_changing_career_levels_reconciles_silently(hosted) -> None:
+    signup(hosted)
+    put_preferences(hosted)
+    intern = add_job(hosted)
+    senior = add_job(hosted, title="Senior Software Engineer", career_level="senior_plus")
+    put_watchlist(hosted, [("google", False)])
+    assert active_match_job_ids(hosted) == {intern}
+
+    put_preferences(hosted, career_levels=["internship", "senior_plus"])
+    assert active_match_job_ids(hosted) == {intern, senior}
+
+    put_preferences(hosted, career_levels=["senior_plus"])
+    assert active_match_job_ids(hosted) == {senior}
+    assert match_for(hosted, intern).no_longer_matches_at is not None
+    assert notification_counts(hosted) == (0, 0)
+
+
+def test_sql_prefilter_skips_non_candidate_jobs_but_keeps_results(
+    hosted, monkeypatch
+) -> None:
+    from app.hosted import match_service
+
+    signup(hosted)
+    put_preferences(hosted)
+    wanted = add_job(hosted)
+    add_job(hosted, title="Senior Software Engineer", career_level="senior_plus")
+    add_job(hosted, role_id="data_engineering")
+    add_job(hosted, is_open=False)
+    add_job(hosted, company_id="stripe")
+
+    evaluated: list[str] = []
+    original = match_service.evaluate_match
+
+    def counting(job, *args, **kwargs):
+        evaluated.append(job.title)
+        return original(job, *args, **kwargs)
+
+    monkeypatch.setattr(match_service, "evaluate_match", counting)
+    put_watchlist(hosted, [("google", False)])
+
+    assert active_match_job_ids(hosted) == {wanted}
+    # Only the open, selected-role, selected-stage job of a watched company is
+    # loaded and passed to the pure matcher.
+    assert len(evaluated) == 1
+
+
+def test_prefilter_still_deactivates_matches_that_leave_the_candidate_set(
+    hosted,
+) -> None:
+    signup(hosted)
+    put_preferences(hosted, preferred_locations=["United States"])
+    job_id = add_job(hosted)
+    put_watchlist(hosted, [("google", False)])
+    assert job_id in active_match_job_ids(hosted)
+
+    with hosted.services.database.session_factory() as db:
+        db.get(HostedJob, job_id).is_open = False
+        db.commit()
+    put_preferences(hosted, preferred_locations=["New York, NY"])
+    assert job_id not in active_match_job_ids(hosted)
+
+
+def test_united_states_preference_still_reads_the_description(hosted) -> None:
+    signup(hosted)
+    put_preferences(hosted, preferred_locations=["United States"])
+    with hosted.services.database.session_factory() as db:
+        db.add(
+            HostedJob(
+                watcher_job_id="foreign",
+                company_id="google",
+                company_name="Google",
+                title="Software Engineer Intern",
+                location="",
+                remote_status="",
+                role_id="software_engineering",
+                career_level="internship",
+                description="This role is based in London, United Kingdom.",
+                requirements="",
+                application_url=None,
+                posting_date=None,
+                deadline=None,
+                is_open=True,
+                first_seen_at=hosted.clock(),
+                last_seen_at=hosted.clock(),
+                closed_at=None,
+                source_metadata={},
+                created_at=hosted.clock(),
+                updated_at=hosted.clock(),
+            )
+        )
+        db.commit()
+    put_watchlist(hosted, [("google", False)])
+    assert active_match_job_ids(hosted) == set()
+
+
+# --- backfill admission marker --------------------------------------------
+
+
+def _mark_backfilled(hosted, job_id: uuid.UUID) -> None:
+    with hosted.services.database.session_factory() as db:
+        db.get(HostedJob, job_id).first_seen_in_backfill = True
+        db.commit()
+
+
+def test_an_undated_backfilled_job_never_looks_newly_posted(hosted) -> None:
+    signup(hosted)
+    put_preferences(hosted, include_recent_openings=False)
+    put_watchlist(hosted, [("google", False)])
+    hosted.clock.advance(days=3)
+    job_id = add_job(hosted, posting_date=None, first_seen_at=hosted.clock())
+    _mark_backfilled(hosted, job_id)
+
+    put_preferences(hosted, include_recent_openings=False, preferred_locations=[])
+    assert match_for(hosted, job_id) is None
+
+
+def test_an_undated_backfilled_job_is_still_recent_catch_up(hosted) -> None:
+    from app.hosted.match_service import (
+        ADMISSION_CATCH_UP,
+        ADMISSION_NEW_OPENING,
+        admission_kind,
+    )
+
+    signup(hosted)
+    put_preferences(hosted)
+    put_watchlist(hosted, [("google", False)])
+    hosted.clock.advance(days=3)
+    job_id = add_job(hosted, posting_date=None, first_seen_at=hosted.clock())
+    with hosted.services.database.session_factory() as db:
+        job = db.get(HostedJob, job_id)
+        watch = db.scalar(select(UserCompanyWatch))
+        kwargs = {"include_recent_openings": True, "now": hosted.clock()}
+        assert admission_kind(job, watch, **kwargs) == ADMISSION_NEW_OPENING
+        job.first_seen_in_backfill = True
+        assert admission_kind(job, watch, **kwargs) == ADMISSION_CATCH_UP
+        assert (
+            admission_kind(
+                job, watch, include_recent_openings=False, now=hosted.clock()
+            )
+            is None
+        )

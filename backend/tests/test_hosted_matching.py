@@ -193,10 +193,11 @@ def test_reasons_are_deterministic_bounded_and_allowlisted() -> None:
     assert all(set(reason) <= {"code", "value"} for reason in first.reasons)
 
 
-def test_reason_order_is_company_role_location_then_season() -> None:
+def test_reason_order_is_company_role_career_level_location_then_season() -> None:
     assert codes(decide()) == [
         "company_watched",
         "role_selected",
+        "career_level_selected",
         "location_preferred",
         "season_any",
     ]
@@ -258,3 +259,122 @@ def test_model_adapters_read_only_normalized_fields() -> None:
     mapped = job_from_model(JobRow())
     assert mapped.company_id == "figma"
     assert is_remote(mapped) is True
+
+
+# --- career level -----------------------------------------------------------
+
+
+def test_career_level_is_a_hard_filter() -> None:
+    senior = job(title="Senior Software Engineer", career_level="senior_plus")
+    assert decide(senior).matches is False
+    assert decide(senior, preferences(career_levels=frozenset({"senior_plus"}))).matches
+    assert (
+        decide(job(), preferences(career_levels=frozenset({"senior_plus"}))).matches
+        is False
+    )
+
+
+def test_default_preferences_are_internship_only() -> None:
+    assert MatchPreferences().career_levels == frozenset({"internship"})
+    for level in ("new_grad_junior", "mid_level", "senior_plus", "unknown"):
+        assert decide(job(career_level=level)).matches is False
+
+
+@pytest.mark.parametrize(
+    ("job_overrides", "preference_overrides"),
+    [
+        ({"company_id": "stripe"}, {}),
+        ({"role_id": "data_science"}, {}),
+        ({"location": "Austin, TX"}, {}),
+    ],
+)
+def test_role_company_and_location_stay_independent_of_career_level(
+    job_overrides, preference_overrides
+) -> None:
+    levels = frozenset({"internship", "new_grad_junior", "senior_plus"})
+    new_grad = job(
+        title="Software Engineer, New Grad",
+        career_level="new_grad_junior",
+        **job_overrides,
+    )
+    prefs = preferences(career_levels=levels, **preference_overrides)
+    baseline = decide(
+        job(title="Software Engineer, New Grad", career_level="new_grad_junior"),
+        prefs,
+    )
+    assert baseline.matches is True
+    if job_overrides == {"company_id": "stripe"}:
+        assert decide(new_grad, prefs, watching=False).matches is False
+        assert decide(new_grad, prefs, paused=True).matches is False
+    else:
+        assert decide(new_grad, prefs).matches is False
+
+
+@pytest.mark.parametrize(
+    ("title", "level"),
+    [
+        ("Software Engineer, New Grad 2026", "new_grad_junior"),
+        ("Senior Fall Detection Engineer", "senior_plus"),
+        ("Senior Winter Sports Platform Engineer", "senior_plus"),
+        ("Staff Engineer, 2026 Start", "senior_plus"),
+    ],
+)
+def test_internship_season_never_filters_other_career_levels(title, level) -> None:
+    prefs = preferences(
+        career_levels=frozenset({level}), internship_season="Summer 2027"
+    )
+    decision = decide(job(title=title, career_level=level), prefs)
+    assert decision.matches is True
+    assert not [code for code in codes(decision) if code.startswith("season_")]
+
+
+def test_internship_season_still_applies_to_internships() -> None:
+    prefs = preferences(internship_season="Summer 2027")
+    fall = job(title="Software Engineering Intern, Fall 2026")
+    summer = job(title="Software Engineering Intern, Summer 2027")
+    assert decide(fall, prefs).matches is False
+    assert codes(decide(summer, prefs))[-1] == "season_match"
+
+
+def test_non_internship_reasons_are_deterministic_and_bounded() -> None:
+    prefs = preferences(career_levels=frozenset({"senior_plus"}))
+    senior = job(title="Senior Software Engineer", career_level="senior_plus")
+    first, second = decide(senior, prefs), decide(senior, prefs)
+    assert first.reasons == second.reasons
+    assert codes(first) == [
+        "company_watched",
+        "role_selected",
+        "career_level_selected",
+        "location_preferred",
+    ]
+    assert first.reasons[2] == {
+        "code": "career_level_selected",
+        "value": "senior_plus",
+    }
+    assert len(first.reasons) <= MAX_REASONS
+    assert "career_level_selected" in REASON_CODES
+    assert bounded_reasons(first.reasons) == first.reasons
+
+
+def test_models_without_career_fields_keep_internship_semantics() -> None:
+    class LegacyPreferenceRow:
+        role_ids = ["software_engineering"]
+        preferred_locations = []
+        include_remote = True
+        internship_season = "Any season"
+
+    class JobRow:
+        company_id = "stripe"
+        role_id = "software_engineering"
+        career_level = "senior_plus"
+        title = "Senior Software Engineer"
+        location = "New York, NY"
+        remote_status = ""
+        description = "Remote-friendly team"
+        is_open = True
+
+    assert preferences_from_model(LegacyPreferenceRow()).career_levels == frozenset(
+        {"internship"}
+    )
+    assert job_from_model(JobRow()).career_level == "senior_plus"
+    assert job_from_model(JobRow(), include_description=False).description == ""

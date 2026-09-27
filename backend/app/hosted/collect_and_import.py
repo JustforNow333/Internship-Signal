@@ -35,13 +35,19 @@ from watcher.collection_snapshot import (
 from watcher.config import DEFAULT_WATCHLIST_PATH, WatcherConfig, load_watchlist
 
 from .database import database_url_from_env
-from .import_snapshot import import_snapshot_into_hosted, import_summary_lines
+from .import_snapshot import (
+    BACKFILL_FLAG,
+    BACKFILL_FLAG_HELP,
+    import_snapshot_into_hosted,
+    import_summary_lines,
+)
 from .job_import import JobImportError
 from .snapshot_jobs import SnapshotReplayError
 
 # Distinguishes scheduled collection from an operator's manual snapshot replay
 # in `hosted_job_import_runs.source_type`.
 HOSTED_COLLECTION_SOURCE_TYPE = "hosted_collection"
+HOSTED_COLLECTION_BACKFILL_SOURCE_TYPE = "hosted_collection_backfill"
 SNAPSHOT_NAME = "hosted-collection.json.gz"
 
 Collector = Callable[[WatcherConfig], CollectionBatch]
@@ -59,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_WATCHLIST_PATH),
         help="Watcher configuration describing the companies and sources to collect",
     )
+    parser.add_argument(BACKFILL_FLAG, action="store_true", help=BACKFILL_FLAG_HELP)
     return parser
 
 
@@ -118,7 +125,12 @@ def main(
             snapshot,
             database_url=database_url,
             watchlist_path=args.watchlist,
-            source_type=HOSTED_COLLECTION_SOURCE_TYPE,
+            source_type=(
+                HOSTED_COLLECTION_BACKFILL_SOURCE_TYPE
+                if args.career_stage_backfill
+                else HOSTED_COLLECTION_SOURCE_TYPE
+            ),
+            backfill=args.career_stage_backfill,
         )
     except (CollectionSnapshotError, SnapshotReplayError, OSError):
         print(
@@ -144,7 +156,7 @@ def main(
 
     # Only reached when the import transaction committed, so a failure can
     # never print a successful import summary.
-    for line in import_summary_lines(result):
+    for line in import_summary_lines(result, backfill=args.career_stage_backfill):
         print(line)
     return 0
 

@@ -23,6 +23,15 @@ from .job_import import JobImportError, JobImportResult, JobImportService
 from .snapshot_jobs import SnapshotReplayError, replay_snapshot_jobs
 
 DEFAULT_SOURCE_TYPE = "collection_snapshot"
+BACKFILL_SOURCE_TYPE = "collection_snapshot_backfill"
+# Shared CLI spelling for an explicit, silent backfill import. It is reusable
+# for any controlled catalog expansion or reclassification, not only the first
+# career-stage import.
+BACKFILL_FLAG = "--career-stage-backfill"
+BACKFILL_FLAG_HELP = (
+    "Explicit one-shot backfill: store and reconcile newly supported jobs "
+    "without creating notification work, and never treat them as newly posted"
+)
 
 
 def import_snapshot_into_hosted(
@@ -33,13 +42,15 @@ def import_snapshot_into_hosted(
     allow_collection_config_mismatch: bool = False,
     retry_failed: bool = False,
     source_type: str = DEFAULT_SOURCE_TYPE,
+    backfill: bool = False,
 ) -> JobImportResult:
     """Replay one validated snapshot file into hosted PostgreSQL.
 
     The snapshot is validated and fingerprinted before anything is written, and
     the whole import - jobs, matches, and notification work - commits or rolls
     back as one transaction inside ``JobImportService``. Reusing a succeeded
-    fingerprint is an idempotent no-op.
+    fingerprint is an idempotent no-op. ``backfill`` is passed straight through
+    to ``JobImportService.import_jobs``.
     """
 
     replayed = replay_snapshot_jobs(
@@ -59,18 +70,24 @@ def import_snapshot_into_hosted(
             source_identifier=replayed.source_identifier,
             source_type=source_type,
             retry_failed=retry_failed,
+            backfill=backfill,
         )
     finally:
         with suppress(Exception):
             database.dispose()
 
 
-def import_summary_lines(result: JobImportResult) -> list[str]:
+def import_summary_lines(
+    result: JobImportResult,
+    *,
+    backfill: bool = False,
+) -> list[str]:
     """Bounded operational summary: counts and a truncated fingerprint only."""
 
     counters = result.counters
     lines = [
         "HOSTED-JOB-IMPORT "
+        f"mode={'backfill' if backfill else 'standard'} "
         f"outcome={result.outcome} "
         f"source={result.source_fingerprint[:12]} "
         f"received={counters.jobs_received} "
@@ -109,6 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Explicitly retry a prior failed import for the same source fingerprint",
     )
+    parser.add_argument(BACKFILL_FLAG, action="store_true", help=BACKFILL_FLAG_HELP)
     return parser
 
 
@@ -126,6 +144,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             watchlist_path=args.watchlist,
             allow_collection_config_mismatch=args.allow_collection_config_mismatch,
             retry_failed=args.retry_failed,
+            source_type=(
+                BACKFILL_SOURCE_TYPE
+                if args.career_stage_backfill
+                else DEFAULT_SOURCE_TYPE
+            ),
+            backfill=args.career_stage_backfill,
         )
     except (CollectionSnapshotError, OSError, SnapshotReplayError):
         print("Snapshot import failed: invalid_collection_snapshot", file=sys.stderr)
@@ -140,7 +164,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Snapshot import failed: hosted_import_unavailable", file=sys.stderr)
         return 1
 
-    for line in import_summary_lines(result):
+    for line in import_summary_lines(result, backfill=args.career_stage_backfill):
         print(line)
     return 0
 

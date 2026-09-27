@@ -55,11 +55,15 @@ rewinding lifecycle state.
 Company names resolve through the same watcher-derived canonical names and
 aliases used by `GET /api/companies`, including the watcher's corporate-suffix
 normalization; unsupported or unselectable companies are skipped. Before role
-mapping, the hosted mapper reuses the watcher internship/co-op predicate and
-records non-internships as `not_internship`. It still maps closed internships
-so existing hosted jobs can transition to closed. Watcher role classifications
-are converted in one hosted mapper; `invalid_role` therefore means an
-internship or co-op could not be safely mapped. Recognized relative Workday
+mapping, the hosted mapper classifies the career level (see
+[Career levels](#career-levels)) and stores only `internship`,
+`new_grad_junior`, and `senior_plus` jobs; `mid_level` and `unknown` jobs are
+skipped as `career_level_mid_level` and `career_level_unknown`. It still maps
+closed jobs so existing hosted jobs can transition to closed. Watcher role
+classifications are converted in one hosted mapper; `invalid_role` therefore
+means a job of a stored career level could not be safely mapped. The broad
+`other_engineering` role stays internship-only, because the role classifier is
+still tuned for internships. Recognized relative Workday
 posting labels such as `Posted Yesterday` are retained as an unknown
 `posting_date` rather than guessed or treated as malformed. Malformed isolated
 jobs are skipped with bounded reason codes, while a malformed final-job
@@ -80,13 +84,93 @@ meaningful match observation, and `no_longer_matches_at` records inactive
 history. Saving and dismissing are independent user actions.
 
 Matching is deterministic and requires a watched, unpaused company, open job,
-selected role, compatible location/remote preference, and compatible season.
-The stored reason list uses a bounded allowlist. It contains no descriptions,
+selected role, selected career level, compatible location/remote preference,
+and, for internships only, a compatible internship season. Jobs of any other
+career level are never season-filtered and carry no season reason. The stored
+reason list is ordered company, role, `career_level_selected`, location, then
+season, and uses a bounded allowlist. It contains no descriptions,
 raw preferences, source metadata, scores, resumes, or generated ranking data.
 
 Authenticated endpoints are `GET /api/matches`, `GET /api/matches/{id}`, and
 `PATCH /api/matches/{id}`. Every lookup is ownership-scoped; another user's ID
 returns the ordinary not-found response.
+
+### Career levels
+
+Alembic revision `20260926_0007` adds `hosted_jobs.career_level` (NOT NULL,
+checked against `internship`, `new_grad_junior`, `mid_level`, `senior_plus`,
+`unknown`, and deliberately without a server default so every insert must be
+classified), `hosted_jobs.first_seen_in_backfill`, and
+`hosted_user_preferences.career_levels` (JSONB, default `["internship"]`). It
+replaces `ix_hosted_jobs_company_id` with
+`ix_hosted_jobs_company_career_level_role (company_id, career_level, role_id)`,
+whose leading column serves every per-company lookup the old index did. Every
+existing job and user backfills to internship: all hosted rows were admitted by
+the internship-only gate, which a read-only production check confirmed predates
+every import run.
+
+`app.hosted.career_level.classify_career_level` is a pure, title-only
+classifier; descriptions, requirements, years of experience, and ATS metadata
+never change its result. It keeps the watcher internship/co-op semantics, maps
+explicit new-grad, entry-level, junior, `Engineer I`, and associate-engineer
+titles to `new_grad_junior`, and senior, staff, principal, distinguished,
+fellow, and tech/lead-engineer titles to `senior_plus`. `Engineer II` and the
+`Senior Associate`/`Principal Associate` ladder are `mid_level`. Management
+titles, `III`/`IV`/`V`, `L`-levels, generic titles such as `Software Engineer`,
+and contradictory titles such as `2026 New Grad Software Engineer Intern` are
+`unknown`. Precision wins over recall.
+
+Users may select only `internship`, `new_grad_junior`, and `senior_plus`, at
+least one and without duplicates. A `PUT /api/preferences` that omits
+`career_levels` stores `["internship"]`, so older clients stay internship-only.
+The frontend does not expose career stages yet. User reconciliation prefilters
+candidate jobs in SQL by watched company, selected career levels, selected
+roles, and open status before the pure matcher applies location and season, and
+it loads posting text only when a United States location preference needs it.
+
+### Career-stage shadow backfill
+
+The first import that stores non-internship levels discovers many postings that
+existed long before FindSooner stored them. They must not alert anyone merely
+because they became storable, so that first import is an explicit backfill.
+`--career-stage-backfill` stores and reconciles jobs normally, so Matches are
+accurate, but creates no notification work at all, records
+`source_type = 'hosted_collection_backfill'`, and marks every job it inserts
+with `first_seen_in_backfill` so an undated posting never later looks newly
+posted. It is never inferred from dates, and it is reusable for any later
+controlled catalog expansion or reclassification. Because the backfill is
+silent for every job, an internship first detected during that one run reaches
+Matches without an email.
+
+Run it exactly once, as the first hosted collection after this revision is
+deployed, by temporarily setting the `hosted-collection` service's start
+command to:
+
+```bash
+PYTHONPATH=.:backend python -m app.hosted.collect_and_import --career-stage-backfill
+```
+
+After that run succeeds, restore the ordinary start command:
+
+```bash
+PYTHONPATH=.:backend python -m app.hosted.collect_and_import
+```
+
+Inspect the shadow run with read-only SQL before exposing career stages:
+
+```sql
+SELECT source_type, status, jobs_received, jobs_inserted, jobs_skipped,
+       matches_created
+FROM hosted_job_import_runs ORDER BY started_at DESC LIMIT 5;
+
+SELECT career_level, role_id, count(*) FROM hosted_jobs
+GROUP BY career_level, role_id ORDER BY career_level, role_id;
+```
+
+The run's `HOSTED-JOB-IMPORT-SKIPS` line reports `career_level_mid_level` and
+`career_level_unknown` counts. An operator snapshot replay accepts the same
+flag: `python -m app.hosted.import_snapshot --snapshot <file>
+--career-stage-backfill`.
 
 ### Recent openings (`include_recent_openings`)
 
@@ -105,13 +189,15 @@ The window is a product rule, not a setting; it lives in one place as
 Admission for a job with no existing match row:
 
 1. The job must be open and must satisfy every ordinary matching rule —
-   watched, unpaused company, selected role, compatible location/remote, and
-   compatible season. The catch-up relaxes nothing.
+   watched, unpaused company, selected role, selected career level, compatible
+   location/remote, and compatible internship season. The catch-up relaxes
+   nothing.
 2. `posting_date` is authoritative whenever the source supplied one. A
    `posting_date` on or after the watch's start date is an ordinary post-watch
    opening and is admitted regardless of the setting. Only when `posting_date`
    is absent does `first_seen_at >= watch.created_at` serve as the fallback
-   post-watch signal.
+   post-watch signal, and never for a job first stored by an explicit backfill
+   import (`first_seen_in_backfill`), which was posted before it was stored.
 3. Otherwise, with the setting off, no new row is created.
 4. Otherwise the 90-day catch-up applies, inclusive at the boundary:
    `posting_date >= (now - 90 days).date()`, or for postings with no date,
@@ -133,7 +219,10 @@ immediately.
 Catch-up populates Matches only. Reconciliation from a watchlist or preference
 change never calls `enqueue_import_notifications`, so a historical match creates
 no `hosted_notification_batches` or `hosted_notification_items` row and no
-email. `matched_at` stays the time the match was actually made and is never
+email. An import that admits a catch-up match is silent too: the job was merely
+discovered late. Reconciliation reports why each new row was admitted, and an
+import enqueues notification work only for genuinely new openings (rule 2).
+`matched_at` stays the time the match was actually made and is never
 backdated.
 
 `PUT /api/watchlist` applies a transactional diff rather than deleting and
@@ -357,10 +446,14 @@ operator CLI uses. There is one hosted import path, not two, so job identity,
 deduplication, snapshot validation, matching, and notification enqueueing
 cannot drift between them.
 
-`--watchlist` overrides the watcher configuration; there are no other options.
-Runs are recorded in `hosted_job_import_runs` with
-`source_type = 'hosted_collection'`, which distinguishes scheduled collection
-from an operator's manual `collection_snapshot` replay.
+`--watchlist` overrides the watcher configuration, and
+`--career-stage-backfill` runs one explicit silent backfill (see
+[Career-stage shadow backfill](#career-stage-shadow-backfill)); there are no
+other options. Runs are recorded in `hosted_job_import_runs` with
+`source_type = 'hosted_collection'` (or `hosted_collection_backfill`), which
+distinguishes scheduled collection from an operator's manual
+`collection_snapshot` replay. The summary line reports `mode=standard` or
+`mode=backfill`.
 
 **It does not touch legacy watcher state.** Collection in `watcher.collection`
 is network and parsing only: no seen store is opened, no source-health or
