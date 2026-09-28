@@ -18,9 +18,9 @@ function unverifiedClient(overrides = {}) {
 describe("brand", () => {
   it("renders the product name without a trailing period", () => {
     render(<Brand navigate={() => {}} />);
-    const brand = screen.getByRole("link", { name: "Internship Signal home" });
+    const brand = screen.getByRole("link", { name: "FindSooner home" });
 
-    expect(brand.textContent).toBe("Internship Signal");
+    expect(brand.textContent).toBe("FindSooner");
     expect(brand.textContent).not.toContain(".");
   });
 });

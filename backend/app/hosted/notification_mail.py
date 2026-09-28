@@ -57,11 +57,21 @@ class DigestJob:
     deadline: date | None
     application_url: str | None
     match_reasons: object
+    # Presentation only; None or an unlabeled value simply omits the line.
+    career_level: str | None = None
 
 
+# Matches the hosted frontend's career-stage labels. mid_level and unknown are
+# never persisted into user-facing jobs, so they have no label.
+CAREER_LEVEL_LABELS = {
+    "internship": "Internship",
+    "new_grad_junior": "New grad / junior",
+    "senior_plus": "Senior+",
+}
 REASON_LABELS = {
     "company_watched": "Company is on your watchlist",
     "role_selected": "Role matches your selected categories",
+    "career_level_selected": "Career stage matches your selection",
     "location_any": "Location matches your open location preference",
     "location_preferred": "Location matches your preferred locations",
     "location_united_states": "Location is compatible with your U.S. preference",
@@ -282,9 +292,9 @@ def build_digest_email(
 ) -> NotificationEmail:
     count = len(jobs)
     subject = (
-        f"New internship matches ({count})"
+        f"New job matches ({count})"
         if frequency == "as_detected"
-        else f"Your Internship Signal digest ({count})"
+        else f"Your FindSooner digest ({count})"
     )
     dashboard_url = f"{public_frontend_url.rstrip('/')}/app/matches"
     settings_url = f"{public_frontend_url.rstrip('/')}/app/settings"
@@ -336,6 +346,9 @@ def _reason_labels(value: object) -> list[str]:
 
 def _plain_job(job: DigestJob, reasons: list[str]) -> list[str]:
     lines = [f"{job.company_name} — {job.title}"]
+    stage = CAREER_LEVEL_LABELS.get(job.career_level or "")
+    if stage:
+        lines.append(f"Career stage: {stage}")
     lines.append(f"Location: {job.location or 'Not specified'}")
     lines.append(f"Remote status: {job.remote_status or 'Not specified'}")
     if job.posting_date:
@@ -354,9 +367,17 @@ def _html_job(job: DigestJob, reasons: list[str]) -> list[str]:
     parts = [
         "<section>",
         f"<h2>{html.escape(job.company_name)} — {html.escape(job.title)}</h2>",
-        f"<p><strong>Location:</strong> {html.escape(job.location or 'Not specified')}<br>",
-        f"<strong>Remote status:</strong> {html.escape(job.remote_status or 'Not specified')}",
+        "<p>",
     ]
+    stage = CAREER_LEVEL_LABELS.get(job.career_level or "")
+    if stage:
+        parts.append(f"<strong>Career stage:</strong> {html.escape(stage)}<br>")
+    parts.extend(
+        [
+            f"<strong>Location:</strong> {html.escape(job.location or 'Not specified')}<br>",
+            f"<strong>Remote status:</strong> {html.escape(job.remote_status or 'Not specified')}",
+        ]
+    )
     if job.posting_date:
         parts.append(f"<br><strong>Posted:</strong> {job.posting_date.isoformat()}")
     if job.deadline:

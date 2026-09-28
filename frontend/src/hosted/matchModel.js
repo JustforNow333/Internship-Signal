@@ -1,10 +1,14 @@
-import { ROLE_OPTIONS } from "./constants.js";
+import { CAREER_LEVEL_OPTIONS, ROLE_OPTIONS } from "./constants.js";
 
 // Presentation only. The backend decides what matched; this file just renders
 // the allowlisted reason codes it returns. No matching logic lives here.
 const REASON_TEXT = {
   company_watched: (match) => `${match.company} is on your watchlist`,
   role_selected: (match) => `${roleName(match.role_id)} is in your role preferences`,
+  career_level_selected: (match) =>
+    careerLevelLabel(match.career_level)
+      ? `${careerLevelLabel(match.career_level)} is in your career stages`
+      : "Matches your career stages",
   location_preferred: (match) =>
     match.location
       ? `${match.location} matches a preferred location`
@@ -19,6 +23,14 @@ const REASON_TEXT = {
 
 export function roleName(roleId) {
   return ROLE_OPTIONS.find((role) => role.id === roleId)?.name || "This role";
+}
+
+// The one place a job's career_level ID becomes user-facing text.
+export function careerLevelLabel(careerLevel) {
+  return (
+    CAREER_LEVEL_OPTIONS.find((option) => option.id === careerLevel)?.label ||
+    ""
+  );
 }
 
 export function reasonText(reason, match) {
@@ -40,6 +52,7 @@ export function normalizeMatch(record) {
     title: record.title,
     role_id: record.role_id,
     role: roleName(record.role_id),
+    career_level: record.career_level || "",
     location: record.location || "",
     remote: Boolean(record.remote),
     remote_status: record.remote_status || "",

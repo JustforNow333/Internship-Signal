@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import date
 from dataclasses import replace
+from types import SimpleNamespace
 import smtplib
 
 import httpx
@@ -18,6 +19,7 @@ from app.hosted.notification_mail import (
     build_digest_email,
     configured_notification_transport,
 )
+from app.hosted.notification_worker import _digest_job
 from app.hosted.settings import HostedSettings
 
 API_KEY = "re_notification_secret_key"
@@ -59,7 +61,7 @@ def test_digest_has_plain_html_safe_fields_and_required_links() -> None:
         public_frontend_url="https://internships.example",
     )
 
-    assert message.subject == "New internship matches (1)"
+    assert message.subject == "New job matches (1)"
     assert message.message_id == "<stable@example.invalid>"
     assert "A <Company>" in message.text
     assert "<script>" not in message.html
@@ -81,11 +83,106 @@ def test_digest_displays_twenty_five_jobs_and_reports_remaining_count() -> None:
         public_frontend_url="https://internships.example",
     )
 
-    assert message.subject == "Your Internship Signal digest (27)"
+    assert message.subject == "Your FindSooner digest (27)"
     assert "Software Intern 25" in message.text
     assert "Software Intern 26" not in message.text
     assert "Software Intern 27" not in message.html
     assert "2 additional matches" in message.text
+
+
+@pytest.mark.parametrize(
+    ("career_level", "label"),
+    [
+        ("internship", "Internship"),
+        ("new_grad_junior", "New grad / junior"),
+        ("senior_plus", "Senior+"),
+    ],
+)
+def test_digest_renders_each_career_stage_label(career_level, label) -> None:
+    message = build_digest_email(
+        recipient="verified@example.com",
+        frequency="as_detected",
+        jobs=[job(career_level=career_level)],
+        message_id="<stable@example.invalid>",
+        public_frontend_url="https://internships.example",
+    )
+
+    assert f"Career stage: {label}" in message.text
+    assert f"<strong>Career stage:</strong> {label}" in message.html
+    for raw in ("new_grad_junior", "senior_plus"):
+        assert raw not in message.text + message.html
+
+
+def test_mixed_stage_digest_labels_every_job_and_career_reason() -> None:
+    reasons = [
+        {"code": "company_watched", "value": "stripe"},
+        {"code": "career_level_selected", "value": "senior_plus"},
+    ]
+    message = build_digest_email(
+        recipient="verified@example.com",
+        frequency="daily",
+        jobs=[
+            job(1, career_level="internship", match_reasons=reasons),
+            job(2, career_level="new_grad_junior", match_reasons=reasons),
+            job(3, career_level="senior_plus", match_reasons=reasons),
+            job(4, career_level="unknown"),
+        ],
+        message_id="<stable@example.invalid>",
+        public_frontend_url="https://internships.example",
+    )
+
+    assert message.subject == "Your FindSooner digest (4)"
+    sections = message.text.split("\n\n")
+    assert "Career stage: Internship" in sections[1]
+    assert "Career stage: New grad / junior" in sections[2]
+    assert "Career stage: Senior+" in sections[3]
+    assert "Career stage" not in sections[4]
+    assert message.html.count("<strong>Career stage:</strong>") == 3
+    assert "Career stage matches your selection" in message.text
+    for raw in ("career_level_selected", "new_grad_junior", "senior_plus", "unknown"):
+        assert raw not in message.text + message.html
+    assert "Internship Signal" not in message.text + message.html
+    assert "internship matches" not in (message.text + message.html).casefold()
+
+
+def test_digest_without_a_career_stage_omits_the_line() -> None:
+    message = build_digest_email(
+        recipient="verified@example.com",
+        frequency="as_detected",
+        jobs=[job()],
+        message_id="<stable@example.invalid>",
+        public_frontend_url="https://internships.example",
+    )
+
+    assert "Career stage" not in message.text + message.html
+
+
+def test_worker_passes_each_job_career_stage_into_the_digest() -> None:
+    hosted_job = SimpleNamespace(
+        company_name="Stripe",
+        title="Senior Software Engineer",
+        location="New York, NY",
+        remote_status="onsite",
+        posting_date=date(2026, 8, 1),
+        deadline=None,
+        application_url="https://example.com/apply/1",
+        career_level="senior_plus",
+    )
+    match = SimpleNamespace(match_reasons=[{"code": "company_watched", "value": "x"}])
+
+    digest_job = _digest_job(match, hosted_job)
+
+    assert digest_job == DigestJob(
+        company_name="Stripe",
+        title="Senior Software Engineer",
+        location="New York, NY",
+        remote_status="onsite",
+        posting_date=date(2026, 8, 1),
+        deadline=None,
+        application_url="https://example.com/apply/1",
+        match_reasons=[{"code": "company_watched", "value": "x"}],
+        career_level="senior_plus",
+    )
 
 
 def test_smtp_transport_classifies_explicit_rejections_and_post_submit_loss(

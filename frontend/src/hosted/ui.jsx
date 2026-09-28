@@ -17,9 +17,9 @@ export function Brand({ navigate, compact = false }) {
       className={`brand ${compact ? "brand-compact" : ""}`}
       href="/"
       onClick={(event) => handleClientNavigation(event, navigate, "/")}
-      aria-label="Internship Signal home"
+      aria-label="FindSooner home"
     >
-      Internship Signal
+      FindSooner
     </a>
   );
 }
@@ -80,7 +80,7 @@ export function AsyncPanel({
   status,
   error,
   onRetry,
-  loadingLabel = "Loading your Internship Signal workspace",
+  loadingLabel = "Loading your FindSooner workspace",
 }) {
   if (status === "loading" || status === "idle") {
     return (

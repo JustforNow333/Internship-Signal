@@ -33,6 +33,8 @@ from app.hosted.mailer import (
     ResendMailer,
     SMTPMailer,
     configured_mailer,
+    password_reset_message,
+    verification_message,
 )
 from app.hosted.models import EmailVerificationToken, User
 from app.hosted.services import HostedServices
@@ -421,3 +423,19 @@ def test_password_reset_mail_still_flows_through_the_selected_mailer(
         json={"token": _token(mailer.messages[-1].text), "password": "new password"},
     )
     assert reset.status_code == 200
+
+
+def test_account_emails_are_branded_findsooner() -> None:
+    verification = verification_message(
+        "student@example.com", "https://app.example/verify?token=t"
+    )
+    reset = password_reset_message(
+        "student@example.com", "https://app.example/reset?token=t"
+    )
+
+    assert verification.subject == "Verify your FindSooner email"
+    assert "finish setting up FindSooner" in verification.text
+    assert reset.subject == "Reset your FindSooner password"
+    assert "reset your FindSooner password" in reset.text
+    for message in (verification, reset):
+        assert "Internship Signal" not in message.subject + message.text

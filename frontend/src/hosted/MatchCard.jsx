@@ -1,3 +1,4 @@
+import { careerLevelLabel } from "./matchModel.js";
 import { freshnessFor, relativeDetection } from "./ui.jsx";
 
 export default function MatchCard({
@@ -9,6 +10,7 @@ export default function MatchCard({
   compact = false,
 }) {
   const freshness = freshnessFor(match.detected_at);
+  const stage = careerLevelLabel(match.career_level);
   return (
     <article className={`match-card ${compact ? "compact" : ""}`}>
       <div className="match-card-main">
@@ -16,6 +18,7 @@ export default function MatchCard({
           <span className={`freshness freshness-${freshness.id}`}>
             {freshness.label}
           </span>
+          {stage && <span className="career-stage-tag">{stage}</span>}
           <time dateTime={match.detected_at}>
             {relativeDetection(match.detected_at)}
           </time>

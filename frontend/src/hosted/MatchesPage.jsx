@@ -171,7 +171,7 @@ export default function MatchesPage({ matches, updateMatch }) {
           {actionError}
         </div>
       )}
-      <section className="matches-list" aria-label="Internship matches">
+      <section className="matches-list" aria-label="Job matches">
         {visible.length ? (
           visible.map((match) => (
             <MatchCard
@@ -190,7 +190,7 @@ export default function MatchesPage({ matches, updateMatch }) {
               title={
                 available.length
                   ? "No matches fit these filters"
-                  : "No matching internships yet"
+                  : "No matching jobs yet"
               }
               hint={
                 available.length

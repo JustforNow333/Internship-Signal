@@ -305,8 +305,8 @@ function AlertsStep({
       <fieldset className="preference-section">
         <legend>Alert frequency</legend>
         <p>
-          “As soon as detected” sends after scheduled scans. Internship Signal
-          does not monitor career pages continuously in real time.
+          “As soon as detected” sends after scheduled scans. FindSooner does
+          not monitor career pages continuously in real time.
         </p>
         <div className="radio-stack">
           {ALERT_FREQUENCIES.map((frequency) => (

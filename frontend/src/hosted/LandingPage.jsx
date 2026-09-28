@@ -4,7 +4,7 @@ function AlertExample() {
   return (
     <article
       className="email-example"
-      aria-label="Example internship alert email"
+      aria-label="Example job alert email"
     >
       <div className="email-toolbar">
         <span />
@@ -12,9 +12,9 @@ function AlertExample() {
         <span />
       </div>
       <div className="email-meta">
-        <span className="email-logo">IS</span>
+        <span className="email-logo">FS</span>
         <span>
-          <strong>Internship Signal</strong>
+          <strong>FindSooner</strong>
           <small>to you</small>
         </span>
         <time>10:18 AM</time>
@@ -64,12 +64,12 @@ export default function LandingPage({ navigate }) {
           <div className="hero-copy">
             <p className="eyebrow">
               <span className="live-dot" />
-              Built for internship recruiting
+              Built for applying early
             </p>
             <h1>Never apply late again.</h1>
             <p className="hero-lede">
-              Choose the companies and roles you care about. Internship Signal
-              monitors supported career pages for new internships and emails you
+              Choose the companies and roles you care about. FindSooner
+              monitors supported career pages for new openings and emails you
               shortly after we detect a match.
             </p>
             <div className="hero-actions">
@@ -138,8 +138,8 @@ export default function LandingPage({ navigate }) {
               <span className="step-number">02</span>
               <h3>Select roles</h3>
               <p>
-                Tell us which internship categories and locations are relevant
-                to you.
+                Tell us which career stages, role categories, and locations are
+                relevant to you.
               </p>
             </li>
             <li>
@@ -182,7 +182,7 @@ export default function LandingPage({ navigate }) {
           <div>
             <h2>Deliberate coverage, clearly labeled.</h2>
             <p>
-              Internship Signal currently monitors a supported catalog of
+              FindSooner currently monitors a supported catalog of
               companies. Your company picker shows whether each source is
               directly monitored, covered by a backstop, or temporarily delayed.
             </p>
@@ -199,7 +199,7 @@ export default function LandingPage({ navigate }) {
 
       <footer className="public-footer">
         <Brand navigate={navigate} compact />
-        <p>Early signals for internship recruiting.</p>
+        <p>Early signals for new job openings.</p>
         <p>Coverage is limited to supported companies.</p>
       </footer>
     </div>

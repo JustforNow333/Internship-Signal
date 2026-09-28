@@ -1,23 +1,25 @@
+import { careerLevelLabel } from "./matchModel.js";
 import { relativeDetection } from "./ui.jsx";
 
 export default function EmailPreview({ match }) {
   if (!match) return null;
+  const stage = careerLevelLabel(match.career_level);
   return (
     <article
       className="inbox-preview"
       aria-label="Preview of your match alert email"
     >
       <div className="inbox-header">
-        <span className="email-logo">IS</span>
+        <span className="email-logo">FS</span>
         <span>
-          <strong>Internship Signal</strong>
+          <strong>FindSooner</strong>
           <small>New watchlist match</small>
         </span>
         <time>now</time>
       </div>
       <div className="inbox-subject">
         <span className="live-dot" />
-        New internship at {match.company}
+        New match at {match.company}
       </div>
       <div className="inbox-body">
         <p className="email-kicker">NEW WATCHLIST MATCH</p>
@@ -25,6 +27,7 @@ export default function EmailPreview({ match }) {
         <p>
           {match.company} · {match.location}
           {match.remote ? " · Remote eligible" : ""}
+          {stage ? ` · ${stage}` : ""}
         </p>
         <div className="email-reason">
           {match.why.slice(0, 2).map((reason) => (

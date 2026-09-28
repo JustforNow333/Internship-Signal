@@ -192,11 +192,11 @@ export function SigninPage({ navigate, client, onSignedIn }) {
     <AuthLayout
       navigate={navigate}
       eyebrow="Welcome back"
-      title="Sign in to Internship Signal"
+      title="Sign in to FindSooner"
       description="Review new matches and keep your alerts tuned."
       footer={
         <p>
-          New to Internship Signal?{" "}
+          New to FindSooner?{" "}
           <RouteLink to="/signup" navigate={navigate}>
             Create an account
           </RouteLink>

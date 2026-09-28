@@ -67,8 +67,8 @@ export default function WatchlistPage({
           <p className="eyebrow">Personal company coverage</p>
           <h1>Watchlist</h1>
           <p>
-            Choose exactly which supported companies Internship Signal should
-            monitor for your account.
+            Choose exactly which supported companies FindSooner should monitor
+            for your account.
           </p>
         </div>
         <button className="secondary" onClick={() => setRequestOpen(true)}>

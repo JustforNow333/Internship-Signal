@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { careerLevelLabel } from "./matchModel.js";
 import { freshnessFor, relativeDetection } from "./ui.jsx";
 
 export default function MatchDrawer({ match, onClose }) {
@@ -13,6 +14,7 @@ export default function MatchDrawer({ match, onClose }) {
 
   if (!match) return null;
   const freshness = freshnessFor(match.detected_at);
+  const stage = careerLevelLabel(match.career_level);
   return (
     <>
       <div className="drawer-scrim" onClick={onClose} />
@@ -34,6 +36,7 @@ export default function MatchDrawer({ match, onClose }) {
           <span className={`freshness freshness-${freshness.id}`}>
             {freshness.label}
           </span>
+          {stage && <span className="career-stage-tag">{stage}</span>}
           <h2 id="match-detail-title">{match.title}</h2>
           <p className="drawer-company">
             <strong>{match.company}</strong> · {match.location}
@@ -66,7 +69,7 @@ export default function MatchDrawer({ match, onClose }) {
         </section>
         {match.summary && (
           <section>
-            <h3>About this internship</h3>
+            <h3>About this role</h3>
             <p>{match.summary}</p>
           </section>
         )}

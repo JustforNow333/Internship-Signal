@@ -217,7 +217,7 @@ describe("hosted match views", () => {
     render(<App initialPath="/app/matches" client={client} />);
 
     expect(
-      await screen.findByText("No matching internships yet"),
+      await screen.findByText("No matching jobs yet"),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Software Engineering Intern, Payments"),
@@ -232,7 +232,7 @@ describe("hosted match views", () => {
     render(<App initialPath="/app/matches" client={client} />);
 
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Loading your Internship Signal workspace",
+      "Loading your FindSooner workspace",
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Match lookup failed.",
@@ -284,7 +284,7 @@ describe("hosted match views", () => {
       dismissed: true,
     });
     expect(
-      await screen.findByText("No matching internships yet"),
+      await screen.findByText("No matching jobs yet"),
     ).toBeInTheDocument();
   });
 

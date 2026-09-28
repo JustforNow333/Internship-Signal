@@ -4,16 +4,20 @@ export const CAREER_LEVEL_OPTIONS = [
   {
     id: "internship",
     name: "Internships",
+    // Singular label for one job's stage on match surfaces and in emails.
+    label: "Internship",
     description: "Internship and co-op opportunities.",
   },
   {
     id: "new_grad_junior",
     name: "New grad / junior",
+    label: "New grad / junior",
     description: "New graduate, entry-level, and junior roles.",
   },
   {
     id: "senior_plus",
     name: "Senior+",
+    label: "Senior+",
     description:
       "Senior, staff, principal, lead, and other experienced individual-contributor roles.",
   },
@@ -26,7 +30,7 @@ export const ROLE_OPTIONS = [
     id: "software_engineering",
     name: "Software Engineering",
     description:
-      "Backend, frontend, mobile, platform, and full-stack internships.",
+      "Backend, frontend, mobile, platform, and full-stack roles.",
   },
   {
     id: "machine_learning_ai",
@@ -56,7 +60,7 @@ export const ROLE_OPTIONS = [
     id: "product_management",
     name: "Product Management",
     description:
-      "Technical product, product strategy, and program internships.",
+      "Technical product, product strategy, and program roles.",
   },
   {
     id: "hardware_embedded",

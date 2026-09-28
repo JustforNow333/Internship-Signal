@@ -100,7 +100,7 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
               <span aria-hidden="true">@</span>
               <div>
                 <h2>Account email</h2>
-                <p>Used for sign-in and internship alerts.</p>
+                <p>Used for sign-in and job alerts.</p>
               </div>
             </div>
             <label className="field">
@@ -147,7 +147,7 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
               <span aria-hidden="true">⌁</span>
               <div>
                 <h2>Role preferences</h2>
-                <p>Choose all internship categories that should match.</p>
+                <p>Choose all role categories that should match.</p>
               </div>
             </div>
             <div className="settings-role-grid">

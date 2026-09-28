@@ -146,9 +146,9 @@ def configured_mailer(settings: HostedSettings) -> Mailer:
 def verification_message(recipient: str, verification_url: str) -> OutboundMessage:
     return OutboundMessage(
         recipient=recipient,
-        subject="Verify your Internship Signal email",
+        subject="Verify your FindSooner email",
         text=(
-            "Verify your email to finish setting up Internship Signal:\n\n"
+            "Verify your email to finish setting up FindSooner:\n\n"
             f"{verification_url}\n\n"
             "This link expires and can be used only once."
         ),
@@ -159,9 +159,9 @@ def verification_message(recipient: str, verification_url: str) -> OutboundMessa
 def password_reset_message(recipient: str, reset_url: str) -> OutboundMessage:
     return OutboundMessage(
         recipient=recipient,
-        subject="Reset your Internship Signal password",
+        subject="Reset your FindSooner password",
         text=(
-            "Use this link to reset your Internship Signal password:\n\n"
+            "Use this link to reset your FindSooner password:\n\n"
             f"{reset_url}\n\n"
             "This link expires and can be used only once. If you did not request "
             "a reset, you can ignore this message."

@@ -756,6 +756,8 @@ button.danger:hover { background: #9f3021; color: white; }
 .match-title-button h3 { margin: 0; font-size: 18px; line-height: 1.25; }
 .match-company { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; color: var(--ink-soft); font-size: 12px; }
 .remote-tag { padding: 1px 6px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-faint); font-size: 9px; }
+.career-stage-tag { padding: 1px 7px; border: 1px solid var(--line-strong); border-radius: 99px; color: var(--ink-soft); font-size: 9.5px; font-weight: 650; white-space: nowrap; }
+.match-drawer .drawer-head .career-stage-tag { margin-left: 7px; }
 .match-reason { display: flex; gap: 7px; color: var(--ink-soft); font-size: 11.5px; }
 .match-reason span { color: var(--sig-high); }
 .match-reason p { margin: 0; }

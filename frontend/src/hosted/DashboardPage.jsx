@@ -33,7 +33,7 @@ export default function DashboardPage({ navigate, data, updateMatch }) {
     <>
       <div className="page-heading dashboard-heading">
         <div>
-          <p className="eyebrow">Your internship signal</p>
+          <p className="eyebrow">Your FindSooner dashboard</p>
           <h1>Good morning.</h1>
           <p>
             Your watchlist is active. New matches are ordered by detection time
@@ -98,7 +98,7 @@ export default function DashboardPage({ navigate, data, updateMatch }) {
           <div className="section-title-row">
             <div>
               <p className="eyebrow">Newest first</p>
-              <h2>Recent matching internships</h2>
+              <h2>Recent matches</h2>
             </div>
             <button
               className="text-button"
@@ -130,7 +130,7 @@ export default function DashboardPage({ navigate, data, updateMatch }) {
               <span aria-hidden="true">◎</span>
               <h3>No matches yet</h3>
               <p>
-                We’ll show new internships here after a scheduled scan finds one
+                We’ll show new matches here after a scheduled scan finds one
                 that matches your watchlist.
               </p>
             </div>

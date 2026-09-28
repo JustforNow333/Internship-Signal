@@ -61,7 +61,7 @@ describe("hosted Internship Signal MVP", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Sign in" }));
     expect(
-      screen.getByRole("heading", { name: "Sign in to Internship Signal" }),
+      screen.getByRole("heading", { name: "Sign in to FindSooner" }),
     ).toBeInTheDocument();
   });
 
@@ -440,7 +440,7 @@ describe("hosted Internship Signal MVP", () => {
   it("renders a loading state while hosted data is pending", () => {
     renderApp("/app/dashboard", { latency: 200 });
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Loading your Internship Signal workspace",
+      "Loading your FindSooner workspace",
     );
     expect(
       screen.getByRole("button", { name: "Account settings" }),
@@ -457,7 +457,7 @@ describe("hosted Internship Signal MVP", () => {
 
     await waitFor(() => expect(logout).toHaveBeenCalledOnce());
     expect(
-      screen.getByRole("heading", { name: "Sign in to Internship Signal" }),
+      screen.getByRole("heading", { name: "Sign in to FindSooner" }),
     ).toBeInTheDocument();
   });
 
@@ -488,7 +488,7 @@ describe("hosted Internship Signal MVP", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Sign in to Internship Signal",
+        name: "Sign in to FindSooner",
       }),
     ).toBeInTheDocument();
   });
@@ -498,7 +498,7 @@ describe("hosted Internship Signal MVP", () => {
     fixtures.matches = [];
     renderApp("/app/matches", { fixtures });
     expect(
-      await screen.findByText("No matching internships yet"),
+      await screen.findByText("No matching jobs yet"),
     ).toBeInTheDocument();
   });
 

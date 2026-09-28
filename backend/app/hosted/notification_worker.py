@@ -336,19 +336,7 @@ class NotificationDeliveryWorker:
                 _cancel_batch(batch, "no_valid_items", now)
                 return None
 
-            jobs = [
-                DigestJob(
-                    company_name=job.company_name,
-                    title=job.title,
-                    location=job.location,
-                    remote_status=job.remote_status,
-                    posting_date=job.posting_date,
-                    deadline=job.deadline,
-                    application_url=job.application_url,
-                    match_reasons=match.match_reasons,
-                )
-                for _item, match, job in valid
-            ]
+            jobs = [_digest_job(match, job) for _item, match, job in valid]
             assert user is not None
             message = build_digest_email(
                 recipient=user.email,
@@ -475,6 +463,21 @@ def _user_cancellation(
     if preferences.alert_frequency == "paused":
         return "frequency_paused"
     return None
+
+
+def _digest_job(match: UserJobMatch, job: HostedJob) -> DigestJob:
+    """The render-only view of one matched job; delivery never reads it."""
+    return DigestJob(
+        company_name=job.company_name,
+        title=job.title,
+        location=job.location,
+        remote_status=job.remote_status,
+        posting_date=job.posting_date,
+        deadline=job.deadline,
+        application_url=job.application_url,
+        match_reasons=match.match_reasons,
+        career_level=job.career_level,
+    )
 
 
 def _item_cancellation(

@@ -631,7 +631,7 @@ def test_daily_to_as_detected_still_delivers_the_alert_exactly_once(
     summary = worker(database, clock, transport).run()
     assert (summary.sent, summary.cancelled) == (1, 0)
     assert len(transport.messages) == 1
-    assert transport.messages[0].subject == "New internship matches (1)"
+    assert transport.messages[0].subject == "New job matches (1)"
 
     item = sole_item(database)
     assert item.status == "sent"
@@ -749,7 +749,7 @@ def test_every_pending_item_survives_a_frequency_change(
 
     transport = RecordingTransport()
     assert worker(database, clock, transport).run().sent == 1
-    assert transport.messages[0].subject == "New internship matches (3)"
+    assert transport.messages[0].subject == "New job matches (3)"
 
 
 def test_rehoming_reuses_an_existing_compatible_rolling_batch(
