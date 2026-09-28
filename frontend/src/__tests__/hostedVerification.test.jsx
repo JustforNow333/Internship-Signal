@@ -44,7 +44,7 @@ describe("/verify-email with a token", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Continue to setup/i }));
     await screen.findByRole("heading", {
-      name: /What kind of internships are you looking for/i,
+      name: /What kind of opportunities are you looking for/i,
     });
   });
 

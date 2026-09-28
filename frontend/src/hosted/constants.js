@@ -1,3 +1,26 @@
+// IDs match the backend's selectable career levels exactly; mid_level and
+// unknown are internal backend states and are never offered to users.
+export const CAREER_LEVEL_OPTIONS = [
+  {
+    id: "internship",
+    name: "Internships",
+    description: "Internship and co-op opportunities.",
+  },
+  {
+    id: "new_grad_junior",
+    name: "New grad / junior",
+    description: "New graduate, entry-level, and junior roles.",
+  },
+  {
+    id: "senior_plus",
+    name: "Senior+",
+    description:
+      "Senior, staff, principal, lead, and other experienced individual-contributor roles.",
+  },
+];
+
+export const DEFAULT_CAREER_LEVELS = ["internship"];
+
 export const ROLE_OPTIONS = [
   {
     id: "software_engineering",

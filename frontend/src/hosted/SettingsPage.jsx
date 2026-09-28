@@ -1,21 +1,37 @@
 import { useEffect, useState } from "react";
 import {
   ALERT_FREQUENCIES,
+  CAREER_LEVEL_OPTIONS,
   LOCATION_OPTIONS,
   ROLE_OPTIONS,
   SEASON_OPTIONS,
 } from "./constants.js";
 import { ConfirmationDialog, SuccessNotice, Toggle } from "./ui.jsx";
-import { toggleSelection } from "./utils.js";
+import { careerLevelsOrDefault, toggleSelection } from "./utils.js";
+
+function withCareerLevels(preferences) {
+  return {
+    ...preferences,
+    career_levels: careerLevelsOrDefault(preferences.career_levels),
+  };
+}
 
 export default function SettingsPage({ me, preferences, savePreferences }) {
-  const [form, setForm] = useState(preferences);
+  const [form, setForm] = useState(() => withCareerLevels(preferences));
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [unsubscribeOpen, setUnsubscribeOpen] = useState(false);
-  useEffect(() => setForm(preferences), [preferences]);
+  useEffect(() => setForm(withCareerLevels(preferences)), [preferences]);
 
+  // The season is kept (not cleared) while internships are deselected so it
+  // returns intact if they are selected again.
+  const internshipsSelected = form.career_levels.includes("internship");
+  const toggleCareerLevel = (id) =>
+    setForm({
+      ...form,
+      career_levels: toggleSelection(form.career_levels, id),
+    });
   const toggleRole = (id) =>
     setForm({ ...form, role_ids: toggleSelection(form.role_ids, id) });
   const toggleLocation = (location) =>
@@ -25,6 +41,7 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
     });
   const save = async (event) => {
     event.preventDefault();
+    if (!form.career_levels.length) return;
     setSaving(true);
     setNotice("");
     setError("");
@@ -92,6 +109,39 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
           </section>
           <section className="settings-card">
             <div className="settings-card-heading">
+              <span aria-hidden="true">◎</span>
+              <div>
+                <h2>Career stages</h2>
+                <p>Choose every career stage that should match.</p>
+              </div>
+            </div>
+            <div className="settings-role-grid">
+              {CAREER_LEVEL_OPTIONS.map((stage) => (
+                <label
+                  key={stage.id}
+                  className={
+                    form.career_levels.includes(stage.id) ? "selected" : ""
+                  }
+                  title={stage.description}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.career_levels.includes(stage.id)}
+                    onChange={() => toggleCareerLevel(stage.id)}
+                  />
+                  <span aria-hidden="true">
+                    {form.career_levels.includes(stage.id) ? "✓" : ""}
+                  </span>
+                  {stage.name}
+                </label>
+              ))}
+            </div>
+            {!form.career_levels.length && (
+              <p className="scan-note">Select at least one career stage.</p>
+            )}
+          </section>
+          <section className="settings-card">
+            <div className="settings-card-heading">
               <span aria-hidden="true">⌁</span>
               <div>
                 <h2>Role preferences</h2>
@@ -155,6 +205,7 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
             <label className="field season-field">
               <span>Internship season</span>
               <select
+                disabled={!internshipsSelected}
                 value={form.internship_season}
                 onChange={(event) =>
                   setForm({ ...form, internship_season: event.target.value })
@@ -164,6 +215,12 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
                   <option key={season}>{season}</option>
                 ))}
               </select>
+              {!internshipsSelected && (
+                <small>
+                  Applies only to internship matches. Select Internships under
+                  Career stages to change it.
+                </small>
+              )}
             </label>
             <Toggle
               checked={form.include_recent_openings}
@@ -221,7 +278,9 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
           <div className="settings-save">
             <button
               className="primary large"
-              disabled={saving || !form.role_ids.length}
+              disabled={
+                saving || !form.role_ids.length || !form.career_levels.length
+              }
             >
               {saving ? "Saving…" : "Save changes"}
             </button>

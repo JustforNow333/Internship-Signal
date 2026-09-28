@@ -584,6 +584,7 @@ button.danger:hover { background: #9f3021; color: white; }
 .auth-form { display: grid; gap: 17px; }
 .field { display: grid; gap: 6px; color: var(--ink-soft); font-size: 13px; font-weight: 650; }
 .field input, .field select { width: 100%; }
+.field select:disabled { opacity: 0.55; cursor: not-allowed; }
 .field small { color: var(--ink-faint); font-size: 11.5px; font-weight: 400; }
 .field-label-row { display: flex; justify-content: space-between; gap: 12px; }
 .field-label-row a { font-weight: 550; }
@@ -607,8 +608,8 @@ button.danger:hover { background: #9f3021; color: white; }
 .onboarding-progress { width: min(720px, 100%); margin: 0 auto 25px; }
 .progress-copy { display: flex; justify-content: space-between; margin-bottom: 12px; color: var(--ink-faint); font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; }
 .progress-copy strong { color: var(--accent-ink); }
-.onboarding-progress ol { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 0; list-style: none; }
-.onboarding-progress ol::before { content: ""; position: absolute; left: 16.66%; right: 16.66%; top: 14px; height: 1px; background: var(--line-strong); }
+.onboarding-progress ol { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); margin: 0; padding: 0; list-style: none; }
+.onboarding-progress ol::before { content: ""; position: absolute; left: 12.5%; right: 12.5%; top: 14px; height: 1px; background: var(--line-strong); }
 .onboarding-progress li { z-index: 1; display: grid; justify-items: center; gap: 3px; color: var(--ink-faint); font-size: 11px; }
 .onboarding-progress li > span { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--paper); font-family: var(--font-mono); font-size: 11px; }
 .onboarding-progress li.active { color: var(--accent-ink); font-weight: 700; }

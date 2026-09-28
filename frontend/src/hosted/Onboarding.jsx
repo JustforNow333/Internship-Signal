@@ -2,6 +2,8 @@ import { useState } from "react";
 import CompanyCatalog from "./CompanyCatalog.jsx";
 import {
   ALERT_FREQUENCIES,
+  CAREER_LEVEL_OPTIONS,
+  DEFAULT_CAREER_LEVELS,
   LOCATION_OPTIONS,
   ROLE_OPTIONS,
   SEASON_OPTIONS,
@@ -10,15 +12,17 @@ import { alertFrequencyLabel, Brand, Toggle } from "./ui.jsx";
 import { toggleSelection } from "./utils.js";
 
 function Progress({ step }) {
-  const labels = ["Roles", "Companies", "Alerts"];
+  const labels = ["Career stages", "Roles", "Companies", "Alerts"];
   return (
     <div
       className="onboarding-progress"
-      aria-label={`Onboarding step ${step} of 3`}
+      aria-label={`Onboarding step ${step} of ${labels.length}`}
     >
       <div className="progress-copy">
         <span>SET UP YOUR SIGNAL</span>
-        <strong>Step {step} of 3</strong>
+        <strong>
+          Step {step} of {labels.length}
+        </strong>
       </div>
       <ol>
         {labels.map((label, index) => {
@@ -40,15 +44,69 @@ function Progress({ step }) {
   );
 }
 
-function RolesStep({ roleIds, setRoleIds, onNext }) {
+function CareerStagesStep({ careerLevels, setCareerLevels, onNext }) {
+  const toggle = (id) => setCareerLevels(toggleSelection(careerLevels, id));
+  return (
+    <section className="onboarding-card" aria-labelledby="onboarding-title">
+      <div className="onboarding-heading">
+        <p className="eyebrow">Step 1 · Career stages</p>
+        <h1 id="onboarding-title">
+          What kind of opportunities are you looking for?
+        </h1>
+        <p>
+          Select every career stage you want us to match. You can change these
+          later.
+        </p>
+      </div>
+      <div className="role-grid">
+        {CAREER_LEVEL_OPTIONS.map((stage) => {
+          const selected = careerLevels.includes(stage.id);
+          return (
+            <label
+              className={`role-option ${selected ? "selected" : ""}`}
+              key={stage.id}
+            >
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={() => toggle(stage.id)}
+              />
+              <span className="role-check" aria-hidden="true">
+                {selected ? "✓" : ""}
+              </span>
+              <span>
+                <strong>{stage.name}</strong>
+                <small>{stage.description}</small>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      <div className="onboarding-actions">
+        <p>
+          {careerLevels.length
+            ? `${careerLevels.length} career ${careerLevels.length === 1 ? "stage" : "stages"} selected`
+            : "Select at least one career stage"}
+        </p>
+        <button
+          className="primary large"
+          disabled={!careerLevels.length}
+          onClick={onNext}
+        >
+          Continue to roles <span aria-hidden="true">→</span>
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function RolesStep({ roleIds, setRoleIds, onBack, onNext }) {
   const toggle = (id) => setRoleIds(toggleSelection(roleIds, id));
   return (
     <section className="onboarding-card" aria-labelledby="onboarding-title">
       <div className="onboarding-heading">
-        <p className="eyebrow">Step 1 · Role preferences</p>
-        <h1 id="onboarding-title">
-          What kind of internships are you looking for?
-        </h1>
+        <p className="eyebrow">Step 2 · Role preferences</p>
+        <h1 id="onboarding-title">Which role categories should we match?</h1>
         <p>
           Select every category you want us to match. You can change these
           later.
@@ -79,6 +137,9 @@ function RolesStep({ roleIds, setRoleIds, onNext }) {
         })}
       </div>
       <div className="onboarding-actions">
+        <button className="ghost-back" onClick={onBack}>
+          ← Back
+        </button>
         <p>
           {roleIds.length
             ? `${roleIds.length} role ${roleIds.length === 1 ? "category" : "categories"} selected`
@@ -110,7 +171,7 @@ function CompaniesStep({
       aria-labelledby="onboarding-title"
     >
       <div className="onboarding-heading">
-        <p className="eyebrow">Step 2 · Your company watchlist</p>
+        <p className="eyebrow">Step 3 · Your company watchlist</p>
         <h1 id="onboarding-title">Which companies should we watch for you?</h1>
         <p>
           Choose from the companies currently supported. This is your personal
@@ -154,10 +215,13 @@ function AlertsStep({
         location,
       ),
     });
+  // The season is kept (not cleared) while internships are deselected so it
+  // returns intact if they are selected again.
+  const internshipsSelected = preferences.career_levels.includes("internship");
   return (
     <section className="onboarding-card" aria-labelledby="onboarding-title">
       <div className="onboarding-heading">
-        <p className="eyebrow">Step 3 · Alert preferences</p>
+        <p className="eyebrow">Step 4 · Alert preferences</p>
         <h1 id="onboarding-title">When and where should we look?</h1>
         <p>Fine-tune the openings that reach your inbox.</p>
       </div>
@@ -205,6 +269,7 @@ function AlertsStep({
       <label className="field preference-section">
         <span className="field-legend">Internship season</span>
         <select
+          disabled={!internshipsSelected}
           value={preferences.internship_season}
           onChange={(event) =>
             setPreferences({
@@ -217,6 +282,12 @@ function AlertsStep({
             <option key={season}>{season}</option>
           ))}
         </select>
+        {!internshipsSelected && (
+          <small>
+            Applies only to internship matches. Select Internships in step 1
+            to change it.
+          </small>
+        )}
       </label>
       <div className="preference-section">
         <Toggle
@@ -346,6 +417,7 @@ export default function Onboarding({
   const [roleIds, setRoleIds] = useState([]);
   const [companyIds, setCompanyIds] = useState([]);
   const [preferences, setPreferences] = useState({
+    career_levels: [...DEFAULT_CAREER_LEVELS],
     preferred_locations: ["United States"],
     include_remote: true,
     internship_season: "Summer 2027",
@@ -369,7 +441,7 @@ export default function Onboarding({
           paused: false,
         })),
       );
-      setStep(4);
+      setStep(5);
     } catch (saveError) {
       setError(saveError.message || "We couldn’t activate your watchlist.");
     } finally {
@@ -386,34 +458,44 @@ export default function Onboarding({
         </button>
       </header>
       <main className="onboarding-main">
-        {step <= 3 && <Progress step={step} />}
+        {step <= 4 && <Progress step={step} />}
         {step === 1 && (
-          <RolesStep
-            roleIds={roleIds}
-            setRoleIds={setRoleIds}
+          <CareerStagesStep
+            careerLevels={preferences.career_levels}
+            setCareerLevels={(careerLevels) =>
+              setPreferences({ ...preferences, career_levels: careerLevels })
+            }
             onNext={() => setStep(2)}
           />
         )}
         {step === 2 && (
-          <CompaniesStep
-            companies={companies}
-            companyIds={companyIds}
-            setCompanyIds={setCompanyIds}
+          <RolesStep
+            roleIds={roleIds}
+            setRoleIds={setRoleIds}
             onBack={() => setStep(1)}
             onNext={() => setStep(3)}
           />
         )}
         {step === 3 && (
+          <CompaniesStep
+            companies={companies}
+            companyIds={companyIds}
+            setCompanyIds={setCompanyIds}
+            onBack={() => setStep(2)}
+            onNext={() => setStep(4)}
+          />
+        )}
+        {step === 4 && (
           <AlertsStep
             preferences={preferences}
             setPreferences={setPreferences}
-            onBack={() => setStep(2)}
+            onBack={() => setStep(3)}
             onFinish={finish}
             saving={saving}
             error={error}
           />
         )}
-        {step === 4 && (
+        {step === 5 && (
           <CompleteStep
             navigate={navigate}
             companyCount={companyIds.length}

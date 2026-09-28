@@ -25,6 +25,7 @@ function renderOnboarding(overrides = {}) {
 }
 
 async function reachAlertsStep() {
+  fireEvent.click(screen.getByRole("button", { name: /Continue to roles/i }));
   fireEvent.click(screen.getByText("Software Engineering").closest("label"));
   fireEvent.click(
     screen.getByRole("button", { name: /Continue to companies/i }),

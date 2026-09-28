@@ -242,6 +242,7 @@ export function makeHostedFixtures() {
         "data_engineering",
         "product_management",
       ],
+      career_levels: ["internship"],
       preferred_locations: ["United States", "New York, NY"],
       include_remote: true,
       internship_season: "Summer 2027",

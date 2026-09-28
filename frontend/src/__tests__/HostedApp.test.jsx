@@ -17,8 +17,15 @@ function renderApp(path, options = {}) {
   return { client, ...render(<App initialPath={path} client={client} />) };
 }
 
+async function continueFromCareerStages() {
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Continue to roles/i }),
+  );
+}
+
 async function reachCompanyStep() {
   renderApp("/onboarding");
+  await continueFromCareerStages();
   const role = await screen.findByText("Software Engineering");
   fireEvent.click(role.closest("label"));
   fireEvent.click(
@@ -161,6 +168,7 @@ describe("hosted Internship Signal MVP", () => {
 
   it("requires and preserves multi-select role choices", async () => {
     renderApp("/onboarding");
+    await continueFromCareerStages();
     const continueButton = await screen.findByRole("button", {
       name: /Continue to companies/i,
     });
@@ -194,6 +202,7 @@ describe("hosted Internship Signal MVP", () => {
     const fixtures = makeHostedFixtures();
     fixtures.companies = [{ ...fixtures.companies[0], selectable: false }];
     renderApp("/onboarding", { fixtures });
+    await continueFromCareerStages();
     fireEvent.click(
       (await screen.findByText("Software Engineering")).closest("label"),
     );
@@ -519,7 +528,9 @@ describe("hosted Internship Signal MVP", () => {
     });
     renderApp("/onboarding", { client });
     expect(
-      await screen.findByRole("heading", { name: /What kind of internships/i }),
+      await screen.findByRole("heading", {
+        name: /What kind of opportunities/i,
+      }),
     ).toBeInTheDocument();
   });
 
