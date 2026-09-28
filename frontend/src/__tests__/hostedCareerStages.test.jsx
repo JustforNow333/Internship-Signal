@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import Onboarding from "../hosted/Onboarding.jsx";
 import SettingsPage from "../hosted/SettingsPage.jsx";
-import { CAREER_LEVEL_OPTIONS } from "../hosted/constants.js";
+import { CAREER_LEVEL_OPTIONS, ROLE_OPTIONS } from "../hosted/constants.js";
 import { makeHostedFixtures } from "../hosted/fixtures.js";
 import { careerLevelsOrDefault } from "../hosted/utils.js";
 
@@ -288,5 +288,56 @@ describe("settings career stages", () => {
     fireEvent.click(stageCheckbox("internship"));
     expect(seasonSelect()).toBeEnabled();
     expect(seasonSelect()).toHaveValue("Spring 2027");
+  });
+});
+
+describe("settings unsubscribe", () => {
+  function renderSettings() {
+    const fixtures = makeHostedFixtures();
+    const savePreferences = vi.fn(async () => {});
+    render(
+      <SettingsPage
+        me={fixtures.me}
+        preferences={fixtures.preferences}
+        savePreferences={savePreferences}
+      />,
+    );
+    return { savePreferences, persisted: fixtures.preferences };
+  }
+
+  async function unsubscribe(savePreferences) {
+    fireEvent.click(screen.getByRole("button", { name: /Unsubscribe from alerts/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Unsubscribe" }));
+    await waitFor(() => expect(savePreferences).toHaveBeenCalledOnce());
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Email alerts are now unsubscribed.",
+    );
+    return savePreferences.mock.calls[0][0];
+  }
+
+  it("pauses delivery from persisted preferences when no career stage is selected", async () => {
+    const { savePreferences, persisted } = renderSettings();
+    fireEvent.click(stageCheckbox("internship"));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    expect(await unsubscribe(savePreferences)).toEqual({
+      ...persisted,
+      alert_frequency: "paused",
+      globally_paused: true,
+    });
+  });
+
+  it("pauses delivery from persisted preferences when no role is selected", async () => {
+    const { savePreferences, persisted } = renderSettings();
+    for (const roleId of persisted.role_ids) {
+      const role = ROLE_OPTIONS.find((option) => option.id === roleId);
+      fireEvent.click(screen.getByRole("checkbox", { name: role.name }));
+    }
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    const sent = await unsubscribe(savePreferences);
+    expect(sent.role_ids).toEqual(persisted.role_ids);
+    expect(sent.career_levels).toEqual(persisted.career_levels);
+    expect(sent).toMatchObject({ alert_frequency: "paused", globally_paused: true });
   });
 });

@@ -55,8 +55,10 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
     }
   };
   const confirmUnsubscribe = async () => {
+    // Unsubscribing changes delivery only, so it starts from the last
+    // persisted preferences rather than possibly incomplete unsaved edits.
     const next = {
-      ...form,
+      ...withCareerLevels(preferences),
       alert_frequency: "paused",
       globally_paused: true,
     };
