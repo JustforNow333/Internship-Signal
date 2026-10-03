@@ -15,6 +15,9 @@ workflow is unaffected.
 Notification delivery is a separate command on purpose. See
 ``app.hosted.deliver_notifications``: a collection failure must never stop
 already-created notification work from being delivered.
+
+Every run ends with bounded ``HOSTED-TIMING`` lines (see ``app.hosted.timing``)
+on success and failure alike. They never change the exit status.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from watcher.collection import collect_batch
+from watcher.collection import CollectionStats, collect_batch
 from watcher.collection_snapshot import (
     CollectionBatch,
     CollectionSnapshotError,
@@ -43,6 +46,7 @@ from .import_snapshot import (
 )
 from .job_import import JobImportError
 from .snapshot_jobs import SnapshotReplayError
+from .timing import HostedTiming
 
 # Distinguishes scheduled collection from an operator's manual snapshot replay
 # in `hosted_job_import_runs.source_type`.
@@ -91,9 +95,26 @@ def collection_summary_line(batch: CollectionBatch) -> str:
 def main(
     argv: Sequence[str] | None = None,
     *,
-    collector: Collector = collect_batch,
+    collector: Collector | None = None,
 ) -> int:
+    """Run once. ``collector`` replaces live collection, mainly for tests."""
+
     args = build_parser().parse_args(argv)
+    timing = HostedTiming()
+    exit_code = 1
+    try:
+        exit_code = _run(args, collector=collector, timing=timing)
+        return exit_code
+    finally:
+        timing.emit(exit_code=exit_code)
+
+
+def _run(
+    args: argparse.Namespace,
+    *,
+    collector: Collector | None,
+    timing: HostedTiming,
+) -> int:
     database_url = database_url_from_env()
     if not database_url:
         print(
@@ -114,13 +135,23 @@ def main(
     # A private temporary directory, never a repository path, so a runtime
     # snapshot can never be committed and never outlives the run.
     workspace = Path(tempfile.mkdtemp(prefix="hosted-collection-"))
+    stats = CollectionStats() if collector is None else None
     try:
-        batch = collector(config)
+        try:
+            with timing.stage("collection"):
+                batch = (
+                    collect_batch(config, stats=stats)
+                    if collector is None
+                    else collector(config)
+                )
+        finally:
+            timing.record_collection(config, stats)
         print(collection_summary_line(batch))
         snapshot = workspace / SNAPSHOT_NAME
         # Saving through the official writer keeps snapshot validation on the
         # path rather than handing unvalidated rows to the importer.
-        save_collection_snapshot(batch, snapshot)
+        with timing.stage("snapshot_save"):
+            save_collection_snapshot(batch, snapshot)
         result = import_snapshot_into_hosted(
             snapshot,
             database_url=database_url,
@@ -131,6 +162,7 @@ def main(
                 else HOSTED_COLLECTION_SOURCE_TYPE
             ),
             backfill=args.career_stage_backfill,
+            timing=timing,
         )
     except (CollectionSnapshotError, SnapshotReplayError, OSError):
         print(

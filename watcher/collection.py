@@ -60,6 +60,25 @@ from watcher.text_safety import exception_text, safe_text
 
 
 @dataclass
+class SourceFamilyTiming:
+    """Aggregate fetch timing for one ATS/source family, never per company."""
+
+    tasks: int = 0
+    seconds_total: float = 0.0
+    seconds_max: float = 0.0
+    failed: int = 0
+    degraded: int = 0
+    rows: int = 0
+    requests: int = 0
+    requests_reported_tasks: int = 0
+    retries: int = 0
+    retries_reported_tasks: int = 0
+    detail_requests: int = 0
+    detail_reported_tasks: int = 0
+    detail_budget_skips: int = 0
+
+
+@dataclass
 class CollectionStats:
     github_feeds_configured: int = 0
     github_feeds_succeeded: int = 0
@@ -78,6 +97,12 @@ class CollectionStats:
     http_status_counts: Counter[int] = field(default_factory=Counter)
     challenge_responses: int = 0
     unexpected_task_exceptions: int = 0
+    # Hosted-safe timing aggregates keyed by stage and by (source kind, family).
+    # In memory only: never part of the persisted collection snapshot schema.
+    stage_seconds: dict[str, float] = field(default_factory=dict)
+    family_timing: dict[tuple[str, str], SourceFamilyTiming] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -277,6 +302,12 @@ class _DirectFetchOutcome:
     status_code: int | None = None
     challenge_response: bool = False
     diagnostics: DirectSourceDiagnostics | None = None
+    # Timing telemetry only; never affects rows, attempts, or health.
+    elapsed_seconds: float = 0.0
+    reported_request_count: int | None = None
+    reported_retry_count: int | None = None
+    detail_requests: int | None = None
+    detail_budget_skipped: bool = False
 
 
 @dataclass
@@ -287,6 +318,7 @@ class _GithubFetchOutcome:
     error_kind: str = ""
     status_code: int | None = None
     challenge_response: bool = False
+    elapsed_seconds: float = 0.0
 
 
 class _DirectSourceProvider:
@@ -387,6 +419,7 @@ def _collect_rows(
     github_rows: list[dict] = []
     errors: list[str] = []
 
+    direct_started = time.perf_counter()
     with _timed_stage("direct_source_collection"):
         # Plan in configuration order, execute under the active mode, then apply
         # every outcome in that same order. Serial and concurrent collection
@@ -444,9 +477,11 @@ def _collect_rows(
                 )
                 continue
             assert index is not None
+            outcome = _direct_outcome_from_result(company, direct_results[index], stats)
+            _record_direct_family_timing(stats, company.ats, outcome)
             _apply_direct_outcome(
                 company,
-                _direct_outcome_from_result(company, direct_results[index], stats),
+                outcome,
                 stats=stats,
                 errors=errors,
                 direct_rows=direct_rows,
@@ -454,7 +489,9 @@ def _collect_rows(
                 observed_at=active_observed_at,
             )
         stats.workday_start_telemetry = source_provider.workday_start_telemetry()
+    _record_stage_seconds(stats, "direct_collection", direct_started)
 
+    github_started = time.perf_counter()
     with _timed_stage("github_backstop_collection"):
         github_plan = [
             _github_feed_plan(source_config, source)
@@ -467,15 +504,24 @@ def _collect_rows(
             ]
         )
         for plan, result in zip(github_plan, github_results):
+            github_outcome = _github_outcome_from_result(plan, result, stats)
+            _record_family_timing(
+                stats,
+                ("backstop", plan.adapter),
+                elapsed_seconds=github_outcome.elapsed_seconds,
+                succeeded=github_outcome.succeeded,
+                rows=len(github_outcome.rows),
+            )
             _apply_github_outcome(
                 plan,
-                _github_outcome_from_result(plan, result, stats),
+                github_outcome,
                 stats=stats,
                 errors=errors,
                 github_rows=github_rows,
                 run_id=active_run_id,
                 observed_at=active_observed_at,
             )
+    _record_stage_seconds(stats, "github_collection", github_started)
 
     stats.collection_concurrency = scheduler.metrics()
     log_collection_concurrency(stats.collection_concurrency)
@@ -545,6 +591,7 @@ def _fetch_direct_source(
     error_kind = ""
     workday_failure_code = ""
     fetch_started = time.perf_counter()
+    elapsed_seconds = 0.0
     try:
         LOGGER.info("Fetching %s via %s...", company.name, company.ats)
         rows = list(source.fetch(company))
@@ -559,12 +606,13 @@ def _fetch_direct_source(
     except Exception as exc:  # defensive run-loop boundary
         error, error_kind, workday_failure_code = exc, ERROR_UNEXPECTED, "unexpected_exception"
     finally:
+        elapsed_seconds = time.perf_counter() - fetch_started
         request_count, retry_count = _source_request_counts(source, error=error)
         _log_source_timing(
             company=company.name,
             adapter=company.ats,
             success=succeeded,
-            elapsed_seconds=time.perf_counter() - fetch_started,
+            elapsed_seconds=elapsed_seconds,
             rows_returned=len(rows) if succeeded else 0,
             source=source,
             error=error,
@@ -586,6 +634,10 @@ def _fetch_direct_source(
             succeeded=succeeded,
             error_kind=error_kind,
         ),
+        elapsed_seconds=elapsed_seconds,
+        reported_request_count=request_count,
+        reported_retry_count=retry_count,
+        **_detail_request_telemetry(source),
     )
 
 
@@ -730,6 +782,7 @@ def _fetch_github_source(
     error: Exception | None = None
     error_kind = ""
     fetch_started = time.perf_counter()
+    elapsed_seconds = 0.0
     source = plan.source
     try:
         LOGGER.info("Fetching GitHub listings backstop source %s...", plan.label)
@@ -751,12 +804,13 @@ def _fetch_github_source(
     except Exception as exc:  # defensive run-loop boundary
         error, error_kind = exc, ERROR_UNEXPECTED
     finally:
+        elapsed_seconds = time.perf_counter() - fetch_started
         _log_source_timing(
             company="all",
             adapter=plan.adapter,
             source_name=plan.source_name,
             success=succeeded,
-            elapsed_seconds=time.perf_counter() - fetch_started,
+            elapsed_seconds=elapsed_seconds,
             rows_returned=len(rows) if succeeded else 0,
             source=source,
             error=error,
@@ -768,6 +822,7 @@ def _fetch_github_source(
         error_kind=error_kind,
         status_code=_http_status_from_error(error),
         challenge_response=_challenge_response(error),
+        elapsed_seconds=elapsed_seconds,
     )
 
 
@@ -1015,6 +1070,97 @@ def _failed_attempt(
         degraded=False if direct else None,
         complete=False if direct else None,
     )
+
+
+def _detail_request_telemetry(source: object) -> dict[str, object]:
+    """Read detail-request counters an adapter already publishes, if any."""
+
+    try:
+        diagnostics = getattr(source, "last_diagnostics", None)
+        detail_requests = _nonnegative_optional_int(
+            _safe_attribute(diagnostics, "detail_requests")
+        )
+        reason = _safe_attribute(diagnostics, "detail_degraded_reason")
+        return {
+            "detail_requests": detail_requests,
+            "detail_budget_skipped": reason == "detail_candidate_limit_exceeded",
+        }
+    except Exception:
+        return {}
+
+
+def _record_stage_seconds(
+    stats: CollectionStats,
+    stage: str,
+    started: float,
+) -> None:
+    try:
+        stats.stage_seconds[stage] = max(0.0, time.perf_counter() - started)
+    except Exception:
+        pass
+
+
+def _record_direct_family_timing(
+    stats: CollectionStats,
+    family: str,
+    outcome: _DirectFetchOutcome,
+) -> None:
+    try:
+        diagnostics = outcome.diagnostics
+        _record_family_timing(
+            stats,
+            ("direct", family),
+            elapsed_seconds=outcome.elapsed_seconds,
+            succeeded=outcome.succeeded,
+            rows=len(outcome.rows),
+            degraded=bool(
+                outcome.succeeded and getattr(diagnostics, "degraded", False)
+            ),
+            requests=outcome.reported_request_count,
+            retries=outcome.reported_retry_count,
+            detail_requests=outcome.detail_requests,
+            detail_budget_skipped=outcome.detail_budget_skipped,
+        )
+    except Exception:
+        pass
+
+
+def _record_family_timing(
+    stats: CollectionStats,
+    key: tuple[str, str],
+    *,
+    elapsed_seconds: float,
+    succeeded: bool,
+    rows: int,
+    degraded: bool = False,
+    requests: int | None = None,
+    retries: int | None = None,
+    detail_requests: int | None = None,
+    detail_budget_skipped: bool = False,
+) -> None:
+    """Fold one fetch into its family aggregate; telemetry never raises."""
+
+    try:
+        family = stats.family_timing.setdefault(key, SourceFamilyTiming())
+        seconds = max(0.0, float(elapsed_seconds))
+        family.tasks += 1
+        family.seconds_total += seconds
+        family.seconds_max = max(family.seconds_max, seconds)
+        family.failed += 0 if succeeded else 1
+        family.degraded += 1 if degraded else 0
+        family.rows += max(0, int(rows))
+        if requests is not None:
+            family.requests += max(0, int(requests))
+            family.requests_reported_tasks += 1
+        if retries is not None:
+            family.retries += max(0, int(retries))
+            family.retries_reported_tasks += 1
+        if detail_requests is not None:
+            family.detail_requests += max(0, int(detail_requests))
+            family.detail_reported_tasks += 1
+        family.detail_budget_skips += 1 if detail_budget_skipped else 0
+    except Exception:
+        pass
 
 
 def _direct_diagnostics_from_source(

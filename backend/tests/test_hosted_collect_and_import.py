@@ -600,3 +600,50 @@ def test_standard_collection_reports_standard_mode(
     assert "mode=standard" in capsys.readouterr().out
     with database.session_factory() as db:
         assert db.scalar(select(HostedJob)).first_seen_in_backfill is False
+
+
+def test_hosted_timing_covers_import_stages_without_identifiers(
+    database, watcher_config, watched_company, capsys
+) -> None:
+    user_id = create_user(database, watched_company.id)
+    batch = batch_for(
+        watcher_config, watched_company.name, posting_date=NOW.date().isoformat()
+    )
+
+    assert collect_main([], collector=collector_for(batch)) == 0
+    output = capsys.readouterr().out
+    timing = [line for line in output.splitlines() if line.startswith("HOSTED-TIMING")]
+    stages = [
+        line.split(" stage=")[1].split()[0] for line in timing if "kind=stage" in line
+    ]
+    assert stages == [
+        "collection",
+        "snapshot_save",
+        "snapshot_verify_load",
+        "analysis",
+        "job_mapping",
+        "job_upsert",
+        "match_reconciliation",
+        "notification_enqueue",
+        "database_import",
+        "total",
+    ]
+    assert timing[-1].endswith("exit_code=0")
+    text = "\n".join(timing).casefold()
+    for identifier in (
+        watched_company.name,
+        watched_company.id,
+        "Backend Software Engineer Intern",
+        "example.com",
+        "COLLECT-1",
+        str(user_id),
+    ):
+        assert identifier.casefold() not in text
+    # Telemetry leaves the import, match, and notification results unchanged.
+    assert counts(database) == {
+        "jobs": 1,
+        "runs": 1,
+        "matches": 1,
+        "batches": 1,
+        "items": 1,
+    }

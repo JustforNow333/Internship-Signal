@@ -21,6 +21,7 @@ from .catalog import CompanyCatalog
 from .database import HostedDatabase, database_url_from_env
 from .job_import import JobImportError, JobImportResult, JobImportService
 from .snapshot_jobs import SnapshotReplayError, replay_snapshot_jobs
+from .timing import HostedTiming, stage
 
 DEFAULT_SOURCE_TYPE = "collection_snapshot"
 BACKFILL_SOURCE_TYPE = "collection_snapshot_backfill"
@@ -43,6 +44,7 @@ def import_snapshot_into_hosted(
     retry_failed: bool = False,
     source_type: str = DEFAULT_SOURCE_TYPE,
     backfill: bool = False,
+    timing: HostedTiming | None = None,
 ) -> JobImportResult:
     """Replay one validated snapshot file into hosted PostgreSQL.
 
@@ -50,13 +52,16 @@ def import_snapshot_into_hosted(
     the whole import - jobs, matches, and notification work - commits or rolls
     back as one transaction inside ``JobImportService``. Reusing a succeeded
     fingerprint is an idempotent no-op. ``backfill`` is passed straight through
-    to ``JobImportService.import_jobs``.
+    to ``JobImportService.import_jobs``. ``timing`` only records stage
+    durations and never changes the result.
     """
 
+    timing_options = {"timing": timing} if timing is not None else {}
     replayed = replay_snapshot_jobs(
         snapshot_path,
         watchlist_path=watchlist_path,
         allow_collection_config_mismatch=allow_collection_config_mismatch,
+        **timing_options,
     )
     database = HostedDatabase(database_url)
     try:
@@ -64,14 +69,16 @@ def import_snapshot_into_hosted(
             database,
             CompanyCatalog.from_watcher_config(replayed.config),
         )
-        return service.import_jobs(
-            replayed.jobs,
-            source_fingerprint=replayed.source_fingerprint,
-            source_identifier=replayed.source_identifier,
-            source_type=source_type,
-            retry_failed=retry_failed,
-            backfill=backfill,
-        )
+        with stage(timing, "database_import"):
+            return service.import_jobs(
+                replayed.jobs,
+                source_fingerprint=replayed.source_fingerprint,
+                source_identifier=replayed.source_identifier,
+                source_type=source_type,
+                retry_failed=retry_failed,
+                backfill=backfill,
+                **timing_options,
+            )
     finally:
         with suppress(Exception):
             database.dispose()

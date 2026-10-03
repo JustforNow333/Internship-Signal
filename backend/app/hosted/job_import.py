@@ -25,6 +25,7 @@ from .match_service import reconcile_jobs
 from .models import HostedJob, HostedJobImportAttempt, HostedJobImportRun
 from .notification_enqueue import enqueue_import_notifications
 from .services import utc_now
+from .timing import HostedTiming, stage
 
 _FINGERPRINT_RE = re.compile(r"[0-9a-f]{64}")
 _SOURCE_TYPE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
@@ -109,6 +110,7 @@ class JobImportService:
         source_type: str,
         retry_failed: bool = False,
         backfill: bool = False,
+        timing: HostedTiming | None = None,
     ) -> JobImportResult:
         """Persist one final-job sequence, reconcile matches, and enqueue alerts.
 
@@ -117,7 +119,7 @@ class JobImportService:
         Its matches still reconcile so stored state is accurate, but it creates
         no notification work, and the jobs it first stores are marked so their
         new ``first_seen_at`` never makes them look newly posted later. It is
-        never inferred from dates.
+        never inferred from dates. ``timing`` only records stage durations.
         """
 
         fingerprint = _validated_fingerprint(source_fingerprint)
@@ -137,7 +139,8 @@ class JobImportService:
 
         mapped: MappedJobs | None = None
         try:
-            mapped = map_final_jobs(final_jobs, self.catalog)
+            with stage(timing, "job_mapping"):
+                mapped = map_final_jobs(final_jobs, self.catalog)
             inserted = 0
             updated = 0
             unchanged = 0
@@ -160,33 +163,36 @@ class JobImportService:
                 ):
                     raise ImportAlreadyRunning()
                 affected_job_ids: list[uuid.UUID] = []
-                for mapped_job in mapped.jobs:
-                    outcome, job_id = self._upsert_job(
-                        db, mapped_job, observed_at, backfill=backfill
-                    )
-                    if outcome == "inserted":
-                        inserted += 1
-                        affected_job_ids.append(job_id)
-                    elif outcome == "updated":
-                        updated += 1
-                        affected_job_ids.append(job_id)
-                    else:
-                        unchanged += 1
+                with stage(timing, "job_upsert"):
+                    for mapped_job in mapped.jobs:
+                        outcome, job_id = self._upsert_job(
+                            db, mapped_job, observed_at, backfill=backfill
+                        )
+                        if outcome == "inserted":
+                            inserted += 1
+                            affected_job_ids.append(job_id)
+                        elif outcome == "updated":
+                            updated += 1
+                            affected_job_ids.append(job_id)
+                        else:
+                            unchanged += 1
 
                 # Reconciliation shares the job-persistence transaction, so a
                 # succeeded run can never report partially applied matches.
-                reconciliation = reconcile_jobs(
-                    db, affected_job_ids, now=observed_at
-                )
+                with stage(timing, "match_reconciliation"):
+                    reconciliation = reconcile_jobs(
+                        db, affected_job_ids, now=observed_at
+                    )
                 # Only genuinely new openings notify. Recent-opening catch-up
                 # and every match an explicit backfill creates stay silent.
                 if not backfill:
-                    enqueue_import_notifications(
-                        db,
-                        reconciliation.new_opening_match_ids,
-                        import_run_id=run.id,
-                        now=observed_at,
-                    )
+                    with stage(timing, "notification_enqueue"):
+                        enqueue_import_notifications(
+                            db,
+                            reconciliation.new_opening_match_ids,
+                            import_run_id=run.id,
+                            now=observed_at,
+                        )
 
                 run.status = "succeeded"
                 run.completed_at = observed_at

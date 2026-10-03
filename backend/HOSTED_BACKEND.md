@@ -471,6 +471,15 @@ truncated fingerprint only - never posting text, company names, source URLs, or
 raw source errors. A failure never prints an import summary, because the
 `HOSTED-JOB-IMPORT` line is emitted only after the import transaction commits.
 
+**Timing.** Every run, successful or not, ends with bounded `HOSTED-TIMING`
+lines on stdout: the effective collection concurrency (`kind=concurrency`),
+monotonic seconds per stage (`kind=stage`, ending with `stage=total` and the
+exit code), and per ATS-family aggregates (`kind=family`: tasks, total/max
+seconds, failures, degraded, rows, and request/retry/Workday-detail counters
+where the adapter already reports them). They carry no company names, URLs,
+titles, or user data, never enable the watcher's verbose INFO logging, and
+never change the exit status.
+
 **Idempotency.** The snapshot is written deterministically, so re-running the
 identical collection produces the same SHA-256 source fingerprint and the
 import is a recognised `already_imported` no-op. A later collection of the same

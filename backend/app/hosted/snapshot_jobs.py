@@ -17,6 +17,8 @@ from watcher.collection_snapshot import (
 )
 from watcher.config import DEFAULT_WATCHLIST_PATH, WatcherConfig, load_watchlist
 
+from .timing import HostedTiming, stage
+
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -40,13 +42,15 @@ def replay_snapshot_jobs(
     allow_collection_config_mismatch: bool = False,
     loader: Callable[[str | Path], CollectionBatch] = load_collection_snapshot,
     analyzer: Callable[..., list[dict]] = analyze_rows,
+    timing: HostedTiming | None = None,
 ) -> ReplayedSnapshot:
     """Validate, replay, and fingerprint one immutable snapshot without I/O effects."""
 
     path = Path(snapshot_path)
-    fingerprint_before = snapshot_sha256(path)
-    batch = loader(path)
-    fingerprint_after = snapshot_sha256(path)
+    with stage(timing, "snapshot_verify_load"):
+        fingerprint_before = snapshot_sha256(path)
+        batch = loader(path)
+        fingerprint_after = snapshot_sha256(path)
     if fingerprint_before != fingerprint_after:
         raise CollectionSnapshotError("Collection snapshot changed while being loaded")
 
@@ -61,10 +65,11 @@ def replay_snapshot_jobs(
             "collection-affecting watchlist settings"
         )
 
-    jobs = analyzer(
-        batch.mutable_rows(),
-        today=batch.captured_at.date(),
-    )
+    with stage(timing, "analysis"):
+        jobs = analyzer(
+            batch.mutable_rows(),
+            today=batch.captured_at.date(),
+        )
     if not isinstance(jobs, list) or any(not isinstance(job, Mapping) for job in jobs):
         raise SnapshotReplayError("snapshot_analysis_invalid")
     return ReplayedSnapshot(
