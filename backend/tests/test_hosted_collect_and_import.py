@@ -647,3 +647,75 @@ def test_hosted_timing_covers_import_stages_without_identifiers(
         "batches": 1,
         "items": 1,
     }
+
+
+def test_a_standard_collection_prints_a_read_only_import_audit(
+    database, watcher_config, watched_company, capsys
+) -> None:
+    create_user(database, watched_company.id)
+    batch = batch_for(
+        watcher_config, watched_company.name, posting_date=NOW.date().isoformat()
+    )
+
+    assert collect_main([], collector=collector_for(batch)) == 0
+    output = capsys.readouterr().out
+    audit = [line for line in output.splitlines() if line.startswith("HOSTED-AUDIT")]
+
+    assert len(audit) == 2
+    assert audit[0].startswith("HOSTED-AUDIT kind=summary mode=standard match_checks=ok ")
+    for expected in (
+        "matches_created=1",
+        "new_opening_matches=1",
+        "notification_eligible_matches=1",
+        "notification_items_created=1",
+        "silent_catch_up_matches=0",
+    ):
+        assert f" {expected} " in audit[0]
+    for expected in (
+        "status=ok",
+        "new_opening_missing_notification=0",
+        "notification_integrity_anomalies=0",
+        "suspicious_cross_source_duplicates=0",
+    ):
+        assert f" {expected} " in f"{audit[1]} "
+    text = "\n".join(audit).casefold()
+    for identifier in (
+        watched_company.name,
+        watched_company.id,
+        "Backend Software Engineer Intern",
+        "example.com",
+        "COLLECT-1",
+    ):
+        assert identifier.casefold() not in text
+    # The audit observes the committed import without changing it.
+    assert counts(database) == {
+        "jobs": 1,
+        "runs": 1,
+        "matches": 1,
+        "batches": 1,
+        "items": 1,
+    }
+
+
+def test_a_late_catch_up_collection_is_audited_as_intentionally_silent(
+    database, watcher_config, watched_company, capsys
+) -> None:
+    create_user(database, watched_company.id)
+    batch = batch_for(
+        watcher_config,
+        watched_company.name,
+        posting_date=(NOW - timedelta(days=30)).date().isoformat(),
+    )
+
+    assert collect_main([], collector=collector_for(batch)) == 0
+    audit = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("HOSTED-AUDIT")
+    ]
+
+    assert " silent_catch_up_matches=1 " in audit[0]
+    assert " notification_items_present=0 " in audit[0]
+    assert " new_opening_missing_notification=0 " in audit[1]
+    assert " late_discoveries=1 " in audit[1]
+    assert counts(database)["items"] == 0

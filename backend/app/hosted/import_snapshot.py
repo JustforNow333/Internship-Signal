@@ -19,6 +19,7 @@ from watcher.config import DEFAULT_WATCHLIST_PATH
 
 from .catalog import CompanyCatalog
 from .database import HostedDatabase, database_url_from_env
+from .import_audit import run_import_audit
 from .job_import import JobImportError, JobImportResult, JobImportService
 from .snapshot_jobs import SnapshotReplayError, replay_snapshot_jobs
 from .timing import HostedTiming, stage
@@ -172,6 +173,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     for line in import_summary_lines(result, backfill=args.career_stage_backfill):
+        print(line)
+    # Read-only and post-commit; it reports problems but can never fail the run.
+    for line in run_import_audit(
+        database_url, result, backfill=args.career_stage_backfill
+    ):
         print(line)
     return 0
 

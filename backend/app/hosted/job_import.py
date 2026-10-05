@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -76,6 +76,16 @@ class JobImportResult:
     outcome: str
     counters: ImportCounters
     skipped_reasons: dict[str, int]
+    # This run's newly inserted match rows and their new-opening subset, kept
+    # in memory only for the post-import audit (``app.hosted.import_audit``).
+    # They are excluded from equality and repr, and an already-imported
+    # result carries none.
+    created_match_ids: tuple[uuid.UUID, ...] = field(
+        default=(), compare=False, repr=False
+    )
+    new_opening_match_ids: tuple[uuid.UUID, ...] = field(
+        default=(), compare=False, repr=False
+    )
 
     @property
     def already_imported(self) -> bool:
@@ -221,6 +231,8 @@ class JobImportService:
                     matches_created=reconciliation.created,
                 ),
                 skipped_reasons=mapped.skipped_reasons,
+                created_match_ids=reconciliation.created_match_ids,
+                new_opening_match_ids=reconciliation.new_opening_match_ids,
             )
         except Exception as exc:
             received = mapped.jobs_received if mapped is not None else _safe_length(final_jobs)

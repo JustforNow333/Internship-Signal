@@ -480,6 +480,24 @@ where the adapter already reports them). They carry no company names, URLs,
 titles, or user data, never enable the watcher's verbose INFO logging, and
 never change the exit status.
 
+**Import audit.** After a committed import, both this command and the offline
+snapshot CLI print two bounded `HOSTED-AUDIT` lines (`app.hosted.import_audit`).
+`kind=summary` splits this run's new matches into new openings, the subset
+notification-eligible by the enqueue rules, items created/present, silent
+`catch_up` (or `backfill`) matches, suppressed recipients, and backstop-sourced
+matches. `kind=integrity` reports deterministic anomalies -
+`new_opening_missing_notification`, catch-up matches carrying notification
+work, item/batch user or run mismatches, and pending items under a `sent` or
+`cancelled` batch (`status=attention` when any is non-zero) - plus
+`pending_items_failed_batch` and two heuristics that never raise the status:
+`late_discoveries` (first stored more than 14 days after `posting_date`) and
+`suspicious_cross_source_duplicates` (same company, dedupe-normalized title,
+and compatible location, but direct versus backstop or only one side carrying
+a requisition ID). It runs in its own read-only, statement-timed transaction
+that is always rolled back, prints aggregate counts only, skips
+`already_imported` runs, and on any error prints one
+`status=skipped reason=audit_unavailable` line without changing the exit code.
+
 **Idempotency.** The snapshot is written deterministically, so re-running the
 identical collection produces the same SHA-256 source fingerprint and the
 import is a recognised `already_imported` no-op. A later collection of the same

@@ -17,7 +17,9 @@ Notification delivery is a separate command on purpose. See
 already-created notification work from being delivered.
 
 Every run ends with bounded ``HOSTED-TIMING`` lines (see ``app.hosted.timing``)
-on success and failure alike. They never change the exit status.
+on success and failure alike. A successful import also prints bounded
+``HOSTED-AUDIT`` lines (see ``app.hosted.import_audit``). Neither ever changes
+the exit status.
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ from .import_snapshot import (
     import_snapshot_into_hosted,
     import_summary_lines,
 )
+from .import_audit import run_import_audit
 from .job_import import JobImportError
 from .snapshot_jobs import SnapshotReplayError
 from .timing import HostedTiming
@@ -189,6 +192,11 @@ def _run(
     # Only reached when the import transaction committed, so a failure can
     # never print a successful import summary.
     for line in import_summary_lines(result, backfill=args.career_stage_backfill):
+        print(line)
+    # Read-only and post-commit; it reports problems but can never fail the run.
+    for line in run_import_audit(
+        database_url, result, backfill=args.career_stage_backfill
+    ):
         print(line)
     return 0
 
