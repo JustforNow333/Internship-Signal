@@ -17,6 +17,7 @@ from pathlib import Path
 from watcher.collection_snapshot import CollectionSnapshotError
 from watcher.config import DEFAULT_WATCHLIST_PATH
 
+from .analysis_cache import build_hosted_analyzer
 from .catalog import CompanyCatalog
 from .database import HostedDatabase, database_url_from_env
 from .import_audit import run_import_audit
@@ -62,6 +63,7 @@ def import_snapshot_into_hosted(
         snapshot_path,
         watchlist_path=watchlist_path,
         allow_collection_config_mismatch=allow_collection_config_mismatch,
+        analyzer=build_hosted_analyzer(timing),
         **timing_options,
     )
     database = HostedDatabase(database_url)

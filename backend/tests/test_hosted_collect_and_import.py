@@ -719,3 +719,75 @@ def test_a_late_catch_up_collection_is_audited_as_intentionally_silent(
     assert " new_opening_missing_notification=0 " in audit[1]
     assert " late_discoveries=1 " in audit[1]
     assert counts(database)["items"] == 0
+
+
+def _business_rows(database: HostedDatabase, model) -> list[dict[str, object]]:
+    """Persisted column values minus generated identifiers and timestamps."""
+
+    with database.session_factory() as db:
+        rows = [
+            {
+                column.key: getattr(record, column.key)
+                for column in model.__table__.columns
+                if not isinstance(getattr(record, column.key), (datetime, uuid.UUID))
+            }
+            for record in db.scalars(select(model))
+        ]
+    return sorted(rows, key=repr)
+
+
+def _truncate(database: HostedDatabase) -> None:
+    tables = [
+        name
+        for name in inspect(database.engine).get_table_names()
+        if name != "alembic_version"
+    ]
+    with database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "TRUNCATE TABLE "
+                + ", ".join(f'"{name}"' for name in tables)
+                + " RESTART IDENTITY CASCADE"
+            )
+        )
+
+
+def test_the_analysis_cache_leaves_imports_matches_and_alerts_identical(
+    database, watcher_config, watched_company, tmp_path, monkeypatch, capsys
+) -> None:
+    cache_path = tmp_path / "volume" / "analysis-cache.sqlite"
+    batch = batch_for(
+        watcher_config,
+        watched_company.name,
+        posting_date=NOW.date().isoformat(),
+    )
+    outcomes = []
+    for cache in (None, cache_path, cache_path):  # disabled, cold, warm
+        _truncate(database)
+        create_user(database, watched_company.id)
+        if cache is None:
+            monkeypatch.delenv("HOSTED_ANALYSIS_CACHE_PATH", raising=False)
+        else:
+            monkeypatch.setenv("HOSTED_ANALYSIS_CACHE_PATH", str(cache))
+
+        assert collect_main([], collector=collector_for(batch)) == 0
+        output = capsys.readouterr().out.splitlines()
+        cache_lines = [line for line in output if "kind=cache" in line]
+        outcomes.append(
+            (
+                [line for line in output if line.startswith("HOSTED-JOB-IMPORT")],
+                counts(database),
+                _business_rows(database, HostedJob),
+                _business_rows(database, UserJobMatch),
+                _business_rows(database, HostedNotificationItem),
+                cache_lines,
+            )
+        )
+
+    disabled, cold, warm = outcomes
+    assert disabled[5] == []
+    assert " hits=0 misses=1 " in cold[5][0]
+    assert " hits=1 misses=0 " in warm[5][0]
+    assert disabled[1]["jobs"] == disabled[1]["matches"] == disabled[1]["items"] == 1
+    assert cold[:5] == disabled[:5]
+    assert warm[:5] == disabled[:5]

@@ -76,6 +76,7 @@ class HostedTiming:
         self._stages: dict[str, float] = {}
         self._concurrency: dict[str, object] | None = None
         self._families: list[str] = []
+        self._analysis_cache: dict[str, object] | None = None
 
     def _now(self) -> float | None:
         try:
@@ -123,6 +124,14 @@ class HostedTiming:
         except Exception:  # noqa: BLE001
             self._families = []
 
+    def record_analysis_cache(self, stats: object | None, *, reason: str = "") -> None:
+        """Capture hosted analysis-cache counters, or why the cache was skipped."""
+
+        try:
+            self._analysis_cache = _analysis_cache_fields(stats, reason=reason)
+        except Exception:  # noqa: BLE001
+            self._analysis_cache = None
+
     def lines(self, *, exit_code: int) -> list[str]:
         lines: list[str] = []
         try:
@@ -138,6 +147,13 @@ class HostedTiming:
                         f"seconds={_seconds(self._stages[stage])}"
                     )
             lines.extend(self._families)
+            if self._analysis_cache is not None:
+                lines.append(
+                    f"{PREFIX} kind=cache cache=analysis "
+                    + " ".join(
+                        f"{key}={value}" for key, value in self._analysis_cache.items()
+                    )
+                )
             ended = self._now()
             total = (
                 ended - self._started
@@ -194,6 +210,27 @@ def _concurrency_fields(config: object, stats: object | None) -> dict[str, objec
         )
         fields["observed_workday"] = _count(getattr(metrics, "max_observed_workday", 0))
     return fields
+
+
+def _analysis_cache_fields(stats: object | None, *, reason: str) -> dict[str, object]:
+    # Only counts, a ratio, seconds, and a fixed reason token: never paths,
+    # fingerprints, or job content.
+    if stats is None:
+        return {"enabled": "false", "reason": safe_token(reason)}
+    rows = _count(getattr(stats, "rows", 0))
+    hits = _count(getattr(stats, "hits", 0))
+    return {
+        "enabled": "true",
+        "rows": rows,
+        "hits": hits,
+        "misses": _count(getattr(stats, "misses", 0)),
+        "invalid": _count(getattr(stats, "invalid", 0)),
+        "writes": _count(getattr(stats, "writes", 0)),
+        "hit_rate": f"{min(1.0, hits / rows) if rows else 0.0:.3f}",
+        "lookup_seconds": _seconds(getattr(stats, "lookup_seconds", 0.0)),
+        "static_seconds": _seconds(getattr(stats, "static_analysis_seconds", 0.0)),
+        "scoring_seconds": _seconds(getattr(stats, "scoring_seconds", 0.0)),
+    }
 
 
 def _family_lines(families: Mapping[object, object]) -> list[str]:

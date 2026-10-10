@@ -478,7 +478,26 @@ exit code), and per ATS-family aggregates (`kind=family`: tasks, total/max
 seconds, failures, degraded, rows, and request/retry/Workday-detail counters
 where the adapter already reports them). They carry no company names, URLs,
 titles, or user data, never enable the watcher's verbose INFO logging, and
-never change the exit status.
+never change the exit status. When the analysis cache below is configured, one
+`kind=cache cache=analysis` line adds its rows, hits, misses, invalid entries,
+writes, hit rate, and lookup/static/scoring seconds, or `enabled=false` with a
+fixed `reason` when that run fell back to uncached analysis.
+
+**Analysis cache (off by default).** Setting `HOSTED_ANALYSIS_CACHE_PATH`, for
+example to `/data/analysis-cache.sqlite`, lets snapshot replay reuse the
+watcher's static-analysis cache (`app.hosted.analysis_cache`), so unchanged
+postings skip the expensive date-independent analysis while scoring, IDs,
+dedupe, mapping, matching, and notifications are recomputed exactly as before.
+The file is a rebuildable SQLite cache, never part of the snapshot or its
+fingerprint, and needs no migration. On Railway it only helps on a persistent
+volume mounted on the `hosted-collection` service; without one every run starts
+cold. Entries are keyed by a version derived from the static-analysis source
+code, so a deploy that changes that code invalidates old entries without any
+manual clearing; unused entries expire after 30 days. The cache is fail-open:
+an unreadable code fingerprint, a missing, corrupt, locked, or unwritable file,
+or any cache error logs one warning naming only a reason and exception type and
+runs the normal uncached analysis with identical results; it never fails the
+import. To roll back, unset the variable; deleting the file is optional.
 
 **Import audit.** After a committed import, both this command and the offline
 snapshot CLI print two bounded `HOSTED-AUDIT` lines (`app.hosted.import_audit`).
@@ -701,6 +720,8 @@ a database containing data that must be retained.
 - `HOSTED_SMTP_TIMEOUT_SECONDS` (also bounds the Resend HTTPS request)
 - `VITE_HOSTED_API_MODE=live`
 - `VITE_HOSTED_API_BASE_URL` (optional with a same-origin proxy)
+- `HOSTED_ANALYSIS_CACHE_PATH` (optional; unset or blank disables the hosted
+  analysis cache, which is the default; see "Analysis cache" above)
 
 `app.hosted.collect_and_import` needs only the database URL.
 `app.hosted.deliver_notifications` needs the database URL, the mail provider
