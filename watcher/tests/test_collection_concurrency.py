@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+import watcher.collection_concurrency as collection_concurrency
 from watcher.collection_concurrency import (
     DIRECT_ORIGIN_HOSTS,
     CollectionScheduler,
@@ -1294,3 +1295,536 @@ def test_scheduler_metrics_accumulate_across_phases():
     assert metrics.tasks_failed == 0
     assert metrics.executor_shutdown_clean is True
     assert metrics.as_dict()["mode"] == COLLECTION_MODE_CONCURRENT
+
+
+# --- capacity-aware dispatch ----------------------------------------------
+
+# The production limits: four workers, two Workday tasks, two per origin/provider.
+PRODUCTION_LIMITS = CollectionConcurrencyCfg(
+    mode=COLLECTION_MODE_CONCURRENT,
+    max_workers=4,
+    workday_max_concurrency=2,
+    per_origin_max_concurrency=2,
+)
+# Only reached when a regression stalls the scheduler; passing runs never wait.
+STALL_TIMEOUT = 5.0
+# Gates outlast every start wait, so a blocked task can never be mistaken for
+# one that started only after a gate timed out.
+GATE_TIMEOUT = 3 * STALL_TIMEOUT
+
+
+class GateLog:
+    """Records task starts and holds tasks until their gate opens."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._started = {}
+        self.order = []
+
+    def _event(self, label):
+        with self._lock:
+            return self._started.setdefault(label, threading.Event())
+
+    def run(self, label, gate=None, *, error=None):
+        def body():
+            with self._lock:
+                self.order.append(label)
+            self._event(label).set()
+            if gate is not None and not gate.wait(timeout=GATE_TIMEOUT):
+                raise RuntimeError(f"gate for {label} never opened")
+            if error is not None:
+                raise error
+            return label
+
+        return body
+
+    def wait_started(self, *labels):
+        return all(self._event(label).wait(timeout=STALL_TIMEOUT) for label in labels)
+
+    def is_started(self, label):
+        return self._event(label).is_set()
+
+
+def workday_task(log, label, gate=None, **kwargs):
+    return CollectionTask(
+        key=label,
+        origin=f"https://{label}.wd5.myworkdayjobs.com",
+        provider="workday",
+        run=log.run(label, gate, **kwargs),
+        workday=True,
+    )
+
+
+def plain_task(log, label, *, provider, origin, gate=None, **kwargs):
+    return CollectionTask(
+        key=label,
+        origin=origin,
+        provider=provider,
+        run=log.run(label, gate, **kwargs),
+    )
+
+
+class BackgroundRun:
+    """Runs the scheduler off the test thread so the test can open gates."""
+
+    def __init__(self, tasks, concurrency, *, observer=None):
+        self.observer = observer or ConcurrencyObserver()
+        self._outcome = None
+        self._error = None
+        self._thread = threading.Thread(
+            target=self._run, args=(tasks, concurrency), daemon=True
+        )
+        self._thread.start()
+
+    def _run(self, tasks, concurrency):
+        try:
+            self._outcome = run_collection_tasks(
+                tasks, concurrency=concurrency, observer=self.observer
+            )
+        except BaseException as exc:  # re-raised on the test thread by finish()
+            self._error = exc
+
+    def finish(self, *gates):
+        for gate in gates:
+            gate.set()
+        self._thread.join(timeout=STALL_TIMEOUT)
+        assert not self._thread.is_alive(), "scheduler stalled"
+        if self._error is not None:
+            raise self._error
+        return self._outcome
+
+
+def available_permits(semaphore):
+    taken = 0
+    while semaphore.acquire(blocking=False):
+        taken += 1
+    for _ in range(taken):
+        semaphore.release()
+    return taken
+
+
+def assert_clean_run(run, metrics):
+    assert metrics.limits_within_bounds() is True
+    assert metrics.executor_shutdown_clean is True
+    assert run.observer.leaked_scopes() == ()
+
+
+def test_held_workday_slots_leave_other_workers_free_for_eligible_tasks():
+    log = GateLog()
+    workday_gate = threading.Event()
+    greenhouse_gate = threading.Event()
+    greenhouse = "https://boards-api.greenhouse.io"
+    tasks = [workday_task(log, f"wd{index}", workday_gate) for index in range(4)] + [
+        plain_task(
+            log, f"gh{index}", provider="greenhouse", origin=greenhouse, gate=greenhouse_gate
+        )
+        for index in range(4)
+    ]
+
+    run = BackgroundRun(tasks, PRODUCTION_LIMITS)
+    try:
+        assert log.wait_started("wd0", "wd1")
+        # Both Workday slots are held, yet the two remaining workers must run
+        # eligible Greenhouse work rather than wait for Workday capacity.
+        assert log.wait_started("gh0", "gh1")
+        assert run.observer.peak("global") == 4
+        greenhouse_gate.set()
+        assert log.wait_started("gh2", "gh3")
+        assert not log.is_started("wd2")
+        assert not log.is_started("wd3")
+    finally:
+        results, metrics = run.finish(greenhouse_gate, workday_gate)
+
+    assert [result.value for result in results] == [
+        "wd0", "wd1", "wd2", "wd3", "gh0", "gh1", "gh2", "gh3"
+    ]
+    assert metrics.tasks_failed == 0
+    assert metrics.max_observed_global == 4
+    assert metrics.max_observed_workday == 2
+    assert_clean_run(run, metrics)
+
+
+def test_held_provider_slots_across_origins_leave_other_workers_free():
+    log = GateLog()
+    icims_gate = threading.Event()
+    lever_gate = threading.Event()
+    tasks = [
+        plain_task(
+            log,
+            f"ic{index}",
+            provider="icims",
+            origin=f"https://careers-{index}.icims.com",
+            gate=icims_gate,
+        )
+        for index in range(4)
+    ] + [
+        plain_task(
+            log, f"lv{index}", provider="lever", origin="https://api.lever.co", gate=lever_gate
+        )
+        for index in range(4)
+    ]
+
+    run = BackgroundRun(tasks, PRODUCTION_LIMITS)
+    try:
+        assert log.wait_started("ic0", "ic1")
+        # The provider limit spans all four iCIMS hosts; Lever must not wait.
+        assert log.wait_started("lv0", "lv1")
+        assert run.observer.peak("global") == 4
+        lever_gate.set()
+        assert log.wait_started("lv2", "lv3")
+        assert not log.is_started("ic2")
+        assert not log.is_started("ic3")
+    finally:
+        results, metrics = run.finish(lever_gate, icims_gate)
+
+    assert [result.value for result in results] == [
+        "ic0", "ic1", "ic2", "ic3", "lv0", "lv1", "lv2", "lv3"
+    ]
+    assert metrics.max_observed_provider == 2
+    assert_clean_run(run, metrics)
+
+
+def test_partial_reservation_rolls_back_when_workday_capacity_is_full():
+    limiter = collection_concurrency._ScopeLimiter(per_origin_limit=2, workday_limit=1)
+    first = CollectionTask(key="a", origin="o1", provider="workday", run=lambda: None, workday=True)
+    second = CollectionTask(key="b", origin="o2", provider="workday", run=lambda: None, workday=True)
+    provider = limiter._semaphore(limiter._providers, "workday")
+    second_origin = limiter._semaphore(limiter._origins, "o2")
+
+    held = limiter.try_acquire(first)
+    assert held is not None and len(held) == 3
+    for _ in range(100):
+        # Provider and origin succeed, then Workday fails: both must roll back.
+        assert limiter.try_acquire(second) is None
+    assert available_permits(provider) == 1
+    assert available_permits(second_origin) == 2
+    assert available_permits(limiter._workday) == 0
+
+    limiter.release(held)
+    assert available_permits(provider) == 2
+    assert available_permits(limiter._semaphore(limiter._origins, "o1")) == 2
+    assert available_permits(limiter._workday) == 1
+
+
+def test_partial_reservation_rolls_back_when_origin_or_provider_is_full():
+    limiter = collection_concurrency._ScopeLimiter(per_origin_limit=1, workday_limit=1)
+    holder = CollectionTask(key="h", origin="shared", provider="p1", run=lambda: None)
+    same_origin = CollectionTask(key="o", origin="shared", provider="p2", run=lambda: None)
+    same_provider = CollectionTask(key="p", origin="other", provider="p1", run=lambda: None)
+
+    held = limiter.try_acquire(holder)
+    assert held is not None and len(held) == 2
+    assert limiter.try_acquire(same_origin) is None
+    assert available_permits(limiter._semaphore(limiter._providers, "p2")) == 1
+    assert limiter.try_acquire(same_provider) is None
+    assert available_permits(limiter._semaphore(limiter._origins, "other")) == 1
+
+    limiter.release(held)
+    assert limiter.try_acquire(same_origin) is not None
+
+
+def test_dispatcher_sleeps_while_no_pending_task_has_capacity(monkeypatch):
+    calls = []
+    original = collection_concurrency._ScopeLimiter.try_acquire
+
+    def counting(self, task):
+        calls.append(task.key)
+        return original(self, task)
+
+    monkeypatch.setattr(collection_concurrency._ScopeLimiter, "try_acquire", counting)
+    log = GateLog()
+    gate = threading.Event()
+    tasks = [workday_task(log, f"wd{index}", gate) for index in range(5)]
+
+    run = BackgroundRun(tasks, PRODUCTION_LIMITS)
+    try:
+        assert log.wait_started("wd0", "wd1")
+        # Nothing can be dispatched while both Workday slots are held. A
+        # spinning dispatcher would retry reservations thousands of times here.
+        time.sleep(0.3)
+    finally:
+        results, metrics = run.finish(gate)
+
+    assert [result.value for result in results] == [f"wd{index}" for index in range(5)]
+    # Each wakeup scans the pending tasks at most once per dispatch.
+    assert len(calls) <= (len(tasks) + 1) ** 2
+    assert_clean_run(run, metrics)
+
+
+def test_unschedulable_tasks_fail_instead_of_stalling(monkeypatch):
+    monkeypatch.setattr(
+        collection_concurrency._ScopeLimiter, "try_acquire", lambda self, task: None
+    )
+    log = GateLog()
+    tasks = [
+        plain_task(log, "a", provider="p", origin="https://a.test"),
+        plain_task(log, "b", provider="p", origin="https://b.test"),
+    ]
+
+    run = BackgroundRun(tasks, PRODUCTION_LIMITS)
+    results, metrics = run.finish()
+
+    assert log.order == []
+    assert [result.failed for result in results] == [True, True]
+    assert all(
+        isinstance(result.error, collection_concurrency.CollectionConcurrencyError)
+        for result in results
+    )
+    assert metrics.tasks_failed == 2
+    assert_clean_run(run, metrics)
+
+
+def test_worker_exceptions_release_capacity_for_remaining_tasks():
+    strict = CollectionConcurrencyCfg(
+        mode=COLLECTION_MODE_CONCURRENT,
+        max_workers=4,
+        workday_max_concurrency=1,
+        per_origin_max_concurrency=1,
+    )
+    log = GateLog()
+    shared = "https://shared.test"
+    tasks = [
+        workday_task(log, "wd0", error=ValueError("boom")),
+        workday_task(log, "wd1"),
+        workday_task(log, "wd2"),
+        plain_task(log, "s0", provider="p", origin=shared, error=KeyError("boom")),
+        plain_task(log, "s1", provider="p", origin=shared),
+    ]
+
+    run = BackgroundRun(tasks, strict)
+    results, metrics = run.finish()
+
+    assert [result.failed for result in results] == [True, False, False, True, False]
+    assert [result.error_label() for result in results if result.failed] == [
+        "valueerror",
+        "keyerror",
+    ]
+    assert [result.value for result in results if not result.failed] == ["wd1", "wd2", "s1"]
+    assert metrics.tasks_failed == 2
+    assert_clean_run(run, metrics)
+
+
+def test_observer_failure_still_releases_the_reservation():
+    class FailingStartObserver(ConcurrencyObserver):
+        def start(self, task):
+            if task.key == "boom":
+                raise RuntimeError("observer failure")
+            super().start(task)
+
+    strict = CollectionConcurrencyCfg(
+        mode=COLLECTION_MODE_CONCURRENT,
+        max_workers=2,
+        workday_max_concurrency=1,
+        per_origin_max_concurrency=1,
+    )
+    log = GateLog()
+    tasks = [
+        plain_task(log, "boom", provider="p", origin="https://shared.test"),
+        plain_task(log, "after", provider="p", origin="https://shared.test"),
+    ]
+
+    run = BackgroundRun(tasks, strict, observer=FailingStartObserver())
+    results, metrics = run.finish()
+
+    assert results[0].failed is True
+    assert results[0].error_label() == "runtimeerror"
+    assert results[1].value == "after"
+    assert metrics.executor_shutdown_clean is True
+
+
+@pytest.mark.parametrize(
+    "workers,workday,per_origin",
+    [(4, 2, 2), (4, 1, 2), (3, 1, 1), (6, 3, 4), (2, 2, 2)],
+)
+def test_randomized_workloads_never_exceed_any_limit(workers, workday, per_origin):
+    import random
+
+    concurrency = CollectionConcurrencyCfg(
+        mode=COLLECTION_MODE_CONCURRENT,
+        max_workers=workers,
+        workday_max_concurrency=workday,
+        per_origin_max_concurrency=per_origin,
+    )
+    rng = random.Random(f"{workers}-{workday}-{per_origin}")
+    probe = ScopeProbe()
+
+    def make_task(index):
+        kind = rng.choice(["workday", "icims", "greenhouse", "lever", "solo"])
+        if kind == "workday":
+            provider, origin = "workday", f"https://t{rng.randrange(6)}.wd5.myworkdayjobs.com"
+        elif kind == "icims":
+            provider, origin = "icims", f"https://careers-{rng.randrange(4)}.icims.com"
+        elif kind == "greenhouse":
+            provider, origin = "greenhouse", "https://boards-api.greenhouse.io"
+        elif kind == "lever":
+            provider, origin = "lever", "https://api.lever.co"
+        else:
+            provider, origin = f"solo{index}", f"https://solo{index}.test"
+        delay = rng.choice([0.0, 0.001, 0.003])
+        scopes = ("any", f"provider:{provider}", f"origin:{origin}") + (
+            ("workday",) if kind == "workday" else ()
+        )
+
+        def body():
+            probe.enter(*scopes)
+            try:
+                time.sleep(delay)
+                return index
+            finally:
+                probe.exit(*scopes)
+
+        return CollectionTask(
+            key=f"t{index}",
+            origin=origin,
+            provider=provider,
+            run=body,
+            workday=kind == "workday",
+        )
+
+    tasks = [make_task(index) for index in range(48)]
+    observer = ConcurrencyObserver()
+    results, metrics = run_collection_tasks(
+        tasks, concurrency=concurrency, observer=observer
+    )
+
+    # Every task ran exactly once and results follow the plan order.
+    assert [result.value for result in results] == list(range(48))
+    assert len(probe.starts) == 48
+    assert probe.peak["any"] <= workers
+    assert probe.peak.get("workday", 0) <= workday
+    for scope, peak in probe.peak.items():
+        if scope.startswith(("provider:", "origin:")):
+            assert peak <= per_origin, scope
+    assert metrics.tasks_failed == 0
+    assert metrics.limits_within_bounds() is True
+    assert metrics.executor_shutdown_clean is True
+    assert observer.leaked_scopes() == ()
+
+
+def test_capacity_aware_dispatch_keeps_shared_workday_pacing():
+    pacer = WorkdayPacer(min_interval_seconds=0.05)
+    log = GateLog()
+
+    def paced(label):
+        def body():
+            pacer.wait_for_tenant(label)
+            return label
+
+        return body
+
+    tasks = [
+        CollectionTask(
+            key=f"wd{index}",
+            origin=f"https://wd{index}.wd5.myworkdayjobs.com",
+            provider="workday",
+            run=paced(f"wd{index}"),
+            workday=True,
+        )
+        for index in range(5)
+    ] + [
+        plain_task(log, f"gh{index}", provider="greenhouse", origin="https://boards-api.greenhouse.io")
+        for index in range(3)
+    ]
+
+    results, metrics = run_collection_tasks(tasks, concurrency=PRODUCTION_LIMITS)
+
+    telemetry = pacer.start_telemetry()
+    assert telemetry.start_count == 5
+    assert telemetry.pacing_violation_count == 0
+    assert telemetry.minimum_spacing_seconds >= 0.05
+    assert [result.value for result in results] == [
+        "wd0", "wd1", "wd2", "wd3", "wd4", "gh0", "gh1", "gh2"
+    ]
+    assert metrics.max_observed_workday <= 2
+
+
+def test_dispatch_priority_moves_workday_first_and_keeps_relative_order():
+    def task(key, provider, origin):
+        return CollectionTask(
+            key=key,
+            origin=origin,
+            provider=provider,
+            run=lambda: None,
+            workday=provider == "workday",
+        )
+
+    greenhouse = "https://boards-api.greenhouse.io"
+    tasks = [
+        task("g0", "greenhouse", greenhouse),
+        task("w0", "workday", "https://a.wd5.myworkdayjobs.com"),
+        task("g1", "greenhouse", greenhouse),
+        task("l0", "lever", "https://api.lever.co"),
+        task("w1", "workday", "https://b.wd5.myworkdayjobs.com"),
+        task("w2", "workday", "https://a.wd5.myworkdayjobs.com"),
+    ]
+
+    base = dispatch_order(tasks)
+    priority = collection_concurrency.dispatch_priority(tasks)
+
+    # dispatch_order itself is unchanged: round-robin over (provider, origin).
+    assert base == (0, 3, 1, 4, 2, 5)
+    assert priority == (1, 4, 5, 0, 3, 2)
+    assert priority == tuple(
+        [index for index in base if tasks[index].workday]
+        + [index for index in base if not tasks[index].workday]
+    )
+    assert collection_concurrency.dispatch_priority([]) == ()
+
+
+def test_results_keep_plan_order_when_workday_tasks_start_first():
+    single = CollectionConcurrencyCfg(
+        mode=COLLECTION_MODE_CONCURRENT,
+        max_workers=1,
+        workday_max_concurrency=1,
+        per_origin_max_concurrency=1,
+    )
+    log = GateLog()
+    tasks = [
+        plain_task(log, "a", provider="greenhouse", origin="https://boards-api.greenhouse.io"),
+        workday_task(log, "b"),
+        plain_task(log, "c", provider="lever", origin="https://api.lever.co"),
+        workday_task(log, "d"),
+    ]
+
+    results, _metrics = run_collection_tasks(tasks, concurrency=single)
+
+    assert log.order == ["b", "d", "a", "c"]
+    assert [result.index for result in results] == [0, 1, 2, 3]
+    assert [result.value for result in results] == ["a", "b", "c", "d"]
+
+
+def test_results_keep_plan_order_when_the_first_task_finishes_last():
+    log = GateLog()
+    gate = threading.Event()
+    tasks = [
+        plain_task(log, "slow", provider="p1", origin="https://p1.test", gate=gate),
+        plain_task(log, "fast1", provider="p2", origin="https://p2.test"),
+        plain_task(log, "fast2", provider="p3", origin="https://p3.test"),
+    ]
+
+    run = BackgroundRun(tasks, PRODUCTION_LIMITS)
+    try:
+        # The fast tasks complete while the first planned task is still held.
+        assert log.wait_started("slow", "fast1", "fast2")
+    finally:
+        results, metrics = run.finish(gate)
+
+    assert [result.value for result in results] == ["slow", "fast1", "fast2"]
+    assert_clean_run(run, metrics)
+
+
+def test_production_limits_produce_the_serial_batch_exactly(tmp_path):
+    serial_batch = collect(mixed_config(SERIAL))
+    concurrent_stats = CollectionStats()
+    concurrent_batch = collect(mixed_config(PRODUCTION_LIMITS), stats=concurrent_stats)
+
+    assert batch_digest(concurrent_batch) == batch_digest(serial_batch)
+    save_collection_snapshot(serial_batch, tmp_path / "serial.json.gz")
+    save_collection_snapshot(concurrent_batch, tmp_path / "concurrent.json.gz")
+    assert (tmp_path / "concurrent.json.gz").read_bytes() == (
+        tmp_path / "serial.json.gz"
+    ).read_bytes()
+    metrics = concurrent_stats.collection_concurrency
+    assert metrics.workday_limit == 2
+    assert metrics.limits_within_bounds() is True
+    assert metrics.executor_shutdown_clean is True

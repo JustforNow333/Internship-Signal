@@ -17,9 +17,11 @@ Every task must satisfy *all* applicable limits at once:
   hosts cannot exceed the per-origin bound just by using different companies),
 * the Workday limit (``WATCHER_WORKDAY_MAX_CONCURRENCY``) for Workday tasks.
 
-The tightest applicable bound wins. Results are always returned in submission
-order so downstream row ordering, dedupe precedence, and diagnostics stay
-byte-identical to serial collection.
+The tightest applicable bound wins. A task is handed to a worker only after
+every scope it needs has been reserved, so a worker never waits for capacity
+while eligible work for other scopes is queued behind it. Results are always
+returned in submission order so downstream row ordering, dedupe precedence, and
+diagnostics stay byte-identical to serial collection.
 """
 
 from __future__ import annotations
@@ -365,7 +367,7 @@ class ConcurrencyObserver:
 
 @dataclass
 class _ScopeLimiter:
-    """Fixed-order semaphore acquisition, which makes deadlock impossible."""
+    """All-or-nothing, nonblocking scope reservation, so nothing ever waits."""
 
     per_origin_limit: int
     workday_limit: int
@@ -389,9 +391,14 @@ class _ScopeLimiter:
                 registry[key] = semaphore
             return semaphore
 
-    def acquired(self, task: CollectionTask) -> list[threading.Semaphore]:
-        # Always provider -> origin -> workday. A single global ordering means
-        # no two tasks can hold resources the other needs.
+    def try_acquire(self, task: CollectionTask) -> list[threading.Semaphore] | None:
+        """Reserve every scope ``task`` needs, or none of them.
+
+        Returns the held semaphores, or ``None`` after rolling back any partial
+        reservation when one scope is already full. It never blocks, so no
+        caller can hold one scope while waiting for another.
+        """
+
         ordered = [
             self._semaphore(self._providers, task.provider),
             self._semaphore(self._origins, task.origin),
@@ -401,11 +408,12 @@ class _ScopeLimiter:
         held: list[threading.Semaphore] = []
         try:
             for semaphore in ordered:
-                semaphore.acquire()
+                if not semaphore.acquire(blocking=False):
+                    self.release(held)
+                    return None
                 held.append(semaphore)
         except BaseException:
-            for semaphore in reversed(held):
-                semaphore.release()
+            self.release(held)
             raise
         return held
 
@@ -439,6 +447,101 @@ def dispatch_order(tasks: Sequence[CollectionTask]) -> tuple[int, ...]:
             break
         position += 1
     return tuple(order)
+
+
+def dispatch_priority(tasks: Sequence[CollectionTask]) -> tuple[int, ...]:
+    """Return :func:`dispatch_order` with Workday tasks moved to the front.
+
+    Workday tenants form the longest paced chain, so offering them capacity
+    first keeps that critical path busy while other workers take the remaining
+    work. Relative order within the Workday and non-Workday groups is
+    unchanged, and result order still follows submission index.
+    """
+
+    order = dispatch_order(tasks)
+    return tuple(
+        [index for index in order if tasks[index].workday]
+        + [index for index in order if not tasks[index].workday]
+    )
+
+
+class _CapacityDispatcher:
+    """Submits a task to the pool only once all of its scopes are reserved.
+
+    The dispatcher thread offers free capacity to the first pending task, in
+    priority order, whose scopes are all available. When nothing fits it
+    sleeps until a running task releases capacity, so it never busy-waits and
+    a worker thread never sits blocked on a full scope.
+    """
+
+    def __init__(self, limiter: _ScopeLimiter, max_workers: int) -> None:
+        self._limiter = limiter
+        self._max_workers = max_workers
+        self._capacity_freed = threading.Condition()
+        self._running = 0
+
+    def submit_all(
+        self,
+        executor: ThreadPoolExecutor,
+        task_list: Sequence[CollectionTask],
+        observer: ConcurrencyObserver,
+    ) -> tuple[dict[int, Future], list[int]]:
+        """Return submitted futures by index plus any unschedulable indexes."""
+
+        pending = list(dispatch_priority(task_list))
+        futures: dict[int, Future] = {}
+        with self._capacity_freed:
+            while pending:
+                reserved = (
+                    self._reserve_next(pending, task_list)
+                    if self._running < self._max_workers
+                    else None
+                )
+                if reserved is not None:
+                    position, held = reserved
+                    index = pending.pop(position)
+                    futures[index] = self._submit(
+                        executor, task_list[index], held, observer
+                    )
+                    continue
+                if self._running == 0:
+                    # Every scope is free yet nothing fits. Validated limits
+                    # make this unreachable; never wait forever if it happens.
+                    break
+                self._capacity_freed.wait()
+        return futures, pending
+
+    def _reserve_next(
+        self,
+        pending: list[int],
+        task_list: Sequence[CollectionTask],
+    ) -> tuple[int, list[threading.Semaphore]] | None:
+        for position, index in enumerate(pending):
+            held = self._limiter.try_acquire(task_list[index])
+            if held is not None:
+                return position, held
+        return None
+
+    def _submit(
+        self,
+        executor: ThreadPoolExecutor,
+        task: CollectionTask,
+        held: list[threading.Semaphore],
+        observer: ConcurrencyObserver,
+    ) -> Future:
+        self._running += 1
+        try:
+            return executor.submit(_run_reserved, task, held, observer, self._finished)
+        except BaseException:
+            self._running -= 1
+            _ScopeLimiter.release(held)
+            raise
+
+    def _finished(self, held: Iterable[threading.Semaphore]) -> None:
+        _ScopeLimiter.release(held)
+        with self._capacity_freed:
+            self._running -= 1
+            self._capacity_freed.notify()
 
 
 class CollectionScheduler:
@@ -516,17 +619,15 @@ def _execute_tasks(
         per_origin_limit=concurrency.per_origin_max_concurrency,
         workday_limit=concurrency.workday_max_concurrency,
     )
+    dispatcher = _CapacityDispatcher(limiter, concurrency.max_workers)
     prefix = f"watcher-collect-{uuid.uuid4().hex[:8]}"
     results_by_index: dict[int, TaskResult] = {}
-    futures: dict[Future, int] = {}
     with ThreadPoolExecutor(
         max_workers=concurrency.max_workers,
         thread_name_prefix=prefix,
     ) as executor:
-        for index in dispatch_order(task_list):
-            task = task_list[index]
-            futures[executor.submit(_run_limited, task, limiter, observer)] = index
-        for future, index in futures.items():
+        futures, unschedulable = dispatcher.submit_all(executor, task_list, observer)
+        for index, future in futures.items():
             task = task_list[index]
             try:
                 value, error = future.result()
@@ -542,6 +643,17 @@ def _execute_tasks(
                 value=value,
                 error=error,
             )
+    if unschedulable:
+        LOGGER.error(
+            "COLLECTION-CONCURRENCY %d task(s) could not be scheduled",
+            len(unschedulable),
+        )
+    for index in unschedulable:
+        results_by_index[index] = TaskResult(
+            index=index,
+            task=task_list[index],
+            error=CollectionConcurrencyError("no scope capacity for collection task"),
+        )
     results = [results_by_index[index] for index in range(len(task_list))]
     return results, _executor_shutdown_clean(prefix)
 
@@ -559,12 +671,14 @@ def _run_serial(
     return TaskResult(index=index, task=task, value=value, error=error)
 
 
-def _run_limited(
+def _run_reserved(
     task: CollectionTask,
-    limiter: _ScopeLimiter,
+    held: list[threading.Semaphore],
     observer: ConcurrencyObserver,
+    finished: Callable[[Iterable[threading.Semaphore]], None],
 ) -> tuple[object, BaseException | None]:
-    held = limiter.acquired(task)
+    # Scopes were reserved by the dispatcher; release them and wake it however
+    # this task ends, including when the observer or task raises.
     try:
         observer.start(task)
         try:
@@ -572,7 +686,7 @@ def _run_limited(
         finally:
             observer.finish(task)
     finally:
-        _ScopeLimiter.release(held)
+        finished(held)
 
 
 def _invoke(task: CollectionTask) -> tuple[object, BaseException | None]:
