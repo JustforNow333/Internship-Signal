@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -31,7 +32,7 @@ from app.hosted.models import (
 )
 from app.hosted.snapshot_jobs import replay_snapshot_jobs, snapshot_sha256
 from psycopg import sql
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
@@ -269,7 +270,7 @@ def test_phase2_migration_creates_postgresql_tables_and_jsonb(
             "SELECT version_num FROM alembic_version"
         ).scalar_one()
     assert source_metadata_type == "jsonb"
-    assert revision == "20260926_0007"
+    assert revision == "20261011_0008"
     database.dispose()
 
 
@@ -1859,3 +1860,168 @@ def test_failed_import_rolls_back_a_verified_backstop_closure(import_service) ->
     stored = _stored_job(database)
     assert _protected_values(stored) == _protected_values(before)
     assert stored.last_seen_at == before.last_seen_at
+
+
+# --- revision 20261011_0008 constraints ----------------------------------------
+
+
+def _insert_identity(connection, job_id, *, key, company="capital-one", kind="requisition", digest=None):
+    connection.execute(
+        text(
+            "INSERT INTO hosted_job_identities (id, job_id, company_id, kind, "
+            "identity_key, identity_digest, first_seen_at, last_seen_at) "
+            "VALUES (:id, :job, :company, :kind, :key, :digest, :now, :now)"
+        ),
+        {
+            "id": uuid.uuid4(),
+            "job": job_id,
+            "company": company,
+            "kind": kind,
+            "key": key,
+            "digest": digest or hashlib.sha256(key.encode("utf-8")).hexdigest(),
+            "now": datetime(2026, 10, 11, tzinfo=UTC),
+        },
+    )
+
+
+def _rejects(database: HostedDatabase, statement: str, params=None) -> None:
+    with pytest.raises(IntegrityError):
+        with database.engine.begin() as connection:
+            connection.execute(text(statement), params or {})
+
+
+def test_job_identity_and_lifecycle_constraints(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(
+        service,
+        [final_job(), final_job(id="watcher-job-2", title="Frontend Intern")],
+        "a",
+    )
+    with database.session_factory() as db:
+        first, second = (
+            job.id for job in db.scalars(select(HostedJob).order_by(HostedJob.watcher_job_id))
+        )
+
+    with database.engine.begin() as connection:
+        _insert_identity(connection, first, key="greenhouse|acme|4455")
+        # The same key at another company, or as another kind, is distinct.
+        _insert_identity(connection, second, key="greenhouse|acme|4455", company="stripe")
+        _insert_identity(connection, second, key="greenhouse|acme|4455", kind="url")
+        _insert_identity(connection, first, key="x" * 4096, kind="listing")
+
+    def identity(job_id, **kwargs):
+        def insert(connection):
+            _insert_identity(connection, job_id, **kwargs)
+
+        with pytest.raises(IntegrityError):
+            with database.engine.begin() as connection:
+                insert(connection)
+
+    # One key names at most one job per company and kind.
+    identity(second, key="greenhouse|acme|4455")
+    identity(first, key="greenhouse|acme|4455")
+    # The digest must be the SHA-256 of the key; kinds and lengths are bounded.
+    identity(first, key="greenhouse|acme|1", digest="0" * 64)
+    identity(first, key="greenhouse|acme|2", kind="title")
+    identity(first, key="", digest=hashlib.sha256(b"").hexdigest())
+    identity(first, key="x" * 4097, kind="listing")
+    identity(uuid.uuid4(), key="greenhouse|acme|3")
+
+    # Identity rows protect their job from deletion.
+    _rejects(database, "DELETE FROM hosted_jobs WHERE id = :id", {"id": first})
+
+    open_job = {"id": first}
+    _rejects(database, "UPDATE hosted_jobs SET absent_complete_runs = -1 WHERE id = :id", open_job)
+    _rejects(database, "UPDATE hosted_jobs SET is_open = false, closure_reason = 'gone' WHERE id = :id", open_job)
+    _rejects(database, "UPDATE hosted_jobs SET closure_reason = 'deadline_passed' WHERE id = :id", open_job)
+    _rejects(database, "UPDATE hosted_jobs SET superseded_by_job_id = :other WHERE id = :id", {"id": first, "other": second})
+    _rejects(
+        database,
+        "UPDATE hosted_jobs SET is_open = false, closure_reason = 'superseded', "
+        "superseded_by_job_id = id WHERE id = :id",
+        open_job,
+    )
+    _rejects(
+        database,
+        "UPDATE hosted_jobs SET is_open = false, closure_reason = 'superseded', "
+        "superseded_by_job_id = :missing WHERE id = :id",
+        {"id": first, "missing": uuid.uuid4()},
+    )
+    with database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE hosted_jobs SET is_open = false, closed_at = last_seen_at, "
+                "closure_reason = 'superseded', superseded_by_job_id = :other "
+                "WHERE id = :id"
+            ),
+            {"id": first, "other": second},
+        )
+    # A job others point at cannot be deleted either.
+    _rejects(database, "DELETE FROM hosted_jobs WHERE id = :id", {"id": second})
+
+
+def test_source_observation_constraints(import_service) -> None:
+    service, database, _clock = import_service
+    run_id = import_jobs(service, [final_job()], "a").run_id
+    columns = (
+        "id, import_run_id, source_key, source_kind, adapter, observed_at, "
+        "attempted, succeeded, complete, rows_returned, identity_count"
+    )
+
+    def observation(**overrides):
+        values = {
+            "id": uuid.uuid4(),
+            "run": run_id,
+            "key": "company:acme:direct:greenhouse",
+            "kind": "direct",
+            "adapter": "greenhouse",
+            "now": datetime(2026, 10, 11, tzinfo=UTC),
+            "attempted": True,
+            "succeeded": True,
+            "complete": True,
+            "rows": 3,
+            "identities": 3,
+        }
+        values.update(overrides)
+        return (
+            f"INSERT INTO hosted_source_observations ({columns}) VALUES "
+            "(:id, :run, :key, :kind, :adapter, :now, :attempted, :succeeded, "
+            ":complete, :rows, :identities)",
+            values,
+        )
+
+    with database.engine.begin() as connection:
+        connection.execute(text(observation()[0]), observation()[1])
+        connection.execute(
+            text(observation(key="github_feed:abc", kind="github_feed")[0]),
+            observation(key="github_feed:abc", kind="github_feed")[1],
+        )
+        statement, values = observation(
+            key="company:other:direct:workday",
+            attempted=False,
+            succeeded=None,
+            complete=None,
+            rows=None,
+            identities=None,
+        )
+        connection.execute(text(statement), values)
+
+    for overrides in (
+        {},  # one observation per source per run
+        {"key": "k1", "kind": "rss"},
+        {"key": "k2", "succeeded": False, "complete": True},
+        {"key": "k3", "succeeded": None, "complete": True},
+        {"key": "k4", "attempted": False},
+        {"key": "k5", "rows": -1},
+        {"key": "k6", "identities": -1},
+        {"key": "k7", "run": uuid.uuid4()},
+    ):
+        _rejects(database, *observation(**overrides))
+
+    # Observations belong to their run.
+    with database.engine.begin() as connection:
+        connection.execute(text("DELETE FROM hosted_job_import_attempts"))
+        connection.execute(
+            text("DELETE FROM hosted_job_import_runs WHERE id = :id"), {"id": run_id}
+        )
+        assert connection.scalar(text("SELECT count(*) FROM hosted_source_observations")) == 0

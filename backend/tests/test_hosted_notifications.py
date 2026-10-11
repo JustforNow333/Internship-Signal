@@ -15,7 +15,11 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from app.hosted.catalog import CompanyCatalog, PublicCompany
-from app.hosted.database import HostedDatabase, normalize_database_url
+from app.hosted.database import (
+    HostedDatabase,
+    alembic_config_url,
+    normalize_database_url,
+)
 from app.hosted.job_import import JobImportService, JobUpsertFailed
 from app.hosted.match_service import reconcile_user
 from app.hosted.models import (
@@ -1650,3 +1654,134 @@ def test_a_verified_closed_listing_closes_the_job_and_cancels_the_pending_alert(
     assert transport.messages == []
     status, reason = _sole_item_state(database)
     assert status == "cancelled" and reason in {"match_inactive", "job_closed"}
+
+
+# --- revision 20261011_0008: additive identity/lifecycle schema --------------
+
+_PRE_IDENTITY_REVISION = "20260926_0007"
+_IDENTITY_JOB_COLUMNS = (
+    "source_key",
+    "last_direct_seen_at",
+    "absent_complete_runs",
+    "closure_reason",
+    "superseded_by_job_id",
+)
+_EXISTING_TABLES = (
+    "hosted_users",
+    "hosted_user_preferences",
+    "hosted_user_company_watches",
+    "hosted_jobs",
+    "hosted_job_import_runs",
+    "hosted_job_import_attempts",
+    "hosted_user_job_matches",
+    "hosted_notification_batches",
+    "hosted_notification_items",
+    "hosted_notification_attempts",
+)
+
+
+def _existing_rows(database: HostedDatabase) -> dict[str, list[str]]:
+    """Every pre-existing row, minus the columns the revision adds."""
+
+    removed = "ARRAY[" + ", ".join(f"'{name}'" for name in _IDENTITY_JOB_COLUMNS) + "]"
+    with database.engine.connect() as connection:
+        return {
+            table: list(
+                connection.scalars(
+                    text(
+                        f"SELECT (to_jsonb(t) - {removed})::text AS row "
+                        f"FROM {table} t ORDER BY row"
+                    )
+                )
+            )
+            for table in _EXISTING_TABLES
+        }
+
+
+def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
+    notification_postgres_url, catalog, clock
+) -> None:
+    alembic = Config(str(BACKEND_DIR / "alembic.ini"))
+    alembic.set_main_option(
+        "sqlalchemy.url", alembic_config_url(notification_postgres_url)
+    )
+    database = HostedDatabase(notification_postgres_url)
+    try:
+        command.downgrade(alembic, _PRE_IDENTITY_REVISION)
+        with database.engine.connect() as connection:
+            tables = set(inspect(connection).get_table_names())
+            job_columns = {
+                column["name"] for column in inspect(connection).get_columns("hosted_jobs")
+            }
+        assert not {"hosted_job_identities", "hosted_source_observations"} & tables
+        assert not set(_IDENTITY_JOB_COLUMNS) & job_columns
+
+        # The current application runs unchanged against the old schema:
+        # import, match, enqueue, deliver, then an update and a closure.
+        with database.session_factory.begin() as db:
+            create_user(db, clock(), "sent@example.com")
+            create_user(db, clock(), "daily@example.com", frequency="daily")
+        clock.advance(hours=1)
+        first = import_jobs(
+            database, catalog, clock, [final_job(1), final_job(2)], "a"
+        )
+        assert first.counters.jobs_inserted == 2
+        assert first.counters.matches_created == 4
+        assert worker(database, clock, RecordingTransport()).run().sent == 1
+        clock.advance(hours=1)
+        closed = final_job(2, extra={"source": "direct", "active": False})
+        second = import_jobs(
+            database,
+            catalog,
+            clock,
+            [final_job(1, description="Updated description."), closed],
+            "b",
+        )
+        assert second.counters.jobs_updated == 2
+        before = _existing_rows(database)
+        assert all(before[table] for table in _EXISTING_TABLES)
+
+        command.upgrade(alembic, "head")
+        assert _existing_rows(database) == before
+        with database.engine.connect() as connection:
+            new_values = connection.execute(
+                text(
+                    "SELECT DISTINCT source_key, last_direct_seen_at, "
+                    "absent_complete_runs, closure_reason, superseded_by_job_id "
+                    "FROM hosted_jobs"
+                )
+            ).all()
+            new_counts = connection.execute(
+                text(
+                    "SELECT (SELECT count(*) FROM hosted_job_identities), "
+                    "(SELECT count(*) FROM hosted_source_observations)"
+                )
+            ).one()
+        assert new_values == [(None, None, 0, None, None)]
+        assert tuple(new_counts) == (0, 0)
+        command.check(alembic)
+
+        # The application keeps working unchanged on the new schema, without
+        # ever populating the new structures.
+        clock.advance(days=1)
+        assert worker(database, clock, RecordingTransport()).run().sent == 1
+        clock.advance(hours=1)
+        third = import_jobs(database, catalog, clock, [final_job(1), final_job(3)], "c")
+        assert third.counters.jobs_inserted == 1
+        with database.engine.connect() as connection:
+            assert connection.scalar(
+                text(
+                    "SELECT count(*) FROM hosted_jobs WHERE source_key IS NOT NULL "
+                    "OR last_direct_seen_at IS NOT NULL OR absent_complete_runs <> 0 "
+                    "OR closure_reason IS NOT NULL OR superseded_by_job_id IS NOT NULL"
+                )
+            ) == 0
+
+        populated = _existing_rows(database)
+        command.downgrade(alembic, _PRE_IDENTITY_REVISION)
+        assert _existing_rows(database) == populated
+        command.upgrade(alembic, "head")
+        assert _existing_rows(database) == populated
+    finally:
+        command.upgrade(alembic, "head")
+        database.dispose()

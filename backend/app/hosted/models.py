@@ -36,6 +36,10 @@ DEFAULT_CAREER_LEVELS_JSON = "[" + ", ".join(
 ) + "]"
 
 
+CLOSURE_REASONS = ("source_closed", "deadline_passed", "absent_from_source", "superseded")
+CLOSURE_REASON_SQL_VALUES = ", ".join(f"'{value}'" for value in CLOSURE_REASONS)
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -233,6 +237,33 @@ class HostedJob(TimestampMixin, Base):
             "career_level",
             "role_id",
         ),
+        CheckConstraint(
+            "absent_complete_runs >= 0",
+            name="absent_complete_runs_nonnegative",
+        ),
+        CheckConstraint(
+            f"closure_reason IS NULL OR closure_reason IN ({CLOSURE_REASON_SQL_VALUES})",
+            name="closure_reason",
+        ),
+        CheckConstraint(
+            "closure_reason IS NULL OR NOT is_open",
+            name="closure_reason_requires_closed",
+        ),
+        CheckConstraint(
+            "superseded_by_job_id IS NULL OR (superseded_by_job_id <> id "
+            "AND NOT is_open AND closure_reason = 'superseded')",
+            name="superseded_state",
+        ),
+        Index(
+            "ix_hosted_jobs_superseded_by_job_id",
+            "superseded_by_job_id",
+            postgresql_where=text("superseded_by_job_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_hosted_jobs_source_key",
+            "source_key",
+            postgresql_where=text("source_key IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -269,6 +300,25 @@ class HostedJob(TimestampMixin, Base):
     )
     source_metadata: Mapped[dict[str, object]] = mapped_column(
         JsonObject, nullable=False, default=dict
+    )
+    # Identity and lifecycle evidence (revision 20261011_0008), not yet read or
+    # written. Deferred, with server-side defaults only, so no current SELECT or
+    # INSERT names them and the code still runs against an unmigrated database.
+    source_key: Mapped[str | None] = mapped_column(String(255), deferred=True)
+    last_direct_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), deferred=True
+    )
+    absent_complete_runs: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"), deferred=True
+    )
+    closure_reason: Mapped[str | None] = mapped_column(String(32), deferred=True)
+    superseded_by_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "hosted_jobs.id",
+            ondelete="RESTRICT",
+            name="fk_hosted_jobs_superseded_by_job",
+        ),
+        deferred=True,
     )
 
 
@@ -429,6 +479,129 @@ class HostedJobImportAttempt(Base):
     failure_summary: Mapped[str | None] = mapped_column(String(400))
 
     import_run: Mapped[HostedJobImportRun] = relationship(back_populates="attempts")
+
+
+class HostedJobIdentity(TimestampMixin, Base):
+    """One source-scoped identity key (requisition, URL, or listing) of a job.
+
+    A key names at most one job per company and kind. ``identity_digest`` is
+    the SHA-256 hex digest of ``identity_key``, enforced by the database, so
+    uniqueness never depends on long keys fitting in a btree entry.
+    """
+
+    __tablename__ = "hosted_job_identities"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('requisition', 'url', 'listing')",
+            name="kind",
+        ),
+        CheckConstraint(
+            "length(identity_key) BETWEEN 1 AND 4096",
+            name="identity_key_length",
+        ),
+        # PostgreSQL-only functions; the SQLite test schemas skip this check.
+        CheckConstraint(
+            "identity_digest = encode(sha256(convert_to(identity_key, 'UTF8')), 'hex')",
+            name="identity_digest",
+        ).ddl_if(dialect="postgresql"),
+        CheckConstraint(
+            "last_seen_at >= first_seen_at",
+            name="seen_timestamps",
+        ),
+        UniqueConstraint(
+            "company_id",
+            "kind",
+            "identity_digest",
+            name="uq_hosted_job_identities_company_kind_digest",
+        ),
+        Index("ix_hosted_job_identities_job_id", "job_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "hosted_jobs.id",
+            ondelete="RESTRICT",
+            name="fk_hosted_job_identities_job",
+        ),
+        nullable=False,
+    )
+    company_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    identity_key: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_key: Mapped[str | None] = mapped_column(String(255))
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class HostedSourceObservation(TimestampMixin, Base):
+    """What one source attempt reported about itself during one import run."""
+
+    __tablename__ = "hosted_source_observations"
+    __table_args__ = (
+        CheckConstraint(
+            "source_kind IN ('direct', 'github_feed')",
+            name="source_kind",
+        ),
+        CheckConstraint(
+            "attempted OR (succeeded IS NULL AND complete IS NULL "
+            "AND rows_returned IS NULL)",
+            name="outcome_requires_attempt",
+        ),
+        CheckConstraint(
+            "complete IS NOT TRUE OR succeeded IS TRUE",
+            name="complete_requires_success",
+        ),
+        CheckConstraint(
+            "rows_returned IS NULL OR rows_returned >= 0",
+            name="rows_returned_nonnegative",
+        ),
+        CheckConstraint(
+            "identity_count IS NULL OR identity_count >= 0",
+            name="identity_count_nonnegative",
+        ),
+        UniqueConstraint(
+            "import_run_id",
+            "source_key",
+            name="uq_hosted_source_observations_run_source",
+        ),
+        Index(
+            "ix_hosted_source_observations_source_observed",
+            "source_key",
+            "observed_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    import_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "hosted_job_import_runs.id",
+            ondelete="CASCADE",
+            name="fk_hosted_source_obs_run",
+        ),
+        nullable=False,
+    )
+    source_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    company_name: Mapped[str | None] = mapped_column(String(200))
+    adapter: Mapped[str] = mapped_column(String(64), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    attempted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    succeeded: Mapped[bool | None] = mapped_column(Boolean)
+    complete: Mapped[bool | None] = mapped_column(Boolean)
+    incomplete: Mapped[bool | None] = mapped_column(Boolean)
+    truncated: Mapped[bool | None] = mapped_column(Boolean)
+    degraded: Mapped[bool | None] = mapped_column(Boolean)
+    rows_returned: Mapped[int | None] = mapped_column(Integer)
+    identity_count: Mapped[int | None] = mapped_column(Integer)
+    config_fingerprint: Mapped[str | None] = mapped_column(String(64))
 
 
 class HostedNotificationBatch(TimestampMixin, Base):
