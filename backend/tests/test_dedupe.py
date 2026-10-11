@@ -858,3 +858,249 @@ def test_workday_requisition_suffix_collapsing_is_unchanged():
 
     assert stable_requisition_key(first) == stable_requisition_key(second)
     assert stable_requisition_key(first).endswith("|r100")
+
+
+# Oracle HCM regional hosts and preview routes. Every host below is configured
+# in watcher/watchlist.yml; all but jpmc are regional (`<pod>.fa.<region>.`).
+_ORACLE_CONFIGURED_HOSTS = (
+    ("egug.fa.us2.oraclecloud.com", "CX_1"),
+    ("eeho.fa.us2.oraclecloud.com", "CX_45001"),
+    ("iaziqy.fa.ocs.oraclecloud.com", "UberCareers"),
+    ("hdpc.fa.us2.oraclecloud.com", "CampusHiring"),
+    ("jpmc.fa.oraclecloud.com", "CX_1001"),
+    ("edel.fa.us2.oraclecloud.com", "CX_2001"),
+    ("edbz.fa.us2.oraclecloud.com", "CX"),
+    ("fa-extu-saasfaprod1.fa.ocs.oraclecloud.com", "CX_1"),
+    ("fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com", "CX_1"),
+    ("ibqbjb.fa.ocs.oraclecloud.com", "Honeywell"),
+)
+_AMEX_HOST = "egug.fa.us2.oraclecloud.com"
+
+
+def _oracle_url(host, site, route_and_id, *, locale="en", query=""):
+    url = (
+        f"https://{host}/hcmUI/CandidateExperience/{locale}/sites/"
+        f"{site}/{route_and_id}"
+    )
+    return f"{url}?{query}" if query else url
+
+
+def _oracle_direct_row(n, host, site, posting_id, **kw):
+    row = _watcher_row(
+        n,
+        requisition_id=posting_id,
+        source_adapter="oracle_hcm",
+        source_url=_oracle_url(host, site, f"job/{posting_id}"),
+        **kw,
+    )
+    row["extra"].update(
+        {
+            "source_id": posting_id,
+            "source_system": "oracle_hcm",
+            "source_scope": f"{host}:{site}",
+        }
+    )
+    return row
+
+
+def _oracle_backstop_row(n, source_url, **kw):
+    return _watcher_row(
+        n,
+        source="github",
+        source_adapter="github_listings",
+        source_url=source_url,
+        **kw,
+    )
+
+
+@pytest.mark.parametrize(("host", "site"), _ORACLE_CONFIGURED_HOSTS)
+def test_oracle_backstop_url_key_equals_direct_key_for_every_configured_host(host, site):
+    direct = _oracle_direct_row(1, host, site, "25012345")
+    backstop_url = _oracle_url(host, site, "job/25012345")
+
+    key = stable_requisition_key({"source_url": backstop_url})
+
+    assert key.startswith("oracle_hcm|")
+    assert key.endswith("|25012345")
+    assert key == stable_requisition_key(direct)
+
+
+def test_oracle_direct_row_keys_are_unchanged_by_url_parsing():
+    amex = _oracle_direct_row(1, _AMEX_HOST, "CX_1", "25012345")
+    jpmc = _oracle_direct_row(2, "jpmc.fa.oraclecloud.com", "CX_1001", "210773759")
+
+    assert stable_requisition_key(amex) == "oracle_hcm|egug_fa_us2_oraclecloud_com_cx_1|25012345"
+    assert stable_requisition_key(jpmc) == "oracle_hcm|jpmc_fa_oraclecloud_com_cx_1001|210773759"
+    assert stable_requisition_key(
+        {"source_url": _oracle_url("jpmc.fa.oraclecloud.com", "CX_1001", "job/210773759")}
+    ) == "oracle_hcm|jpmc_fa_oraclecloud_com_cx_1001|210773759"
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        _oracle_url(_AMEX_HOST, "CX_1", "job/25012345"),
+        _oracle_url(_AMEX_HOST, "CX_1", "job/25012345/"),
+        _oracle_url(_AMEX_HOST, "CX_1", "requisitions/preview/25012345"),
+        _oracle_url(_AMEX_HOST, "CX_1", "requisitions/preview/25012345/"),
+        _oracle_url(_AMEX_HOST, "CX_1", "job/25012345", locale="en-US"),
+        _oracle_url(_AMEX_HOST, "CX_1", "requisitions/preview/25012345", locale="fr-CA"),
+        _oracle_url(_AMEX_HOST, "CX_1", "job/25012345", query="utm_source=github&ref=simplify"),
+        _oracle_url(
+            _AMEX_HOST, "CX_1", "requisitions/preview/25012345", query="utm_medium=board"
+        ),
+        _oracle_url(_AMEX_HOST.upper(), "cx_1", "job/25012345"),
+        _oracle_url(_AMEX_HOST, "CX_1", "job/25012345") + "#apply",
+    ],
+)
+def test_american_express_oracle_url_variants_merge_with_direct_posting(variant):
+    direct = _oracle_direct_row(
+        1, _AMEX_HOST, "CX_1", "25012345", company="American Express"
+    )
+    backstop = _oracle_backstop_row(
+        2,
+        variant,
+        company="American Express",
+        title="Software Engineer Intern - GitHub wording",
+        location="Multiple Locations",
+    )
+
+    kept, report = dedupe([backstop, direct])
+
+    assert stable_requisition_key(backstop) == stable_requisition_key(direct)
+    assert len(kept) == 1
+    assert report[0]["matched_on"] == "requisition_id"
+    assert kept[0]["extra"]["source"] == "direct"
+    assert kept[0]["extra"]["primary_source"] == "direct_ats"
+
+
+@pytest.mark.parametrize(
+    "host", ["jpmc.fa.oraclecloud.com", _AMEX_HOST, "iaziqy.fa.ocs.oraclecloud.com"]
+)
+def test_oracle_preview_urls_for_distinct_requisitions_never_collide(host):
+    first = _oracle_backstop_row(
+        1, _oracle_url(host, "CX_1", "requisitions/preview/210773759")
+    )
+    second = _oracle_backstop_row(
+        2, _oracle_url(host, "CX_1", "requisitions/preview/210774001")
+    )
+
+    first_key = stable_requisition_key(first)
+    second_key = stable_requisition_key(second)
+    kept, report = dedupe([first, second])
+
+    assert first_key.endswith("|210773759")
+    assert second_key.endswith("|210774001")
+    assert first_key != second_key
+    assert "preview" not in first_key
+    assert len(kept) == 2
+    assert report == []
+
+
+def test_oracle_requisition_scope_keeps_host_and_site_boundaries():
+    base = stable_requisition_key(
+        {"source_url": _oracle_url(_AMEX_HOST, "CX_1", "job/25012345")}
+    )
+    other_site = stable_requisition_key(
+        {"source_url": _oracle_url(_AMEX_HOST, "CX_2", "job/25012345")}
+    )
+    other_region = stable_requisition_key(
+        {"source_url": _oracle_url("egug.fa.us6.oraclecloud.com", "CX_1", "job/25012345")}
+    )
+    other_pod = stable_requisition_key(
+        {"source_url": _oracle_url("eeho.fa.us2.oraclecloud.com", "CX_1", "job/25012345")}
+    )
+
+    assert len({base, other_site, other_region, other_pod}) == 4
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # Deceptively similar or unrelated hosts.
+        "https://egug.fa.us2.oraclecloud.com.attacker.test/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://jpmc.fa.oraclecloud.com.evil.test/hcmUI/CandidateExperience/en/sites/CX_1001/job/210773759",
+        "https://egug.fa.us2.notoraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://egug-fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://egug.xfa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://egug.fa.us2.extra.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://jpmc.fa.oraclecloud.com@evil.test/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://evil.test/jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        # Incomplete or unsupported Oracle paths.
+        "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions/preview",
+        "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/requisitions/preview",
+        "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/requisitions/preview/?keyword=intern",
+        "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/apply",
+        "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions/preview/",
+        "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job",
+        "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/apply",
+        "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions/preview/preview",
+        "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions",
+        "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/search/25012345",
+        "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1",
+        "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/job/25012345",
+        "https://egug.fa.us2.oraclecloud.com/",
+        "https://egug.fa.us2.oraclecloud.com:99999/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "https://[egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/25012345",
+        "not a url",
+        "",
+    ],
+)
+def test_oracle_unsupported_or_malformed_urls_yield_no_requisition_identity(url):
+    assert stable_requisition_key({"source_url": url}) == ""
+
+
+def test_oracle_dedupe_identity_is_stable_across_repeated_processing():
+    rows = [
+        _oracle_backstop_row(
+            1,
+            _oracle_url(_AMEX_HOST, "CX_1", "requisitions/preview/25012345", locale="en-US"),
+            company="American Express",
+        ),
+        _oracle_direct_row(2, _AMEX_HOST, "CX_1", "25012345", company="American Express"),
+        _oracle_backstop_row(
+            3,
+            _oracle_url("jpmc.fa.oraclecloud.com", "CX_1001", "requisitions/preview/210773759"),
+            company="JPMorgan Chase",
+        ),
+        _oracle_backstop_row(
+            4,
+            _oracle_url("jpmc.fa.oraclecloud.com", "CX_1001", "requisitions/preview/210774001"),
+            company="JPMorgan Chase",
+        ),
+    ]
+
+    runs = []
+    for _ in range(3):
+        kept, report = dedupe(deepcopy(rows))
+        runs.append(
+            (
+                [posting_identity_key(row) for row in kept],
+                analyzed_job_ids(kept),
+                [(entry["row_number"], entry["duplicate_of"]) for entry in report],
+            )
+        )
+
+    assert runs[0] == runs[1] == runs[2]
+    identities, _ids, merges = runs[0]
+    assert len(identities) == 3
+    assert merges == [(1, 2)]
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://jobs.lever.co/acme/abc-123", "lever|acme|abc-123"),
+        ("https://job-boards.greenhouse.io/acme/jobs/4455", "greenhouse|acme|4455"),
+        (
+            "https://acme.wd5.myworkdayjobs.com/External/job/NY/Intern_R12345-1",
+            "workday|acme_external|r12345",
+        ),
+        ("https://jobs.ashbyhq.com/acme/uuid-1", "ashby|acme|uuid-1"),
+    ],
+)
+def test_non_oracle_url_requisition_keys_are_unchanged(url, expected):
+    assert stable_requisition_key({"source_url": url}) == expected

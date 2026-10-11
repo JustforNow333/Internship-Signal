@@ -54,6 +54,15 @@ _POSTING_ID_QUERY_KEYS = frozenset(
         "requisitionid",
     }
 )
+# Oracle Fusion HCM Candidate Experience hosts: `<pod>.fa.oraclecloud.com` or
+# the regional `<pod>.fa.<region>.oraclecloud.com` (for example `us2`, `ocs`).
+_ORACLE_HCM_HOST = re.compile(
+    r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+fa(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)?"
+    r"\.oraclecloud\.com"
+)
+# Oracle requisition IDs are numeric; requiring a digit keeps route words such
+# as `preview` or `apply` from ever becoming an identity.
+_ORACLE_HCM_REQUISITION_ID = re.compile(r"(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9][A-Za-z0-9_-]*")
 _GENERIC_TERMINAL_SEGMENTS = frozenset(
     {
         "career",
@@ -636,7 +645,7 @@ def _ats_url_requisition(url: str) -> tuple[str, str, str] | None:
             scope = f"{host.split('.', 1)[0]}:{segments[0] if segments else ''}"
             native_id = re.sub(r"(?<=\d)-\d+$", "", match.group(1))
             return "workday", scope, native_id
-    if host.endswith(".fa.oraclecloud.com"):
+    if _ORACLE_HCM_HOST.fullmatch(host) and _has_valid_port(parts):
         lowered = [segment.casefold() for segment in segments]
         try:
             sites_index = lowered.index("sites")
@@ -646,8 +655,13 @@ def _ats_url_requisition(url: str) -> tuple[str, str, str] | None:
             route = lowered[sites_index + 2]
             if route in {"job", "jobs", "requisition", "requisitions"}:
                 site = segments[sites_index + 1]
-                native_id = segments[sites_index + 3]
-                if site and native_id:
+                id_index = sites_index + 3
+                # `requisitions/preview/<id>` names the posting after the
+                # marker; the marker itself is never a requisition ID.
+                if lowered[id_index] == "preview":
+                    id_index += 1
+                native_id = segments[id_index] if id_index < len(segments) else ""
+                if site and _ORACLE_HCM_REQUISITION_ID.fullmatch(native_id):
                     return "oracle_hcm", f"{host}:{site}", native_id
     if host in {"careers.google.com", "www.google.com"} and "results" in {
         segment.casefold() for segment in segments
@@ -658,6 +672,14 @@ def _ats_url_requisition(url: str) -> tuple[str, str, str] | None:
                 if candidate:
                     return "google_careers", host, candidate.group(1)
     return None
+
+
+def _has_valid_port(parts) -> bool:
+    try:
+        parts.port
+    except ValueError:
+        return False
+    return True
 
 
 def _has_source_metadata(row: dict) -> bool:
