@@ -1481,3 +1481,93 @@ def test_internship_only_users_never_match_other_career_levels(
     )
     assert _matched_watcher_job_ids(database) == {"watcher-job-1"}
     assert _notified_watcher_job_ids(database) == {"watcher-job-1"}
+
+
+# --- direct/backstop source precedence ---------------------------------------
+
+
+def _backstop(index: int = 1, **overrides) -> dict:
+    values = {
+        "description": "",
+        "requirements": "",
+        "source_url": f"https://simplify.example/listing/{index}",
+        "deadline": "",
+        "deadline_days_left": None,
+        "extra": {"source": "github", "source_adapter": "github_listings", "active": True},
+    }
+    values.update(overrides)
+    return final_job(index, **values)
+
+
+def _match_states(database: HostedDatabase) -> list[tuple]:
+    with database.session_factory() as db:
+        return [
+            (
+                match.id,
+                match.job_id,
+                match.matched_at,
+                match.no_longer_matches_at,
+            )
+            for match in db.scalars(select(UserJobMatch).order_by(UserJobMatch.id))
+        ]
+
+
+def _item_count(database: HostedDatabase) -> int:
+    with database.session_factory() as db:
+        return db.scalar(select(func.count()).select_from(HostedNotificationItem))
+
+
+def test_backstop_runs_over_a_direct_job_keep_its_match_and_never_renotify(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        create_user(db, clock(), "precedence@example.com")
+    clock.advance(hours=1)
+    first = import_jobs(database, catalog, clock, [final_job()], "a")
+    assert first.counters.matches_created == 1
+    transport = RecordingTransport()
+    assert worker(database, clock, transport).run().sent == 1
+    matches = _match_states(database)
+    assert len(matches) == 1 and matches[0][3] is None
+
+    # Direct source outage: only the backstop representation arrives.
+    for marker in "bc":
+        clock.advance(hours=1)
+        outage = import_jobs(database, catalog, clock, [_backstop()], marker)
+        assert outage.counters.matches_created == 0
+        assert not outage.new_opening_match_ids
+    # The direct source recovers with the original data.
+    clock.advance(hours=1)
+    recovered = import_jobs(database, catalog, clock, [final_job()], "d")
+    assert recovered.counters.matches_created == 0
+
+    assert _match_states(database) == matches
+    assert _item_count(database) == 1
+    clock.advance(days=1)
+    assert worker(database, clock, transport).run().sent == 0
+    assert len(transport.messages) == 1
+
+
+def test_direct_upgrade_of_a_backstop_job_keeps_one_match_and_one_alert(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        create_user(db, clock(), "upgrade@example.com")
+    clock.advance(hours=1)
+    first = import_jobs(database, catalog, clock, [_backstop()], "a")
+    assert first.counters.matches_created == 1
+    transport = RecordingTransport()
+    assert worker(database, clock, transport).run().sent == 1
+    matches = _match_states(database)
+
+    clock.advance(hours=1)
+    upgraded = import_jobs(database, catalog, clock, [final_job()], "b")
+
+    assert upgraded.counters.jobs_updated == 1
+    assert upgraded.counters.matches_created == 0
+    assert _match_states(database) == matches
+    assert _item_count(database) == 1
+    clock.advance(days=1)
+    assert worker(database, clock, transport).run().sent == 0
+    with database.session_factory() as db:
+        assert db.scalar(select(HostedJob)).source_metadata["source_type"] == "direct"

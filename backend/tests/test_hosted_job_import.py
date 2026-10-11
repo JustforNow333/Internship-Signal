@@ -201,6 +201,29 @@ def final_job(**overrides) -> dict:
     return job
 
 
+def backstop_job(**overrides) -> dict:
+    """The same posting as ``final_job`` seen only through a GitHub backstop."""
+
+    values = {
+        "description": "",
+        "requirements": "",
+        "source_url": "https://simplify.example/listing/123",
+        "date_posted": "2026-07-15",
+        "deadline": "",
+        "deadline_days_left": None,
+        "location": "New York",
+        "remote_status": "",
+        "extra": {
+            "source": "github",
+            "source_adapter": "github_listings",
+            "source_id": "listing-9",
+            "active": True,
+        },
+    }
+    values.update(overrides)
+    return final_job(**values)
+
+
 def import_jobs(service: JobImportService, jobs, fingerprint_character: str, **kwargs):
     return service.import_jobs(
         jobs,
@@ -387,7 +410,7 @@ def test_out_of_order_observation_is_rejected_without_rewinding_last_seen(
 
 def test_existing_job_updates_every_mutable_business_field(import_service) -> None:
     service, database, clock = import_service
-    import_jobs(service, [final_job()], "a")
+    import_jobs(service, [backstop_job()], "a")
     clock.advance(days=1)
     changed = final_job(
         company="Supported Backstop",
@@ -1239,3 +1262,265 @@ def test_snapshot_cli_accepts_the_explicit_backfill_flag() -> None:
         .career_stage_backfill
         is True
     )
+
+
+# --- source precedence -------------------------------------------------------
+
+_PROTECTED_JOB_FIELDS = (
+    "company_id",
+    "company_name",
+    "title",
+    "location",
+    "remote_status",
+    "role_id",
+    "career_level",
+    "description",
+    "requirements",
+    "application_url",
+    "posting_date",
+    "deadline",
+    "is_open",
+    "closed_at",
+    "source_metadata",
+    "first_seen_at",
+    "first_seen_in_backfill",
+    "created_at",
+)
+
+
+def _stored_job(database: HostedDatabase) -> HostedJob:
+    with database.session_factory() as db:
+        jobs = db.scalars(select(HostedJob)).all()
+    assert len(jobs) == 1
+    return jobs[0]
+
+
+def _protected_values(job: HostedJob) -> dict[str, object]:
+    return {field: getattr(job, field) for field in _PROTECTED_JOB_FIELDS}
+
+
+def test_backstop_observation_never_overwrites_a_direct_job(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job()], "a")
+    direct = _stored_job(database)
+    assert direct.source_metadata["source_type"] == "direct"
+    assert direct.source_metadata["requisition_id"] == "R-123"
+    before = _protected_values(direct)
+
+    clock.advance(hours=1)
+    result = import_jobs(service, [backstop_job()], "b")
+
+    assert result.counters.jobs_unchanged == 1
+    assert result.counters.jobs_updated == result.counters.jobs_inserted == 0
+    stored = _stored_job(database)
+    assert stored.id == direct.id
+    assert _protected_values(stored) == before
+    assert stored.description == "Build production APIs and distributed services."
+    assert stored.application_url == "https://example.com/jobs/123"
+    assert stored.source_metadata == {
+        "adapter": "workday",
+        "merged_adapters": ["github_listings", "workday"],
+        "requisition_id": "R-123",
+        "source_type": "direct",
+    }
+    # The backstop still confirms the posting is listed.
+    assert stored.last_seen_at == clock()
+
+
+def test_direct_source_outage_keeps_direct_data_until_the_direct_source_returns(
+    import_service,
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job()], "a")
+    before = _protected_values(_stored_job(database))
+
+    for marker in "bcd":
+        clock.advance(hours=1)
+        outage = import_jobs(service, [backstop_job()], marker)
+        assert outage.counters.jobs_unchanged == 1
+        stored = _stored_job(database)
+        assert _protected_values(stored) == before
+        assert stored.last_seen_at == clock()
+
+    clock.advance(hours=1)
+    recovered = final_job(
+        description="Updated responsibilities from the direct source.",
+        extra={**final_job()["extra"], "source_requisition_id": "R-123-B"},
+    )
+    result = import_jobs(service, [recovered], "e")
+    assert result.counters.jobs_updated == 1
+    stored = _stored_job(database)
+    assert stored.description == "Updated responsibilities from the direct source."
+    assert stored.source_metadata["requisition_id"] == "R-123-B"
+    assert stored.source_metadata["source_type"] == "direct"
+
+
+def test_backstop_job_is_upgraded_by_direct_source_data(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [backstop_job()], "a")
+    backstop = _stored_job(database)
+    assert backstop.source_metadata == {
+        "adapter": "github_listings",
+        "source_type": "backstop",
+    }
+
+    clock.advance(hours=1)
+    result = import_jobs(service, [final_job()], "b")
+
+    assert result.counters.jobs_updated == 1
+    stored = _stored_job(database)
+    assert stored.id == backstop.id
+    assert stored.first_seen_at == backstop.first_seen_at
+    assert stored.description == "Build production APIs and distributed services."
+    assert stored.requirements == "Python and SQL"
+    assert stored.application_url == "https://example.com/jobs/123"
+    assert stored.posting_date == date(2026, 8, 1)
+    assert stored.deadline == date(2026, 9, 1)
+    assert stored.source_metadata["source_type"] == "direct"
+    assert stored.source_metadata["requisition_id"] == "R-123"
+
+
+def test_backstop_only_job_keeps_updating_from_the_backstop(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [backstop_job()], "a")
+
+    clock.advance(hours=1)
+    result = import_jobs(
+        service,
+        [
+            backstop_job(
+                description="Listing now includes a summary.",
+                source_url="https://simplify.example/listing/123-v2",
+                date_posted="2026-07-20",
+            )
+        ],
+        "b",
+    )
+
+    assert result.counters.jobs_updated == 1
+    stored = _stored_job(database)
+    assert stored.description == "Listing now includes a summary."
+    assert stored.application_url == "https://simplify.example/listing/123-v2"
+    assert stored.posting_date == date(2026, 7, 20)
+    assert stored.source_metadata["source_type"] == "backstop"
+
+
+def test_direct_source_changes_to_a_direct_job_still_apply(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job()], "a")
+
+    clock.advance(hours=1)
+    changed = final_job(
+        location="Remote",
+        description="",
+        source_url="https://example.com/jobs/123?v=2",
+        deadline="2026-09-15",
+        extra={"source": "direct", "source_adapter": "greenhouse"},
+    )
+    result = import_jobs(service, [changed], "b")
+
+    assert result.counters.jobs_updated == 1
+    stored = _stored_job(database)
+    assert stored.location == "Remote"
+    assert stored.description == ""
+    assert stored.application_url == "https://example.com/jobs/123?v=2"
+    assert stored.deadline == date(2026, 9, 15)
+    assert stored.source_metadata == {"adapter": "greenhouse", "source_type": "direct"}
+
+
+def test_backstop_may_close_but_never_reopen_a_direct_job(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job()], "a")
+    before = _protected_values(_stored_job(database))
+
+    clock.advance(hours=1)
+    closed_listing = backstop_job(
+        extra={**backstop_job()["extra"], "source_adapter": "github_markdown_table", "active": False}
+    )
+    closed = import_jobs(service, [closed_listing], "b")
+    assert closed.counters.jobs_updated == 1
+    stored = _stored_job(database)
+    assert stored.is_open is False
+    assert stored.closed_at == clock()
+    expected = {**before, "is_open": False, "closed_at": clock()}
+    assert _protected_values(stored) == expected
+
+    clock.advance(hours=1)
+    reopened_listing = import_jobs(service, [backstop_job()], "c")
+    assert reopened_listing.counters.jobs_unchanged == 1
+    assert _protected_values(_stored_job(database)) == expected
+
+    clock.advance(hours=1)
+    reopened = import_jobs(service, [final_job()], "d")
+    assert reopened.counters.jobs_updated == 1
+    stored = _stored_job(database)
+    assert stored.is_open is True
+    assert stored.closed_at is None
+
+
+def test_job_without_stored_direct_provenance_is_updated_normally(
+    import_service,
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job(extra={"source_requisition_id": "R-123"})], "a")
+    assert _stored_job(database).source_metadata == {"requisition_id": "R-123"}
+
+    clock.advance(hours=1)
+    result = import_jobs(service, [backstop_job()], "b")
+
+    assert result.counters.jobs_updated == 1
+    stored = _stored_job(database)
+    assert stored.description == ""
+    assert stored.source_metadata["source_type"] == "backstop"
+
+
+def test_repeated_backstop_imports_over_a_direct_job_are_idempotent(
+    import_service,
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job()], "a")
+    clock.advance(hours=1)
+    first = import_jobs(service, [backstop_job()], "b")
+    seen_at = clock()
+    before = _protected_values(_stored_job(database))
+
+    clock.advance(hours=1)
+    repeated = import_jobs(service, [backstop_job()], "b")
+
+    assert repeated.already_imported
+    assert repeated.run_id == first.run_id
+    stored = _stored_job(database)
+    assert _protected_values(stored) == before
+    assert stored.last_seen_at == seen_at
+
+
+def test_failed_import_rolls_back_a_protected_backstop_observation(
+    import_service,
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job()], "a")
+    before = _stored_job(database)
+    original_upsert = service._upsert_job
+    calls = 0
+
+    def failing_upsert(db, mapped, observed_at, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("fail after the protected observation")
+        return original_upsert(db, mapped, observed_at, **kwargs)
+
+    service._upsert_job = failing_upsert
+    clock.advance(hours=1)
+    with pytest.raises(JobUpsertFailed):
+        import_jobs(
+            service,
+            [backstop_job(), final_job(id="watcher-job-2", title="Frontend Intern")],
+            "b",
+        )
+
+    assert calls == 2
+    stored = _stored_job(database)
+    assert _protected_values(stored) == _protected_values(before)
+    assert stored.last_seen_at == before.last_seen_at
+    assert stored.updated_at == before.updated_at

@@ -420,6 +420,8 @@ class JobImportService:
             raise JobUpsertFailed()
         if observed_at < existing.last_seen_at:
             raise InvalidImportSource("observation_before_last_seen")
+        if _is_backstop_over_direct(existing, mapped):
+            return self._observe_backstop_of_direct(existing, mapped, observed_at)
 
         changed = any(getattr(existing, field) != value for field, value in values.items())
         was_open = existing.is_open
@@ -431,6 +433,30 @@ class JobImportService:
         elif not was_open and mapped.is_open:
             existing.closed_at = None
         elif not mapped.is_open and existing.closed_at is None:
+            existing.closed_at = observed_at
+            changed = True
+        existing.last_seen_at = observed_at
+        existing.updated_at = observed_at
+        return ("updated" if changed else "unchanged"), existing.id
+
+    @staticmethod
+    def _observe_backstop_of_direct(
+        existing: HostedJob,
+        mapped: MappedJob,
+        observed_at: datetime,
+    ) -> tuple[str, uuid.UUID]:
+        """Record a backstop sighting without touching direct-source content.
+
+        Dedupe keeps the direct row whenever both are collected, so a backstop
+        row arrives alone only when the direct source failed or no longer
+        lists the posting. It confirms the posting is still listed, and a
+        closed listing may close the job, but it never rewrites or reopens a
+        direct-source record.
+        """
+
+        changed = False
+        if existing.is_open and not mapped.is_open:
+            existing.is_open = False
             existing.closed_at = observed_at
             changed = True
         existing.last_seen_at = observed_at
@@ -472,6 +498,14 @@ class JobImportService:
             attempt.status = "failed"
             attempt.completed_at = observed_at
             attempt.failure_summary = failure_summary[:400]
+
+
+def _is_backstop_over_direct(existing: HostedJob, mapped: MappedJob) -> bool:
+    stored = existing.source_metadata if isinstance(existing.source_metadata, Mapping) else {}
+    return (
+        stored.get("source_type") == "direct"
+        and mapped.source_metadata.get("source_type") == "backstop"
+    )
 
 
 def _validated_fingerprint(value: str) -> str:
