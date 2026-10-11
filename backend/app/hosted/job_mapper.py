@@ -138,6 +138,9 @@ class MappedJob:
     deadline: date | None
     is_open: bool
     source_metadata: dict[str, object]
+    # True only when the source itself marked the posting inactive. A job can
+    # also be closed by an expired deadline, which is inference, not a report.
+    explicitly_closed: bool = False
 
     def business_values(self) -> dict[str, object]:
         return {
@@ -257,6 +260,7 @@ def _map_final_job(
         raise _SkipJob(CAREER_LEVEL_SKIP_REASONS[career_level])
     role_id = _hosted_role_id(job, career_level=career_level)
     open_status = _open_status(job)
+    explicitly_closed = job["extra"].get("active") is False
     source_metadata = safe_source_metadata(job.get("extra"))
     return MappedJob(
         watcher_job_id=watcher_job_id,
@@ -274,6 +278,7 @@ def _map_final_job(
         deadline=deadline,
         is_open=open_status,
         source_metadata=source_metadata,
+        explicitly_closed=explicitly_closed,
     )
 
 

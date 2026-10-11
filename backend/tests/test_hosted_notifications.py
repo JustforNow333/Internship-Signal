@@ -1571,3 +1571,82 @@ def test_direct_upgrade_of_a_backstop_job_keeps_one_match_and_one_alert(
     assert worker(database, clock, transport).run().sent == 0
     with database.session_factory() as db:
         assert db.scalar(select(HostedJob)).source_metadata["source_type"] == "direct"
+
+
+def _closed_listing(index: int = 1, **overrides) -> dict:
+    values = {
+        "extra": {
+            "source": "github",
+            "source_adapter": "github_markdown_table",
+            "active": False,
+            "closed": True,
+        },
+    }
+    values.update(overrides)
+    return _backstop(index, **values)
+
+
+def _sole_item_state(database: HostedDatabase) -> tuple[str, str | None]:
+    with database.session_factory() as db:
+        item = db.scalar(select(HostedNotificationItem))
+        return item.status, item.cancellation_reason
+
+
+def test_an_unverified_closed_listing_keeps_the_pending_alert(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        create_user(db, clock(), "pending@example.com", frequency="daily")
+    clock.advance(hours=1)
+    import_jobs(database, catalog, clock, [final_job()], "a")
+    matches = _match_states(database)
+    assert _sole_item_state(database) == ("pending", None)
+
+    clock.advance(hours=1)
+    # An old closed listing for a different requisition with the same title and
+    # city arrives while the direct source is down.
+    stale = import_jobs(
+        database,
+        catalog,
+        clock,
+        [_closed_listing(source_url="https://example.com/jobs/old-999")],
+        "b",
+    )
+
+    assert stale.counters.jobs_unchanged == 1
+    assert _match_states(database) == matches
+    assert _sole_item_state(database) == ("pending", None)
+    clock.advance(days=1)
+    transport = RecordingTransport()
+    assert worker(database, clock, transport).run().sent == 1
+    assert len(transport.messages) == 1
+    assert _sole_item_state(database)[0] == "sent"
+
+
+def test_a_verified_closed_listing_closes_the_job_and_cancels_the_pending_alert(
+    database, catalog, clock
+) -> None:
+    with database.session_factory.begin() as db:
+        create_user(db, clock(), "verified@example.com", frequency="daily")
+    clock.advance(hours=1)
+    import_jobs(database, catalog, clock, [final_job()], "a")
+    assert _sole_item_state(database) == ("pending", None)
+
+    clock.advance(hours=1)
+    closed = import_jobs(
+        database,
+        catalog,
+        clock,
+        [_closed_listing(source_url="https://example.com/jobs/1?utm_source=github")],
+        "b",
+    )
+
+    assert closed.counters.jobs_updated == 1
+    matches = _match_states(database)
+    assert len(matches) == 1 and matches[0][3] == clock()
+    clock.advance(days=1)
+    transport = RecordingTransport()
+    worker(database, clock, transport).run()
+    assert transport.messages == []
+    status, reason = _sole_item_state(database)
+    assert status == "cancelled" and reason in {"match_inactive", "job_closed"}

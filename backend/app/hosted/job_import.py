@@ -13,6 +13,8 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.app.dedupe import posting_specific_url_key, stable_requisition_key
+
 from .catalog import CompanyCatalog
 from .database import HostedDatabase
 from .job_mapper import (
@@ -421,7 +423,7 @@ class JobImportService:
         if observed_at < existing.last_seen_at:
             raise InvalidImportSource("observation_before_last_seen")
         if _is_backstop_over_direct(existing, mapped):
-            return self._observe_backstop_of_direct(existing, mapped, observed_at)
+            return self._observe_backstop_of_direct(db, existing, mapped, observed_at)
 
         changed = any(getattr(existing, field) != value for field, value in values.items())
         was_open = existing.is_open
@@ -441,6 +443,7 @@ class JobImportService:
 
     @staticmethod
     def _observe_backstop_of_direct(
+        db: Session,
         existing: HostedJob,
         mapped: MappedJob,
         observed_at: datetime,
@@ -449,13 +452,19 @@ class JobImportService:
 
         Dedupe keeps the direct row whenever both are collected, so a backstop
         row arrives alone only when the direct source failed or no longer
-        lists the posting. It confirms the posting is still listed, and a
-        closed listing may close the job, but it never rewrites or reopens a
-        direct-source record.
+        lists the posting. It confirms the posting is still listed, but it
+        never rewrites or reopens a direct-source record. It closes one only
+        when the listing explicitly reports the posting closed and is verified
+        to be the same posting: the two may otherwise share only the legacy
+        company/title/city ID, and closing cancels pending alerts for good.
         """
 
         changed = False
-        if existing.is_open and not mapped.is_open:
+        if (
+            existing.is_open
+            and mapped.explicitly_closed
+            and _verified_same_posting(db, existing, mapped)
+        ):
             existing.is_open = False
             existing.closed_at = observed_at
             changed = True
@@ -506,6 +515,41 @@ def _is_backstop_over_direct(existing: HostedJob, mapped: MappedJob) -> bool:
         stored.get("source_type") == "direct"
         and mapped.source_metadata.get("source_type") == "backstop"
     )
+
+
+def _verified_same_posting(db: Session, existing: HostedJob, mapped: MappedJob) -> bool:
+    """Whether a backstop row provably names the stored job's posting.
+
+    Only posting-specific evidence counts: equal source-scoped requisition
+    identities parsed from both URLs, or the same posting-specific URL. Any
+    missing, generic, conflicting, or shared URL leaves the identity unproven.
+    """
+
+    stored_url = existing.application_url or ""
+    incoming_url = mapped.application_url or ""
+    if not stored_url or not incoming_url:
+        return False
+    stored_requisition = stable_requisition_key({"source_url": stored_url})
+    incoming_requisition = stable_requisition_key({"source_url": incoming_url})
+    if stored_requisition and incoming_requisition:
+        verified = stored_requisition == incoming_requisition
+    else:
+        stored_posting = posting_specific_url_key({"source_url": stored_url})
+        verified = bool(stored_posting) and stored_posting == posting_specific_url_key(
+            {"source_url": incoming_url}
+        )
+    if not verified:
+        return False
+    # A URL that another stored job also uses cannot single out this posting.
+    shared = db.scalar(
+        select(func.count())
+        .select_from(HostedJob)
+        .where(
+            HostedJob.application_url == existing.application_url,
+            HostedJob.id != existing.id,
+        )
+    )
+    return not shared
 
 
 def _validated_fingerprint(value: str) -> str:

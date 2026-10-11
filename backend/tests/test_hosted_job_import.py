@@ -224,6 +224,21 @@ def backstop_job(**overrides) -> dict:
     return final_job(**values)
 
 
+def closed_listing(**overrides) -> dict:
+    """A GitHub markdown row explicitly marked closed (the lock emoji)."""
+
+    values = {
+        "extra": {
+            "source": "github",
+            "source_adapter": "github_markdown_table",
+            "active": False,
+            "closed": True,
+        },
+    }
+    values.update(overrides)
+    return backstop_job(**values)
+
+
 def import_jobs(service: JobImportService, jobs, fingerprint_character: str, **kwargs):
     return service.import_jobs(
         jobs,
@@ -1434,10 +1449,11 @@ def test_backstop_may_close_but_never_reopen_a_direct_job(import_service) -> Non
     before = _protected_values(_stored_job(database))
 
     clock.advance(hours=1)
-    closed_listing = backstop_job(
-        extra={**backstop_job()["extra"], "source_adapter": "github_markdown_table", "active": False}
+    closed = import_jobs(
+        service,
+        [closed_listing(source_url="https://example.com/jobs/123?utm_source=github")],
+        "b",
     )
-    closed = import_jobs(service, [closed_listing], "b")
     assert closed.counters.jobs_updated == 1
     stored = _stored_job(database)
     assert stored.is_open is False
@@ -1446,7 +1462,9 @@ def test_backstop_may_close_but_never_reopen_a_direct_job(import_service) -> Non
     assert _protected_values(stored) == expected
 
     clock.advance(hours=1)
-    reopened_listing = import_jobs(service, [backstop_job()], "c")
+    reopened_listing = import_jobs(
+        service, [backstop_job(source_url="https://example.com/jobs/123")], "c"
+    )
     assert reopened_listing.counters.jobs_unchanged == 1
     assert _protected_values(_stored_job(database)) == expected
 
@@ -1524,3 +1542,320 @@ def test_failed_import_rolls_back_a_protected_backstop_observation(
     assert _protected_values(stored) == _protected_values(before)
     assert stored.last_seen_at == before.last_seen_at
     assert stored.updated_at == before.updated_at
+
+
+
+# --- backstop closure authority over direct jobs -------------------------------
+
+_GREENHOUSE_DIRECT_URL = "https://job-boards.greenhouse.io/acme/jobs/4455"
+_ORACLE_AMEX_DIRECT_URL = (
+    "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+    "CX_1/job/25012345"
+)
+
+
+def _direct_at(url: str | None, **overrides) -> dict:
+    return final_job(source_url=url, **overrides)
+
+
+def _assert_still_open_and_protected(database, before, observed_at) -> None:
+    stored = _stored_job(database)
+    assert _protected_values(stored) == before
+    assert stored.is_open is True
+    assert stored.closed_at is None
+    assert stored.last_seen_at == observed_at
+
+
+def test_old_closed_listing_with_same_title_and_city_cannot_close_a_live_requisition(
+    import_service,
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [_direct_at(_GREENHOUSE_DIRECT_URL)], "a")
+    before = _protected_values(_stored_job(database))
+
+    clock.advance(hours=1)
+    # Last season's posting: same company, title, and city, so the same legacy
+    # watcher job ID, but a different requisition that the source closed.
+    result = import_jobs(
+        service,
+        [closed_listing(source_url="https://job-boards.greenhouse.io/acme/jobs/1111")],
+        "b",
+    )
+
+    assert result.counters.jobs_unchanged == 1
+    assert result.counters.jobs_updated == 0
+    _assert_still_open_and_protected(database, before, clock())
+
+
+@pytest.mark.parametrize(
+    ("direct_url", "listing_url"),
+    [
+        # Same Greenhouse requisition through the legacy board host.
+        (_GREENHOUSE_DIRECT_URL, "https://boards.greenhouse.io/acme/jobs/4455?gh_src=simplify"),
+        # Same Workday requisition with a re-posting suffix.
+        (
+            "https://acme.wd5.myworkdayjobs.com/External/job/New-York/Intern_R12345",
+            "https://acme.wd5.myworkdayjobs.com/External/job/New-York-NY/Intern_R12345-1",
+        ),
+        # Regional Oracle HCM: standard direct URL, preview listing URL.
+        (
+            _ORACLE_AMEX_DIRECT_URL,
+            "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en-US/sites/"
+            "CX_1/requisitions/preview/25012345?utm_source=github",
+        ),
+    ],
+)
+def test_explicit_closure_with_a_matching_requisition_closes_the_direct_job(
+    import_service, direct_url, listing_url
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [_direct_at(direct_url)], "a")
+    before = _protected_values(_stored_job(database))
+
+    clock.advance(hours=1)
+    result = import_jobs(service, [closed_listing(source_url=listing_url)], "b")
+
+    assert result.counters.jobs_updated == 1
+    stored = _stored_job(database)
+    assert _protected_values(stored) == {
+        **before,
+        "is_open": False,
+        "closed_at": clock(),
+    }
+
+
+def test_explicit_closure_with_the_same_posting_url_closes_the_direct_job(
+    import_service,
+) -> None:
+    service, database, clock = import_service
+    direct_url = "https://careers.example.com/jobs/backend-intern-123"
+    import_jobs(service, [_direct_at(direct_url)], "a")
+
+    clock.advance(hours=1)
+    result = import_jobs(
+        service,
+        [closed_listing(source_url=f"{direct_url}/?utm_source=simplify&ref=github")],
+        "b",
+    )
+
+    assert result.counters.jobs_updated == 1
+    assert _stored_job(database).is_open is False
+
+
+@pytest.mark.parametrize(
+    ("direct_url", "listing_url"),
+    [
+        # Different requisitions sharing a title and location.
+        (_GREENHOUSE_DIRECT_URL, "https://job-boards.greenhouse.io/acme/jobs/9999"),
+        (
+            "https://acme.wd5.myworkdayjobs.com/External/job/New-York/Intern_R12345",
+            "https://acme.wd5.myworkdayjobs.com/External/job/New-York/Intern_R67890",
+        ),
+        (
+            _ORACLE_AMEX_DIRECT_URL,
+            "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+            "CX_1/requisitions/preview/25099999",
+        ),
+        # Same requisition number, different Oracle site or Greenhouse board.
+        (
+            _ORACLE_AMEX_DIRECT_URL,
+            "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+            "CX_2/job/25012345",
+        ),
+        (_GREENHOUSE_DIRECT_URL, "https://job-boards.greenhouse.io/other/jobs/4455"),
+        # Requisition on one side only: the URLs differ, so nothing is verified.
+        (_GREENHOUSE_DIRECT_URL, "https://careers.example.com/jobs/backend-intern-4455"),
+        ("https://careers.example.com/jobs/backend-intern-123", _GREENHOUSE_DIRECT_URL),
+        # Different posting-specific URLs without requisitions.
+        (
+            "https://careers.example.com/jobs/backend-intern-123",
+            "https://careers.example.com/jobs/backend-intern-456",
+        ),
+        # Generic or search URLs are never posting identity.
+        ("https://careers.example.com/careers", "https://careers.example.com/careers"),
+        (
+            "https://careers.example.com/jobs?q=intern",
+            "https://careers.example.com/jobs?q=intern",
+        ),
+        ("https://careers.example.com/", "https://careers.example.com/"),
+        # Missing URLs.
+        (None, "https://careers.example.com/jobs/backend-intern-123"),
+        ("https://careers.example.com/jobs/backend-intern-123", ""),
+        (None, ""),
+    ],
+)
+def test_explicit_closure_without_verified_shared_identity_keeps_the_job_open(
+    import_service, direct_url, listing_url
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [_direct_at(direct_url)], "a")
+    before = _protected_values(_stored_job(database))
+
+    clock.advance(hours=1)
+    result = import_jobs(service, [closed_listing(source_url=listing_url)], "b")
+
+    assert result.counters.jobs_unchanged == 1
+    _assert_still_open_and_protected(database, before, clock())
+
+
+def test_malformed_closed_listing_url_is_skipped_and_cannot_close(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [_direct_at(_GREENHOUSE_DIRECT_URL)], "a")
+    before = _stored_job(database)
+
+    clock.advance(hours=1)
+    result = import_jobs(service, [closed_listing(source_url="https://[bad/jobs/4455")], "b")
+
+    assert result.counters.jobs_skipped == 1
+    stored = _stored_job(database)
+    assert _protected_values(stored) == _protected_values(before)
+    assert stored.last_seen_at == before.last_seen_at
+
+
+def test_a_posting_url_shared_by_another_stored_job_is_ambiguous(import_service) -> None:
+    service, database, clock = import_service
+    shared = "https://careers.example.com/jobs/backend-intern-123"
+    import_jobs(
+        service,
+        [
+            _direct_at(shared),
+            final_job(id="watcher-job-2", title="Frontend Intern", source_url=shared),
+        ],
+        "a",
+    )
+
+    clock.advance(hours=1)
+    result = import_jobs(service, [closed_listing(source_url=shared)], "b")
+
+    assert result.counters.jobs_unchanged == 1
+    with database.session_factory() as db:
+        jobs = db.scalars(select(HostedJob)).all()
+    assert [job.is_open for job in jobs] == [True, True]
+
+
+def test_a_backstop_deadline_alone_never_closes_a_direct_job(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [_direct_at(_GREENHOUSE_DIRECT_URL)], "a")
+    before = _protected_values(_stored_job(database))
+
+    clock.advance(hours=1)
+    expired = backstop_job(
+        source_url=_GREENHOUSE_DIRECT_URL,
+        deadline="2026-07-01",
+        deadline_days_left=-32,
+    )
+    result = import_jobs(service, [expired], "b")
+
+    assert result.counters.jobs_unchanged == 1
+    _assert_still_open_and_protected(database, before, clock())
+
+
+def test_direct_source_closures_still_apply_explicitly_and_by_deadline(
+    import_service,
+) -> None:
+    service, database, clock = import_service
+    import_jobs(
+        service,
+        [
+            final_job(),
+            final_job(id="watcher-job-2", title="Frontend Intern", source_url="https://example.com/jobs/456"),
+        ],
+        "a",
+    )
+
+    clock.advance(hours=1)
+    result = import_jobs(
+        service,
+        [
+            final_job(extra={**final_job()["extra"], "active": False}),
+            final_job(
+                id="watcher-job-2",
+                title="Frontend Intern",
+                source_url="https://example.com/jobs/456",
+                deadline_days_left=-1,
+            ),
+        ],
+        "b",
+    )
+
+    assert result.counters.jobs_updated == 2
+    with database.session_factory() as db:
+        jobs = db.scalars(select(HostedJob)).all()
+    assert {job.is_open for job in jobs} == {False}
+    assert {job.closed_at for job in jobs} == {clock()}
+
+
+@pytest.mark.parametrize(
+    "closing_row",
+    [
+        # Explicit closure under a different URL.
+        lambda: closed_listing(source_url="https://simplify.example/listing/other"),
+        # Deadline-inferred closure.
+        lambda: backstop_job(deadline="2026-07-01", deadline_days_left=-32),
+    ],
+)
+def test_backstop_only_jobs_keep_their_existing_closure_behavior(
+    import_service, closing_row
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [backstop_job()], "a")
+
+    clock.advance(hours=1)
+    result = import_jobs(service, [closing_row()], "b")
+
+    assert result.counters.jobs_updated == 1
+    stored = _stored_job(database)
+    assert stored.is_open is False
+    assert stored.closed_at == clock()
+    assert stored.source_metadata["source_type"] == "backstop"
+
+
+def test_repeated_unverified_closed_listings_stay_idempotent(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [_direct_at(_GREENHOUSE_DIRECT_URL)], "a")
+    before = _protected_values(_stored_job(database))
+    stale = closed_listing(source_url="https://job-boards.greenhouse.io/acme/jobs/1111")
+
+    for marker in "bcd":
+        clock.advance(hours=1)
+        result = import_jobs(service, [stale], marker)
+        assert result.counters.jobs_unchanged == 1
+        _assert_still_open_and_protected(database, before, clock())
+    last_seen = clock()
+
+    clock.advance(hours=1)
+    repeated = import_jobs(service, [stale], "d")
+    assert repeated.already_imported
+    _assert_still_open_and_protected(database, before, last_seen)
+
+
+def test_failed_import_rolls_back_a_verified_backstop_closure(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [_direct_at(_GREENHOUSE_DIRECT_URL)], "a")
+    before = _stored_job(database)
+    original_upsert = service._upsert_job
+    calls = 0
+
+    def failing_upsert(db, mapped, observed_at, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("fail after the verified closure")
+        return original_upsert(db, mapped, observed_at, **kwargs)
+
+    service._upsert_job = failing_upsert
+    clock.advance(hours=1)
+    with pytest.raises(JobUpsertFailed):
+        import_jobs(
+            service,
+            [
+                closed_listing(source_url=_GREENHOUSE_DIRECT_URL),
+                final_job(id="watcher-job-2", title="Frontend Intern"),
+            ],
+            "b",
+        )
+
+    assert calls == 2
+    stored = _stored_job(database)
+    assert _protected_values(stored) == _protected_values(before)
+    assert stored.last_seen_at == before.last_seen_at
