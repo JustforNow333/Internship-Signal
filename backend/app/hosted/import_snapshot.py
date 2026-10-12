@@ -20,6 +20,7 @@ from watcher.config import DEFAULT_WATCHLIST_PATH
 from .analysis_cache import build_hosted_analyzer
 from .catalog import CompanyCatalog
 from .database import HostedDatabase, database_url_from_env
+from .identity_shadow import SourceEvidence, identity_shadow_enabled
 from .import_audit import run_import_audit
 from .job_import import JobImportError, JobImportResult, JobImportService
 from .snapshot_jobs import SnapshotReplayError, replay_snapshot_jobs
@@ -56,9 +57,14 @@ def import_snapshot_into_hosted(
     fingerprint is an idempotent no-op. ``backfill`` is passed straight through
     to ``JobImportService.import_jobs``. ``timing`` only records stage
     durations and never changes the result.
+
+    Phase 2 identity shadow tracking runs only when
+    ``HOSTED_IDENTITY_SHADOW_ENABLED`` is explicitly true; it then also
+    receives the snapshot's per-source attempt metadata.
     """
 
     timing_options = {"timing": timing} if timing is not None else {}
+    identity_shadow = identity_shadow_enabled()
     replayed = replay_snapshot_jobs(
         snapshot_path,
         watchlist_path=watchlist_path,
@@ -71,6 +77,12 @@ def import_snapshot_into_hosted(
         service = JobImportService(
             database,
             CompanyCatalog.from_watcher_config(replayed.config),
+            identity_shadow=identity_shadow,
+        )
+        shadow_options = (
+            {"source_evidence": SourceEvidence.from_batch(replayed.batch)}
+            if identity_shadow
+            else {}
         )
         with stage(timing, "database_import"):
             return service.import_jobs(
@@ -81,6 +93,7 @@ def import_snapshot_into_hosted(
                 retry_failed=retry_failed,
                 backfill=backfill,
                 **timing_options,
+                **shadow_options,
             )
     finally:
         with suppress(Exception):
@@ -113,6 +126,8 @@ def import_summary_lines(
             for reason, count in sorted(result.skipped_reasons.items())
         )
         lines.append(f"HOSTED-JOB-IMPORT-SKIPS {reasons}")
+    if result.identity_shadow is not None:
+        lines.extend(result.identity_shadow.lines())
     return lines
 
 

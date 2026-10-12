@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -17,6 +17,12 @@ from backend.app.dedupe import posting_specific_url_key, stable_requisition_key
 
 from .catalog import CompanyCatalog
 from .database import HostedDatabase
+from .identity_shadow import (
+    IdentityShadowReport,
+    ImportedJob,
+    SourceEvidence,
+    run_identity_shadow,
+)
 from .job_mapper import (
     FinalJobsStructureError,
     MappedJob,
@@ -88,6 +94,11 @@ class JobImportResult:
     new_opening_match_ids: tuple[uuid.UUID, ...] = field(
         default=(), compare=False, repr=False
     )
+    # Phase 2 shadow tracking outcome; ``None`` whenever it is disabled or
+    # the import did not run. It never affects the import's own result.
+    identity_shadow: IdentityShadowReport | None = field(
+        default=None, compare=False, repr=False
+    )
 
     @property
     def already_imported(self) -> bool:
@@ -108,10 +119,14 @@ class JobImportService:
         catalog: CompanyCatalog,
         *,
         clock: Callable[[], datetime] = utc_now,
+        identity_shadow: bool = False,
     ) -> None:
         self.database = database
         self.catalog = catalog
         self.clock = clock
+        # Phase 2 shadow tracking of stable identities and source evidence.
+        # Off by default; see ``app.hosted.identity_shadow``.
+        self.identity_shadow = identity_shadow
 
     def import_jobs(
         self,
@@ -123,6 +138,7 @@ class JobImportService:
         retry_failed: bool = False,
         backfill: bool = False,
         timing: HostedTiming | None = None,
+        source_evidence: SourceEvidence | None = None,
     ) -> JobImportResult:
         """Persist one final-job sequence, reconcile matches, and enqueue alerts.
 
@@ -132,6 +148,11 @@ class JobImportService:
         no notification work, and the jobs it first stores are marked so their
         new ``first_seen_at`` never makes them look newly posted later. It is
         never inferred from dates. ``timing`` only records stage durations.
+
+        When the service was built with ``identity_shadow``, a separate
+        transaction after the import commits records identity and source
+        evidence (``source_evidence``). It never changes the import, and its
+        failure is only reported in ``JobImportResult.identity_shadow``.
         """
 
         fingerprint = _validated_fingerprint(source_fingerprint)
@@ -150,6 +171,7 @@ class JobImportService:
         assert claim.attempt_id is not None
 
         mapped: MappedJobs | None = None
+        shadow_jobs: list[ImportedJob] | None = [] if self.identity_shadow else None
         try:
             with stage(timing, "job_mapping"):
                 mapped = map_final_jobs(final_jobs, self.catalog)
@@ -180,6 +202,10 @@ class JobImportService:
                         outcome, job_id = self._upsert_job(
                             db, mapped_job, observed_at, backfill=backfill
                         )
+                        if shadow_jobs is not None:
+                            shadow_jobs.append(
+                                ImportedJob(mapped_job, job_id, outcome)
+                            )
                         if outcome == "inserted":
                             inserted += 1
                             affected_job_ids.append(job_id)
@@ -220,7 +246,7 @@ class JobImportService:
                 attempt.completed_at = observed_at
                 attempt.failure_summary = None
 
-            return JobImportResult(
+            result = JobImportResult(
                 run_id=claim.run_id,
                 source_fingerprint=fingerprint,
                 outcome="imported",
@@ -252,6 +278,22 @@ class JobImportService:
             if isinstance(exc, JobImportError):
                 raise
             raise JobUpsertFailed() from exc
+
+        # Outside the import's failure handling on purpose: the import has
+        # committed, and shadow tracking reports its own failures and never
+        # raises, so it can neither fail nor mark failed a committed run.
+        if shadow_jobs is not None:
+            with stage(timing, "identity_shadow"):
+                report = run_identity_shadow(
+                    self.database,
+                    import_run_id=claim.run_id,
+                    observed_at=observed_at,
+                    final_jobs=final_jobs,
+                    imported=shadow_jobs,
+                    evidence=source_evidence,
+                )
+            result = replace(result, identity_shadow=report)
+        return result
 
     def _claim_source(
         self,

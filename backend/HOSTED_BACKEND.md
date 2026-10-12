@@ -73,6 +73,37 @@ Structural final-job failures remain a broad `invalid_final_jobs` CLI error.
 Operator failure records append only an allowlisted structural subreason and
 never posting data or source identifiers.
 
+### Identity and source-evidence shadow tracking
+
+Alembic revision `20261011_0008` adds `hosted_job_identities`,
+`hosted_source_observations`, and five `hosted_jobs` lifecycle columns. They
+are written only when `HOSTED_IDENTITY_SHADOW_ENABLED` is explicitly true;
+unset, blank, false, or any unrecognized value leaves the import path exactly
+as before, and it never reads or writes these structures.
+
+When enabled, a separate transaction after each successful import records:
+
+- each job's strong identities: the source-scoped requisition key (a native
+  requisition ID and a different URL-derived one are both kept), the
+  posting-specific URL, and a GitHub listing ID scoped to its feed. Company,
+  title, and location are never an identity, and a URL shared by distinct
+  requisitions is not one either. An identity two jobs claim in one import is
+  not written, and an identity another job already owns keeps its owner;
+- `hosted_jobs.source_key` (a backstop never takes it from a direct-source job)
+  and `hosted_jobs.last_direct_seen_at`, never moved backwards or past the
+  import time;
+- one `hosted_source_observations` row per source attempt. Missing or
+  contradictory completeness is stored as unknown (`NULL`), never complete.
+
+It also compares the job the recorded identities would select with the job the
+legacy `watcher_job_id` path selected, and reports agreement, disagreement,
+and conflicts as counts in bounded `HOSTED-IDENTITY-SHADOW` lines. Nothing is
+applied: job IDs, business values, open/closed state, `updated_at`, matches,
+and notification work are unchanged. A shadow failure rolls back only the
+shadow transaction and prints `HOSTED-IDENTITY-SHADOW status=failed`; the
+committed import still succeeds. Shadow work locks job rows with `SKIP LOCKED`,
+so it never waits for a concurrent import.
+
 ## Per-user matching
 
 Alembic revision `20260803_0003` adds `hosted_user_job_matches`, with one
@@ -722,6 +753,8 @@ a database containing data that must be retained.
 - `VITE_HOSTED_API_BASE_URL` (optional with a same-origin proxy)
 - `HOSTED_ANALYSIS_CACHE_PATH` (optional; unset or blank disables the hosted
   analysis cache, which is the default; see "Analysis cache" above)
+- `HOSTED_IDENTITY_SHADOW_ENABLED` (optional; off unless `1`, `true`, `yes`,
+  or `on`; see "Identity and source-evidence shadow tracking" above)
 
 `app.hosted.collect_and_import` needs only the database URL.
 `app.hosted.deliver_notifications` needs the database URL, the mail provider
