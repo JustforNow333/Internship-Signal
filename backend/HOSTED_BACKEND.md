@@ -104,6 +104,57 @@ shadow transaction and prints `HOSTED-IDENTITY-SHADOW status=failed`; the
 committed import still succeeds. Shadow work locks job rows with `SKIP LOCKED`,
 so it never waits for a concurrent import.
 
+### Guarded identity resolution
+
+`HOSTED_IDENTITY_RESOLUTION_ENABLED` (off unless explicitly true, parsed like
+the shadow flag) lets an import update the existing job a posting's strong
+identities name instead of inserting another copy when its `watcher_job_id`
+churns (collision suffixes, retitles, location edits). It is enforced only
+when `HOSTED_IDENTITY_SHADOW_ENABLED` is also true; set it on every process
+that imports, never on some only.
+
+The resolver uses only identity ownership recorded before the import, and
+never title, location, or description. A row resolves to job X only when all
+of its owned identities belong to X, X is not its legacy target, and every
+guard passes: no identity of the row is claimed by another row in the batch,
+none was rejected or unscoped, its native and URL-derived requisitions do not
+disagree within one provider scope, X owns its primary identity (the native
+requisition when present, so a URL never overrides one), X is open and not
+superseded, X owns at most one requisition per provider scope and none that
+the row contradicts, X owns no requisition unless the row carries one (a
+backstop sighting of a direct job excepted), and no other row in the batch
+resolves to X or carries X's `watcher_job_id`. Anything else takes the legacy
+path.
+
+A resolved row goes through the ordinary update branch for X, including
+backstop-over-direct precedence and its verified-closure rule. X keeps its
+`id` and `watcher_job_id`, so its matches and notification items stay
+attached and no new alert is created. The legacy twin, if any, is left
+untouched; Phase 3 never merges, deletes, supersedes, closes, or reopens
+historical duplicates. An enforced import first takes
+`pg_advisory_xact_lock(hashtextextended('hosted-job-import', 0))`, waiting at
+most 300 seconds before failing with `hosted_import_lock_unavailable` (retry
+with `--retry-failed`). It locks candidate targets and writes identity
+ownership in the same transaction, so decisions, job updates, and ownership
+commit or roll back together. Ownership is never reassigned.
+
+With shadow tracking on and resolution off, the shadow pass computes the same
+decisions read-only and the import transaction is unchanged. Every import with
+shadow tracking prints one bounded line of counts:
+
+```text
+HOSTED-IDENTITY-RESOLVE mode=shadow status=ok rows=... would_resolve=...
+resolved=0 agree=... unowned=... no_strong_identity=... fallback=...
+reject_<reason>=... legacy_requisition_mismatch=...
+```
+
+(shown wrapped; it is one line). `mode=enforced` reports applied decisions
+(`resolved` equals `would_resolve`). `legacy_requisition_mismatch` counts rows
+whose legacy target owns a different requisition in the same provider scope,
+which means the legacy title/city ID would merge two requisitions. A diagnostic
+failure prints `status=failed` and changes nothing else. Unsetting the variable
+returns the next import to the legacy path with no data repair.
+
 ## Per-user matching
 
 Alembic revision `20260803_0003` adds `hosted_user_job_matches`, with one
@@ -755,6 +806,9 @@ a database containing data that must be retained.
   analysis cache, which is the default; see "Analysis cache" above)
 - `HOSTED_IDENTITY_SHADOW_ENABLED` (optional; off unless `1`, `true`, `yes`,
   or `on`; see "Identity and source-evidence shadow tracking" above)
+- `HOSTED_IDENTITY_RESOLUTION_ENABLED` (optional; off unless explicitly true,
+  and only enforced together with the shadow flag; see "Guarded identity
+  resolution" above)
 
 `app.hosted.collect_and_import` needs only the database URL.
 `app.hosted.deliver_notifications` needs the database URL, the mail provider

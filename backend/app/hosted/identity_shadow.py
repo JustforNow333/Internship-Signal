@@ -30,6 +30,15 @@ columns. When it is on, shadow tracking cannot fail or partially commit the
 import: the import has already committed, the shadow transaction is atomic,
 and any error is reported as a bounded status line and swallowed. Shadow work
 never waits for a job row that an import has locked; it skips those jobs.
+
+Phase 3 adds guarded identity resolution (``decide_resolution``). It is
+enforced only when ``HOSTED_IDENTITY_RESOLUTION_ENABLED`` is explicitly true
+*and* shadow tracking is on: the import then updates the one existing job its
+strong identities single out, instead of inserting another copy, and writes
+identity ownership in the same transaction. With shadow tracking on and
+resolution off, the shadow pass only reports, read-only, what the same guards
+would have decided. Either way the result is one bounded
+``HOSTED-IDENTITY-RESOLVE`` line of counts.
 """
 
 from __future__ import annotations
@@ -40,7 +49,7 @@ import os
 import re
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -140,6 +149,41 @@ REPORT_LINES = (
 )
 COUNTER_NAMES = tuple(name for _prefix, names in REPORT_LINES for name in names)
 
+RESOLUTION_FLAG_ENV = "HOSTED_IDENTITY_RESOLUTION_ENABLED"
+RESOLVE = "resolve"
+# Why a row whose identities name another job still takes the legacy path,
+# in the order the guards are checked. Each is reported as ``reject_<name>``.
+RESOLUTION_REASONS = (
+    "conflict",
+    "batch_ambiguous",
+    "weak_identity",
+    "row_native_url_disagreement",
+    "primary_not_owned",
+    "target_missing",
+    "target_superseded",
+    "target_closed",
+    "target_ambiguous",
+    "target_requisition_mismatch",
+    "target_requisition_unverified",
+    "target_contention",
+)
+RESOLVE_COUNTER_NAMES = (
+    "rows",
+    "would_resolve",
+    "resolved",
+    "agree",
+    "unowned",
+    "no_strong_identity",
+    "fallback",
+    *(f"reject_{reason}" for reason in RESOLUTION_REASONS),
+    "legacy_requisition_mismatch",
+)
+
+
+def _flag_enabled(name: str) -> bool:
+    raw = os.getenv(name)
+    return raw is not None and raw.strip().casefold() in _TRUE_VALUES
+
 
 def identity_shadow_enabled() -> bool:
     """Whether Phase 2 shadow tracking is explicitly enabled.
@@ -148,8 +192,17 @@ def identity_shadow_enabled() -> bool:
     unrecognized value all leave it off, so a typo can never enable writes.
     """
 
-    raw = os.getenv(SHADOW_FLAG_ENV)
-    return raw is not None and raw.strip().casefold() in _TRUE_VALUES
+    return _flag_enabled(SHADOW_FLAG_ENV)
+
+
+def identity_resolution_enabled() -> bool:
+    """Whether Phase 3 resolution is explicitly enabled and enforceable.
+
+    Parsed like the shadow flag, and never true without shadow tracking:
+    resolution relies on the ownership shadow tracking records.
+    """
+
+    return _flag_enabled(RESOLUTION_FLAG_ENV) and identity_shadow_enabled()
 
 
 @dataclass(frozen=True)
@@ -204,6 +257,9 @@ class IdentityShadowReport:
     counters: Mapping[str, int] = field(default_factory=dict)
     error: str | None = None
     failed_stage: str | None = None
+    # Read-only Phase 3 diagnostics, when this pass was asked for them. They
+    # are reported on their own line, never in ``lines()``.
+    resolution: IdentityResolutionReport | None = field(default=None, compare=False)
 
     def lines(self) -> list[str]:
         if self.status != "ok":
@@ -219,6 +275,201 @@ class IdentityShadowReport:
             )
             for prefix, names in REPORT_LINES
         ]
+
+
+@dataclass(frozen=True)
+class IdentityResolutionReport:
+    """Bounded Phase 3 outcome: what the guards decided, as counts only.
+
+    ``mode`` is ``shadow`` when the decisions were only computed and
+    ``enforced`` when the import applied them.
+    """
+
+    mode: str
+    status: str = "ok"
+    counters: Mapping[str, int] = field(default_factory=dict)
+
+    def lines(self) -> list[str]:
+        prefix = f"HOSTED-IDENTITY-RESOLVE mode={self.mode} status={self.status}"
+        if self.status != "ok":
+            return [prefix]
+        return [
+            " ".join(
+                (
+                    prefix,
+                    *(
+                        f"{name}={int(self.counters.get(name, 0))}"
+                        for name in RESOLVE_COUNTER_NAMES
+                    ),
+                )
+            )
+        ]
+
+
+@dataclass(frozen=True)
+class ResolutionRow:
+    """One incoming row as the resolver sees it.
+
+    ``identities`` keep ``derive_identities`` order, strongest first, so the
+    first is the row's primary identity. ``legacy_target`` is the job the
+    legacy ``watcher_job_id`` path would update, or ``None`` if it inserts.
+    """
+
+    company_id: str
+    identities: tuple[JobIdentity, ...]
+    legacy_target: uuid.UUID | None
+    rejected: int = 0
+    backstop: bool = False
+
+    @property
+    def claims(self) -> tuple[tuple[str, str, str], ...]:
+        return tuple(
+            (self.company_id, identity.kind, identity.digest)
+            for identity in self.identities
+        )
+
+
+@dataclass(frozen=True)
+class ResolutionTarget:
+    """The stored state of a job some row's identities single out."""
+
+    job_id: uuid.UUID
+    is_open: bool
+    superseded: bool
+    direct: bool
+    requisitions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ResolutionDecision:
+    outcome: str
+    target_id: uuid.UUID | None = None
+
+    @property
+    def resolves(self) -> bool:
+        return self.outcome == RESOLVE
+
+
+def decide_resolution(
+    row: ResolutionRow,
+    *,
+    owners: Mapping[tuple[str, str, str], uuid.UUID],
+    targets: Mapping[uuid.UUID, ResolutionTarget],
+    batch_ambiguous: frozenset[tuple[str, str, str]] = frozenset(),
+) -> ResolutionDecision:
+    """Decide whether one row resolves to an existing job, and why not.
+
+    Pure: ``owners`` maps ``(company_id, kind, digest)`` to the job that owned
+    that identity before this import, and ``targets`` holds the stored state
+    of candidate jobs. Only ``resolve`` redirects the row; every other outcome
+    keeps the legacy ``watcher_job_id`` path. Batch-level contention is
+    checked by ``decide_resolutions``.
+    """
+
+    if not row.identities:
+        return ResolutionDecision("no_strong_identity")
+    claims = row.claims
+    selected = {owners[claim] for claim in claims if claim in owners}
+    if not selected:
+        return ResolutionDecision("unowned")
+    if len(selected) > 1:
+        return ResolutionDecision("conflict")
+    [owner] = selected
+    if owner == row.legacy_target:
+        return ResolutionDecision("agree")
+    reason = _refusal(row, claims, owner, owners, targets, batch_ambiguous)
+    if reason is not None:
+        return ResolutionDecision(reason)
+    return ResolutionDecision(RESOLVE, owner)
+
+
+def _refusal(
+    row: ResolutionRow,
+    claims: tuple[tuple[str, str, str], ...],
+    owner: uuid.UUID,
+    owners: Mapping[tuple[str, str, str], uuid.UUID],
+    targets: Mapping[uuid.UUID, ResolutionTarget],
+    batch_ambiguous: frozenset[tuple[str, str, str]],
+) -> str | None:
+    if any(claim in batch_ambiguous for claim in claims):
+        return "batch_ambiguous"
+    row_scopes = _requisition_scopes(
+        identity.key for identity in row.identities if identity.kind == KIND_REQUISITION
+    )
+    if row.rejected or row_scopes is None:
+        return "weak_identity"
+    if any(len(keys) > 1 for keys in row_scopes.values()):
+        # Native and URL-derived requisitions disagree in one provider scope.
+        return "row_native_url_disagreement"
+    if owners.get(claims[0]) != owner:
+        # A URL or URL-derived requisition never overrides a native one.
+        return "primary_not_owned"
+    target = targets.get(owner)
+    if target is None:
+        return "target_missing"
+    if target.superseded:
+        return "target_superseded"
+    if not target.is_open:
+        return "target_closed"
+    target_scopes = _requisition_scopes(target.requisitions)
+    if target_scopes is None or any(len(keys) > 1 for keys in target_scopes.values()):
+        return "target_ambiguous"
+    if any(
+        scope in target_scopes and target_scopes[scope] != keys
+        for scope, keys in row_scopes.items()
+    ):
+        return "target_requisition_mismatch"
+    if target_scopes and not row_scopes and not (row.backstop and target.direct):
+        # Only a backstop sighting of a direct job, which never rewrites it,
+        # may rely on a URL or listing against a job with a requisition.
+        return "target_requisition_unverified"
+    return None
+
+
+def decide_resolutions(
+    rows: Sequence[ResolutionRow],
+    *,
+    owners: Mapping[tuple[str, str, str], uuid.UUID],
+    targets: Mapping[uuid.UUID, ResolutionTarget],
+) -> list[ResolutionDecision]:
+    """Decide every row of one import, then refuse contended targets.
+
+    An identity claimed by two rows is ambiguous for both. A target is
+    contended when more than one row would resolve to it, or when it is the
+    legacy target of any row in the batch.
+    """
+
+    claimants: Counter[tuple[str, str, str]] = Counter(
+        claim for row in rows for claim in set(row.claims)
+    )
+    ambiguous = frozenset(claim for claim, count in claimants.items() if count > 1)
+    decisions = [
+        decide_resolution(row, owners=owners, targets=targets, batch_ambiguous=ambiguous)
+        for row in rows
+    ]
+    legacy_targets = {row.legacy_target for row in rows if row.legacy_target is not None}
+    resolving = Counter(decision.target_id for decision in decisions if decision.resolves)
+    return [
+        ResolutionDecision("target_contention")
+        if decision.resolves
+        and (resolving[decision.target_id] > 1 or decision.target_id in legacy_targets)
+        else decision
+        for decision in decisions
+    ]
+
+
+def _requisition_scopes(
+    keys: Iterable[str],
+) -> dict[tuple[str, str], frozenset[str]] | None:
+    """Group requisition keys by provider and scope; ``None`` if any is unscoped."""
+
+    scopes: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for key in keys:
+        parts = key.split("|", 2)
+        if len(parts) != 3 or not all(parts):
+            return None
+        scopes[(parts[0], parts[1])].add(key)
+    return {scope: frozenset(values) for scope, values in scopes.items()}
 
 
 def identity_digest(key: str) -> str:
@@ -345,11 +596,14 @@ def run_identity_shadow(
     final_jobs: Sequence[Mapping[str, object]],
     imported: Sequence[ImportedJob],
     evidence: SourceEvidence | None,
+    resolution_diagnostics: bool = False,
 ) -> IdentityShadowReport:
     """Record one committed import's identity and source evidence.
 
     Never raises: every failure rolls back the whole shadow transaction and is
     reported as a bounded status. The import itself is already committed.
+    ``resolution_diagnostics`` also reports, read-only, what Phase 3 would
+    have decided from the ownership recorded before this import.
     """
 
     stage = "derive"
@@ -363,6 +617,9 @@ def run_identity_shadow(
             stage = "resolve"
             owners = _existing_owners(db, plan, locked)
             _resolve(plan, owners, locked)
+            resolution = (
+                _diagnose_resolution(db, plan) if resolution_diagnostics else None
+            )
             stage = "identity_upsert"
             written = _upsert_identities(db, plan, locked, observed_at)
             stage = "job_evidence"
@@ -374,6 +631,7 @@ def run_identity_shadow(
         return IdentityShadowReport(
             status="ok",
             counters={name: plan.counters[name] for name in COUNTER_NAMES},
+            resolution=resolution,
         )
     except Exception as exc:  # noqa: BLE001 - shadow tracking must never fail an import
         name = type(exc).__name__
@@ -382,7 +640,260 @@ def run_identity_shadow(
             status="failed",
             error=name if _ERROR_NAME_RE.fullmatch(name) else "error",
             failed_stage=stage,
+            resolution=(
+                IdentityResolutionReport(mode="shadow", status="failed")
+                if resolution_diagnostics
+                else None
+            ),
         )
+
+
+@dataclass(frozen=True)
+class ResolutionPlan:
+    """Per mapped row, the existing job to update instead, or ``None``."""
+
+    targets: tuple[uuid.UUID | None, ...]
+    report: IdentityResolutionReport
+
+
+def plan_identity_resolution(
+    db: Session,
+    final_jobs: Sequence[Mapping[str, object]],
+    mapped_jobs: Sequence[MappedJob],
+) -> ResolutionPlan:
+    """Decide, inside the import transaction, which rows resolve.
+
+    The caller must hold the import advisory lock: ownership is then stable,
+    because only this transaction or a shadow pass adds it and neither ever
+    reassigns or deletes it. Candidate targets are locked ``FOR UPDATE`` before
+    their state is read.
+    """
+
+    raw_by_id, non_specific = _batch_rows(final_jobs)
+    legacy = _legacy_targets(db, [job.watcher_job_id for job in mapped_jobs])
+    rows = [
+        _resolution_row(
+            raw_by_id.get(job.watcher_job_id, {}),
+            job,
+            non_specific,
+            legacy.get(job.watcher_job_id),
+        )
+        for job in mapped_jobs
+    ]
+    decisions, counters = _decide(db, rows, lock=True)
+    counters["resolved"] = counters["would_resolve"]
+    return ResolutionPlan(
+        targets=tuple(
+            decision.target_id if decision.resolves else None for decision in decisions
+        ),
+        report=IdentityResolutionReport(
+            mode="enforced",
+            counters={name: counters[name] for name in RESOLVE_COUNTER_NAMES},
+        ),
+    )
+
+
+def record_import_identities(
+    db: Session,
+    *,
+    final_jobs: Sequence[Mapping[str, object]],
+    imported: Sequence[ImportedJob],
+    evidence: SourceEvidence | None,
+    observed_at: datetime,
+) -> None:
+    """Write identity ownership inside the import transaction.
+
+    Same rules as the shadow pass: an identity two jobs claim is not written
+    and an existing owner is never replaced. Every job here is locked by the
+    import itself.
+    """
+
+    plan = _plan(final_jobs, imported, evidence, observed_at)
+    _upsert_identities(
+        db, plan, frozenset(job.imported.job_id for job in plan.jobs), observed_at
+    )
+
+
+def _diagnose_resolution(db: Session, plan: _Plan) -> IdentityResolutionReport:
+    """What enforced resolution would decide, without writing anything.
+
+    Runs in a savepoint so a failure leaves the shadow pass intact. Reads take
+    no row locks, so every row is evaluated, including skipped ones.
+    """
+
+    rows = [
+        ResolutionRow(
+            company_id=job.imported.mapped.company_id,
+            identities=job.identities,
+            legacy_target=(
+                None if job.imported.outcome == "inserted" else job.imported.job_id
+            ),
+            rejected=job.rejected,
+            backstop=_is_backstop(job.imported.mapped),
+        )
+        for job in plan.jobs
+    ]
+    try:
+        with db.begin_nested():
+            _decisions, counters = _decide(db, rows, lock=False)
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never fail shadow work
+        LOGGER.warning("Identity resolution diagnostics failed (%s).", type(exc).__name__)
+        return IdentityResolutionReport(mode="shadow", status="failed")
+    return IdentityResolutionReport(
+        mode="shadow",
+        counters={name: counters[name] for name in RESOLVE_COUNTER_NAMES},
+    )
+
+
+def _decide(
+    db: Session,
+    rows: Sequence[ResolutionRow],
+    *,
+    lock: bool,
+) -> tuple[list[ResolutionDecision], Counter[str]]:
+    owners = _owners_for(db, {claim for row in rows for claim in row.claims})
+    candidates: set[uuid.UUID] = set()
+    for row in rows:
+        selected = {owners[claim] for claim in row.claims if claim in owners}
+        if len(selected) == 1 and row.legacy_target not in selected:
+            candidates |= selected
+    legacy_ids = {
+        row.legacy_target
+        for row in rows
+        if row.legacy_target is not None
+        and any(identity.kind == KIND_REQUISITION for identity in row.identities)
+    }
+    targets, requisitions = _resolution_targets(db, candidates, legacy_ids, lock=lock)
+    decisions = decide_resolutions(rows, owners=owners, targets=targets)
+    return decisions, _count_decisions(rows, decisions, requisitions)
+
+
+def _count_decisions(
+    rows: Sequence[ResolutionRow],
+    decisions: Sequence[ResolutionDecision],
+    requisitions: Mapping[uuid.UUID, tuple[str, ...]],
+) -> Counter[str]:
+    counters: Counter[str] = Counter()
+    for row, decision in zip(rows, decisions, strict=True):
+        counters["rows"] += 1
+        if decision.resolves:
+            counters["would_resolve"] += 1
+        elif decision.outcome in RESOLUTION_REASONS:
+            counters["fallback"] += 1
+            counters[f"reject_{decision.outcome}"] += 1
+        else:
+            counters[decision.outcome] += 1
+        if _legacy_requisition_mismatch(row, requisitions):
+            counters["legacy_requisition_mismatch"] += 1
+    return counters
+
+
+def _legacy_requisition_mismatch(
+    row: ResolutionRow,
+    requisitions: Mapping[uuid.UUID, tuple[str, ...]],
+) -> bool:
+    """Whether the legacy target owns a different requisition in a row scope.
+
+    That is the legacy title/city ID merging two distinct requisitions.
+    """
+
+    if row.legacy_target is None:
+        return False
+    row_scopes = _requisition_scopes(
+        identity.key for identity in row.identities if identity.kind == KIND_REQUISITION
+    )
+    stored = _requisition_scopes(requisitions.get(row.legacy_target, ()))
+    if not row_scopes or not stored:
+        return False
+    return any(
+        scope in stored and not stored[scope] <= keys for scope, keys in row_scopes.items()
+    )
+
+
+def _resolution_row(
+    raw: Mapping[str, object],
+    mapped: MappedJob,
+    non_specific: frozenset[str],
+    legacy_target: uuid.UUID | None,
+) -> ResolutionRow:
+    derived = derive_identities(raw, non_specific_urls=non_specific)
+    return ResolutionRow(
+        company_id=mapped.company_id,
+        identities=derived.identities,
+        legacy_target=legacy_target,
+        rejected=derived.rejected,
+        backstop=_is_backstop(mapped),
+    )
+
+
+def _is_backstop(mapped: MappedJob) -> bool:
+    return mapped.source_metadata.get("source_type") == "backstop"
+
+
+def _legacy_targets(db: Session, watcher_ids: Sequence[str]) -> dict[str, uuid.UUID]:
+    found: dict[str, uuid.UUID] = {}
+    wanted = sorted(set(watcher_ids))
+    for start in range(0, len(wanted), _CHUNK):
+        chunk = wanted[start : start + _CHUNK]
+        for watcher_id, job_id in db.execute(
+            text(
+                "SELECT watcher_job_id, id FROM hosted_jobs "
+                "WHERE watcher_job_id = ANY(CAST(:ids AS varchar[]))"
+            ),
+            {"ids": chunk},
+        ):
+            found[watcher_id] = job_id
+    return found
+
+
+def _resolution_targets(
+    db: Session,
+    candidates: set[uuid.UUID],
+    legacy_ids: set[uuid.UUID],
+    *,
+    lock: bool,
+) -> tuple[dict[uuid.UUID, ResolutionTarget], dict[uuid.UUID, tuple[str, ...]]]:
+    """Candidate targets' state, and every listed job's requisition keys."""
+
+    states: dict[uuid.UUID, tuple[bool, bool, bool]] = {}
+    ordered = sorted(candidates)
+    for start in range(0, len(ordered), _CHUNK):
+        chunk = ordered[start : start + _CHUNK]
+        for job_id, is_open, superseded, direct in db.execute(
+            text(
+                "SELECT id, is_open, superseded_by_job_id IS NOT NULL, "
+                "COALESCE(source_metadata ->> 'source_type' = 'direct', false) "
+                "FROM hosted_jobs WHERE id = ANY(:ids) ORDER BY id"
+                + (" FOR UPDATE" if lock else "")
+            ),
+            {"ids": chunk},
+        ):
+            states[job_id] = (is_open, superseded, direct)
+
+    requisitions: dict[uuid.UUID, list[str]] = defaultdict(list)
+    listed = sorted(candidates | legacy_ids)
+    table = HostedJobIdentity.__table__
+    for start in range(0, len(listed), _CHUNK):
+        chunk = listed[start : start + _CHUNK]
+        for job_id, key in db.execute(
+            table.select()
+            .with_only_columns(table.c.job_id, table.c.identity_key)
+            .where(table.c.job_id.in_(chunk), table.c.kind == KIND_REQUISITION)
+            .order_by(table.c.job_id, table.c.identity_key)
+        ):
+            requisitions[job_id].append(key)
+
+    targets = {
+        job_id: ResolutionTarget(
+            job_id=job_id,
+            is_open=bool(is_open),
+            superseded=bool(superseded),
+            direct=bool(direct),
+            requisitions=tuple(requisitions.get(job_id, ())),
+        )
+        for job_id, (is_open, superseded, direct) in states.items()
+    }
+    return targets, {job_id: tuple(keys) for job_id, keys in requisitions.items()}
 
 
 @dataclass
@@ -392,6 +903,7 @@ class _JobPlan:
     source_key: str | None
     source_observed_at: datetime | None
     direct: bool
+    rejected: int = 0
 
 
 @dataclass
@@ -411,13 +923,7 @@ def _plan(
     observed_at: datetime,
 ) -> _Plan:
     counters: Counter[str] = Counter()
-    rows = [job for job in final_jobs if isinstance(job, Mapping)]
-    raw_by_id: dict[str, Mapping[str, object]] = {}
-    for job in rows:
-        watcher_id = job.get("id")
-        if isinstance(watcher_id, str):
-            raw_by_id.setdefault(watcher_id.strip(), job)
-    non_specific = non_specific_posting_urls([_row(job) for job in rows])
+    raw_by_id, non_specific = _batch_rows(final_jobs)
 
     attempts = list(evidence.attempts) if evidence is not None else []
     attempt_keys = frozenset(attempt.health_key for attempt in attempts)
@@ -457,6 +963,7 @@ def _plan(
                     attempt_times.get(source_key) if source_key is not None else None
                 ),
                 direct=direct,
+                rejected=derived.rejected,
             )
         )
         for identity in derived.identities:
@@ -482,6 +989,20 @@ def _plan(
         config_fingerprint=evidence.config_fingerprint if evidence else None,
         counters=counters,
     )
+
+
+def _batch_rows(
+    final_jobs: Sequence[Mapping[str, object]],
+) -> tuple[dict[str, Mapping[str, object]], frozenset[str]]:
+    """Raw rows by watcher ID, and the URLs that name no single posting."""
+
+    rows = [job for job in final_jobs if isinstance(job, Mapping)]
+    raw_by_id: dict[str, Mapping[str, object]] = {}
+    for job in rows:
+        watcher_id = job.get("id")
+        if isinstance(watcher_id, str):
+            raw_by_id.setdefault(watcher_id.strip(), job)
+    return raw_by_id, non_specific_posting_urls([_row(job) for job in rows])
 
 
 def _lock_jobs(db: Session, plan: _Plan) -> frozenset[uuid.UUID]:
@@ -517,14 +1038,24 @@ def _existing_owners(
     plan: _Plan,
     locked: frozenset[uuid.UUID],
 ) -> dict[tuple[str, str, str], uuid.UUID]:
-    wanted = sorted(
+    return _owners_for(
+        db,
         {
             (job.imported.mapped.company_id, identity.kind, identity.digest)
             for job in plan.jobs
             if job.imported.job_id in locked
             for identity in job.identities
-        }
+        },
     )
+
+
+def _owners_for(
+    db: Session,
+    claims: set[tuple[str, str, str]],
+) -> dict[tuple[str, str, str], uuid.UUID]:
+    """The job that currently owns each ``(company_id, kind, digest)``."""
+
+    wanted = sorted(claims)
     table = HostedJobIdentity.__table__
     owners: dict[tuple[str, str, str], uuid.UUID] = {}
     for start in range(0, len(wanted), _CHUNK):

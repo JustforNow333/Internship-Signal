@@ -8,9 +8,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from backend.app.dedupe import posting_specific_url_key, stable_requisition_key
@@ -18,9 +18,13 @@ from backend.app.dedupe import posting_specific_url_key, stable_requisition_key
 from .catalog import CompanyCatalog
 from .database import HostedDatabase
 from .identity_shadow import (
+    IdentityResolutionReport,
     IdentityShadowReport,
     ImportedJob,
+    ResolutionPlan,
     SourceEvidence,
+    plan_identity_resolution,
+    record_import_identities,
     run_identity_shadow,
 )
 from .job_mapper import (
@@ -38,6 +42,11 @@ from .timing import HostedTiming, stage
 _FINGERPRINT_RE = re.compile(r"[0-9a-f]{64}")
 _SOURCE_TYPE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+# Serializes enforced identity-resolving imports. The wait is bounded so an
+# overlapping run fails cleanly instead of queueing indefinitely.
+IMPORT_LOCK_KEY = "hosted-job-import"
+_IMPORT_LOCK_TIMEOUT = "300s"
+_LOCK_NOT_AVAILABLE = "55P03"
 
 
 class JobImportError(RuntimeError):
@@ -65,6 +74,10 @@ class InvalidFinalJobs(JobImportError):
 
 class JobUpsertFailed(JobImportError):
     code = "job_upsert_failed"
+
+
+class ImportLockUnavailable(JobImportError):
+    code = "hosted_import_lock_unavailable"
 
 
 @dataclass(frozen=True)
@@ -99,6 +112,11 @@ class JobImportResult:
     identity_shadow: IdentityShadowReport | None = field(
         default=None, compare=False, repr=False
     )
+    # Phase 3 resolution outcome: enforced decisions, or shadow diagnostics
+    # when only shadow tracking is on; ``None`` when shadow tracking is off.
+    identity_resolution: IdentityResolutionReport | None = field(
+        default=None, compare=False, repr=False
+    )
 
     @property
     def already_imported(self) -> bool:
@@ -120,6 +138,7 @@ class JobImportService:
         *,
         clock: Callable[[], datetime] = utc_now,
         identity_shadow: bool = False,
+        identity_resolution: bool = False,
     ) -> None:
         self.database = database
         self.catalog = catalog
@@ -127,6 +146,9 @@ class JobImportService:
         # Phase 2 shadow tracking of stable identities and source evidence.
         # Off by default; see ``app.hosted.identity_shadow``.
         self.identity_shadow = identity_shadow
+        # Phase 3 enforced resolution. Off by default, and never on without
+        # shadow tracking, whose ownership records it relies on.
+        self.identity_resolution = identity_resolution and identity_shadow
 
     def import_jobs(
         self,
@@ -153,6 +175,13 @@ class JobImportService:
         transaction after the import commits records identity and source
         evidence (``source_evidence``). It never changes the import, and its
         failure is only reported in ``JobImportResult.identity_shadow``.
+
+        With ``identity_resolution`` as well, the import transaction first
+        takes the import advisory lock, then updates the existing job a row's
+        strong identities unambiguously single out instead of the legacy
+        ``watcher_job_id`` target, and writes identity ownership before it
+        commits. Without it, the shadow pass only reports what would have
+        resolved.
         """
 
         fingerprint = _validated_fingerprint(source_fingerprint)
@@ -172,6 +201,7 @@ class JobImportService:
 
         mapped: MappedJobs | None = None
         shadow_jobs: list[ImportedJob] | None = [] if self.identity_shadow else None
+        resolution: ResolutionPlan | None = None
         try:
             with stage(timing, "job_mapping"):
                 mapped = map_final_jobs(final_jobs, self.catalog)
@@ -179,6 +209,8 @@ class JobImportService:
             updated = 0
             unchanged = 0
             with self.database.session_factory.begin() as db:
+                if self.identity_resolution:
+                    _acquire_import_lock(db)
                 run = db.scalar(
                     select(HostedJobImportRun)
                     .where(HostedJobImportRun.id == claim.run_id)
@@ -198,10 +230,22 @@ class JobImportService:
                     raise ImportAlreadyRunning()
                 affected_job_ids: list[uuid.UUID] = []
                 with stage(timing, "job_upsert"):
-                    for mapped_job in mapped.jobs:
-                        outcome, job_id = self._upsert_job(
-                            db, mapped_job, observed_at, backfill=backfill
+                    if self.identity_resolution:
+                        resolution = plan_identity_resolution(
+                            db, final_jobs, mapped.jobs
                         )
+                    for index, mapped_job in enumerate(mapped.jobs):
+                        target_id = (
+                            resolution.targets[index] if resolution is not None else None
+                        )
+                        if target_id is None:
+                            outcome, job_id = self._upsert_job(
+                                db, mapped_job, observed_at, backfill=backfill
+                            )
+                        else:
+                            outcome, job_id = self._update_resolved(
+                                db, target_id, mapped_job, observed_at
+                            )
                         if shadow_jobs is not None:
                             shadow_jobs.append(
                                 ImportedJob(mapped_job, job_id, outcome)
@@ -214,6 +258,16 @@ class JobImportService:
                             affected_job_ids.append(job_id)
                         else:
                             unchanged += 1
+                    if resolution is not None and shadow_jobs is not None:
+                        # The ownership that justified a resolution commits or
+                        # rolls back with it.
+                        record_import_identities(
+                            db,
+                            final_jobs=final_jobs,
+                            imported=shadow_jobs,
+                            evidence=source_evidence,
+                            observed_at=observed_at,
+                        )
 
                 # Reconciliation shares the job-persistence transaction, so a
                 # succeeded run can never report partially applied matches.
@@ -291,8 +345,15 @@ class JobImportService:
                     final_jobs=final_jobs,
                     imported=shadow_jobs,
                     evidence=source_evidence,
+                    resolution_diagnostics=resolution is None,
                 )
-            result = replace(result, identity_shadow=report)
+            result = replace(
+                result,
+                identity_shadow=report,
+                identity_resolution=(
+                    resolution.report if resolution is not None else report.resolution
+                ),
+            )
         return result
 
     def _claim_source(
@@ -462,6 +523,36 @@ class JobImportService:
         )
         if existing is None:
             raise JobUpsertFailed()
+        return self._update_existing(db, existing, mapped, observed_at)
+
+    def _update_resolved(
+        self,
+        db: Session,
+        target_id: uuid.UUID,
+        mapped: MappedJob,
+        observed_at: datetime,
+    ) -> tuple[str, uuid.UUID]:
+        """Apply a row to the existing job its identities resolved to.
+
+        The target keeps its ``id`` and ``watcher_job_id``; every ordinary
+        update, source-precedence, and open/close rule applies unchanged.
+        """
+
+        existing = db.scalar(
+            select(HostedJob).where(HostedJob.id == target_id).with_for_update()
+        )
+        if existing is None:
+            raise JobUpsertFailed()
+        return self._update_existing(db, existing, mapped, observed_at)
+
+    def _update_existing(
+        self,
+        db: Session,
+        existing: HostedJob,
+        mapped: MappedJob,
+        observed_at: datetime,
+    ) -> tuple[str, uuid.UUID]:
+        values = mapped.business_values()
         if observed_at < existing.last_seen_at:
             raise InvalidImportSource("observation_before_last_seen")
         if _is_backstop_over_direct(existing, mapped):
@@ -549,6 +640,32 @@ class JobImportService:
             attempt.status = "failed"
             attempt.completed_at = observed_at
             attempt.failure_summary = failure_summary[:400]
+
+
+def _acquire_import_lock(db: Session) -> None:
+    """Take the import advisory lock as the transaction's first statements.
+
+    Waits at most ``_IMPORT_LOCK_TIMEOUT``, then restores the session's lock
+    timeout so the rest of the import behaves exactly as before.
+    """
+
+    previous = db.scalar(text("SELECT current_setting('lock_timeout')"))
+    db.execute(
+        text("SELECT set_config('lock_timeout', :value, true)"),
+        {"value": _IMPORT_LOCK_TIMEOUT},
+    )
+    try:
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": IMPORT_LOCK_KEY},
+        )
+    except OperationalError as exc:
+        if getattr(exc.orig, "sqlstate", None) == _LOCK_NOT_AVAILABLE:
+            raise ImportLockUnavailable() from None
+        raise
+    db.execute(
+        text("SELECT set_config('lock_timeout', :value, true)"), {"value": previous}
+    )
 
 
 def _is_backstop_over_direct(existing: HostedJob, mapped: MappedJob) -> bool:

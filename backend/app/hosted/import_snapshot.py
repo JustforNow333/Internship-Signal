@@ -20,7 +20,11 @@ from watcher.config import DEFAULT_WATCHLIST_PATH
 from .analysis_cache import build_hosted_analyzer
 from .catalog import CompanyCatalog
 from .database import HostedDatabase, database_url_from_env
-from .identity_shadow import SourceEvidence, identity_shadow_enabled
+from .identity_shadow import (
+    SourceEvidence,
+    identity_resolution_enabled,
+    identity_shadow_enabled,
+)
 from .import_audit import run_import_audit
 from .job_import import JobImportError, JobImportResult, JobImportService
 from .snapshot_jobs import SnapshotReplayError, replay_snapshot_jobs
@@ -60,11 +64,14 @@ def import_snapshot_into_hosted(
 
     Phase 2 identity shadow tracking runs only when
     ``HOSTED_IDENTITY_SHADOW_ENABLED`` is explicitly true; it then also
-    receives the snapshot's per-source attempt metadata.
+    receives the snapshot's per-source attempt metadata. Phase 3 resolution
+    is enforced only when ``HOSTED_IDENTITY_RESOLUTION_ENABLED`` is also
+    explicitly true; otherwise shadow tracking only reports what it would do.
     """
 
     timing_options = {"timing": timing} if timing is not None else {}
     identity_shadow = identity_shadow_enabled()
+    identity_resolution = identity_resolution_enabled()
     replayed = replay_snapshot_jobs(
         snapshot_path,
         watchlist_path=watchlist_path,
@@ -78,6 +85,7 @@ def import_snapshot_into_hosted(
             database,
             CompanyCatalog.from_watcher_config(replayed.config),
             identity_shadow=identity_shadow,
+            identity_resolution=identity_resolution,
         )
         shadow_options = (
             {"source_evidence": SourceEvidence.from_batch(replayed.batch)}
@@ -128,6 +136,8 @@ def import_summary_lines(
         lines.append(f"HOSTED-JOB-IMPORT-SKIPS {reasons}")
     if result.identity_shadow is not None:
         lines.extend(result.identity_shadow.lines())
+    if result.identity_resolution is not None:
+        lines.extend(result.identity_resolution.lines())
     return lines
 
 
