@@ -259,6 +259,9 @@ class JobImportService:
                         else:
                             unchanged += 1
                     if resolution is not None and shadow_jobs is not None:
+                        resolution = resolution.with_outcomes(
+                            [job.outcome for job in shadow_jobs]
+                        )
                         # The ownership that justified a resolution commits or
                         # rolls back with it.
                         record_import_identities(

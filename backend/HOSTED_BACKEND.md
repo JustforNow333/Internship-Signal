@@ -146,14 +146,40 @@ shadow tracking prints one bounded line of counts:
 HOSTED-IDENTITY-RESOLVE mode=shadow status=ok rows=... would_resolve=...
 resolved=0 agree=... unowned=... no_strong_identity=... fallback=...
 reject_<reason>=... legacy_requisition_mismatch=...
+legacy_requisition_collision=... legacy_requisition_stale_same_posting=...
+legacy_requisition_unowned_replacement=... legacy_requisition_uncertain=...
+legacy_requisition_mismatch_updated=... legacy_requisition_collision_updated=...
 ```
 
 (shown wrapped; it is one line). `mode=enforced` reports applied decisions
 (`resolved` equals `would_resolve`). `legacy_requisition_mismatch` counts rows
-whose legacy target owns a different requisition in the same provider scope,
-which means the legacy title/city ID would merge two requisitions. A diagnostic
-failure prints `status=failed` and changes nothing else. Unsetting the variable
-returns the next import to the legacy path with no data repair.
+whose legacy target (the job their `watcher_job_id` names) owns a requisition
+the row does not carry, in a provider scope where the row carries one. It
+counts a state observed in this import, usually one an earlier import left,
+whether or not the row then resolves elsewhere. Four classes partition it,
+using only identity ownership recorded before the import:
+
+- `collision`: another job owns the row's requisition in that scope, and the
+  target owns none of the row's: the legacy ID names two distinct postings.
+- `stale_same_posting`: the target already held the row's requisition when
+  every key the row lacks was first recorded, and the target's own URLs derive
+  those keys. The target is on its own posting and only stale URL-derived keys
+  remain.
+- `unowned_replacement`: no other job owns the row's requisition, and the
+  target did not hold it before the keys the row lacks. A different
+  requisition took over the legacy ID; a repost and a distinct posting look
+  the same here.
+- `uncertain`: anything else, such as a row whose requisitions name both the
+  target and another job, an older held requisition beside a lacking key no
+  owned URL derives, or provider scopes that classify differently.
+
+`legacy_requisition_mismatch_updated` counts mismatched rows whose legacy
+update changed the target's stored values in this import, and
+`legacy_requisition_collision_updated` the collisions among them: overwrites
+performed now, not ones observed again. A resolved row updates another job and
+never counts. A diagnostic failure prints `status=failed` and changes nothing
+else. Unsetting the variable returns the next import to the legacy path with
+no data repair.
 
 ## Per-user matching
 

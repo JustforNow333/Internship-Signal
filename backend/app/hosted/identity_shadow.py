@@ -50,7 +50,7 @@ import re
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from sqlalchemy import func, literal_column, text, tuple_
@@ -167,6 +167,15 @@ RESOLUTION_REASONS = (
     "target_requisition_unverified",
     "target_contention",
 )
+# Why a row's legacy target owns a requisition the row does not carry, in the
+# row's provider scope. Each is reported as ``legacy_requisition_<name>``, and
+# together they partition ``legacy_requisition_mismatch``.
+LEGACY_MISMATCH_CLASSES = (
+    "collision",
+    "stale_same_posting",
+    "unowned_replacement",
+    "uncertain",
+)
 RESOLVE_COUNTER_NAMES = (
     "rows",
     "would_resolve",
@@ -177,6 +186,11 @@ RESOLVE_COUNTER_NAMES = (
     "fallback",
     *(f"reject_{reason}" for reason in RESOLUTION_REASONS),
     "legacy_requisition_mismatch",
+    *(f"legacy_requisition_{name}" for name in LEGACY_MISMATCH_CLASSES),
+    # Mismatched rows whose legacy update changed the target in this import,
+    # as opposed to a mismatch an earlier import left in place.
+    "legacy_requisition_mismatch_updated",
+    "legacy_requisition_collision_updated",
 )
 
 
@@ -654,6 +668,20 @@ class ResolutionPlan:
 
     targets: tuple[uuid.UUID | None, ...]
     report: IdentityResolutionReport
+    mismatches: tuple[str | None, ...] = ()
+
+    def with_outcomes(self, outcomes: Sequence[str]) -> ResolutionPlan:
+        """This plan, its report also counting the legacy updates applied."""
+
+        counters = Counter(self.report.counters)
+        _count_mismatch_updates(counters, self.mismatches, outcomes, self.targets)
+        return replace(
+            self,
+            report=replace(
+                self.report,
+                counters={name: counters[name] for name in RESOLVE_COUNTER_NAMES},
+            ),
+        )
 
 
 def plan_identity_resolution(
@@ -680,7 +708,7 @@ def plan_identity_resolution(
         )
         for job in mapped_jobs
     ]
-    decisions, counters = _decide(db, rows, lock=True)
+    decisions, counters, mismatches = _decide(db, rows, lock=True)
     counters["resolved"] = counters["would_resolve"]
     return ResolutionPlan(
         targets=tuple(
@@ -690,6 +718,7 @@ def plan_identity_resolution(
             mode="enforced",
             counters={name: counters[name] for name in RESOLVE_COUNTER_NAMES},
         ),
+        mismatches=tuple(mismatches),
     )
 
 
@@ -735,7 +764,11 @@ def _diagnose_resolution(db: Session, plan: _Plan) -> IdentityResolutionReport:
     ]
     try:
         with db.begin_nested():
-            _decisions, counters = _decide(db, rows, lock=False)
+            _decisions, counters, mismatches = _decide(db, rows, lock=False)
+            # Nothing resolves here, so every row took the legacy path.
+            _count_mismatch_updates(
+                counters, mismatches, [job.imported.outcome for job in plan.jobs]
+            )
     except Exception as exc:  # noqa: BLE001 - diagnostics must never fail shadow work
         LOGGER.warning("Identity resolution diagnostics failed (%s).", type(exc).__name__)
         return IdentityResolutionReport(mode="shadow", status="failed")
@@ -750,7 +783,7 @@ def _decide(
     rows: Sequence[ResolutionRow],
     *,
     lock: bool,
-) -> tuple[list[ResolutionDecision], Counter[str]]:
+) -> tuple[list[ResolutionDecision], Counter[str], list[str | None]]:
     owners = _owners_for(db, {claim for row in rows for claim in row.claims})
     candidates: set[uuid.UUID] = set()
     for row in rows:
@@ -765,16 +798,17 @@ def _decide(
     }
     targets, requisitions = _resolution_targets(db, candidates, legacy_ids, lock=lock)
     decisions = decide_resolutions(rows, owners=owners, targets=targets)
-    return decisions, _count_decisions(rows, decisions, requisitions)
+    mismatches = _mismatch_classes(db, rows, owners, requisitions)
+    return decisions, _count_decisions(rows, decisions, mismatches), mismatches
 
 
 def _count_decisions(
     rows: Sequence[ResolutionRow],
     decisions: Sequence[ResolutionDecision],
-    requisitions: Mapping[uuid.UUID, tuple[str, ...]],
+    mismatches: Sequence[str | None],
 ) -> Counter[str]:
     counters: Counter[str] = Counter()
-    for row, decision in zip(rows, decisions, strict=True):
+    for row, decision, mismatch in zip(rows, decisions, mismatches, strict=True):
         counters["rows"] += 1
         if decision.resolves:
             counters["would_resolve"] += 1
@@ -783,9 +817,61 @@ def _count_decisions(
             counters[f"reject_{decision.outcome}"] += 1
         else:
             counters[decision.outcome] += 1
-        if _legacy_requisition_mismatch(row, requisitions):
+        if mismatch is not None:
             counters["legacy_requisition_mismatch"] += 1
+            counters[f"legacy_requisition_{mismatch}"] += 1
     return counters
+
+
+def _count_mismatch_updates(
+    counters: Counter[str],
+    mismatches: Sequence[str | None],
+    outcomes: Sequence[str],
+    targets: Sequence[uuid.UUID | None] = (),
+) -> None:
+    """Count mismatched rows whose legacy update changed the target now.
+
+    A resolved row updated another job, so it never counts.
+    """
+
+    for index, (mismatch, outcome) in enumerate(zip(mismatches, outcomes, strict=True)):
+        if mismatch is None or outcome != "updated":
+            continue
+        if targets and targets[index] is not None:
+            continue
+        counters["legacy_requisition_mismatch_updated"] += 1
+        if mismatch == "collision":
+            counters["legacy_requisition_collision_updated"] += 1
+
+
+def _mismatch_classes(
+    db: Session,
+    rows: Sequence[ResolutionRow],
+    owners: Mapping[tuple[str, str, str], uuid.UUID],
+    requisitions: Mapping[uuid.UUID, tuple[str, ...]],
+) -> list[str | None]:
+    """Each row's mismatch class, or ``None`` when it has no mismatch."""
+
+    mismatched = [_legacy_requisition_mismatch(row, requisitions) for row in rows]
+    stored, urls = _mismatch_evidence(
+        db,
+        {row.legacy_target for row, flag in zip(rows, mismatched) if flag},
+    )
+    return [
+        (
+            classify_legacy_requisition_mismatch(
+                row,
+                owners=owners,
+                stored=stored.get(row.legacy_target, {}),
+                url_requisitions=urls.get(row.legacy_target, frozenset()),
+            )
+            # The classes always partition the compatibility total.
+            or "uncertain"
+        )
+        if flag
+        else None
+        for row, flag in zip(rows, mismatched)
+    ]
 
 
 def _legacy_requisition_mismatch(
@@ -808,6 +894,76 @@ def _legacy_requisition_mismatch(
     return any(
         scope in stored and not stored[scope] <= keys for scope, keys in row_scopes.items()
     )
+
+
+def classify_legacy_requisition_mismatch(
+    row: ResolutionRow,
+    *,
+    owners: Mapping[tuple[str, str, str], uuid.UUID],
+    stored: Mapping[str, datetime],
+    url_requisitions: frozenset[str] = frozenset(),
+) -> str | None:
+    """Classify why the legacy target owns a requisition the row lacks.
+
+    Pure. ``None`` unless the row has a ``legacy_requisition_mismatch``.
+    ``stored`` maps the legacy target's requisition keys to when each was
+    first recorded, ``url_requisitions`` holds the requisitions its owned URLs
+    derive, and ``owners`` the ownership recorded before this import. Each
+    mismatched provider scope is classified from that evidence alone:
+
+    * ``collision``: another job owns a row requisition in the scope and the
+      target owns none: the legacy ID names two distinct postings;
+    * ``stale_same_posting``: the target already held a row requisition when
+      each key the row lacks was recorded, and its own URLs derive each of
+      them: the target is on its own posting and only stale URL-derived keys
+      remain;
+    * ``unowned_replacement``: no job held a row requisition before the keys
+      the row lacks: another requisition, a repost or a different posting,
+      took over the legacy ID;
+    * ``uncertain``: anything else, such as a row naming both the target and
+      another job, an older lacking key no URL derives, or scopes that
+      classify differently.
+    """
+
+    if row.legacy_target is None:
+        return None
+    row_scopes = _requisition_scopes(
+        identity.key for identity in row.identities if identity.kind == KIND_REQUISITION
+    )
+    stored_scopes = _requisition_scopes(stored)
+    if not row_scopes or not stored_scopes:
+        return None
+    classes = {
+        _scope_mismatch_class(
+            row, keys, stored_scopes[scope] - keys, owners, stored, url_requisitions
+        )
+        for scope, keys in row_scopes.items()
+        if scope in stored_scopes and not stored_scopes[scope] <= keys
+    }
+    if not classes:
+        return None
+    return classes.pop() if len(classes) == 1 else "uncertain"
+
+
+def _scope_mismatch_class(
+    row: ResolutionRow,
+    keys: frozenset[str],
+    lacking: frozenset[str],
+    owners: Mapping[tuple[str, str, str], uuid.UUID],
+    stored: Mapping[str, datetime],
+    url_requisitions: frozenset[str],
+) -> str:
+    holders = {
+        owners.get((row.company_id, KIND_REQUISITION, identity_digest(key)))
+        for key in keys
+    }
+    if holders - {None, row.legacy_target}:
+        return "uncertain" if row.legacy_target in holders else "collision"
+    # A key the row carries is in ``stored`` only if the target owns it.
+    first_lacking = min(stored[key] for key in lacking)
+    if not any(key in stored and stored[key] <= first_lacking for key in keys):
+        return "unowned_replacement"
+    return "stale_same_posting" if lacking <= url_requisitions else "uncertain"
 
 
 def _resolution_row(
@@ -894,6 +1050,35 @@ def _resolution_targets(
         for job_id, (is_open, superseded, direct) in states.items()
     }
     return targets, {job_id: tuple(keys) for job_id, keys in requisitions.items()}
+
+
+def _mismatch_evidence(
+    db: Session, job_ids: set[uuid.UUID]
+) -> tuple[dict[uuid.UUID, dict[str, datetime]], dict[uuid.UUID, frozenset[str]]]:
+    """Each job's requisitions with first sightings, and what its URLs derive."""
+
+    stored: dict[uuid.UUID, dict[str, datetime]] = defaultdict(dict)
+    derived: dict[uuid.UUID, set[str]] = defaultdict(set)
+    ordered = sorted(job_ids)
+    table = HostedJobIdentity.__table__
+    for start in range(0, len(ordered), _CHUNK):
+        chunk = ordered[start : start + _CHUNK]
+        for job_id, kind, key, first_seen in db.execute(
+            table.select()
+            .with_only_columns(
+                table.c.job_id, table.c.kind, table.c.identity_key, table.c.first_seen_at
+            )
+            .where(
+                table.c.job_id.in_(chunk),
+                table.c.kind.in_((KIND_REQUISITION, KIND_URL)),
+            )
+            .order_by(table.c.job_id, table.c.kind, table.c.identity_key)
+        ):
+            if kind == KIND_REQUISITION:
+                stored[job_id][key] = first_seen
+            elif requisition := stable_requisition_key({"source_url": key}):
+                derived[job_id].add(requisition)
+    return dict(stored), {job_id: frozenset(keys) for job_id, keys in derived.items()}
 
 
 @dataclass

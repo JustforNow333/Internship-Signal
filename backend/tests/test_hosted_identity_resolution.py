@@ -11,6 +11,7 @@ import psycopg
 import pytest
 from app.hosted import identity_shadow, job_import
 from app.hosted.identity_shadow import (
+    LEGACY_MISMATCH_CLASSES,
     RESOLUTION_FLAG_ENV,
     RESOLUTION_REASONS,
     RESOLVE_COUNTER_NAMES,
@@ -18,6 +19,7 @@ from app.hosted.identity_shadow import (
     JobIdentity,
     ResolutionRow,
     ResolutionTarget,
+    classify_legacy_requisition_mismatch,
     decide_resolution,
     decide_resolutions,
     identity_resolution_enabled,
@@ -657,6 +659,7 @@ def test_distinct_postings_sharing_title_and_location_are_never_merged(
         "would_resolve": 1,
         "resolved": 1,
         "legacy_requisition_mismatch": 1,
+        "legacy_requisition_collision": 1,
     }
     after = jobs_state(database)
     assert after["L"] == before["L"]
@@ -827,6 +830,390 @@ def test_workday_tenants_and_sites_keep_identical_requisition_text_apart(
         assert after[watcher_id]["last_seen_at"] == clock()
 
 
+# --- Legacy requisition mismatch classification ------------------------------
+
+R3 = JobIdentity("requisition", "workday|stripe_stripe|r3")
+UNI_R1 = JobIdentity("requisition", "workday|stripe_stripeuniversity|r1")
+GH_R1 = JobIdentity("requisition", "greenhouse|stripe|r1")
+GH_R2 = JobIdentity("requisition", "greenhouse|stripe|r2")
+UNIVERSITY_URL = (
+    "https://stripe.wd5.myworkdayjobs.com/StripeUniversity/job/New-York-NY/"
+    "Backend-Engineer-Intern_{}"
+)
+
+EARLY = datetime(2026, 10, 12, tzinfo=UTC)
+LATE = datetime(2026, 10, 13, tzinfo=UTC)
+
+
+def stored(*keys, late=()) -> dict[str, datetime]:
+    return {
+        identity.key: LATE if identity in late else EARLY for identity in (*keys, *late)
+    }
+
+
+MISMATCH_CASES = {
+    "no legacy target": (row(R2), owned((R2, Y)), stored(R1), (), None),
+    "row carries every stored key": (row(R1, legacy=X), owned((R1, X)), stored(R1), (), None),
+    "stored key only in another scope": (row(R1, legacy=X), {}, stored(UNI_R1), (), None),
+    "cross-provider stored key": (row(R1, legacy=X), owned((GH_R1, Y)), stored(GH_R1), (), None),
+    "distinct requisition owned by another job": (
+        row(R2, legacy=X),
+        owned((R2, Y)),
+        stored(R1),
+        (),
+        "collision",
+    ),
+    "row names both the target and another job": (
+        row(R1, R2, legacy=X),
+        owned((R1, X), (R2, Y)),
+        stored(R1, R3),
+        (),
+        "uncertain",
+    ),
+    "stale url alias recorded beside the held key": (
+        row(R1, legacy=X),
+        owned((R1, X)),
+        stored(R1, late=(R3,)),
+        (R3,),
+        "stale_same_posting",
+    ),
+    "stale url alias recorded with the held key": (
+        row(R1, legacy=X),
+        owned((R1, X)),
+        stored(R1, R3),
+        (R3,),
+        "stale_same_posting",
+    ),
+    "held key recorded after the url-derived one it replaced": (
+        row(R1, legacy=X),
+        owned((R1, X)),
+        stored(R3, late=(R1,)),
+        (R3,),
+        "unowned_replacement",
+    ),
+    "older held key beside a lacking key no url derives": (
+        row(R1, legacy=X),
+        owned((R1, X)),
+        stored(R1, R3),
+        (),
+        "uncertain",
+    ),
+    "only partly derived from owned urls": (
+        row(R1, legacy=X),
+        owned((R1, X)),
+        stored(R1, R2, R3),
+        (R3,),
+        "uncertain",
+    ),
+    "unowned replacement": (row(R2, legacy=X), {}, stored(R1), (), "unowned_replacement"),
+    "url-derived lacking key without the target's own key": (
+        row(R2, legacy=X),
+        {},
+        stored(R3),
+        (R3,),
+        "unowned_replacement",
+    ),
+    "owner in another scope is no collision": (
+        row(R2, UNI_R1, legacy=X),
+        owned((UNI_R1, Y)),
+        stored(R1),
+        (),
+        "unowned_replacement",
+    ),
+    "scopes disagree": (
+        row(R2, GH_R2, legacy=X),
+        owned((R2, Y)),
+        stored(R1, GH_R1),
+        (),
+        "uncertain",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(MISMATCH_CASES))
+def test_classify_legacy_requisition_mismatch(case) -> None:
+    item, owners, keys, url_requisitions, expected = MISMATCH_CASES[case]
+    assert (
+        classify_legacy_requisition_mismatch(
+            item,
+            owners=owners,
+            stored=keys,
+            url_requisitions=frozenset(identity.key for identity in url_requisitions),
+        )
+        == expected
+    )
+
+
+def legacy_counts(result) -> dict[str, int]:
+    counters = resolve(result)
+    classes = sum(
+        counters[f"legacy_requisition_{name}"] for name in LEGACY_MISMATCH_CLASSES
+    )
+    # The classes always partition the compatibility total.
+    assert classes == counters["legacy_requisition_mismatch"]
+    assert counters["legacy_requisition_mismatch_updated"] <= classes
+    assert (
+        counters["legacy_requisition_collision_updated"]
+        <= counters["legacy_requisition_collision"]
+    )
+    return {
+        name: value for name, value in nonzero(counters).items() if name.startswith("legacy_")
+    }
+
+
+def _collision_steps(database, catalog, clock, *, resolution):
+    run(database, catalog, clock, [direct_job(1, requisition="R1", id="L")], "a", resolution=resolution)
+    run(
+        database,
+        catalog,
+        clock,
+        [
+            direct_job(1, requisition="R1", id=f"L-{SUFFIX_A}"),
+            direct_job(1, requisition="R2", id=f"L-{SUFFIX_B}"),
+        ],
+        "b",
+        resolution=resolution,
+    )
+    # R2 arrives alone under R1's legacy ID, with an edited description.
+    edited = direct_job(1, requisition="R2", id="L", description="Build payment APIs.")
+    return [
+        run(database, catalog, clock, [edited], marker, resolution=resolution)
+        for marker in "cd"
+    ]
+
+
+def test_collision_overwrite_is_counted_when_written_then_only_observed(
+    database, catalog, clock
+) -> None:
+    first, again = _collision_steps(database, catalog, clock, resolution=False)
+
+    # The legacy path rewrites R1's job with R2, which another job owns.
+    assert jobs_state(database)["L"]["application_url"] == url_key("R2")
+    assert first.counters.jobs_updated == 1
+    assert legacy_counts(first) == {
+        "legacy_requisition_mismatch": 1,
+        "legacy_requisition_collision": 1,
+        "legacy_requisition_mismatch_updated": 1,
+        "legacy_requisition_collision_updated": 1,
+    }
+    # Nothing changes on the next sighting: an existing mismatch, no new write.
+    assert again.counters.jobs_updated == 0
+    assert legacy_counts(again) == {
+        "legacy_requisition_mismatch": 1,
+        "legacy_requisition_collision": 1,
+    }
+    assert nonzero(resolve(first)) == {
+        "rows": 1,
+        "would_resolve": 1,
+        **legacy_counts(first),
+    }
+
+
+def test_enforced_resolution_observes_a_collision_without_writing_it(
+    database, catalog, clock
+) -> None:
+    first, again = _collision_steps(database, catalog, clock, resolution=True)
+
+    state = jobs_state(database)
+    assert state["L"]["application_url"] == url_key("R1")
+    # The edit updated R2's own job, which is no legacy overwrite.
+    assert first.counters.jobs_updated == 1
+    assert state[f"L-{SUFFIX_B}"]["description"] == "Build payment APIs."
+    for result in (first, again):
+        assert nonzero(resolve(result)) == {
+            "rows": 1,
+            "would_resolve": 1,
+            "resolved": 1,
+            "legacy_requisition_mismatch": 1,
+            "legacy_requisition_collision": 1,
+        }
+
+
+@pytest.mark.parametrize("resolution", [False, True])
+def test_stale_url_derived_key_is_a_same_posting_mismatch(
+    database, catalog, clock, resolution
+) -> None:
+    # The first sighting's URL named R8 while the native requisition was R7.
+    run(
+        database,
+        catalog,
+        clock,
+        [direct_job(1, requisition="R7", id="s", url=url_key("R8"))],
+        "a",
+        resolution=resolution,
+    )
+    result = run(database, catalog, clock, [direct_job(1, requisition="R7", id="s")], "b", resolution=resolution)
+
+    assert result.counters.jobs_updated == 1
+    assert nonzero(resolve(result)) == {
+        "rows": 1,
+        "agree": 1,
+        "legacy_requisition_mismatch": 1,
+        "legacy_requisition_stale_same_posting": 1,
+        "legacy_requisition_mismatch_updated": 1,
+    }
+
+
+@pytest.mark.parametrize("resolution", [False, True])
+def test_unowned_replacement_is_counted_when_written_then_only_observed(
+    database, catalog, clock, resolution
+) -> None:
+    run(database, catalog, clock, [direct_job(1, requisition="R1", id="x")], "a", resolution=resolution)
+    first, again = (
+        run(database, catalog, clock, [direct_job(9, requisition="R9", id="x")], marker, resolution=resolution)
+        for marker in "bc"
+    )
+
+    assert jobs_state(database)["x"]["application_url"] == url_key("R9")
+    assert nonzero(resolve(first)) == {
+        "rows": 1,
+        "unowned": 1,
+        "legacy_requisition_mismatch": 1,
+        "legacy_requisition_unowned_replacement": 1,
+        "legacy_requisition_mismatch_updated": 1,
+    }
+    # R9 now belongs to the replaced job, which still owns R1.
+    assert nonzero(resolve(again)) == {
+        "rows": 1,
+        "agree": 1,
+        "legacy_requisition_mismatch": 1,
+        "legacy_requisition_unowned_replacement": 1,
+    }
+
+
+@pytest.mark.parametrize("resolution", [False, True])
+def test_a_row_naming_its_target_and_another_job_is_uncertain(
+    database, catalog, clock, resolution
+) -> None:
+    run(
+        database,
+        catalog,
+        clock,
+        [
+            direct_job(1, requisition="R1", id="u", url=url_key("R3")),
+            direct_job(2, requisition="R2", id="y"),
+            direct_job(4, requisition=None, id="v", url=url_key("R5")),
+        ],
+        "a",
+        resolution=resolution,
+    )
+    result = run(
+        database,
+        catalog,
+        clock,
+        [
+            # Native R1 is u's own, but the URL names y's R2.
+            direct_job(1, requisition="R1", id="u", url=url_key("R2")),
+            # v was known only by its URL's R5. Without v's own key beside
+            # it, a native R6 shows no same posting: a replacement.
+            direct_job(6, requisition="R6", id="v"),
+        ],
+        "b",
+        resolution=resolution,
+    )
+
+    assert legacy_counts(result) == {
+        "legacy_requisition_mismatch": 2,
+        "legacy_requisition_uncertain": 1,
+        "legacy_requisition_unowned_replacement": 1,
+        "legacy_requisition_mismatch_updated": 2,
+    }
+    assert resolve(result)["reject_conflict"] == 1 and resolve(result)["unowned"] == 1
+
+
+@pytest.mark.parametrize("resolution", [False, True])
+def test_identical_requisition_text_in_another_scope_is_never_a_mismatch(
+    database, catalog, clock, resolution
+) -> None:
+    run(
+        database,
+        catalog,
+        clock,
+        [
+            direct_job(1, requisition="R1", id="t1"),
+            direct_job(2, requisition="R1", id="t2", url=UNIVERSITY_URL.format("R1")),
+            direct_job(3, requisition="R3", id="t3", url=UNIVERSITY_URL.format("R3")),
+        ],
+        "a",
+        resolution=resolution,
+    )
+    result = run(
+        database,
+        catalog,
+        clock,
+        [
+            # t1's site-scoped R1 differs from t2's R1 on another site, so the
+            # university sighting is no collision with t1.
+            direct_job(2, requisition="R1", id="t1", url=UNIVERSITY_URL.format("R1")),
+            # A university R4 replacing a university R3 is in t3's own scope.
+            direct_job(4, requisition="R4", id="t3", url=UNIVERSITY_URL.format("R4")),
+        ],
+        "b",
+        resolution=resolution,
+    )
+
+    assert legacy_counts(result) == {
+        "legacy_requisition_mismatch": 1,
+        "legacy_requisition_unowned_replacement": 1,
+        "legacy_requisition_mismatch_updated": 1,
+    }
+
+
+@pytest.mark.parametrize("resolution", [False, True])
+def test_mismatch_classification_never_changes_decisions_or_writes(
+    database, catalog, monkeypatch, resolution
+) -> None:
+    def scenario():
+        clock = MutableClock()
+        with database.session_factory.begin() as db:
+            create_user(db, clock(), "watcher@example.com")
+        results = _collision_steps(database, catalog, clock, resolution=resolution)
+        results.append(
+            run(
+                database,
+                catalog,
+                clock,
+                [
+                    direct_job(1, requisition="R7", id="s"),
+                    direct_job(9, requisition="R9", id=f"L-{SUFFIX_A}"),
+                ],
+                "e",
+                resolution=resolution,
+            )
+        )
+        return results, _state(database), owner_rows(database)
+
+    classified, classified_state, classified_owners = scenario()
+    _truncate(database)
+    monkeypatch.setattr(
+        identity_shadow, "classify_legacy_requisition_mismatch", lambda *_a, **_k: None
+    )
+    blind, blind_state, blind_owners = scenario()
+
+    assert classified_state == blind_state
+    assert {key: value[0] for key, value in classified_owners.items()} == {
+        key: value[0] for key, value in blind_owners.items()
+    }
+    for seen, unseen in zip(classified, blind, strict=True):
+        assert seen.counters == unseen.counters
+        assert {
+            name: value
+            for name, value in resolve(seen).items()
+            if not name.startswith("legacy_")
+        } == {
+            name: value
+            for name, value in resolve(unseen).items()
+            if not name.startswith("legacy_")
+        }
+    assert any(legacy_counts(result) for result in classified)
+    # Without a class the compatibility total still counts, as uncertain.
+    assert any(resolve(result)["legacy_requisition_mismatch"] for result in blind)
+    for result in blind:
+        assert legacy_counts(result).get("legacy_requisition_uncertain", 0) == resolve(
+            result
+        )["legacy_requisition_mismatch"]
+
+
 # --- Direct and backstop ------------------------------------------------------
 
 BACKSTOP_EVIDENCE = evidence(
@@ -941,6 +1328,8 @@ def test_target_contention_and_batch_ambiguity_fall_back(database, catalog, cloc
         "fallback": 1,
         "reject_target_contention": 1,
         "legacy_requisition_mismatch": 1,
+        "legacy_requisition_unowned_replacement": 1,
+        "legacy_requisition_mismatch_updated": 1,
     }
     assert contended.counters.jobs_inserted == 1
 
@@ -1198,6 +1587,8 @@ def test_disabled_resolution_keeps_jobs_matches_and_notifications_identical(
     # Suffix churn, a retitle, and a backstop sighting of a direct job.
     assert reports[1].counters["would_resolve"] == 3
     assert reports[2].counters["legacy_requisition_mismatch"] == 1
+    assert reports[2].counters["legacy_requisition_unowned_replacement"] == 1
+    assert reports[2].counters["legacy_requisition_mismatch_updated"] == 1
 
 
 def test_diagnostic_import_transaction_is_statement_identical_to_legacy(
@@ -1299,6 +1690,8 @@ def test_diagnostic_decisions_match_enforced_decisions_on_equivalent_fixtures(
         "reject_target_ambiguous": 1,
         "reject_target_contention": 1,
         "legacy_requisition_mismatch": 1,
+        "legacy_requisition_unowned_replacement": 1,
+        "legacy_requisition_mismatch_updated": 1,
     }
     assert enforced.counters.jobs_inserted == diagnostic.counters.jobs_inserted - 3
 
