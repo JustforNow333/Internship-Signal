@@ -870,15 +870,47 @@ def _write_corrupt_deflate_body(path):
 
 
 def _write_deeply_nested(path):
-    """Valid JSON the parser accepts but whose nesting cannot be frozen."""
+    """A valid snapshot with one value nested past the recursion limit.
+
+    Python 3.11's JSON decoder counts nesting against that limit and later
+    versions do not, so loading fails while parsing or while freezing,
+    depending on the interpreter. Either way it must be reported.
+    """
 
     payload = _batch().as_dict()
     payload["rows"][0]["extra"]["nested"] = "NESTED"
     depth = sys.getrecursionlimit() + 100
     text = json.dumps(payload).replace('"NESTED"', "[" * depth + "]" * depth)
-    json.loads(text)
     with gzip.open(path, "wt", encoding="utf-8") as stream:
         stream.write(text)
+
+
+def test_nesting_too_deep_to_freeze_is_reported_on_any_interpreter(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "parsed.json.gz"
+    save_collection_snapshot(_batch(), path)
+    payload = _batch().as_dict()
+    nested: list = []
+    for _ in range(sys.getrecursionlimit() + 100):
+        nested = [nested]
+    payload["rows"][0]["extra"]["nested"] = nested
+    parsed = []
+
+    def load(stream):
+        # Stand in for a decoder that accepted the nesting, so only freezing
+        # can exceed the recursion limit.
+        parsed.append(stream.read())
+        return payload
+
+    monkeypatch.setattr(
+        "watcher.collection_snapshot.json",
+        SimpleNamespace(load=load, JSONDecodeError=json.JSONDecodeError),
+    )
+
+    with pytest.raises(CollectionSnapshotError, match="too deeply nested"):
+        load_collection_snapshot(path)
+    assert len(parsed) == 1
 
 
 @pytest.mark.parametrize(
