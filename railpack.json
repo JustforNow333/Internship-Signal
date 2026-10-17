@@ -11,6 +11,10 @@
           "src": "backend/requirements.txt",
           "dest": "backend/requirements.txt"
         },
+        {
+          "src": "backend/constraints.txt",
+          "dest": "backend/constraints.txt"
+        },
         "..."
       ]
     }
