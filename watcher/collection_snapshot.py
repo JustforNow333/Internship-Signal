@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import tempfile
+import zlib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -357,11 +358,24 @@ def load_collection_snapshot(path: str | Path) -> CollectionBatch:
         raise CollectionSnapshotError(
             f"Collection snapshot not found: {source}"
         ) from exc
-    except (OSError, UnicodeError, json.JSONDecodeError, EOFError) as exc:
+    # A damaged deflate stream raises zlib.error, which is not an OSError.
+    except (OSError, UnicodeError, json.JSONDecodeError, EOFError, zlib.error) as exc:
         raise CollectionSnapshotError(
             f"Collection snapshot is corrupt or truncated: {source}"
         ) from exc
-    return _batch_from_dict(payload)
+    except RecursionError:
+        raise _too_deeply_nested(source) from None
+    try:
+        return _batch_from_dict(payload)
+    except RecursionError:
+        raise _too_deeply_nested(source) from None
+
+
+def _too_deeply_nested(source: Path) -> CollectionSnapshotError:
+    # Parsing and freezing both recurse once per nesting level.
+    return CollectionSnapshotError(
+        f"Collection snapshot is too deeply nested: {source}"
+    )
 
 
 def _batch_from_dict(value: object) -> CollectionBatch:

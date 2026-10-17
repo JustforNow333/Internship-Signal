@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import logging
 import os
@@ -1080,14 +1081,31 @@ def test_snapshot_cli_uses_official_replay_and_is_idempotent_without_side_effect
     database.dispose()
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(b"not gzip", id="not_gzip"),
+        # A gzip header around an undecodable deflate stream (zlib.error).
+        pytest.param(
+            gzip.compress(b"{}", mtime=0)[:10]
+            + b"\xff" * 32
+            + gzip.compress(b"{}", mtime=0)[-8:],
+            id="corrupt_deflate_body",
+        ),
+        pytest.param(
+            gzip.compress(b"[" * 200_000 + b"]" * 200_000), id="too_deeply_nested"
+        ),
+    ],
+)
 def test_snapshot_cli_fails_cleanly_on_corrupt_input(
     job_postgres_url: str,
     tmp_path: Path,
     monkeypatch,
     capsys,
+    payload: bytes,
 ) -> None:
     corrupt = tmp_path / "private-secret-name.json.gz"
-    corrupt.write_bytes(b"not gzip")
+    corrupt.write_bytes(payload)
     monkeypatch.setenv("HOSTED_DATABASE_URL", job_postgres_url)
     assert import_snapshot_main(["--snapshot", str(corrupt)]) == 1
     captured = capsys.readouterr()

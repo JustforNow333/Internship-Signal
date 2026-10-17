@@ -1,6 +1,8 @@
 import gzip
 import json
 import sqlite3
+import sys
+import zlib
 from dataclasses import FrozenInstanceError, replace
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
@@ -854,14 +856,54 @@ def test_replay_defaults_to_snapshot_date_and_today_can_override(tmp_path):
     assert override_result.jobs[0]["deadline_days_left"] == -1
 
 
+def _write_corrupt_deflate_body(path):
+    """A valid gzip header and trailer around an undecodable deflate stream.
+
+    gzip reports this as ``zlib.error``, which is not an ``OSError``.
+    """
+
+    valid = gzip.compress(b"{}", mtime=0)
+    # 0xff starts a deflate block of the reserved type 3.
+    path.write_bytes(valid[:10] + b"\xff" * 32 + valid[-8:])
+    with pytest.raises(zlib.error):
+        gzip.decompress(path.read_bytes())
+
+
+def _write_deeply_nested(path):
+    """Valid JSON the parser accepts but whose nesting cannot be frozen."""
+
+    payload = _batch().as_dict()
+    payload["rows"][0]["extra"]["nested"] = "NESTED"
+    depth = sys.getrecursionlimit() + 100
+    text = json.dumps(payload).replace('"NESTED"', "[" * depth + "]" * depth)
+    json.loads(text)
+    with gzip.open(path, "wt", encoding="utf-8") as stream:
+        stream.write(text)
+
+
 @pytest.mark.parametrize(
     "kind",
-    ["corrupt", "truncated", "malformed", "invalid_structure", "unsupported"],
+    [
+        "corrupt",
+        "corrupt_deflate_body",
+        "truncated",
+        "malformed",
+        "invalid_structure",
+        "unsupported",
+        "parser_nesting",
+        "deeply_nested",
+    ],
 )
 def test_invalid_snapshots_fail_before_processing(tmp_path, kind):
     path = tmp_path / f"{kind}.json.gz"
     if kind == "corrupt":
         path.write_bytes(b"not gzip")
+    elif kind == "corrupt_deflate_body":
+        _write_corrupt_deflate_body(path)
+    elif kind == "parser_nesting":
+        path.write_bytes(gzip.compress(b"[" * 200_000 + b"]" * 200_000))
+    elif kind == "deeply_nested":
+        _write_deeply_nested(path)
     elif kind == "truncated":
         valid = tmp_path / "valid.json.gz"
         save_collection_snapshot(_batch(), valid)
@@ -885,6 +927,8 @@ def test_invalid_snapshots_fail_before_processing(tmp_path, kind):
         if kind == "unsupported"
         else "rows must be an array"
         if kind == "invalid_structure"
+        else "too deeply nested"
+        if kind in {"parser_nesting", "deeply_nested"}
         else "corrupt or truncated"
     )
     with pytest.raises(CollectionSnapshotError, match=match):
@@ -922,6 +966,26 @@ def test_snapshot_write_is_atomic_when_replacement_fails(tmp_path, monkeypatch):
 def test_snapshot_path_must_use_json_gz_extension(tmp_path):
     with pytest.raises(CollectionSnapshotError, match=r"\.json\.gz"):
         save_collection_snapshot(_batch(), tmp_path / "capture.json")
+
+
+@pytest.mark.parametrize("writer", [_write_corrupt_deflate_body, _write_deeply_nested])
+def test_cli_replay_of_a_damaged_snapshot_is_a_usage_error(tmp_path, monkeypatch, writer):
+    snapshot_path = tmp_path / "damaged.json.gz"
+    writer(snapshot_path)
+    monkeypatch.setattr("watcher.cli.load_watchlist", lambda _path: _config())
+
+    with pytest.raises(SystemExit) as raised:
+        watcher_main(
+            [
+                "--watchlist",
+                str(tmp_path / "unused.yml"),
+                "--seen-db",
+                str(tmp_path / "seen.sqlite"),
+                "--replay-collection-snapshot",
+                str(snapshot_path),
+            ]
+        )
+    assert raised.value.code == 2
 
 
 def test_snapshot_cli_options_are_mutually_exclusive(tmp_path):
