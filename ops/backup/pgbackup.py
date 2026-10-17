@@ -484,34 +484,52 @@ def scratch_server(runner: Runner, tools: Tools, workdir: Path) -> Iterator[str]
     """A throwaway local PostgreSQL server; yields its connection URL."""
 
     data = workdir / "restore-data"
-    sockets = workdir / "restore-socket"
-    sockets.mkdir()
-    port = str(_free_port())
-    run_tool(
-        runner,
-        [tools.pg("initdb"), "-D", str(data), "-U", "postgres", "--auth=trust", "-E", "UTF8", "--no-sync"],
-        stage="restore_initdb",
-    )
-    options = (
-        f"-p {port} -c listen_addresses=localhost -c fsync=off "
-        "-c shared_buffers=32MB -c max_connections=10"
-    )
-    if os.name != "nt":
-        options += f" -k {sockets}"
-    run_tool(
-        runner,
-        [tools.pg("pg_ctl"), "-D", str(data), "-o", options, "-l", str(workdir / "restore.log"), "-w", "-t", "120", "start"],
-        stage="restore_start",
-    )
+    log = workdir / "restore.log"
+    # Unix socket paths are limited to about 100 bytes, so the socket gets
+    # its own short directory rather than one inside the work directory.
+    sockets = Path(tempfile.mkdtemp(prefix="fsb-", dir="/tmp" if os.name != "nt" else None))
     try:
-        yield f"postgresql://postgres@localhost:{port}/postgres"
-    finally:
-        with contextlib.suppress(BackupError):
+        port = str(_free_port())
+        run_tool(
+            runner,
+            [tools.pg("initdb"), "-D", str(data), "-U", "postgres", "--auth=trust", "-E", "UTF8", "--no-sync"],
+            stage="restore_initdb",
+        )
+        options = (
+            f"-p {port} -c listen_addresses=localhost -c fsync=off "
+            "-c shared_buffers=32MB -c max_connections=10"
+        )
+        if os.name != "nt":
+            options += f" -k {sockets}"
+        try:
             run_tool(
                 runner,
-                [tools.pg("pg_ctl"), "-D", str(data), "-m", "immediate", "-w", "-t", "60", "stop"],
-                stage="restore_stop",
+                [tools.pg("pg_ctl"), "-D", str(data), "-o", options, "-l", str(log), "-w", "-t", "120", "start"],
+                stage="restore_start",
             )
+        except BackupError as exc:
+            # The throwaway server's own log holds no table data; its last
+            # lines say why it did not start.
+            raise BackupError(exc.stage, f"{exc.detail}; {_log_tail(log)}") from None
+        try:
+            yield f"postgresql://postgres@localhost:{port}/postgres"
+        finally:
+            with contextlib.suppress(BackupError):
+                run_tool(
+                    runner,
+                    [tools.pg("pg_ctl"), "-D", str(data), "-m", "immediate", "-w", "-t", "60", "stop"],
+                    stage="restore_stop",
+                )
+    finally:
+        shutil.rmtree(sockets, ignore_errors=True)
+
+
+def _log_tail(path: Path, lines: int = 3) -> str:
+    try:
+        tail = path.read_text(errors="replace").strip().splitlines()[-lines:]
+    except OSError:
+        return "no server log"
+    return " | ".join(re.sub(r"\s+", " ", line)[:200] for line in tail) or "empty server log"
 
 
 def _free_port() -> int:
