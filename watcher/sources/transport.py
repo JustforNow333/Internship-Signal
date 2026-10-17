@@ -14,7 +14,7 @@ from email.utils import parsedate_to_datetime
 from json import JSONDecodeError
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
 
 from watcher.sources.contracts import (
@@ -474,6 +474,36 @@ def _decode_text_http_response(
     return TextHttpResponse(text=text.lstrip("\ufeff"), metadata=metadata)
 
 
+# Workday's public maintenance page, verified in production on 2026-10-17: the
+# CXS endpoint answers 303 to the first URL, which redirects to the second.
+# Only these exact sanitized destinations mean maintenance, never page content.
+WORKDAY_MAINTENANCE_URLS = frozenset(
+    {
+        "https://community.workday.com/maintenance-page",
+        "https://static.community.workday.com/maintenance-page.html",
+    }
+)
+
+
+def _maintenance_destination(
+    *,
+    status: int,
+    headers: Any,
+    final_url: str,
+    request_url: str,
+) -> str | None:
+    """The Workday maintenance URL this response was redirected to, if any."""
+
+    if final_url != _safe_url(request_url) and final_url in WORKDAY_MAINTENANCE_URLS:
+        return final_url
+    location = _header_value(headers, "Location") if 300 <= status < 400 else ""
+    if location:
+        target = _safe_url(urljoin(request_url, location))
+        if target in WORKDAY_MAINTENANCE_URLS:
+            return target
+    return None
+
+
 def _decode_json_http_response(
     response: Any,
     *,
@@ -494,6 +524,34 @@ def _decode_json_http_response(
     request_label = _safe_url(request_url)
     redirected = final_url != request_label
     raw_body = response.read(max_response_bytes + 1)
+    destination = _maintenance_destination(
+        status=status,
+        headers=headers,
+        final_url=final_url,
+        request_url=request_url,
+    )
+    if destination is not None:
+        # Retrying cannot succeed until the ATS ends its maintenance, and the
+        # source must still be reported as failed and incomplete.
+        metadata = _response_metadata(
+            status=status,
+            final_url=final_url,
+            content_type=content_type,
+            content_encoding=content_encoding,
+            raw_body=raw_body,
+            body_kind="maintenance",
+            redirected=True,
+            transient=False,
+        )
+        metadata["maintenance_destination"] = destination
+        raise SourceFetchError(
+            f"{source_name} {request_method} is under ATS maintenance: "
+            f"code=ats_maintenance destination={destination} endpoint={request_label}",
+            error_code="ats_maintenance",
+            status_code=status,
+            retryable=False,
+            response_metadata=metadata,
+        )
     if len(raw_body) > max_response_bytes:
         metadata = _response_metadata(
             status=status,

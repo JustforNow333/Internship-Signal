@@ -2242,6 +2242,16 @@ def test_non_workday_collection_does_not_invoke_workday_pacing(monkeypatch):
     assert errors == []
 
 
+def test_platform_wide_workday_maintenance_is_a_shared_incident():
+    stats = CollectionStats(workday_attempted=76, workday_succeeded=1, workday_failed=75)
+    stats.workday_failure_codes["ats_maintenance"] = 75
+
+    summary = summarize_workday_transport(stats)
+
+    assert summary.dominant_error == "ats_maintenance"
+    assert summary.likely_shared_incident is True
+
+
 def test_isolated_or_mixed_workday_failures_do_not_create_false_incident():
     isolated = CollectionStats(workday_attempted=2, workday_failed=2)
     isolated.workday_failure_codes["html_challenge"] = 2

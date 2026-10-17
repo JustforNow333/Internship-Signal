@@ -683,6 +683,50 @@ def test_cross_source_backstop_resolves_to_the_direct_job_without_merging(
     assert evidence_by_job["watcher-job-1"][0] == DIRECT_KEY
 
 
+def test_workday_maintenance_is_failed_incomplete_evidence_and_no_disappearance(
+    database, catalog, clock
+) -> None:
+    run_import(database, catalog, clock, [direct_job(1)], "a")
+    before_jobs = jobs_state_for_maintenance(database)
+    before_evidence = job_evidence(database)
+    clock.advance(hours=2)
+    # Workday is in maintenance: the source fails and returns no rows.
+    result = run_import(
+        database,
+        catalog,
+        clock,
+        [],
+        "b",
+        source_evidence=evidence(
+            attempt(
+                succeeded=False,
+                rows_returned=None,
+                error_kind="fetch_failure/ats_maintenance",
+                incomplete=True,
+                complete=False,
+            ),
+        ),
+    )
+
+    assert result.identity_shadow.status == "ok"
+    latest = [item for item in observations(database) if item.import_run_id == result.run_id]
+    assert [(item.succeeded, item.complete, item.incomplete) for item in latest] == [
+        (False, False, True)
+    ]
+    # The job stays open and gains no closure or absence evidence.
+    assert jobs_state_for_maintenance(database) == before_jobs
+    assert job_evidence(database) == before_evidence
+    assert before_evidence["watcher-job-1"][2:4] == (0, None)
+
+
+def jobs_state_for_maintenance(database: HostedDatabase) -> dict[str, tuple]:
+    with database.session_factory() as db:
+        return {
+            job.watcher_job_id: (job.is_open, job.closed_at, job.last_seen_at)
+            for job in db.scalars(select(HostedJob))
+        }
+
+
 def test_backstop_never_takes_source_ownership_of_a_direct_job(
     database, catalog, clock
 ) -> None:

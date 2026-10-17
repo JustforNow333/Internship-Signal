@@ -1,13 +1,16 @@
 import hashlib
 import gzip
+import io
+import json
 import logging
 from email.message import Message
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import pytest
 
 from watcher.config import CompanyCfg, ConfigError, workday_min_interval_seconds
 from watcher.sources.base import SourceFetchError, SourceSchemaError, post_json_response
+from watcher.sources.transport import get_json_response
 from watcher.sources.retry import http_retry_delay
 from watcher.sources.workday import WorkdayPacer, WorkdaySource
 
@@ -168,6 +171,115 @@ def test_redirect_to_html_is_classified_and_final_url_has_no_query():
     assert exc_info.value.error_code == "redirected_to_html"
     assert exc_info.value.response_metadata["final_url"].endswith("/refresh")
     assert "private" not in str(exc_info.value.response_metadata)
+
+
+MAINTENANCE_PAGE = "https://community.workday.com/maintenance-page"
+STATIC_MAINTENANCE_PAGE = "https://static.community.workday.com/maintenance-page.html"
+MAINTENANCE_HTML = b"<html><body>Workday is unavailable for maintenance.</body></html>"
+
+
+def see_other(location):
+    """The verified response: the CXS endpoint answers 303 to the maintenance page."""
+
+    headers = Message()
+    headers["Location"] = location
+    return HTTPError(URL, 303, "See Other", headers, io.BytesIO(b""))
+
+
+def maintenance_opener(location=MAINTENANCE_PAGE):
+    def opener(request, timeout):
+        raise see_other(location)
+
+    return opener
+
+
+def test_verified_303_maintenance_redirect_is_ats_maintenance():
+    with pytest.raises(SourceFetchError) as exc_info:
+        post_json_response(URL, {}, "workday", opener=maintenance_opener())
+
+    error = exc_info.value
+    assert error.error_code == "ats_maintenance"
+    assert error.retryable is False
+    assert error.status_code == 303
+    assert error.response_metadata["maintenance_destination"] == MAINTENANCE_PAGE
+    assert error.response_metadata["transient"] is False
+    assert "destination=https://community.workday.com/maintenance-page" in str(error)
+    assert "secret" not in str(error) and "secret" not in str(error.response_metadata)
+
+
+@pytest.mark.parametrize(
+    "final_url",
+    [
+        # urllib follows the 303 and then Workday's 302 to the static page.
+        STATIC_MAINTENANCE_PAGE + "?ref=private",
+        MAINTENANCE_PAGE,
+        "https://STATIC.community.workday.com/maintenance-page.html",
+    ],
+)
+def test_followed_maintenance_redirect_chain_is_ats_maintenance(final_url):
+    with pytest.raises(SourceFetchError) as exc_info:
+        response_call(MAINTENANCE_HTML, content_type="text/html", url=final_url)
+
+    error = exc_info.value
+    assert error.error_code == "ats_maintenance"
+    assert error.retryable is False
+    assert error.status_code == 200
+    destination = error.response_metadata["maintenance_destination"]
+    assert destination in {MAINTENANCE_PAGE, STATIC_MAINTENANCE_PAGE}
+    assert "private" not in str(error) and "private" not in str(error.response_metadata)
+    assert "unavailable for maintenance" not in str(error)
+    assert "preview" not in error.response_metadata
+
+
+def test_maintenance_detection_ignores_status_and_body():
+    # The destination alone decides: an error status or a JSON body there is
+    # still maintenance, and nothing in the page is read for the decision.
+    with pytest.raises(SourceFetchError) as failed:
+        response_call(b"", status=503, content_type="text/html", url=STATIC_MAINTENANCE_PAGE)
+    with pytest.raises(SourceFetchError) as json_body:
+        response_call(b'{"jobPostings": []}', url=STATIC_MAINTENANCE_PAGE)
+
+    assert failed.value.error_code == json_body.value.error_code == "ats_maintenance"
+
+
+def test_detail_get_to_the_maintenance_page_is_ats_maintenance():
+    with pytest.raises(SourceFetchError) as exc_info:
+        get_json_response(URL, "workday", opener=maintenance_opener())
+
+    assert exc_info.value.error_code == "ats_maintenance"
+    assert exc_info.value.retryable is False
+
+
+@pytest.mark.parametrize(
+    "final_url",
+    [
+        "https://tenant.wd5.myworkdayjobs.com/maintenance-page",
+        "https://community.workday.com/other-page",
+        "https://community.workday.com/maintenance-page/extra",
+        "http://community.workday.com/maintenance-page",
+        "https://community.workday.com.example.net/maintenance-page",
+        "https://example.net/community.workday.com/maintenance-page",
+    ],
+)
+def test_unrelated_html_redirects_keep_their_retryable_classification(final_url):
+    with pytest.raises(SourceFetchError) as exc_info:
+        response_call(MAINTENANCE_HTML, content_type="text/html", url=final_url)
+
+    assert exc_info.value.error_code == "redirected_to_html"
+    assert exc_info.value.retryable is True
+    assert "maintenance_destination" not in exc_info.value.response_metadata
+
+
+@pytest.mark.parametrize(
+    "location",
+    ["https://tenant.wd5.myworkdayjobs.com/Site/login", "/maintenance-page", ""],
+)
+def test_other_unfollowed_redirects_are_not_maintenance(location):
+    with pytest.raises(SourceFetchError) as exc_info:
+        post_json_response(URL, {}, "workday", opener=maintenance_opener(location))
+
+    assert exc_info.value.error_code != "ats_maintenance"
+    assert "maintenance_destination" not in exc_info.value.response_metadata
 
 
 def test_error_sanitization_removes_request_query_strings():
@@ -422,6 +534,109 @@ def test_three_transient_failures_raise_one_final_failure_and_two_retries(caplog
     assert sleeps == [1.0, 3.0]
     assert caplog.text.count("Workday transport retry:") == 2
     assert caplog.text.count("Workday transport failure:") == 1
+
+
+def transport_request_json(opener):
+    """The adapter's real POST path, with an offline opener."""
+
+    calls = []
+
+    def request_json(url, payload, source_name):
+        calls.append(url)
+        return post_json_response(url, payload, source_name, opener=opener)
+
+    return request_json, calls
+
+
+def test_confirmed_maintenance_stops_retrying_immediately(caplog):
+    sleeps = []
+    request_json, calls = transport_request_json(maintenance_opener())
+    source = WorkdaySource(
+        min_interval_seconds=0,
+        request_json=request_json,
+        sleeper=sleeps.append,
+        jitter=lambda low, high: low,
+    )
+    with caplog.at_level(logging.WARNING, logger="watcher.sources.workday"):
+        with pytest.raises(SourceFetchError) as exc_info:
+            source.fetch(workday_company())
+
+    assert len(calls) == 1
+    assert sleeps == []
+    assert exc_info.value.error_code == "ats_maintenance"
+    assert exc_info.value.attempt_count == 1
+    assert source.last_diagnostics.retry_attempts == 0
+    assert "Workday transport retry:" not in caplog.text
+    assert caplog.text.count("Workday transport failure: code=ats_maintenance") == 1
+
+
+def test_unrelated_html_redirect_still_retries_through_the_real_transport():
+    sleeps = []
+    request_json, calls = transport_request_json(
+        lambda request, timeout: FakeResponse(
+            MAINTENANCE_HTML,
+            content_type="text/html",
+            url="https://tenant.wd5.myworkdayjobs.com/Site/login",
+        )
+    )
+    source = WorkdaySource(
+        min_interval_seconds=0,
+        request_json=request_json,
+        sleeper=sleeps.append,
+        jitter=lambda low, high: low,
+    )
+    with pytest.raises(SourceFetchError) as exc_info:
+        source.fetch(workday_company())
+
+    assert len(calls) == 3
+    assert sleeps == [1.0, 3.0]
+    assert exc_info.value.error_code == "redirected_to_html"
+
+
+def test_maintenance_on_a_continuation_page_keeps_rows_and_marks_incomplete():
+    page = {
+        "jobPostings": [
+            {
+                "title": f"Software Engineer Intern {index}",
+                "externalPath": f"/job/NYC/Software-Engineer-Intern_R{index}",
+                "locationsText": "New York, NY",
+                "bulletFields": [f"R{index}"],
+            }
+            for index in range(WorkdaySource.page_size)
+        ],
+        "total": WorkdaySource.page_size + 5,
+    }
+    responses = iter([FakeResponse(json.dumps(page).encode())])
+
+    def opener(request, timeout):
+        response = next(responses, None)
+        if response is None:
+            raise see_other(MAINTENANCE_PAGE)
+        return response
+
+    request_json, calls = transport_request_json(opener)
+    source = WorkdaySource(
+        min_interval_seconds=0,
+        request_json=request_json,
+        sleeper=lambda _delay: None,
+        jitter=lambda low, high: low,
+    )
+    company = CompanyCfg(
+        name="Tenant",
+        ats="workday",
+        token="tenant",
+        workday_shard="wd5",
+        workday_site="Site",
+        workday_detail_policy="none",
+    )
+    rows = source.fetch(company)
+
+    # One listing page, then one maintenance response with no retry.
+    assert len(calls) == 2
+    assert len(rows) == WorkdaySource.page_size
+    assert source.last_diagnostics.listing_incomplete is True
+    assert source.last_health_diagnostics.complete is False
+    assert source.last_health_diagnostics.incomplete is True
 
 
 @pytest.mark.parametrize("status", [400, 404])

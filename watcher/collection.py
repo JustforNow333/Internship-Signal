@@ -118,6 +118,7 @@ class WorkdayTransportSummary:
 
 WORKDAY_TRANSPORT_ERROR_CODES = frozenset(
     {
+        "ats_maintenance",
         "compressed_decode_failure",
         "connection_reset",
         "dns_failure",

@@ -8,9 +8,12 @@ sends email, touches production state, or performs network I/O.
 
 from __future__ import annotations
 
+import io
 import json
 import sqlite3
 from datetime import datetime, timezone
+from email.message import Message
+from urllib.error import HTTPError
 
 from watcher.collection_snapshot import (
     CollectionBatch,
@@ -29,7 +32,7 @@ from watcher.source_health import (
     SourceHealthStore,
     write_health_report,
 )
-from watcher.sources.base import SourceFetchError
+from watcher.sources.base import SourceFetchError, post_json_response
 from watcher.sources.workday import WorkdaySource
 from watcher.tests.test_run import FakeDigestSender, FakeGithub
 
@@ -328,6 +331,43 @@ def test_failed_first_request_persists_as_failed_not_degraded(tmp_path, monkeypa
     state = persisted_state(db_path)
     assert state.status == "failed"
     assert result.health_summary.direct_failed == 1
+
+
+def maintenance_transport():
+    """Workday's verified maintenance answer, through the real transport."""
+
+    calls: list[str] = []
+
+    def transport(url, payload, source_name):
+        calls.append(url)
+        headers = Message()
+        headers["Location"] = "https://community.workday.com/maintenance-page"
+
+        def opener(request, timeout):
+            raise HTTPError(url, 303, "See Other", headers, io.BytesIO(b""))
+
+        return post_json_response(url, payload, source_name, opener=opener).payload
+
+    return transport, calls
+
+
+def test_workday_maintenance_persists_as_failed_and_incomplete(tmp_path, monkeypatch):
+    transport, calls = maintenance_transport()
+
+    result, db_path = execute_run(tmp_path, monkeypatch, transport)
+
+    assert len(calls) == 1
+    attempt = direct_attempt(result)
+    assert attempt.succeeded is False
+    assert attempt.rows_returned is None
+    assert attempt.complete is False
+    assert attempt.incomplete is True
+    assert attempt.error_kind == "fetch_failure/ats_maintenance"
+    assert persisted_state(db_path).status == "failed"
+    assert result.health_summary.direct_failed == 1
+    assert result.workday_transport.failed_tenants == 1
+    assert result.workday_transport.retry_attempts == 0
+    assert result.workday_transport.dominant_error == "ats_maintenance"
 
 
 # --- consistency across every downstream surface ---------------------------
