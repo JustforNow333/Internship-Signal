@@ -477,6 +477,58 @@ def test_monitor_treats_an_unverified_manifest_as_stale(s3) -> None:
     assert backup_status(s3.storage(), now=NOW).status == "stale"
 
 
+def seed_unverified_object(s3: FakeS3, started: dt.datetime) -> None:
+    """An upload whose run failed before writing its manifest."""
+
+    stem = f"findsooner/postgres/{started:%Y/%m}/findsooner-{started:%Y%m%dT%H%M%SZ}-0000ffff"
+    s3.objects[stem + ".dump.age"] = b"encrypted"
+
+
+def test_an_unverified_upload_after_the_last_good_backup_is_incomplete(s3) -> None:
+    # The last verified backup is recent enough, but the next run uploaded
+    # and then failed verification 20 hours ago.
+    seed_manifest(s3, NOW - dt.timedelta(hours=30))
+    seed_unverified_object(s3, NOW - dt.timedelta(hours=20))
+    status = backup_status(s3.storage(), now=NOW)
+
+    assert status.status == "incomplete"
+    assert status.unverified_newer == 1 and status.unverified_total == 1
+    assert round(status.unverified_age_hours) == 20
+    assert "status=incomplete" in status.line() and "unverified_total=1" in status.line()
+
+
+def test_a_backup_still_running_is_not_reported_as_incomplete(s3) -> None:
+    seed_manifest(s3, NOW - dt.timedelta(hours=24))
+    seed_unverified_object(s3, NOW - dt.timedelta(minutes=20))
+    status = backup_status(s3.storage(), now=NOW)
+
+    assert status.status == "ok"
+    assert status.unverified_newer == 1
+    assert not should_alert(status, now=NOW)
+
+
+def test_a_later_verified_backup_resolves_an_earlier_failure_but_keeps_it_visible(s3) -> None:
+    seed_unverified_object(s3, NOW - dt.timedelta(hours=26))
+    seed_manifest(s3, NOW - dt.timedelta(hours=2))
+    status = backup_status(s3.storage(), now=NOW)
+
+    assert status.status == "ok"
+    assert status.unverified_newer == 0
+    assert status.unverified_total == 1
+
+
+def test_an_unresolved_incomplete_backup_alerts_about_once_a_day() -> None:
+    def status(age):
+        return BackupStatus(
+            status="incomplete", retained=3, age_hours=30, unverified_newer=1,
+            unverified_age_hours=age,
+        )
+
+    # Grace of 6 hours, monitor every 6 hours: once per day of the problem.
+    alerts = [age for age in range(6, 6 + 72, 6) if should_alert(status(age + 0.5), now=NOW)]
+    assert alerts == [6, 30, 54]
+
+
 def test_missing_and_overdue_backups_alert_about_once_a_day() -> None:
     def status(age):
         return BackupStatus(status="stale", retained=3, age_hours=age)
