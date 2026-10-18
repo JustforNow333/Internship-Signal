@@ -50,6 +50,10 @@ UNLOCK_SQL = "SELECT pg_advisory_unlock(hashtextextended('findsooner-backup', 0)
 OBJECT_SUFFIX = ".dump.age"
 MANIFEST_SUFFIX = ".manifest.json"
 _KEY_RE = re.compile(r"findsooner-(\d{8}T\d{6}Z)-[0-9a-f]{8}" + re.escape(MANIFEST_SUFFIX) + "$")
+_OBJECT_RE = re.compile(r"findsooner-(\d{8}T\d{6}Z)-[0-9a-f]{8}" + re.escape(OBJECT_SUFFIX) + "$")
+# An upload newer than the newest manifest is a run in progress for this
+# long, and a failed run after it. Runs normally finish within minutes.
+INCOMPLETE_GRACE_HOURS = 6
 _CHUNK = 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 1800
 HTTP_TIMEOUT_SECONDS = 120
@@ -720,9 +724,11 @@ def _backup_locked(database_url, storage, recipients, tools, runner, started, be
 
 @dataclass(frozen=True)
 class BackupStatus:
-    status: str  # ok | stale | missing
+    status: str  # ok | stale | incomplete | missing
     retained: int
     unverified_newer: int = 0
+    unverified_total: int = 0
+    unverified_age_hours: float | None = None
     latest_key: str | None = None
     finished_at: dt.datetime | None = None
     age_hours: float | None = None
@@ -739,8 +745,15 @@ class BackupStatus:
             "upload_verified": str(self.upload_verified).lower(),
             "restore_verified": str(self.restore_verified).lower(),
             "retained": self.retained,
-            # Uploaded after the latest manifest but never verified: a failed run.
+            # Uploaded after the latest manifest but never verified: a run
+            # in progress, or a failed run once older than the grace period.
             "unverified_newer": self.unverified_newer,
+            "unverified_age_hours": (
+                f"{self.unverified_age_hours:.1f}" if self.unverified_age_hours is not None else "none"
+            ),
+            # Every upload without a manifest, including failures already
+            # superseded by a later verified backup.
+            "unverified_total": self.unverified_total,
         }
         return f"{PREFIX}-STATUS " + " ".join(f"{key}={value}" for key, value in fields.items())
 
@@ -760,21 +773,41 @@ def backup_status(
         if _KEY_RE.search(key) and key[: -len(MANIFEST_SUFFIX)] + OBJECT_SUFFIX in keys
     )
     objects = sorted(key for key in keys if key.endswith(OBJECT_SUFFIX))
+    unverified = [
+        key
+        for key in objects
+        if _OBJECT_RE.search(key) and key[: -len(OBJECT_SUFFIX)] + MANIFEST_SUFFIX not in keys
+    ]
     if not manifests:
-        return BackupStatus(status="missing", retained=0, unverified_newer=len(objects))
+        return BackupStatus(
+            status="missing",
+            retained=0,
+            unverified_newer=len(unverified),
+            unverified_total=len(unverified),
+        )
     cutoff = now - dt.timedelta(days=retention_days)
     retained = sum(1 for key in manifests if _manifest_time(key) >= cutoff)
     latest = manifests[-1]
     latest_object = latest[: -len(MANIFEST_SUFFIX)] + OBJECT_SUFFIX
-    unverified_newer = sum(1 for key in objects if key > latest_object)
+    newer = [key for key in unverified if key > latest_object]
+    # Measured from the oldest one, so a repeated failure keeps its age.
+    unverified_age = (now - _key_time(newer[0], _OBJECT_RE)).total_seconds() / 3600 if newer else None
     manifest = json.loads(storage.get_bytes(latest))
     finished = dt.datetime.fromisoformat(manifest["finished_at"])
     age = (now - finished).total_seconds() / 3600
     verified = bool(manifest.get("upload_verified")) and bool(manifest.get("restore_verified"))
+    if age > max_age_hours or not verified:
+        state = "stale"
+    elif unverified_age is not None and unverified_age > INCOMPLETE_GRACE_HOURS:
+        state = "incomplete"
+    else:
+        state = "ok"
     return BackupStatus(
-        status="ok" if age <= max_age_hours and verified else "stale",
+        status=state,
         retained=retained,
-        unverified_newer=unverified_newer,
+        unverified_newer=len(newer),
+        unverified_total=len(unverified),
+        unverified_age_hours=unverified_age,
         latest_key=latest,
         finished_at=finished,
         age_hours=age,
@@ -785,7 +818,11 @@ def backup_status(
 
 
 def _manifest_time(key: str) -> dt.datetime:
-    match = _KEY_RE.search(key)
+    return _key_time(key, _KEY_RE)
+
+
+def _key_time(key: str, pattern: re.Pattern[str]) -> dt.datetime:
+    match = pattern.search(key)
     assert match is not None
     return dt.datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.UTC)
 
@@ -808,6 +845,9 @@ def should_alert(
         return False
     if status.status == "missing":
         return now.hour < interval_hours
+    if status.status == "incomplete":
+        overdue = (status.unverified_age_hours or 0) - INCOMPLETE_GRACE_HOURS
+        return overdue % 24 < interval_hours
     overdue = (status.age_hours or 0) - max_age_hours
     if overdue < 0:  # verified flags missing on an otherwise recent backup
         return now.hour < interval_hours
@@ -1010,10 +1050,16 @@ def main(argv: Sequence[str] | None = None, *, env: Mapping[str, str] = os.envir
             return 0
         if should_alert(status, now=now, max_age_hours=args.max_age_hours, interval_hours=args.interval_hours):
             send_alert(
-                "FindSooner backup is overdue",
+                "FindSooner backup failed verification"
+                if status.status == "incomplete"
+                else "FindSooner backup is overdue",
                 (
                     "No verified PostgreSQL backup exists."
                     if status.status == "missing"
+                    else f"A backup uploaded {status.unverified_age_hours:.0f} hours ago was never "
+                    f"verified, so that run failed. The newest verified backup finished "
+                    f"{status.age_hours:.0f} hours ago."
+                    if status.status == "incomplete"
                     else f"The newest verified backup finished {status.age_hours:.0f} hours ago "
                     f"(threshold {args.max_age_hours:.0f}). {status.retained} verified backups are retained."
                 ),
