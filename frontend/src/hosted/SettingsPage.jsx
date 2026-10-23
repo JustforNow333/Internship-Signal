@@ -230,7 +230,7 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
                 setForm({ ...form, include_recent_openings: checked })
               }
               label="Include recent openings"
-              description="When you add a company, show matching openings posted within the last 90 days."
+              description="When you add a company, show its matching openings from the last 90 days on your dashboard and send one catch-up email summarizing them. Some may have been posted before you started watching."
             />
           </section>
           <section className="settings-card">

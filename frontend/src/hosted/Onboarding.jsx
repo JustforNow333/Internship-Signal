@@ -292,7 +292,7 @@ function AlertsStep({
       <div className="preference-section">
         <Toggle
           label="Include recent openings"
-          description="When you add a company, show matching openings posted within the last 90 days."
+          description="When you add a company, show its matching openings from the last 90 days on your dashboard and send one catch-up email summarizing them. Some may have been posted before you started watching."
           checked={preferences.include_recent_openings}
           onChange={(checked) =>
             setPreferences({
@@ -356,6 +356,21 @@ function AlertsStep({
   );
 }
 
+const CATCH_UP_TIMING = {
+  as_detected: "shortly",
+  three_hour: "within about three hours",
+  daily: "within about a day",
+};
+
+// Nothing has been emailed yet when setup finishes: the catch-up is queued
+// only for a verified address and only when matching openings exist.
+function catchUpEmailNotice(alertFrequency) {
+  const timing = CATCH_UP_TIMING[alertFrequency];
+  if (!timing)
+    return "Email alerts are paused, so no catch-up email will be sent.";
+  return `If any match, we’ll email you one catch-up summary ${timing} once your email address is verified. After that, alerts cover only newly detected openings.`;
+}
+
 function CompleteStep({
   navigate,
   companyCount,
@@ -382,7 +397,7 @@ function CompleteStep({
       {includeRecentOpenings && (
         <p>
           Your dashboard may also include matching openings from the last 90
-          days.
+          days. {catchUpEmailNotice(alertFrequency)}
         </p>
       )}
       <div className="confirmation-summary">

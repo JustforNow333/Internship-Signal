@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .career_level import DEFAULT_CAREER_LEVELS
+from .catch_up import record_watchlist_catch_ups, resolve_user_catch_ups
 from .dependencies import CurrentIdentity, get_current_identity, get_db, get_services
 from .mailer import (
     MailerDeliveryError,
@@ -423,6 +424,10 @@ def verify_email(
     verification_token.used_at = now
     user.email_verified_at = now
     user.updated_at = now
+    db.flush()
+    # A watchlist activated before verification kept its catch-up request;
+    # verifying is what lets it queue. Already-resolved requests are skipped.
+    resolve_user_catch_ups(db, user.id, now=now)
     db.commit()
     return AcceptedResponse()
 
@@ -606,6 +611,24 @@ def put_watchlist(
     if affected:
         db.flush()
         reconcile_user(db, identity.user.id, now=now, company_ids=affected)
+    # Only a genuinely new, unpaused watch earns a recent-openings catch-up
+    # email; unchanged saves, pauses, and resumes never do.
+    added = [
+        company_id
+        for company_id, paused in next_state.items()
+        if company_id not in previous_state and not paused
+    ]
+    removed = [
+        company_id for company_id in previous_state if company_id not in next_state
+    ]
+    if added or removed:
+        record_watchlist_catch_ups(
+            db,
+            identity.user.id,
+            added_company_ids=added,
+            removed_company_ids=removed,
+            now=now,
+        )
     db.commit()
     return [_watch_response(watch) for watch in watches]
 

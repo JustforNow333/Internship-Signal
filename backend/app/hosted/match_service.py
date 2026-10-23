@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -139,12 +139,26 @@ def admission_kind(
     if not include_recent_openings:
         return None
 
+    return (
+        ADMISSION_CATCH_UP
+        if is_recent_opening(job.posting_date, job.first_seen_at, now=now)
+        else None
+    )
+
+
+def is_recent_opening(
+    posting_date: date | None, first_seen_at: datetime, *, now: datetime
+) -> bool:
+    """Whether a posting falls inside the inclusive recent-openings window.
+
+    ``posting_date`` is authoritative whenever it is known; ``first_seen_at``
+    is consulted only for postings without one.
+    """
+
     cutoff = now - timedelta(days=RECENT_OPENING_WINDOW_DAYS)
-    if job.posting_date is not None:
-        recent = job.posting_date >= cutoff.date()
-    else:
-        recent = _aware(job.first_seen_at) >= cutoff
-    return ADMISSION_CATCH_UP if recent else None
+    if posting_date is not None:
+        return posting_date >= cutoff.date()
+    return _aware(first_seen_at) >= cutoff
 
 
 def reconcile_jobs(

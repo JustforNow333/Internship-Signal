@@ -54,10 +54,13 @@
 
 ## Hosted notification delivery (Phase 3A)
 
-- Import-only notification enqueueing runs in the same PostgreSQL transaction
-  as job persistence and Phase 2B reconciliation. Only newly inserted match
-  rows for active, verified, unpaused users create items; reconciliation,
-  reactivation, and `already_imported` never enqueue backlog.
+- Import notification enqueueing runs in the same PostgreSQL transaction
+  as job persistence and Phase 2B reconciliation. Only genuinely new openings
+  (`new_opening_match_ids`) for active, verified, unpaused users create
+  items; reconciliation, reactivation, and `already_imported` never enqueue
+  backlog. The one recent-openings catch-up digest per newly watched company
+  is queued only through `app.hosted.catch_up` (`kind='catch_up'` batches,
+  `source_catch_up_id` items); never enqueue every created match.
 - `hosted_notification_batches`, `hosted_notification_items`, and
   `hosted_notification_attempts` own delivery state. As-detected batches group
   by user/import; three-hour and daily batches use rolling windows from the

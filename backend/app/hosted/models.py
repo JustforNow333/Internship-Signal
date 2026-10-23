@@ -39,6 +39,20 @@ DEFAULT_CAREER_LEVELS_JSON = "[" + ", ".join(
 CLOSURE_REASONS = ("source_closed", "deadline_passed", "absent_from_source", "superseded")
 CLOSURE_REASON_SQL_VALUES = ", ".join(f"'{value}'" for value in CLOSURE_REASONS)
 
+# Why a notification batch exists: an import's genuinely new openings, or the
+# one-off recent-openings catch-up a user earns by starting to watch companies.
+NOTIFICATION_KINDS = ("import", "catch_up")
+CATCH_UP_OPEN_STATUSES = ("awaiting_verification", "awaiting_jobs")
+CATCH_UP_STATUSES = CATCH_UP_OPEN_STATUSES + (
+    "enqueued",
+    "empty",
+    "suppressed",
+    "cancelled",
+    "expired",
+)
+_CATCH_UP_OPEN_SQL = ", ".join(f"'{value}'" for value in CATCH_UP_OPEN_STATUSES)
+_CATCH_UP_STATUS_SQL = ", ".join(f"'{value}'" for value in CATCH_UP_STATUSES)
+
 
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
@@ -604,6 +618,64 @@ class HostedSourceObservation(TimestampMixin, Base):
     config_fingerprint: Mapped[str | None] = mapped_column(String(64))
 
 
+class HostedCatchUpRequest(TimestampMixin, Base):
+    """A user's durable claim to one recent-openings catch-up for a company.
+
+    One row is recorded when a company is newly added to a watchlist while
+    ``include_recent_openings`` is on. It waits for email verification and,
+    when the company has no stored jobs yet, for the first import that stores
+    some, then resolves exactly once. Only matches created at or after
+    ``requested_at`` are eligible, so a re-added company never resurfaces
+    matches from an earlier watch.
+    """
+
+    __tablename__ = "hosted_catch_up_requests"
+    __table_args__ = (
+        CheckConstraint(f"status IN ({_CATCH_UP_STATUS_SQL})", name="status"),
+        CheckConstraint(
+            f"(status IN ({_CATCH_UP_OPEN_SQL}) AND completed_at IS NULL) OR "
+            f"(status NOT IN ({_CATCH_UP_OPEN_SQL}) AND completed_at IS NOT NULL)",
+            name="lifecycle",
+        ),
+        CheckConstraint(
+            "status <> 'awaiting_jobs' OR wait_expires_at IS NOT NULL",
+            name="jobs_wait_bounded",
+        ),
+        # At most one unresolved request per watched company.
+        Index(
+            "uq_hosted_catch_up_requests_open_company",
+            "user_id",
+            "company_id",
+            unique=True,
+            postgresql_where=text(f"status IN ({_CATCH_UP_OPEN_SQL})"),
+            sqlite_where=text(f"status IN ({_CATCH_UP_OPEN_SQL})"),
+        ),
+        Index(
+            "ix_hosted_catch_up_requests_awaiting_jobs",
+            "company_id",
+            postgresql_where=text("status = 'awaiting_jobs'"),
+            sqlite_where=text("status = 'awaiting_jobs'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "hosted_users.id",
+            ondelete="CASCADE",
+            name="fk_hosted_catch_up_requests_user",
+        ),
+        nullable=False,
+    )
+    company_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    wait_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class HostedNotificationBatch(TimestampMixin, Base):
     """One durable, leased unit of hosted internship-match delivery."""
 
@@ -619,9 +691,14 @@ class HostedNotificationBatch(TimestampMixin, Base):
             name="status",
         ),
         CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
+        CheckConstraint("kind IN ('import', 'catch_up')", name="kind"),
+        # Import batches keep their original shape. A catch-up batch is created
+        # by a user action, so it never references an import run.
         CheckConstraint(
+            "(kind = 'import' AND ("
             "(frequency = 'as_detected' AND source_import_run_id IS NOT NULL) OR "
-            "(frequency IN ('three_hour', 'daily') AND source_import_run_id IS NULL)",
+            "(frequency IN ('three_hour', 'daily') AND source_import_run_id IS NULL)"
+            ")) OR (kind = 'catch_up' AND source_import_run_id IS NULL)",
             name="source_import_frequency",
         ),
         CheckConstraint(
@@ -676,6 +753,9 @@ class HostedNotificationBatch(TimestampMixin, Base):
         ForeignKey("hosted_users.id", ondelete="CASCADE"), nullable=False
     )
     frequency: Mapped[str] = mapped_column(String(32), nullable=False)
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="import", server_default="import"
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     next_attempt_at: Mapped[datetime] = mapped_column(
@@ -725,11 +805,23 @@ class HostedNotificationItem(TimestampMixin, Base):
             "AND cancellation_reason IS NOT NULL)",
             name="lifecycle",
         ),
+        # Exactly one provenance: the import that found a new opening, or the
+        # catch-up request that admitted a recent one.
+        CheckConstraint(
+            "(source_import_run_id IS NOT NULL AND source_catch_up_id IS NULL) OR "
+            "(source_import_run_id IS NULL AND source_catch_up_id IS NOT NULL)",
+            name="provenance",
+        ),
         UniqueConstraint(
             "user_job_match_id",
             name="uq_hosted_notification_items_user_job_match",
         ),
         Index("ix_hosted_notification_items_batch", "batch_id"),
+        Index(
+            "ix_hosted_notification_items_catch_up",
+            "source_catch_up_id",
+            postgresql_where=text("source_catch_up_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -749,13 +841,19 @@ class HostedNotificationItem(TimestampMixin, Base):
         ),
         nullable=False,
     )
-    source_import_run_id: Mapped[uuid.UUID] = mapped_column(
+    source_import_run_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey(
             "hosted_job_import_runs.id",
             ondelete="RESTRICT",
             name="fk_hosted_notif_items_import_run",
         ),
-        nullable=False,
+    )
+    source_catch_up_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "hosted_catch_up_requests.id",
+            ondelete="CASCADE",
+            name="fk_hosted_notif_items_catch_up",
+        ),
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     cancellation_reason: Mapped[str | None] = mapped_column(String(64))

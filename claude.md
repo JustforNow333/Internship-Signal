@@ -31,10 +31,10 @@
   final watcher IDs structural failures.
 - Preserve unaffected classifications and IDs, keep replay offline and
   watcher-state safe.
-- Phase 3A enqueueing is import-only and shares the job/match transaction. It
-  accepts only newly inserted matches for active, verified, unpaused users;
-  preference/watch reconciliation, reactivation, and `already_imported` never
-  create notification backlog.
+- Import enqueueing shares the job/match transaction and accepts only genuinely
+  new openings for active, verified, unpaused users; reconciliation,
+  reactivation, and `already_imported` never create import backlog. Newly
+  watched companies earn one catch-up digest only via `app.hosted.catch_up`.
 - Durable batches/items/attempts live only in hosted PostgreSQL. As-detected
   groups by user/import; three-hour and daily use rolling first-item windows.
   The one-shot worker claims with `SKIP LOCKED`, token and 10-minute lease,

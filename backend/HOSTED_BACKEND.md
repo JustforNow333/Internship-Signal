@@ -324,14 +324,14 @@ old. Turning the setting off never removes matches that were already admitted;
 turning it on reconciles the watched companies so eligible openings appear
 immediately.
 
-Catch-up populates Matches only. Reconciliation from a watchlist or preference
-change never calls `enqueue_import_notifications`, so a historical match creates
-no `hosted_notification_batches` or `hosted_notification_items` row and no
-email. An import that admits a catch-up match is silent too: the job was merely
-discovered late. Reconciliation reports why each new row was admitted, and an
-import enqueues notification work only for genuinely new openings (rule 2).
-`matched_at` stays the time the match was actually made and is never
-backdated.
+Reconciliation never calls `enqueue_import_notifications`, and an import
+enqueues import alerts only for genuinely new openings (rule 2): a catch-up
+admission was merely discovered late, so it never becomes a "new job" alert.
+The one email a catch-up can produce is the separate, explicit
+[recent-openings catch-up digest](#recent-openings-catch-up-digest), earned only
+by newly watching a company. Preference edits, including turning the setting
+on, populate Matches without any email. `matched_at` stays the time the match
+was actually made and is never backdated.
 
 `PUT /api/watchlist` applies a transactional diff rather than deleting and
 recreating every row, because `UserCompanyWatch.created_at` is the watch-start
@@ -349,7 +349,9 @@ Alembic revision `20260803_0004` adds:
   marker, terminal timestamps, and a bounded status/error code. Partial indexes
   serve due pending work and expired leases; user history has a separate index.
 - `hosted_notification_items`: one lifetime notification per match row, linked
-  to both its batch and source import run. Items are pending, sent, or cancelled.
+  to its batch and to exactly one provenance: the source import run, or (since
+  `20261022_0009`) the catch-up request that queued it. Items are pending,
+  sent, or cancelled.
 - `hosted_notification_attempts`: unique positive attempt numbers per batch,
   start/completion timestamps, typed outcome, and bounded error code. Recipient
   addresses, message bodies, credentials, and raw provider errors are never
@@ -360,7 +362,9 @@ only match rows newly inserted by that import when the user is active, verified,
 not globally paused, and has `as_detected`, `three_hour`, or `daily` delivery.
 The match must be active and undismissed and its job open. Existing matches,
 reactivations, job-only updates, preference reconciliation, watchlist changes,
-paused users, and repeated succeeded fingerprints do not create work. If
+paused users, and repeated succeeded fingerprints do not create import alert
+work (newly watching a company may separately earn the one
+[catch-up digest](#recent-openings-catch-up-digest)). If
 notification persistence fails, the jobs, matches, notification work, and
 reported import success roll back together.
 
@@ -373,6 +377,76 @@ Batch windows are deterministic and UTC-based:
 
 Only an unclaimed pending batch accepts new rolling items. Phase 3A has no user
 timezone or preferred delivery-hour fields.
+
+### Recent-openings catch-up digest
+
+Import alerts cover genuinely new openings only. Separately, a user who newly
+watches companies while `include_recent_openings` is on is owed **one**
+consolidated email of the recent matches that watch admitted: the first-run
+"here is what is already open" digest. Alembic revision `20261022_0009` adds:
+
+- `hosted_catch_up_requests`: one row per newly watched company (`user_id`,
+  `company_id`, `requested_at`, `status`, `wait_expires_at`, `completed_at`).
+  A partial unique index allows one unresolved request per company. Statuses:
+  `awaiting_verification` and `awaiting_jobs` (unresolved), then `enqueued`,
+  `empty`, `suppressed` (inactive, paused, or setting off when resolved),
+  `cancelled` (company removed first), or `expired`.
+- `hosted_notification_batches.kind`: `import` (every existing row, through
+  the server default) or `catch_up`. A catch-up batch never references an
+  import run; import batches keep their original frequency/run rule.
+- `hosted_notification_items.source_catch_up_id`, with
+  `source_import_run_id` now nullable and a check that exactly one provenance
+  is set. No fake import run is ever created.
+
+`PUT /api/watchlist` records a request only for a company that was not on the
+watchlist before and is saved unpaused. Unchanged saves, retries, pauses,
+resumes, and preference edits record nothing; removing a company cancels its
+unresolved request. A request is resolved, in the same transaction, by
+`app.hosted.catch_up`:
+
+1. on the watchlist save itself, for a verified account;
+2. on `POST /api/auth/verify-email`, for an account that finished onboarding
+   first (the request waits durably; an unverified account is never emailed);
+3. on the first later non-backfill import that stores jobs for a company the
+   catalog did not yet hold. The wait is bounded by `catch_up.JOB_WAIT`
+   (7 days), after which the request expires instead of becoming a backlog.
+
+Resolution re-checks the account: inactive, globally paused, `paused`
+frequency, or the setting turned off resolve the request as `suppressed`, so
+resuming alerts later never resurrects it. Otherwise it queues every match the
+request admitted (created at or after `requested_at`, so a re-added company
+never resurfaces an earlier watch's matches) that is active, undismissed, open,
+still inside the inclusive 90-day window by the same `posting_date` /
+`first_seen_at` rule, and never notified before. Items are inserted with
+`ON CONFLICT DO NOTHING` on the lifetime `user_job_match_id` key, so a job that
+already had an import alert, or any earlier email, is never sent again. With
+nothing eligible no batch is created; an empty company that the catalog
+already holds resolves as `empty`, otherwise it waits for jobs.
+
+Catch-up items for one user join a single pending, never-attempted `catch_up`
+batch for their frequency (serialized by a per-user advisory lock), so
+activating or adding several companies yields one email. Timing follows the
+user's frequency exactly like import alerts: `as_detected` is due immediately
+(the next scheduled delivery run, never during the API request), `three_hour`
+and `daily` are due three or 24 hours after the first item. Frequency changes
+re-home a pending catch-up batch onto a catch-up batch for the new frequency;
+pausing cancels it at delivery, and turning the setting off before delivery
+cancels it with `recent_openings_disabled`. Request rows are locked
+`FOR UPDATE`, so concurrent verification, watchlist saves, and imports resolve
+each request once.
+
+The worker renders a catch-up batch with the same digest renderer, privacy
+rules, and 25-job display cap, under the subject `Your recent job matches (N)`
+and an introduction stating that the roles are from the last 90 days and that
+later alerts cover only newly detected openings. Jobs are ordered most recent
+first: dated postings by `posting_date`, then undated ones by `first_seen_at`,
+with company, title, and item ID tie-breakers. Import alert subjects and
+rendering are unchanged.
+
+Deploying `20261022_0009` creates no request rows, so it queues nothing for
+existing accounts; they earn a catch-up only by watching a new company. The
+downgrade refuses to run while any catch-up batch or item exists rather than
+delete notification history.
 
 ### Changing alert frequency
 
@@ -613,8 +687,9 @@ snapshot CLI print two bounded `HOSTED-AUDIT` lines (`app.hosted.import_audit`).
 notification-eligible by the enqueue rules, items created/present, silent
 `catch_up` (or `backfill`) matches, suppressed recipients, and backstop-sourced
 matches. `kind=integrity` reports deterministic anomalies -
-`new_opening_missing_notification`, catch-up matches carrying notification
-work, item/batch user or run mismatches, and pending items under a `sent` or
+`new_opening_missing_notification`, catch-up matches carrying import
+notification work (catch-up digest items are expected), item/batch user or run
+mismatches, and pending items under a `sent` or
 `cancelled` batch (`status=attention` when any is non-zero) - plus
 `pending_items_failed_batch` and two heuristics that never raise the status:
 `late_discoveries` (first stored more than 14 days after `posting_date`) and

@@ -7,7 +7,7 @@ import { makeHostedFixtures } from "../hosted/fixtures.js";
 
 const TOGGLE = "Include recent openings";
 const DESCRIPTION =
-  "When you add a company, show matching openings posted within the last 90 days.";
+  "When you add a company, show its matching openings from the last 90 days on your dashboard and send one catch-up email summarizing them. Some may have been posted before you started watching.";
 
 function renderOnboarding(overrides = {}) {
   const fixtures = makeHostedFixtures();
@@ -129,6 +129,36 @@ describe("onboarding recent openings", () => {
     ).toBeInTheDocument();
   });
 
+  it("describes when a catch-up email may follow without claiming one was sent", async () => {
+    renderOnboarding();
+    await reachAlertsStep();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Activate my watchlist/i }),
+    );
+
+    await screen.findByRole("heading", { name: /Your watchlist is active/i });
+    expect(
+      screen.getByText(
+        /If any match, we’ll email you one catch-up summary shortly once your email address is verified/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/email (was|has been) sent/i)).not.toBeInTheDocument();
+  });
+
+  it("says no catch-up email is sent when alerts are paused", async () => {
+    renderOnboarding();
+    await reachAlertsStep();
+    fireEvent.click(screen.getByRole("radio", { name: /Paused/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /Activate my watchlist/i }),
+    );
+
+    await screen.findByRole("heading", { name: /Your watchlist is active/i });
+    expect(
+      screen.getByText(/Email alerts are paused, so no catch-up email will be sent/i),
+    ).toBeInTheDocument();
+  });
+
   it("omits the completion sentence when the toggle is off", async () => {
     renderOnboarding();
     await reachAlertsStep();
@@ -141,6 +171,7 @@ describe("onboarding recent openings", () => {
     expect(
       screen.queryByText(/may also include matching openings/i),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText(/catch-up/i)).not.toBeInTheDocument();
   });
 });
 

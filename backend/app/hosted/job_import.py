@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from backend.app.dedupe import posting_specific_url_key, stable_requisition_key
 
 from .catalog import CompanyCatalog
+from .catch_up import resolve_import_catch_ups
 from .database import HostedDatabase
 from .identity_shadow import (
     IdentityResolutionReport,
@@ -287,6 +288,11 @@ class JobImportService:
                             reconciliation.new_opening_match_ids,
                             import_run_id=run.id,
                             now=observed_at,
+                        )
+                        # A watchlist activated before its companies were
+                        # collected completes its one catch-up here instead.
+                        resolve_import_catch_ups(
+                            db, affected_job_ids, now=observed_at
                         )
 
                 run.status = "succeeded"
