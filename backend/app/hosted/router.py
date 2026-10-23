@@ -20,9 +20,16 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .account_deletion import delete_account
 from .career_level import DEFAULT_CAREER_LEVELS
 from .catch_up import record_watchlist_catch_ups, resolve_user_catch_ups
-from .dependencies import CurrentIdentity, get_current_identity, get_db, get_services
+from .dependencies import (
+    CurrentIdentity,
+    get_current_identity,
+    get_db,
+    get_services,
+    require_trusted_origin,
+)
 from .mailer import (
     MailerDeliveryError,
     password_reset_message,
@@ -48,6 +55,7 @@ from .schemas import (
     MATCH_PAGE_MAX_LIMIT,
     MATCH_VIEWS,
     AcceptedResponse,
+    AccountDeletionRequest,
     AuthCredentials,
     AuthResponse,
     CompanyRequestInput,
@@ -435,6 +443,44 @@ def verify_email(
 @router.get("/me", response_model=UserResponse)
 def me(identity: CurrentIdentity = Depends(get_current_identity)) -> UserResponse:
     return _user_response(identity.user)
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_trusted_origin)],
+)
+def delete_me(
+    payload: AccountDeletionRequest,
+    response: Response,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: Session = Depends(get_db),
+    services: HostedServices = Depends(get_services),
+) -> None:
+    """Permanently delete the signed-in account after re-authentication.
+
+    The account is the session's; the body carries only the current password.
+    Nothing is written unless the password verifies, and 204 is returned only
+    after the deleting transaction commits. A database failure surfaces as the
+    generic storage error, never as success.
+    """
+
+    user_id = identity.user.id
+    password_hash = identity.user.password_hash
+    if not verify_password(password_hash, payload.password):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password was not recognized.",
+        )
+    if not delete_account(db, user_id, password_hash=password_hash):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password was not recognized.",
+        )
+    db.commit()
+    _clear_session_cookie(response, services)
 
 
 @router.get("/companies", response_model=list[CompanyResponse])

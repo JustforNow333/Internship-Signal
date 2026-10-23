@@ -51,6 +51,7 @@ export default function App({ client = hostedApi, initialPath }) {
   const [verificationDeliveryAccepted, setVerificationDeliveryAccepted] =
     useState(null);
   const [sessionError, setSessionError] = useState("");
+  const [accountNotice, setAccountNotice] = useState("");
   const [resource, setResource] = useState({
     status: "idle",
     data: null,
@@ -157,6 +158,23 @@ export default function App({ client = hostedApi, initialPath }) {
     navigate("/signin");
   }, [client, navigate]);
 
+  // Deletion removes every session server-side and clears the cookie, so no
+  // logout request follows. Account data is cleared only after the server
+  // confirms; a failure rejects here and leaves everything in place.
+  const deleteAccount = useCallback(
+    async ({ password }) => {
+      await client.deleteAccount({ password });
+      setSessionError("");
+      setResource({ status: "idle", data: null, error: "" });
+      setOnboardingResource({ status: "idle", companies: [], error: "" });
+      setVerificationEmail("");
+      setVerificationDeliveryAccepted(null);
+      setAccountNotice("Your FindSooner account has been deleted.");
+      navigate("/signin");
+    },
+    [client, navigate],
+  );
+
   useEffect(() => {
     if (APP_ROUTES.has(path) && resource.status === "idle") loadWorkspace();
   }, [loadWorkspace, path, resource.status]);
@@ -250,8 +268,10 @@ export default function App({ client = hostedApi, initialPath }) {
       <SigninPage
         navigate={navigate}
         client={client}
+        notice={accountNotice}
         onSignedIn={(result) => {
           setSessionError("");
+          setAccountNotice("");
           setResource({ status: "idle", data: null, error: "" });
           // An unverified sign-in lands on /verify-email, which needs the
           // address to offer a resend.
@@ -352,6 +372,7 @@ export default function App({ client = hostedApi, initialPath }) {
               me={data.me}
               preferences={data.preferences}
               savePreferences={savePreferences}
+              deleteAccount={deleteAccount}
             />
           )}
         </>

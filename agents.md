@@ -77,6 +77,10 @@
   use the hosted SMTP settings, resolve the verified address at send time, and
   never store/log recipients, bodies, raw SMTP errors, descriptions, or source
   metadata. Watcher SQLite and watcher email state remain separate.
+- `DELETE /api/me` permanently deletes the session's account under CSRF
+  (exact `Origin` plus `X-FindSooner-CSRF`) and password checks, by deleting
+  the `hosted_users` row. Every new account-owned table must reach
+  `hosted_users` through `ON DELETE CASCADE`; shared job tables must not.
 
 ## Required every prompt
 

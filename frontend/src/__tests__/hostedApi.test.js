@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { HostedApiError, createHttpHostedApi } from "../hosted/api.js";
+import {
+  CSRF_HEADER,
+  HostedApiError,
+  createHttpHostedApi,
+} from "../hosted/api.js";
 
 function jsonResponse(body, status = 200) {
   return {
@@ -65,6 +69,54 @@ describe("hosted HTTP API adapter", () => {
       "/api/auth/forgot-password",
       "/api/auth/reset-password",
     ]);
+  });
+
+  it("deletes the account with a credentialed, CSRF-marked request", async () => {
+    const json = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 204, json });
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createHttpHostedApi({ baseUrl: "https://api.example/" });
+
+    await expect(
+      api.deleteAccount({ password: "secure password" }),
+    ).resolves.toBeNull();
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.example/api/me", {
+      method: "DELETE",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        [CSRF_HEADER]: "1",
+      },
+      body: JSON.stringify({ password: "secure password" }),
+    });
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it("reports a refused deletion without signalling a lost session", async () => {
+    const unauthorized = vi.fn();
+    window.addEventListener("hosted-api-unauthorized", unauthorized);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ detail: "Password was not recognized." }, 403),
+        ),
+    );
+    try {
+      await expect(
+        createHttpHostedApi().deleteAccount({ password: "wrong" }),
+      ).rejects.toMatchObject({
+        status: 403,
+        message: "Password was not recognized.",
+      });
+      expect(unauthorized).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("hosted-api-unauthorized", unauthorized);
+    }
   });
 
   it("loads and replaces preferences and watchlists", async () => {

@@ -44,6 +44,8 @@
   Use only hosted SMTP, resolve the verified address when sending, reuse the
   deterministic Message-ID, and never store/log addresses, bodies, raw SMTP
   errors, descriptions, source metadata, or watcher delivery state.
+- `DELETE /api/me` deletes the account via the `hosted_users` cascade after
+  CSRF and password checks; new account-owned tables must cascade from it.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.

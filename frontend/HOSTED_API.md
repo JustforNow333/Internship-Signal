@@ -20,6 +20,7 @@ hosted unauthorized event, and protected routes return to `/signin`.
 | POST   | `/api/auth/resend-verification` | Public         | `email`                               | generic `{accepted: true}`             |
 | POST   | `/api/auth/verify-email`        | Public         | `token`                               | `{accepted: true}`                     |
 | GET    | `/api/me`                       | Required       | —                                     | safe current-user fields only          |
+| DELETE | `/api/me`                       | Required + CSRF | `password`                           | `204`, account deleted, cleared cookie |
 | GET    | `/api/companies`                | Public         | —                                     | sanitized watcher-derived catalog      |
 | GET    | `/api/preferences`              | Required       | —                                     | current user's preferences             |
 | PUT    | `/api/preferences`              | Required       | complete preference object            | saved preferences                      |
@@ -40,8 +41,16 @@ details, notes, and alumni data are never part of this response.
 Phase 1 intentionally has no job matching endpoint. In live mode the adapter
 returns an empty matches collection so account, preference, and watchlist pages
 remain usable. Mock mode retains match fixtures for UI regression tests.
-There is also no account-deletion endpoint in this phase, so the Settings
-control is visibly disabled instead of pretending that navigation deleted data.
+
+`DELETE /api/me` permanently deletes the signed-in account. The adapter's
+`deleteAccount({password})` sends the current password and the
+`X-FindSooner-CSRF: 1` header; the browser adds `Origin`, which must be one of
+`HOSTED_ALLOWED_FRONTEND_ORIGINS`. A wrong password or failed CSRF check is
+HTTP 403 (never 401, so it does not trigger the unauthorized redirect) and
+changes nothing; a storage failure is HTTP 503. Only after `204` does the app
+clear its account state and show a neutral confirmation on `/signin`; it sends
+no logout request, because every session was deleted with the account. Mock
+mode simulates the same outcome: after a deletion its account calls return 401.
 
 Validation failures return HTTP 422 with safe entries containing `field`,
 `message`, and `type`; raw request values are omitted. HTTP 401 means the

@@ -3,6 +3,10 @@ import { normalizeMatch, normalizeMatchList } from "./matchModel.js";
 
 export const MATCH_VIEWS = ["active", "saved", "dismissed", "historical", "all"];
 
+// Destructive requests carry this header. A cross-site page cannot add it
+// without a CORS preflight, which the API grants only to the hosted frontend.
+export const CSRF_HEADER = "X-FindSooner-CSRF";
+
 function matchQuery({ view, limit, offset } = {}) {
   const query = new URLSearchParams();
   if (view) query.set("view", view);
@@ -102,6 +106,12 @@ export function createHttpHostedApi({
     mode: "live",
     listCompanies: () => call("/api/companies"),
     getMe: () => call("/api/me"),
+    deleteAccount: ({ password }) =>
+      call("/api/me", {
+        method: "DELETE",
+        headers: { [CSRF_HEADER]: "1" },
+        body: JSON.stringify({ password }),
+      }),
     signup: (input) =>
       call("/api/auth/signup", {
         method: "POST",
@@ -170,10 +180,24 @@ export function createMockHostedApi({
 } = {}) {
   const state = clone(fixtures || makeHostedFixtures());
 
+  // After a simulated deletion every account request fails like the server
+  // would: the deleted session is no longer authenticated.
+  const PUBLIC_KEYS = new Set([
+    "companies",
+    "signup",
+    "login",
+    "forgotPassword",
+    "resetPassword",
+    "resendVerification",
+    "verifyEmail",
+  ]);
+  let deleted = false;
   const respond = (key, value) =>
     new Promise((resolve, reject) => {
       const finish = () => {
         if (failures[key]) reject(new Error(failures[key]));
+        else if (deleted && !PUBLIC_KEYS.has(key))
+          reject(new HostedApiError("Authentication required.", 401));
         else resolve(clone(value));
       };
       if (latency > 0) setTimeout(finish, latency);
@@ -194,6 +218,23 @@ export function createMockHostedApi({
         verification_email_sent: true,
       }),
     login: () => respond("login", { user: state.me }),
+    deleteAccount: ({ password } = {}) => {
+      if (!password)
+        return Promise.reject(
+          new HostedApiError("Password was not recognized.", 403),
+        );
+      const result = respond("deleteAccount", null);
+      result.then(
+        () => {
+          deleted = true;
+          state.preferences = null;
+          state.watchlist = [];
+          state.matches = [];
+        },
+        () => {},
+      );
+      return result;
+    },
     logout: () => respond("logout", null),
     forgotPassword: () => respond("forgotPassword", { accepted: true }),
     resetPassword: () => respond("resetPassword", { accepted: true }),

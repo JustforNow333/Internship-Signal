@@ -558,6 +558,70 @@ scheduling: nothing here invokes `app.hosted.deliver_notifications`. Batches
 stay pending until an operator, or a scheduler an operator configures by hand,
 runs the command. See [Scheduled hosted pipeline](#scheduled-hosted-pipeline).
 
+## Account deletion and data retention
+
+`DELETE /api/me` permanently deletes the signed-in account; it is not a
+deactivation. The account is always the session's own, never one named in the
+request. In order, the request must pass:
+
+1. **CSRF validation** (`dependencies.require_trusted_origin`). The production
+   session cookie is `SameSite=None`, so the cookie alone proves nothing. The
+   `Origin` header must exactly equal one of `HOSTED_ALLOWED_FRONTEND_ORIGINS`
+   and the request must carry `X-FindSooner-CSRF: 1`, a custom header that a
+   cross-site page cannot send without a CORS preflight the API refuses for
+   other origins. Failure is HTTP 403.
+2. **An authenticated session** (HTTP 401 otherwise).
+3. **Re-authentication**: the body is exactly `{"password": "..."}`, checked
+   with the existing Argon2id verifier. A wrong password is HTTP 403
+   `Password was not recognized.` and writes nothing (the authentication
+   dependency's `last_used_at` touch is the only change).
+
+Deletion then runs in one PostgreSQL transaction (`app.hosted.account_deletion`)
+that deletes the `hosted_users` row; every account-owned table reaches it
+through `ON DELETE CASCADE`, so no hand-ordered delete list exists to drift.
+HTTP 204 and the cleared session cookie (same `Secure`/`SameSite` policy as
+logout) are returned only after the commit. A database failure rolls the whole
+deletion back and returns the generic HTTP 503 storage error. Passwords,
+hashes, tokens, request bodies, and account data are never logged.
+
+**Removed from the active database:** the user row (email, normalized email,
+password hash, verification state); every authentication session, so every
+existing cookie stops working; email-verification and password-reset tokens;
+preferences; company watches; unsupported-company requests; all job matches
+(active, saved, dismissed, and historical); recent-openings catch-up requests
+in any state; and every notification batch (pending, processing, sent, failed,
+uncertain, or cancelled) with its items and attempts. The email address can
+sign up again immediately and starts with a fresh account.
+
+**Preserved:** hosted jobs, job identities, source observations, import runs
+and attempts, the company catalog, every other user's rows, and all watcher
+SQLite state. None of these reference a user.
+
+**Concurrency.** Deletion locks the account's company watches, then its
+catch-up requests, then its notification batches, then the user row, the order
+the other writers use. Import reconciliation holds `FOR KEY SHARE` on the
+watches and existing matches it reads until it commits, so a deletion waits for
+an in-flight import (and then deletes what it created), and an import that
+starts during a deletion waits and then no longer sees the account. A delivery
+worker holds a batch only during its short prepare and record transactions:
+a batch deleted before preparation is skipped, and one deleted while its email
+is being submitted is recorded as nothing. That message may still be delivered,
+because mail accepted by the provider cannot be recalled. No new notification
+work or catch-up request can be created afterwards, since every path that
+creates one needs the account's session or watches.
+
+**Retention outside the active database.** Deletion does not recall emails
+already sent, and it does not rewrite backups. Database backups (currently
+operator-made `pg_dump` files, and any offsite copies made from them) keep the
+deleted rows until those backups expire or are removed under their own
+retention policy; this repository has no automatic backup purge. Restoring a
+backup taken before a deletion would restore the account, so deletion must be
+re-applied after any restore. The mail provider (Resend, or the SMTP relay)
+keeps its own delivery logs, including recipient addresses and subjects, under
+its retention settings. Application logs never contain account data, but the
+hosting platform's HTTP access logs record request paths and client IP
+addresses under the platform's log retention.
+
 ## Offline snapshot import
 
 From the repository root, after applying migrations:

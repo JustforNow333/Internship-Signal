@@ -72,6 +72,18 @@ class ResetPasswordRequest(TokenRequest):
     password: Password
 
 
+class AccountDeletionRequest(BaseModel):
+    """Re-authentication for permanent account deletion.
+
+    The account is always the authenticated session's; no identifier is read
+    from the request body.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    password: Password
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

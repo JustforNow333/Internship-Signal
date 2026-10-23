@@ -307,15 +307,25 @@ def _reconcile_job_chunk(
 
     company_ids = sorted({job.company_id for job in jobs.values()})
     watches: dict[str, list[UserCompanyWatch]] = {}
+    # FOR KEY SHARE keeps the watching accounts from being deleted until this
+    # import commits, so the matches and notification rows it creates for them
+    # can never reference a user deleted mid-import. Account deletion takes
+    # these rows first and simply waits; ordinary watch edits are unaffected.
     for chunk in _chunks(company_ids):
         for watch in db.scalars(
-            select(UserCompanyWatch).where(UserCompanyWatch.company_id.in_(chunk))
+            select(UserCompanyWatch)
+            .where(UserCompanyWatch.company_id.in_(chunk))
+            .order_by(UserCompanyWatch.user_id, UserCompanyWatch.company_id)
+            .with_for_update(key_share=True)
         ):
             watches.setdefault(watch.company_id, []).append(watch)
 
     existing: dict[tuple[uuid.UUID, uuid.UUID], UserJobMatch] = {}
     for match in db.scalars(
-        select(UserJobMatch).where(UserJobMatch.job_id.in_(job_ids))
+        select(UserJobMatch)
+        .where(UserJobMatch.job_id.in_(job_ids))
+        .order_by(UserJobMatch.id)
+        .with_for_update(key_share=True)
     ):
         existing[(match.user_id, match.job_id)] = match
 
