@@ -201,7 +201,7 @@ def test_empty_database_migrates_to_expected_postgresql_schema(
         )
         revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
     assert data_type == "jsonb"
-    assert revision == "20261022_0009"
+    assert revision == "20261025_0010"
     database.dispose()
 
 

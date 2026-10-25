@@ -27,6 +27,7 @@ ROLE_IDS = {
     "data_science",
     "data_engineering",
     "quantitative_development",
+    "quantitative_trading_research",
     "product_management",
     "hardware_embedded",
     "other_engineering",

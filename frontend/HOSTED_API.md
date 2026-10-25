@@ -30,7 +30,8 @@ hosted unauthorized event, and protected routes return to `/signin`.
 
 Preference role IDs are `software_engineering`, `machine_learning_ai`,
 `data_science`, `data_engineering`, `quantitative_development`,
-`product_management`, `hardware_embedded`, and `other_engineering`. Alert
+`quantitative_trading_research`, `product_management`, `hardware_embedded`,
+and `other_engineering`. Alert
 frequencies are `as_detected`, `three_hour`, `daily`, and `paused`.
 
 Company objects expose only `id`, `name`, optional `aliases`, `coverage`, and

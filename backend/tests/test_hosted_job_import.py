@@ -271,7 +271,7 @@ def test_phase2_migration_creates_postgresql_tables_and_jsonb(
             "SELECT version_num FROM alembic_version"
         ).scalar_one()
     assert source_metadata_type == "jsonb"
-    assert revision == "20261022_0009"
+    assert revision == "20261025_0010"
     database.dispose()
 
 
@@ -571,6 +571,7 @@ def test_generic_full_time_title_cannot_enter_hosted_jobs(import_service) -> Non
         ("data_science", "data_science", "data_science"),
         ("data_engineering", "data_science", "data_engineering"),
         ("quant_dev", "quant", "quantitative_development"),
+        ("quant_research", "quant", "quantitative_trading_research"),
         ("technical_product", "product", "product_management"),
         ("firmware", "swe", "hardware_embedded"),
         ("it_support", "it", "other_engineering"),

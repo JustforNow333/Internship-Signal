@@ -383,7 +383,7 @@ def test_software_adjacent_titles_get_specific_role_tracks(title, track, role):
         ("A.I. Integration Intern", "ml_ai"),
         ("AI-Integration Internship", "ml_ai"),
         ("Markets Quantitative Analyst Summer Internship", "quant_dev"),
-        ("Systematic Investing Intern", "quant_dev"),
+        ("Systematic Investing Intern", "quant_research"),
         ("Associate Product Manager Intern (APM)", "technical_product"),
         ("Technical Product Management Intern", "technical_product"),
         ("Product Development Internship Program", "technical_product"),
@@ -578,17 +578,17 @@ def test_audit_nearby_negative_controls_remain_excluded(
 @pytest.mark.parametrize(
     ("title", "track", "role"),
     [
-        ("Data Scientist Intern", "data_engineering", "data_science"),
-        ("Sector Data Scientist Intern", "data_engineering", "data_science"),
-        ("Data Scientist Intern - Product Analytics", "data_engineering", "data_science"),
+        ("Data Scientist Intern", "data_science", "data_science"),
+        ("Sector Data Scientist Intern", "data_science", "data_science"),
+        ("Data Scientist Intern - Product Analytics", "data_science", "data_science"),
         ("AI Applied Scientist Intern", "ml_ai", "ml_ai"),
         ("Applied Scientist Intern", "ml_ai", "ml_ai"),
         ("Applied Science Intern - Gen AI & Large Language Models", "ml_ai", "ml_ai"),
         ("Researcher Intern - Coreai", "ml_ai", "ml_ai"),
-        ("Quantitative Trader Intern - Quantitative Trader", "quant_dev", "quant"),
+        ("Quantitative Trader Intern - Quantitative Trader", "quant_research", "quant"),
         (
             "Quantitative Strategist Intern - Americas - The Core Quantitative Group",
-            "quant_dev",
+            "quant_research",
             "quant",
         ),
         ("AI Intern", "ml_ai", "ml_ai"),
@@ -670,3 +670,123 @@ def test_title_only_role_phrases_are_not_read_from_descriptions(
     got = classify_role(_row(title=title, description=description))
 
     assert got["role_track"] == expected_track
+
+
+# --- data science and quantitative trading & research categories -----------
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "track", "role"),
+    [
+        ("Data Scientist Intern", "", "data_science", "data_science"),
+        ("Data Science Intern", "", "data_science", "data_science"),
+        ("Decision Scientist Intern", "", "data_science", "data_science"),
+        ("Statistician Intern", "", "data_science", "data_science"),
+        ("Statistical Modeling Intern", "", "data_science", "data_science"),
+        ("Experimentation Scientist Intern", "", "data_science", "data_science"),
+        (
+            "Data Scientist, Product",
+            "Train machine learning models and build Python pipelines.",
+            "data_science",
+            "data_science",
+        ),
+        ("Data Engineer Intern", "", "data_engineering", "data_science"),
+        ("Data Infrastructure Intern", "", "data_engineering", "data_science"),
+        ("Data Analyst Intern", "", "data_engineering", "data_science"),
+        ("Machine Learning Engineer Intern", "", "ml_ai", "ml_ai"),
+        ("Applied Scientist Intern", "", "ml_ai", "ml_ai"),
+        ("Quant Developer Intern", "", "quant_dev", "quant"),
+        ("Quantitative Developer Intern", "", "quant_dev", "quant"),
+        ("Quantitative Analyst Intern", "", "quant_dev", "quant"),
+        (
+            "Quantitative Developer Intern - Systematic Trading",
+            "",
+            "quant_dev",
+            "quant",
+        ),
+        ("Quantitative Trader Intern", "", "quant_research", "quant"),
+        ("Quantitative Trading Intern", "", "quant_research", "quant"),
+        ("Quantitative Research Intern", "", "quant_research", "quant"),
+        ("Quantitative Researcher Intern", "", "quant_research", "quant"),
+        ("Quantitative Strategist Intern", "", "quant_research", "quant"),
+        ("Systematic Trading Intern", "", "quant_research", "quant"),
+        ("Systematic Research Intern", "", "quant_research", "quant"),
+        ("Trading Intern", "", "quant_research", "quant"),
+        (
+            "Quant Intern",
+            "Develop alpha signals and statistical arbitrage trading strategies.",
+            "quant_research",
+            "quant",
+        ),
+    ],
+)
+def test_data_science_and_quant_categories_are_distinguished(
+    title,
+    description,
+    track,
+    role,
+):
+    got = classify_role(_row(title=title, description=description))
+
+    assert got["role_track"] == track
+    assert got["role"] == role
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "expected_track"),
+    [
+        ("Sales and Trading Intern", "", "non_technical"),
+        ("Sales & Trading Summer Analyst", "", "non_technical"),
+        ("Financial Analyst Intern", "", "unknown"),
+        ("Investment Banking Summer Analyst", "", "unknown"),
+        ("Equity Research Intern", "", "unknown"),
+        ("Research Intern", "", "unknown"),
+        ("Market Research Intern", "", "non_technical"),
+        ("Quantitative Finance Intern", "", "unknown"),
+        ("Quant Intern", "", "unknown"),
+        (
+            "Summer Analyst Intern - Americas - Investment Banking Quantitative Strategies",
+            "",
+            "unknown",
+        ),
+        # Colleagues named in a description are not the role itself.
+        (
+            "Business Analyst Intern",
+            "Partner with data scientists and quantitative researchers.",
+            "unknown",
+        ),
+        (
+            "Analyst Intern",
+            "Apply statistical modeling and experimentation to revenue forecasts.",
+            "unknown",
+        ),
+    ],
+)
+def test_finance_and_research_titles_need_quant_or_data_science_evidence(
+    title,
+    description,
+    expected_track,
+):
+    got = classify_role(_row(title=title, description=description))
+
+    assert got["role_track"] == expected_track
+
+
+def test_quant_intern_with_infrastructure_duties_is_not_quant_research():
+    got = classify_role(_row(
+        title="Quant Intern",
+        description="Build low-latency C++ trading infrastructure and developer tooling.",
+    ))
+
+    assert got["role_track"] != "quant_research"
+    assert got["role"] == "swe"
+
+
+def test_new_tracks_carry_labels_and_software_membership():
+    from app.classify import ROLE_TRACK_LABELS, ROLE_TRACK_TO_ROLE, SOFTWARE_ROLE_TRACKS
+
+    assert ROLE_TRACK_LABELS["data_science"] == "Data science"
+    assert ROLE_TRACK_LABELS["quant_research"] == "Quant trading / research"
+    assert ROLE_TRACK_TO_ROLE["data_science"] == "data_science"
+    assert ROLE_TRACK_TO_ROLE["quant_research"] == "quant"
+    assert {"data_science", "quant_research"} <= SOFTWARE_ROLE_TRACKS

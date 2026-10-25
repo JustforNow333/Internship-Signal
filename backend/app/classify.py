@@ -183,9 +183,11 @@ ROLE_TRACK_LABELS = {
     "frontend": "Frontend software",
     "general_swe": "Software engineering",
     "platform_infra": "Platform / infrastructure software",
+    "data_science": "Data science",
     "data_engineering": "Data engineering / analytics",
     "ml_ai": "ML / AI engineering",
     "quant_dev": "Quant development",
+    "quant_research": "Quant trading / research",
     "devops": "DevOps / developer tooling",
     "cloud": "Cloud software",
     "embedded_software": "Embedded software",
@@ -212,9 +214,11 @@ SOFTWARE_ROLE_TRACKS = {
     "frontend",
     "general_swe",
     "platform_infra",
+    "data_science",
     "data_engineering",
     "ml_ai",
     "quant_dev",
+    "quant_research",
     "devops",
     "cloud",
     "embedded_software",
@@ -237,9 +241,11 @@ ROLE_TRACK_TO_ROLE = {
     "firmware": "swe",
     "sdet_qa_automation": "swe",
     "technical_product": "product",
+    "data_science": "data_science",
     "data_engineering": "data_science",
     "ml_ai": "ml_ai",
     "quant_dev": "quant",
+    "quant_research": "quant",
     "product": "product",
     "it_support": "it",
     "non_technical": "non_technical",
@@ -276,9 +282,12 @@ SOFTWARE_TITLE_PATTERNS = [
     ("full_stack", r"\bfull[- ]?stack\b"),
     ("frontend", r"\bfront[- ]?end\b|\bui engineer\b|\bweb developer\b"),
     ("platform_infra", r"\bplatform software\b|\binfrastructure software\b|\bsite reliability\b|\bsre\b"),
-    ("data_engineering", r"\bdata engineer(ing)?\b|\bdata science\b|\bdata analy(st|tics)\b|\bdata infrastructure\b|\bdata pipeline"),
+    ("data_science", r"\bdata science\b"),
+    ("data_engineering", r"\bdata engineer(ing)?\b|\bdata analy(st|tics)\b|\bdata infrastructure\b|\bdata pipeline"),
     ("ml_ai", r"machine[- ]learning (engineer|engineering|intern)|\bml\b|\bml engineer\b|\bai engineer\b|\ba\.?\s*i\.?\s+integration\b|\bai[- ]integration\b|deep learning|computer vision|\bnlp\b|\bllms?\b|\bpytorch\b|\btensorflow\b"),
-    ("quant_dev", r"\bquant(itative)? (developer|engineer|analyst|trading|research)|\bquantitative trading intern\b|\btrading intern\b|\bsystematic (investing|trading|research)\b|\bmarket model(l)?ing\b"),
+    ("quant_dev", r"\bquant(itative)? (developer|engineer|analyst)"),
+    # Sales-and-trading desks are client-facing, not quantitative trading.
+    ("quant_research", r"\bquant(?:itative)? (?:trading|research)\b|\bsystematic (?:investing|trading|research)\b|\bmarket model(?:l)?ing\b|(?<!sales and )(?<!sales & )\btrading intern\b"),
     ("embedded_software", r"\bembedded software\b"),
     ("firmware", r"\bfirmware\b"),
     ("sdet_qa_automation", r"\bsdet\b|software qa automation|qa automation|software test automation|test automation framework"),
@@ -287,6 +296,30 @@ SOFTWARE_TITLE_PATTERNS = [
     ("cloud", r"\bcloud developer\b|\bcloud software\b"),
     ("devops", r"\bdevops\b|developer tooling|build engineer"),
 ]
+
+# Role nouns that name the job only in a title. In a description they usually
+# name colleagues ("partner with data scientists"), so they never extend the
+# body patterns above.
+TITLE_ONLY_ROLE_TERMS = {
+    "data_science": (
+        r"\bdata scientists?\b|\bdecision scien(?:ce|tists?)\b|\bstatisticians?\b|"
+        r"\bstatistical model(?:l)?ing\b|\bexperimentation (?:analyst|scientist)s?\b"
+    ),
+    "quant_research": r"\bquant(?:itative)? (?:traders?|researchers?|strategists?)\b",
+}
+TITLE_SOFTWARE_PATTERNS = [
+    (track, f"{pattern}|{TITLE_ONLY_ROLE_TERMS[track]}" if track in TITLE_ONLY_ROLE_TERMS else pattern)
+    for track, pattern in SOFTWARE_TITLE_PATTERNS
+]
+
+# A bare "Quant Intern" names no discipline; trading or research duties in the
+# posting decide it. Without them the ordinary software rules apply.
+GENERIC_QUANT_TITLE_RE = re.compile(r"\bquant(?:itative)? intern(?:ship)?\b", re.I)
+QUANT_RESEARCH_CONTEXT_RE = re.compile(
+    r"\balpha\b|\btrading (?:strateg(?:y|ies)|signals?)\b|\bstatistical arbitrage\b|"
+    r"\bmarket[- ]making\b|\bbacktest(?:s|ing)?\b|\bsystematic (?:trading|strateg(?:y|ies))\b",
+    re.I,
+)
 
 NON_SWE_TITLE_PATTERNS = [
     ("customer_experience", r"customer experience engineer|customer support engineer|technical support engineer"),
@@ -437,7 +470,6 @@ SCOPED_ROLE_TITLE_PATTERNS = [
 # need an explicit AI/ML qualifier; physical-science and market-research titles
 # stay out.
 TITLE_DISCIPLINE_FALLBACK_PATTERNS = [
-    ("data_engineering", r"\bdata scientists?\b"),
     (
         "ml_ai",
         r"^(?!.*\b(?:quantum|physics|physical|chemi\w*|materials?|bio\w*)\b)"
@@ -452,7 +484,6 @@ TITLE_DISCIPLINE_FALLBACK_PATTERNS = [
         r".*\b(?:applied science|research(?:ers?)?|scientists?)\b",
     ),
     ("ml_ai", r"^\W*(?:ai|artificial intelligence) intern(?:ship)?\b"),
-    ("quant_dev", r"\bquant(?:itative)? (?:trader|strategist)s?\b"),
     ("general_swe", r"\bapplication development\b"),
 ]
 
@@ -541,7 +572,7 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
         body = analysis_context.description_requirements
         full = analysis_context.title_description_requirements
 
-    title_software_hits = _hits(SOFTWARE_TITLE_PATTERNS, title)
+    title_software_hits = _hits(TITLE_SOFTWARE_PATTERNS, title)
     body_software_hits = _hits(SOFTWARE_TITLE_PATTERNS, body)
     title_non_swe_hits = _hits(NON_SWE_TITLE_PATTERNS, title)
     body_non_swe_hits = _hits(NON_SWE_TITLE_PATTERNS, body)
@@ -657,6 +688,22 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
         if body_software_hits:
             evidence.append(f'"{body_software_hits[0][1]}"')
         return _finish_role(track, 0.82 + (0.05 if software_evidence else 0), evidence, software_evidence or [hit], non_swe_evidence)
+
+    generic_quant = GENERIC_QUANT_TITLE_RE.search(title)
+    quant_research_context = (
+        QUANT_RESEARCH_CONTEXT_RE.search(body) if generic_quant else None
+    )
+    if generic_quant and quant_research_context:
+        return _finish_role(
+            "quant_research",
+            0.7,
+            [
+                f'title: "{generic_quant.group(0)}"',
+                f'trading/research duties: "{quant_research_context.group(0)}"',
+            ],
+            software_evidence or [generic_quant.group(0)],
+            non_swe_evidence,
+        )
 
     if title_non_swe_hits:
         track, hit = title_non_swe_hits[0]

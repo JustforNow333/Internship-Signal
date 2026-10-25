@@ -75,14 +75,28 @@ SOFTWARE_SIGNAL_TRACKS = {
     "frontend",
     "general_swe",
     "platform_infra",
+    "data_science",
     "data_engineering",
     "ml_ai",
     "quant_dev",
+    "quant_research",
     "cloud",
     "devops",
     "embedded_software",
     "firmware",
     "sdet_qa_automation",
+}
+
+BACKEND_FOCUS_TRACKS = {
+    "backend",
+    "full_stack",
+    "general_swe",
+    "platform_infra",
+    "data_science",
+    "data_engineering",
+    "ml_ai",
+    "quant_dev",
+    "quant_research",
 }
 
 
@@ -461,9 +475,7 @@ def detect_positive_signals(
         else title + " " + text
     )
     backend_match = BACKEND_TERMS.search(backend_text)
-    if backend_match and role_track in {
-        "backend", "full_stack", "general_swe", "platform_infra", "data_engineering", "ml_ai", "quant_dev"
-    }:
+    if backend_match and role_track in BACKEND_FOCUS_TRACKS:
         signals.append(_signal("backend_focus", "Backend / data infrastructure focus", 2, backend_match.group(0)))
 
     if company_cls.get("is_startup"):

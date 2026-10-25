@@ -35,11 +35,13 @@ DEFAULT_PROFILE = {
     "role_track_affinity": {
         "backend": 82,
         "full_stack": 80,
+        "data_science": 78,
         "data_engineering": 78,
         "ml_ai": 76,
         "general_swe": 74,
         "platform_infra": 72,
         "quant_dev": 72,
+        "quant_research": 72,
         "frontend": 68,
         "cloud": 62,
         "devops": 58,

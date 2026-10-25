@@ -54,7 +54,13 @@ export const ROLE_OPTIONS = [
     id: "quantitative_development",
     name: "Quantitative Development",
     description:
-      "Quant engineering, trading systems, and financial modeling roles.",
+      "Quant software engineering, trading infrastructure, and developer roles.",
+  },
+  {
+    id: "quantitative_trading_research",
+    name: "Quantitative Trading & Research",
+    description:
+      "Quant trading, quant research, strategist, and systematic trading roles.",
   },
   {
     id: "product_management",

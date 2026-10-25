@@ -228,7 +228,8 @@ class HostedJob(TimestampMixin, Base):
         CheckConstraint(
             "role_id IN ('software_engineering', 'machine_learning_ai', "
             "'data_science', 'data_engineering', 'quantitative_development', "
-            "'product_management', 'hardware_embedded', 'other_engineering')",
+            "'quantitative_trading_research', 'product_management', "
+            "'hardware_embedded', 'other_engineering')",
             name="role_id",
         ),
         CheckConstraint(
