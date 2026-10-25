@@ -15,6 +15,13 @@ from .security import token_hash
 from .services import HostedServices
 
 
+# Sent by the hosted frontend on destructive requests. A custom header cannot
+# be attached cross-site without a CORS preflight, which only the configured
+# frontend origins pass.
+CSRF_HEADER = "X-FindSooner-CSRF"
+CSRF_HEADER_VALUE = "1"
+
+
 @dataclass(frozen=True)
 class CurrentIdentity:
     user: User
@@ -46,6 +53,31 @@ def unauthorized() -> HTTPException:
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Authentication required.",
     )
+
+
+def require_trusted_origin(
+    request: Request,
+    services: HostedServices = Depends(get_services),
+) -> None:
+    """CSRF guard for cookie-authenticated destructive requests.
+
+    The session cookie is ``SameSite=None`` in production, so the cookie alone
+    proves nothing about who initiated the request. Browsers always send
+    ``Origin`` on a cross-origin or non-GET request, and it must name one of
+    the configured frontend origins exactly; the custom header additionally
+    forces a preflight that CORS refuses for any other origin.
+    """
+
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    if (
+        not origin
+        or origin not in services.settings.allowed_frontend_origins
+        or request.headers.get(CSRF_HEADER) != CSRF_HEADER_VALUE
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This request could not be verified. Reload the page and try again.",
+        )
 
 
 def get_current_identity(

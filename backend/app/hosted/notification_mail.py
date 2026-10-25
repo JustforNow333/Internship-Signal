@@ -18,6 +18,7 @@ from typing import Literal, Protocol
 
 import httpx
 
+from .match_service import RECENT_OPENING_WINDOW_DAYS
 from .matching import bounded_reasons
 from .settings import HostedSettings
 
@@ -289,13 +290,23 @@ def build_digest_email(
     jobs: list[DigestJob],
     message_id: str,
     public_frontend_url: str,
+    kind: str = "import",
 ) -> NotificationEmail:
     count = len(jobs)
-    subject = (
-        f"New job matches ({count})"
-        if frequency == "as_detected"
-        else f"Your FindSooner digest ({count})"
-    )
+    intro: str | None = None
+    if kind == "catch_up":
+        subject = f"Your recent job matches ({count})"
+        intro = (
+            f"{count} open role{'s' if count != 1 else ''} from the last "
+            f"{RECENT_OPENING_WINDOW_DAYS} days match{'es' if count == 1 else ''} "
+            "the companies you just started watching. Some were posted before "
+            "you started watching; from now on, alerts cover only newly "
+            "detected openings."
+        )
+    elif frequency == "as_detected":
+        subject = f"New job matches ({count})"
+    else:
+        subject = f"Your FindSooner digest ({count})"
     dashboard_url = f"{public_frontend_url.rstrip('/')}/app/matches"
     settings_url = f"{public_frontend_url.rstrip('/')}/app/settings"
     displayed = jobs[:DISPLAY_LIMIT]
@@ -306,6 +317,9 @@ def build_digest_email(
         "<!doctype html><html><body>",
         f"<h1>{html.escape(subject)}</h1>",
     ]
+    if intro:
+        text_parts.extend([intro, ""])
+        html_parts.append(f"<p>{html.escape(intro)}</p>")
     for job in displayed:
         reasons = _reason_labels(job.match_reasons)
         text_parts.extend(_plain_job(job, reasons))

@@ -46,7 +46,7 @@ _PAID_RE = re.compile(r"\bpaid\b", re.I)          # \b stops this matching insid
 _UNPAID_RE = re.compile(r"\bunpaid\b|\bfree labor\b", re.I)
 _REMOTE_RE = re.compile(r"\bremote\b|work from home|\bwfh\b", re.I)
 
-BACKEND_ADJACENT_TRACKS = {"backend", "full_stack", "platform_infra", "data_engineering"}
+BACKEND_ADJACENT_TRACKS = {"backend", "full_stack", "platform_infra", "data_science", "data_engineering"}
 
 _STOPWORDS = {
     "the", "a", "an", "which", "what", "who", "show", "me", "ones", "one", "are",

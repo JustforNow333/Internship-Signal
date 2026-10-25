@@ -37,9 +37,11 @@ SOFTWARE_FIT_TRACKS = {
     "frontend",
     "general_swe",
     "platform_infra",
+    "data_science",
     "data_engineering",
     "ml_ai",
     "quant_dev",
+    "quant_research",
     "cloud",
     "devops",
     "embedded_software",
@@ -61,9 +63,11 @@ ROLE_TRACK_PRIORITY = {
     "full_stack": 1,
     "general_swe": 2,
     "platform_infra": 3,
+    "data_science": 4,
     "data_engineering": 4,
     "ml_ai": 5,
     "quant_dev": 6,
+    "quant_research": 6,
     "frontend": 7,
     "cloud": 8,
     "devops": 9,
@@ -81,7 +85,7 @@ BACKEND_FIT_RE = re.compile(
     re.I,
 )
 PRODUCTION_CODE_RE = re.compile(r"production code|code review|ship (real )?(code|features?)|own .*service|building services?", re.I)
-NEAR_PERFECT_TRACKS = {"backend", "full_stack", "data_engineering", "ml_ai", "general_swe"}
+NEAR_PERFECT_TRACKS = {"backend", "full_stack", "data_science", "data_engineering", "ml_ai", "general_swe"}
 CORE_RESUME_STACK_RE = re.compile(
     r"\bpython\b|\bjava\b(?!\s*script)|\bsql\b|\bjavascript\b|\btypescript\b|"
     r"\bfastapi\b|\bflask\b|\bsqlalchemy\b|\breact\b|\bnext\.?js\b|"

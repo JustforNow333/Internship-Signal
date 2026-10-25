@@ -257,6 +257,7 @@ def _audit_matches(
                 select(
                     HostedNotificationItem.user_job_match_id,
                     HostedNotificationItem.source_import_run_id,
+                    HostedNotificationItem.source_catch_up_id,
                     HostedNotificationBatch.user_id.label("batch_user_id"),
                     HostedNotificationBatch.frequency,
                     HostedNotificationBatch.source_import_run_id.label(
@@ -321,7 +322,9 @@ def _audit_matches(
                     audit.backfill_silent_matches += 1
                 else:
                     audit.silent_catch_up_matches += 1
-                if item is not None:
+                # A catch-up digest item is the user's explicit recent-openings
+                # email, not import notification work for a silent match.
+                if item is not None and item.source_catch_up_id is None:
                     audit.silent_match_with_notification += 1
 
             metadata = row.source_metadata if isinstance(row.source_metadata, dict) else {}

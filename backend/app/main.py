@@ -28,6 +28,7 @@ HOSTED_MUTATION_PREFIXES = (
     "/api/preferences",
     "/api/watchlist",
     "/api/company-requests",
+    "/api/me",
 )
 
 app.state.hosted_services = HostedServices.build()
@@ -43,9 +44,12 @@ app.add_middleware(
 
 @app.middleware("http")
 async def limit_hosted_request_size(request: Request, call_next):
-    if request.method in {"POST", "PUT", "PATCH"} and request.url.path.startswith(
-        HOSTED_MUTATION_PREFIXES
-    ):
+    if request.method in {
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+    } and request.url.path.startswith(HOSTED_MUTATION_PREFIXES):
         raw_length = request.headers.get("content-length")
         if raw_length:
             try:

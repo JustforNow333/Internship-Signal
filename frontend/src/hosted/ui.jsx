@@ -165,6 +165,125 @@ export function ConfirmationDialog({
   );
 }
 
+export const DELETE_CONFIRMATION = "DELETE";
+
+export function DeleteAccountDialog({ open, onClose, onDelete }) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState("");
+  const passwordRef = useRef(null);
+  const ids = useId();
+
+  useEffect(() => {
+    if (!open) return undefined;
+    setPassword("");
+    setConfirmation("");
+    setDeleting(false);
+    setError("");
+    passwordRef.current?.focus();
+    return undefined;
+  }, [open]);
+
+  // Return focus to the password once a failed attempt re-enables the form.
+  useEffect(() => {
+    if (open && error && !deleting) passwordRef.current?.focus();
+  }, [open, error, deleting]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    // A request in flight cannot be withdrawn, so the dialog stays put.
+    const onKeyDown = (event) =>
+      event.key === "Escape" && !deleting && onClose();
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, deleting, onClose]);
+
+  if (!open) return null;
+  const ready =
+    password.length > 0 && confirmation === DELETE_CONFIRMATION && !deleting;
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!ready) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await onDelete({ password });
+    } catch (deleteError) {
+      setError(
+        deleteError.message ||
+          "Your account could not be deleted. Nothing was changed; try again.",
+      );
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div
+      className="modal-layer"
+      role="presentation"
+      onMouseDown={(event) =>
+        event.target === event.currentTarget && !deleting && onClose()
+      }
+    >
+      <section
+        className="modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={`${ids}-title`}
+        aria-describedby={`${ids}-description`}
+      >
+        <form onSubmit={submit} noValidate>
+          <h2 id={`${ids}-title`}>Permanently delete your account?</h2>
+          <div id={`${ids}-description`} className="modal-copy">
+            <p>
+              This cannot be undone. Your account, preferences, watchlist,
+              matches, and notification history will be deleted, and email
+              notifications will stop.
+            </p>
+          </div>
+          {error && (
+            <div className="field-error" role="alert">
+              {error}
+            </div>
+          )}
+          <label className="field">
+            <span>Current password</span>
+            <input
+              ref={passwordRef}
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              disabled={deleting}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>
+              Type <strong>{DELETE_CONFIRMATION}</strong> to confirm
+            </span>
+            <input
+              value={confirmation}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={deleting}
+              onChange={(event) => setConfirmation(event.target.value)}
+            />
+          </label>
+          <div className="modal-actions">
+            <button type="button" onClick={onClose} disabled={deleting}>
+              Cancel
+            </button>
+            <button type="submit" className="danger" disabled={!ready}>
+              {deleting ? "Deleting account…" : "Permanently delete account"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 export function RequestCompanyDialog({ open, onClose, onSubmit }) {
   const [companyName, setCompanyName] = useState("");
   const [careerUrl, setCareerUrl] = useState("");

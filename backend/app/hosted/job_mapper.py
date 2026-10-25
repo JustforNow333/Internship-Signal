@@ -54,6 +54,7 @@ WATCHER_ROLE_TRACK_TO_HOSTED_ROLE = {
     "data_science": "data_science",
     "data_engineering": "data_engineering",
     "quant_dev": "quantitative_development",
+    "quant_research": "quantitative_trading_research",
     "technical_product": "product_management",
     "product": "product_management",
     "embedded_software": "hardware_embedded",

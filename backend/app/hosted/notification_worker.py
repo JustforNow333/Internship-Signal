@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
+from .catch_up import unconfirmed_job_ids
 from .database import HostedDatabase
 from .models import (
     HostedJob,
@@ -22,6 +23,7 @@ from .models import (
     UserPreference,
 )
 from .notification_enqueue import (
+    CATCH_UP_KIND,
     DELIVERY_FREQUENCIES,
     pending_item_count,
     rehome_pending_items,
@@ -59,10 +61,20 @@ BATCH_CANCELLATION_CODES = frozenset(
         # rows cancelled before re-homing existed. Never applied to an item.
         "frequency_changed",
         "no_valid_items",
+        # A catch-up digest whose user has since turned recent openings off.
+        "recent_openings_disabled",
     }
 )
 ITEM_CANCELLATION_CODES = frozenset(
-    {"match_dismissed", "match_inactive", "job_closed", "match_missing", "job_missing"}
+    {
+        "match_dismissed",
+        "match_inactive",
+        "job_closed",
+        "match_missing",
+        "job_missing",
+        # A catch-up posting no longer confirmed current when its digest is sent.
+        "job_unconfirmed",
+    }
 )
 ERROR_CODES = frozenset(
     {
@@ -288,6 +300,15 @@ class NotificationDeliveryWorker:
 
             assert preferences is not None
             if (
+                batch.kind == CATCH_UP_KIND
+                and not preferences.include_recent_openings
+            ):
+                _cancel_batch(batch, "recent_openings_disabled", now)
+                for item in batch.items:
+                    if item.status == "pending":
+                        _cancel_item(item, "recent_openings_disabled", now)
+                return None
+            if (
                 preferences.alert_frequency != batch.frequency
                 and preferences.alert_frequency in DELIVERY_FREQUENCIES
             ):
@@ -332,15 +353,28 @@ class NotificationDeliveryWorker:
                     _cancel_item(item, reason, now)
                 else:
                     valid.append((item, match, job))
+            if batch.kind == CATCH_UP_KIND and valid:
+                # A catch-up presents postings as current; one that stopped
+                # being confirmed while the digest waited is left out.
+                unconfirmed = unconfirmed_job_ids(
+                    db, [job.id for _item, _match, job in valid], now=now
+                )
+                for item, _match, job in valid:
+                    if job.id in unconfirmed:
+                        _cancel_item(item, "job_unconfirmed", now)
+                valid = [row for row in valid if row[2].id not in unconfirmed]
             if not valid:
                 _cancel_batch(batch, "no_valid_items", now)
                 return None
+            if batch.kind == CATCH_UP_KIND:
+                valid.sort(key=_catch_up_order)
 
             jobs = [_digest_job(match, job) for _item, match, job in valid]
             assert user is not None
             message = build_digest_email(
                 recipient=user.email,
                 frequency=batch.frequency,
+                kind=batch.kind,
                 jobs=jobs,
                 message_id=batch.email_message_id,
                 public_frontend_url=self.public_frontend_url,
@@ -478,6 +512,20 @@ def _digest_job(match: UserJobMatch, job: HostedJob) -> DigestJob:
         match_reasons=match.match_reasons,
         career_level=job.career_level,
     )
+
+
+def _catch_up_order(
+    row: tuple[HostedNotificationItem, UserJobMatch, HostedJob],
+) -> tuple:
+    """Most recent first: dated postings by posting date, then undated ones by
+    when they were first seen, with stable text and id tie-breakers."""
+
+    item, _match, job = row
+    if job.posting_date is not None:
+        recency = (0, -job.posting_date.toordinal(), 0.0)
+    else:
+        recency = (1, 0, -job.first_seen_at.timestamp())
+    return (*recency, job.company_name, job.title, str(item.id))
 
 
 def _item_cancellation(

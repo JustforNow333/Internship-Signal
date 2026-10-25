@@ -31,10 +31,10 @@
   final watcher IDs structural failures.
 - Preserve unaffected classifications and IDs, keep replay offline and
   watcher-state safe.
-- Phase 3A enqueueing is import-only and shares the job/match transaction. It
-  accepts only newly inserted matches for active, verified, unpaused users;
-  preference/watch reconciliation, reactivation, and `already_imported` never
-  create notification backlog.
+- Import enqueueing shares the job/match transaction and accepts only genuinely
+  new openings for active, verified, unpaused users; reconciliation,
+  reactivation, and `already_imported` never create import backlog. Newly
+  watched companies earn one catch-up digest only via `app.hosted.catch_up`.
 - Durable batches/items/attempts live only in hosted PostgreSQL. As-detected
   groups by user/import; three-hour and daily use rolling first-item windows.
   The one-shot worker claims with `SKIP LOCKED`, token and 10-minute lease,
@@ -44,6 +44,8 @@
   Use only hosted SMTP, resolve the verified address when sending, reuse the
   deterministic Message-ID, and never store/log addresses, bodies, raw SMTP
   errors, descriptions, source metadata, or watcher delivery state.
+- `DELETE /api/me` deletes the account via the `hosted_users` cascade after
+  CSRF and password checks; new account-owned tables must cascade from it.
 
 - After every user prompt, update the root `claude.md`, `agents.md`, and
   `.gitignore`. Keep them concise, synchronized, and relevant.

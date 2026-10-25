@@ -6,7 +6,12 @@ import {
   ROLE_OPTIONS,
   SEASON_OPTIONS,
 } from "./constants.js";
-import { ConfirmationDialog, SuccessNotice, Toggle } from "./ui.jsx";
+import {
+  ConfirmationDialog,
+  DeleteAccountDialog,
+  SuccessNotice,
+  Toggle,
+} from "./ui.jsx";
 import { careerLevelsOrDefault, toggleSelection } from "./utils.js";
 
 function withCareerLevels(preferences) {
@@ -16,12 +21,18 @@ function withCareerLevels(preferences) {
   };
 }
 
-export default function SettingsPage({ me, preferences, savePreferences }) {
+export default function SettingsPage({
+  me,
+  preferences,
+  savePreferences,
+  deleteAccount,
+}) {
   const [form, setForm] = useState(() => withCareerLevels(preferences));
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [unsubscribeOpen, setUnsubscribeOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   useEffect(() => setForm(withCareerLevels(preferences)), [preferences]);
 
   // The season is kept (not cleared) while internships are deselected so it
@@ -230,7 +241,7 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
                 setForm({ ...form, include_recent_openings: checked })
               }
               label="Include recent openings"
-              description="When you add a company, show matching openings posted within the last 90 days."
+              description="When you add a company, show its matching openings from the last 90 days on your dashboard and send one catch-up email summarizing them. Some may have been posted before you started watching."
             />
           </section>
           <section className="settings-card">
@@ -298,11 +309,16 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
               </span>
               <span aria-hidden="true">→</span>
             </button>
-            <button type="button" disabled>
+            <button
+              type="button"
+              onClick={() => setDeleteOpen(true)}
+              disabled={!deleteAccount}
+            >
               <span>
                 <strong>Delete account</strong>
-                <small>Account deletion is not available yet.</small>
+                <small>Permanently delete your account and its data.</small>
               </span>
+              <span aria-hidden="true">→</span>
             </button>
           </section>
         </aside>
@@ -320,6 +336,11 @@ export default function SettingsPage({ me, preferences, savePreferences }) {
           remain available if you return.
         </p>
       </ConfirmationDialog>
+      <DeleteAccountDialog
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onDelete={deleteAccount}
+      />
     </>
   );
 }

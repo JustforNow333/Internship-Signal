@@ -27,6 +27,7 @@ ROLE_IDS = {
     "data_science",
     "data_engineering",
     "quantitative_development",
+    "quantitative_trading_research",
     "product_management",
     "hardware_embedded",
     "other_engineering",
@@ -69,6 +70,18 @@ class TokenRequest(BaseModel):
 
 
 class ResetPasswordRequest(TokenRequest):
+    password: Password
+
+
+class AccountDeletionRequest(BaseModel):
+    """Re-authentication for permanent account deletion.
+
+    The account is always the authenticated session's; no identifier is read
+    from the request body.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     password: Password
 
 

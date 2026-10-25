@@ -1666,6 +1666,8 @@ _IDENTITY_JOB_COLUMNS = (
     "closure_reason",
     "superseded_by_job_id",
 )
+# Added by 20261022_0009; absent from the pre-identity schema as well.
+_CATCH_UP_COLUMNS = ("kind", "source_catch_up_id")
 _EXISTING_TABLES = (
     "hosted_users",
     "hosted_user_preferences",
@@ -1683,7 +1685,13 @@ _EXISTING_TABLES = (
 def _existing_rows(database: HostedDatabase) -> dict[str, list[str]]:
     """Every pre-existing row, minus the columns the revision adds."""
 
-    removed = "ARRAY[" + ", ".join(f"'{name}'" for name in _IDENTITY_JOB_COLUMNS) + "]"
+    removed = (
+        "ARRAY["
+        + ", ".join(
+            f"'{name}'" for name in (*_IDENTITY_JOB_COLUMNS, *_CATCH_UP_COLUMNS)
+        )
+        + "]"
+    )
     with database.engine.connect() as connection:
         return {
             table: list(
@@ -1707,17 +1715,10 @@ def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
     )
     database = HostedDatabase(notification_postgres_url)
     try:
-        command.downgrade(alembic, _PRE_IDENTITY_REVISION)
-        with database.engine.connect() as connection:
-            tables = set(inspect(connection).get_table_names())
-            job_columns = {
-                column["name"] for column in inspect(connection).get_columns("hosted_jobs")
-            }
-        assert not {"hosted_job_identities", "hosted_source_observations"} & tables
-        assert not set(_IDENTITY_JOB_COLUMNS) & job_columns
-
-        # The current application runs unchanged against the old schema:
-        # import, match, enqueue, deliver, then an update and a closure.
+        # Populate through the application: import, match, enqueue, deliver,
+        # then an update and a closure. The application now requires the
+        # catch-up schema (20261022_0009), so the rows are written at head and
+        # carried down to the pre-identity schema before the upgrade under test.
         with database.session_factory.begin() as db:
             create_user(db, clock(), "sent@example.com")
             create_user(db, clock(), "daily@example.com", frequency="daily")
@@ -1738,7 +1739,18 @@ def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
             "b",
         )
         assert second.counters.jobs_updated == 2
+        populated_at_head = _existing_rows(database)
+
+        command.downgrade(alembic, _PRE_IDENTITY_REVISION)
+        with database.engine.connect() as connection:
+            tables = set(inspect(connection).get_table_names())
+            job_columns = {
+                column["name"] for column in inspect(connection).get_columns("hosted_jobs")
+            }
+        assert not {"hosted_job_identities", "hosted_source_observations"} & tables
+        assert not set(_IDENTITY_JOB_COLUMNS) & job_columns
         before = _existing_rows(database)
+        assert before == populated_at_head
         assert all(before[table] for table in _EXISTING_TABLES)
 
         command.upgrade(alembic, "head")

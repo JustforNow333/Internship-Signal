@@ -1,5 +1,6 @@
-"""Transactional notification creation for newly inserted import matches,
-plus the re-homing that keeps pending work alive across frequency changes."""
+"""Transactional notification creation for newly inserted import matches and
+recent-openings catch-ups, plus the re-homing that keeps pending work alive
+across frequency changes."""
 
 from __future__ import annotations
 
@@ -25,6 +26,9 @@ ROLLING_DELAYS = {
     "three_hour": timedelta(hours=3),
     "daily": timedelta(hours=24),
 }
+
+IMPORT_KIND = "import"
+CATCH_UP_KIND = "catch_up"
 
 # The bounded reason recorded on a batch that re-homing emptied. The moved
 # items stay pending; only the retired batch carries this code.
@@ -103,6 +107,55 @@ def enqueue_import_notifications(
     return created
 
 
+def enqueue_catch_up_items(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    frequency: str,
+    items: Iterable[tuple[uuid.UUID, uuid.UUID]],
+    now: datetime,
+) -> dict[uuid.UUID, int]:
+    """Queue ``(user_job_match_id, catch_up_request_id)`` pairs as one digest.
+
+    The caller has already checked that the user may receive mail and owns
+    the surrounding transaction. Lifetime item uniqueness still decides: a
+    match that was ever notified is skipped. Returns how many items each
+    request gained, omitting requests that gained none; when nothing was
+    queued, no batch is left behind.
+    """
+
+    pairs = list(dict.fromkeys(items))
+    if not pairs or frequency not in DELIVERY_FREQUENCIES:
+        return {}
+    batch, created = _catch_up_batch(
+        db, user_id=user_id, frequency=frequency, now=now
+    )
+    contributed: dict[uuid.UUID, int] = {}
+    for match_id, request_id in pairs:
+        inserted = db.scalar(
+            postgresql_insert(HostedNotificationItem)
+            .values(
+                id=uuid.uuid4(),
+                batch_id=batch.id,
+                user_job_match_id=match_id,
+                source_import_run_id=None,
+                source_catch_up_id=request_id,
+                status="pending",
+                created_at=now,
+                updated_at=now,
+            )
+            .on_conflict_do_nothing(index_elements=["user_job_match_id"])
+            .returning(HostedNotificationItem.id)
+        )
+        if inserted is not None:
+            contributed[request_id] = contributed.get(request_id, 0) + 1
+    if created and not contributed:
+        # Every candidate was claimed concurrently; never leave an empty batch.
+        db.delete(batch)
+        db.flush()
+    return contributed
+
+
 def rehome_pending_items(
     db: Session,
     batch: HostedNotificationBatch,
@@ -143,6 +196,19 @@ def rehome_pending_items(
         return 0
 
     moved = 0
+    if batch.kind == CATCH_UP_KIND:
+        # A catch-up digest has no import run to key on: its items move
+        # together onto the user's catch-up batch for the new frequency.
+        target, _created = _catch_up_batch(
+            db, user_id=batch.user_id, frequency=frequency, now=now
+        )
+        for item in items:
+            item.batch_id = target.id
+            item.updated_at = now
+            moved += 1
+        db.flush()
+        return moved
+
     targets: dict[uuid.UUID | None, HostedNotificationBatch] = {}
     for item in items:
         # Rolling frequencies share one target per user; as-detected keeps one
@@ -343,6 +409,7 @@ def _batch_for_item(
         select(HostedNotificationBatch)
         .where(
             HostedNotificationBatch.user_id == user_id,
+            HostedNotificationBatch.kind == IMPORT_KIND,
             HostedNotificationBatch.frequency == frequency,
             HostedNotificationBatch.status == "pending",
             HostedNotificationBatch.attempt_count == 0,
@@ -363,6 +430,55 @@ def _batch_for_item(
     )
 
 
+def _catch_up_batch(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    frequency: str,
+    now: datetime,
+) -> tuple[HostedNotificationBatch, bool]:
+    """The user's pending catch-up digest for ``frequency``, or a new one.
+
+    Catch-ups that arrive before the digest is first attempted join it, so
+    adding several companies yields one email. The due time follows the same
+    rules as import alerts: immediately for as-detected, otherwise the rolling
+    delay measured from the first enqueued item.
+    """
+
+    lock_key = f"hosted-notification-catch-up:{user_id}"
+    db.execute(
+        select(func.pg_advisory_xact_lock(func.hashtextextended(lock_key, 0)))
+    )
+    existing = db.scalar(
+        select(HostedNotificationBatch)
+        .where(
+            HostedNotificationBatch.user_id == user_id,
+            HostedNotificationBatch.kind == CATCH_UP_KIND,
+            HostedNotificationBatch.frequency == frequency,
+            HostedNotificationBatch.status == "pending",
+            HostedNotificationBatch.attempt_count == 0,
+        )
+        .order_by(HostedNotificationBatch.created_at, HostedNotificationBatch.id)
+        .limit(1)
+        .with_for_update()
+    )
+    if existing is not None:
+        return existing, False
+    due_at = now + ROLLING_DELAYS.get(frequency, timedelta(0))
+    return (
+        _new_batch(
+            db,
+            user_id=user_id,
+            frequency=frequency,
+            import_run_id=None,
+            due_at=due_at,
+            now=now,
+            kind=CATCH_UP_KIND,
+        ),
+        True,
+    )
+
+
 def _new_batch(
     db: Session,
     *,
@@ -371,12 +487,14 @@ def _new_batch(
     import_run_id: uuid.UUID | None,
     due_at: datetime,
     now: datetime,
+    kind: str = IMPORT_KIND,
 ) -> HostedNotificationBatch:
     batch_id = uuid.uuid4()
     batch = HostedNotificationBatch(
         id=batch_id,
         user_id=user_id,
         frequency=frequency,
+        kind=kind,
         status="pending",
         due_at=due_at,
         next_attempt_at=due_at,

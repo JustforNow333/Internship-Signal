@@ -324,14 +324,14 @@ old. Turning the setting off never removes matches that were already admitted;
 turning it on reconciles the watched companies so eligible openings appear
 immediately.
 
-Catch-up populates Matches only. Reconciliation from a watchlist or preference
-change never calls `enqueue_import_notifications`, so a historical match creates
-no `hosted_notification_batches` or `hosted_notification_items` row and no
-email. An import that admits a catch-up match is silent too: the job was merely
-discovered late. Reconciliation reports why each new row was admitted, and an
-import enqueues notification work only for genuinely new openings (rule 2).
-`matched_at` stays the time the match was actually made and is never
-backdated.
+Reconciliation never calls `enqueue_import_notifications`, and an import
+enqueues import alerts only for genuinely new openings (rule 2): a catch-up
+admission was merely discovered late, so it never becomes a "new job" alert.
+The one email a catch-up can produce is the separate, explicit
+[recent-openings catch-up digest](#recent-openings-catch-up-digest), earned only
+by newly watching a company. Preference edits, including turning the setting
+on, populate Matches without any email. `matched_at` stays the time the match
+was actually made and is never backdated.
 
 `PUT /api/watchlist` applies a transactional diff rather than deleting and
 recreating every row, because `UserCompanyWatch.created_at` is the watch-start
@@ -349,7 +349,9 @@ Alembic revision `20260803_0004` adds:
   marker, terminal timestamps, and a bounded status/error code. Partial indexes
   serve due pending work and expired leases; user history has a separate index.
 - `hosted_notification_items`: one lifetime notification per match row, linked
-  to both its batch and source import run. Items are pending, sent, or cancelled.
+  to its batch and to exactly one provenance: the source import run, or (since
+  `20261022_0009`) the catch-up request that queued it. Items are pending,
+  sent, or cancelled.
 - `hosted_notification_attempts`: unique positive attempt numbers per batch,
   start/completion timestamps, typed outcome, and bounded error code. Recipient
   addresses, message bodies, credentials, and raw provider errors are never
@@ -360,7 +362,9 @@ only match rows newly inserted by that import when the user is active, verified,
 not globally paused, and has `as_detected`, `three_hour`, or `daily` delivery.
 The match must be active and undismissed and its job open. Existing matches,
 reactivations, job-only updates, preference reconciliation, watchlist changes,
-paused users, and repeated succeeded fingerprints do not create work. If
+paused users, and repeated succeeded fingerprints do not create import alert
+work (newly watching a company may separately earn the one
+[catch-up digest](#recent-openings-catch-up-digest)). If
 notification persistence fails, the jobs, matches, notification work, and
 reported import success roll back together.
 
@@ -373,6 +377,91 @@ Batch windows are deterministic and UTC-based:
 
 Only an unclaimed pending batch accepts new rolling items. Phase 3A has no user
 timezone or preferred delivery-hour fields.
+
+### Recent-openings catch-up digest
+
+Import alerts cover genuinely new openings only. Separately, a user who newly
+watches companies while `include_recent_openings` is on is owed **one**
+consolidated email of the recent matches that watch admitted: the first-run
+"here is what is already open" digest. Alembic revision `20261022_0009` adds:
+
+- `hosted_catch_up_requests`: one row per newly watched company (`user_id`,
+  `company_id`, `requested_at`, `status`, `wait_expires_at`, `completed_at`).
+  A partial unique index allows one unresolved request per company. Statuses:
+  `awaiting_verification` and `awaiting_jobs` (unresolved), then `enqueued`,
+  `empty`, `suppressed` (inactive, paused, or setting off when resolved),
+  `cancelled` (company removed first), or `expired`.
+- `hosted_notification_batches.kind`: `import` (every existing row, through
+  the server default) or `catch_up`. A catch-up batch never references an
+  import run; import batches keep their original frequency/run rule.
+- `hosted_notification_items.source_catch_up_id`, with
+  `source_import_run_id` now nullable and a check that exactly one provenance
+  is set. No fake import run is ever created.
+
+`PUT /api/watchlist` records a request only for a company that was not on the
+watchlist before and is saved unpaused. Unchanged saves, retries, pauses,
+resumes, and preference edits record nothing; removing a company cancels its
+unresolved request. A request is resolved, in the same transaction, by
+`app.hosted.catch_up`:
+
+1. on the watchlist save itself, for a verified account;
+2. on `POST /api/auth/verify-email`, for an account that finished onboarding
+   first (the request waits durably; an unverified account is never emailed);
+3. on the first later non-backfill import that stores jobs for a company the
+   catalog did not yet hold. The wait is bounded by `catch_up.JOB_WAIT`
+   (7 days), after which the request expires instead of becoming a backlog.
+
+Resolution re-checks the account: inactive, globally paused, `paused`
+frequency, or the setting turned off resolve the request as `suppressed`, so
+resuming alerts later never resurrects it. Otherwise it queues every match the
+request admitted (created at or after `requested_at`, so a re-added company
+never resurfaces an earlier watch's matches) that is active, undismissed, open,
+still inside the inclusive 90-day window by the same `posting_date` /
+`first_seen_at` rule, and never notified before. Items are inserted with
+`ON CONFLICT DO NOTHING` on the lifetime `user_job_match_id` key, so a job that
+already had an import alert, or any earlier email, is never sent again. With
+nothing eligible no batch is created; an empty company that the catalog
+already holds resolves as `empty`, otherwise it waits for jobs.
+
+A catch-up presents postings as currently open, so it also requires each one to
+be confirmed current (`catch_up.listing_confirmed`). A posting is excluded when
+a successful, complete observation of its own source
+(`hosted_source_observations` keyed by `hosted_jobs.source_key`) was made after
+the posting was last seen, which proves the source no longer lists it. Failed,
+incomplete, and unknown-completeness collections never prove that, so a source
+outage alone excludes nothing until the posting has gone unseen for
+`catch_up.UNCONFIRMED_LISTING_MAX_AGE` (7 days); healthy sources are collected
+every few hours, so the bound only binds when completeness cannot be proven.
+The delivery worker re-checks the same rule before sending a catch-up batch and
+cancels a posting that stopped being confirmed while the digest waited with
+`job_unconfirmed`. None of this closes a job or changes matching: an excluded
+posting still appears on the dashboard. Import alerts are unaffected, since an
+import only notifies postings it has just seen.
+
+Catch-up items for one user join a single pending, never-attempted `catch_up`
+batch for their frequency (serialized by a per-user advisory lock), so
+activating or adding several companies yields one email. Timing follows the
+user's frequency exactly like import alerts: `as_detected` is due immediately
+(the next scheduled delivery run, never during the API request), `three_hour`
+and `daily` are due three or 24 hours after the first item. Frequency changes
+re-home a pending catch-up batch onto a catch-up batch for the new frequency;
+pausing cancels it at delivery, and turning the setting off before delivery
+cancels it with `recent_openings_disabled`. Request rows are locked
+`FOR UPDATE`, so concurrent verification, watchlist saves, and imports resolve
+each request once.
+
+The worker renders a catch-up batch with the same digest renderer, privacy
+rules, and 25-job display cap, under the subject `Your recent job matches (N)`
+and an introduction stating that the roles are from the last 90 days and that
+later alerts cover only newly detected openings. Jobs are ordered most recent
+first: dated postings by `posting_date`, then undated ones by `first_seen_at`,
+with company, title, and item ID tie-breakers. Import alert subjects and
+rendering are unchanged.
+
+Deploying `20261022_0009` creates no request rows, so it queues nothing for
+existing accounts; they earn a catch-up only by watching a new company. The
+downgrade refuses to run while any catch-up batch or item exists rather than
+delete notification history.
 
 ### Changing alert frequency
 
@@ -483,6 +572,70 @@ schedule, or loop as a daemon, and this repository still installs no deployment
 scheduling: nothing here invokes `app.hosted.deliver_notifications`. Batches
 stay pending until an operator, or a scheduler an operator configures by hand,
 runs the command. See [Scheduled hosted pipeline](#scheduled-hosted-pipeline).
+
+## Account deletion and data retention
+
+`DELETE /api/me` permanently deletes the signed-in account; it is not a
+deactivation. The account is always the session's own, never one named in the
+request. In order, the request must pass:
+
+1. **CSRF validation** (`dependencies.require_trusted_origin`). The production
+   session cookie is `SameSite=None`, so the cookie alone proves nothing. The
+   `Origin` header must exactly equal one of `HOSTED_ALLOWED_FRONTEND_ORIGINS`
+   and the request must carry `X-FindSooner-CSRF: 1`, a custom header that a
+   cross-site page cannot send without a CORS preflight the API refuses for
+   other origins. Failure is HTTP 403.
+2. **An authenticated session** (HTTP 401 otherwise).
+3. **Re-authentication**: the body is exactly `{"password": "..."}`, checked
+   with the existing Argon2id verifier. A wrong password is HTTP 403
+   `Password was not recognized.` and writes nothing (the authentication
+   dependency's `last_used_at` touch is the only change).
+
+Deletion then runs in one PostgreSQL transaction (`app.hosted.account_deletion`)
+that deletes the `hosted_users` row; every account-owned table reaches it
+through `ON DELETE CASCADE`, so no hand-ordered delete list exists to drift.
+HTTP 204 and the cleared session cookie (same `Secure`/`SameSite` policy as
+logout) are returned only after the commit. A database failure rolls the whole
+deletion back and returns the generic HTTP 503 storage error. Passwords,
+hashes, tokens, request bodies, and account data are never logged.
+
+**Removed from the active database:** the user row (email, normalized email,
+password hash, verification state); every authentication session, so every
+existing cookie stops working; email-verification and password-reset tokens;
+preferences; company watches; unsupported-company requests; all job matches
+(active, saved, dismissed, and historical); recent-openings catch-up requests
+in any state; and every notification batch (pending, processing, sent, failed,
+uncertain, or cancelled) with its items and attempts. The email address can
+sign up again immediately and starts with a fresh account.
+
+**Preserved:** hosted jobs, job identities, source observations, import runs
+and attempts, the company catalog, every other user's rows, and all watcher
+SQLite state. None of these reference a user.
+
+**Concurrency.** Deletion locks the account's company watches, then its
+catch-up requests, then its notification batches, then the user row, the order
+the other writers use. Import reconciliation holds `FOR KEY SHARE` on the
+watches and existing matches it reads until it commits, so a deletion waits for
+an in-flight import (and then deletes what it created), and an import that
+starts during a deletion waits and then no longer sees the account. A delivery
+worker holds a batch only during its short prepare and record transactions:
+a batch deleted before preparation is skipped, and one deleted while its email
+is being submitted is recorded as nothing. That message may still be delivered,
+because mail accepted by the provider cannot be recalled. No new notification
+work or catch-up request can be created afterwards, since every path that
+creates one needs the account's session or watches.
+
+**Retention outside the active database.** Deletion does not recall emails
+already sent, and it does not rewrite backups. Database backups (currently
+operator-made `pg_dump` files, and any offsite copies made from them) keep the
+deleted rows until those backups expire or are removed under their own
+retention policy; this repository has no automatic backup purge. Restoring a
+backup taken before a deletion would restore the account, so deletion must be
+re-applied after any restore. The mail provider (Resend, or the SMTP relay)
+keeps its own delivery logs, including recipient addresses and subjects, under
+its retention settings. Application logs never contain account data, but the
+hosting platform's HTTP access logs record request paths and client IP
+addresses under the platform's log retention.
 
 ## Offline snapshot import
 
@@ -613,8 +766,9 @@ snapshot CLI print two bounded `HOSTED-AUDIT` lines (`app.hosted.import_audit`).
 notification-eligible by the enqueue rules, items created/present, silent
 `catch_up` (or `backfill`) matches, suppressed recipients, and backstop-sourced
 matches. `kind=integrity` reports deterministic anomalies -
-`new_opening_missing_notification`, catch-up matches carrying notification
-work, item/batch user or run mismatches, and pending items under a `sent` or
+`new_opening_missing_notification`, catch-up matches carrying import
+notification work (catch-up digest items are expected), item/batch user or run
+mismatches, and pending items under a `sent` or
 `cancelled` batch (`status=attention` when any is non-zero) - plus
 `pending_items_failed_batch` and two heuristics that never raise the status:
 `late_discoveries` (first stored more than 14 days after `posting_date`) and

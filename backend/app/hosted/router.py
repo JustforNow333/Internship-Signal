@@ -20,8 +20,16 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .account_deletion import delete_account
 from .career_level import DEFAULT_CAREER_LEVELS
-from .dependencies import CurrentIdentity, get_current_identity, get_db, get_services
+from .catch_up import record_watchlist_catch_ups, resolve_user_catch_ups
+from .dependencies import (
+    CurrentIdentity,
+    get_current_identity,
+    get_db,
+    get_services,
+    require_trusted_origin,
+)
 from .mailer import (
     MailerDeliveryError,
     password_reset_message,
@@ -47,6 +55,7 @@ from .schemas import (
     MATCH_PAGE_MAX_LIMIT,
     MATCH_VIEWS,
     AcceptedResponse,
+    AccountDeletionRequest,
     AuthCredentials,
     AuthResponse,
     CompanyRequestInput,
@@ -423,6 +432,10 @@ def verify_email(
     verification_token.used_at = now
     user.email_verified_at = now
     user.updated_at = now
+    db.flush()
+    # A watchlist activated before verification kept its catch-up request;
+    # verifying is what lets it queue. Already-resolved requests are skipped.
+    resolve_user_catch_ups(db, user.id, now=now)
     db.commit()
     return AcceptedResponse()
 
@@ -430,6 +443,44 @@ def verify_email(
 @router.get("/me", response_model=UserResponse)
 def me(identity: CurrentIdentity = Depends(get_current_identity)) -> UserResponse:
     return _user_response(identity.user)
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_trusted_origin)],
+)
+def delete_me(
+    payload: AccountDeletionRequest,
+    response: Response,
+    identity: CurrentIdentity = Depends(get_current_identity),
+    db: Session = Depends(get_db),
+    services: HostedServices = Depends(get_services),
+) -> None:
+    """Permanently delete the signed-in account after re-authentication.
+
+    The account is the session's; the body carries only the current password.
+    Nothing is written unless the password verifies, and 204 is returned only
+    after the deleting transaction commits. A database failure surfaces as the
+    generic storage error, never as success.
+    """
+
+    user_id = identity.user.id
+    password_hash = identity.user.password_hash
+    if not verify_password(password_hash, payload.password):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password was not recognized.",
+        )
+    if not delete_account(db, user_id, password_hash=password_hash):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password was not recognized.",
+        )
+    db.commit()
+    _clear_session_cookie(response, services)
 
 
 @router.get("/companies", response_model=list[CompanyResponse])
@@ -606,6 +657,24 @@ def put_watchlist(
     if affected:
         db.flush()
         reconcile_user(db, identity.user.id, now=now, company_ids=affected)
+    # Only a genuinely new, unpaused watch earns a recent-openings catch-up
+    # email; unchanged saves, pauses, and resumes never do.
+    added = [
+        company_id
+        for company_id, paused in next_state.items()
+        if company_id not in previous_state and not paused
+    ]
+    removed = [
+        company_id for company_id in previous_state if company_id not in next_state
+    ]
+    if added or removed:
+        record_watchlist_catch_ups(
+            db,
+            identity.user.id,
+            added_company_ids=added,
+            removed_company_ids=removed,
+            now=now,
+        )
     db.commit()
     return [_watch_response(watch) for watch in watches]
 

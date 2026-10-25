@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Brand, RouteLink } from "./ui.jsx";
+import { Brand, RouteLink, SuccessNotice } from "./ui.jsx";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -158,7 +158,7 @@ export function SignupPage({ navigate, client, onSignup }) {
   );
 }
 
-export function SigninPage({ navigate, client, onSignedIn }) {
+export function SigninPage({ navigate, client, onSignedIn, notice = "" }) {
   const [values, setValues] = useState({ email: "", password: "" });
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState("idle");
@@ -204,6 +204,7 @@ export function SigninPage({ navigate, client, onSignedIn }) {
       }
     >
       <form className="auth-form" onSubmit={submit} noValidate>
+        {notice && <SuccessNotice>{notice}</SuccessNotice>}
         {serverError && (
           <div className="error-banner" role="alert">
             {serverError}

@@ -425,15 +425,144 @@ describe("hosted Internship Signal MVP", () => {
     expect(boston).toBeChecked();
   });
 
-  it("does not claim account deletion without a backend endpoint", async () => {
-    renderApp("/app/settings");
+  async function openDeleteDialog(options = {}) {
+    const rendered = renderApp("/app/settings", options);
     await screen.findByRole("heading", { name: "Settings" });
+    fireEvent.click(screen.getByRole("button", { name: /Delete account/ }));
+    const dialog = screen.getByRole("alertdialog", {
+      name: "Permanently delete your account?",
+    });
+    return { ...rendered, dialog };
+  }
 
+  function fillDeleteDialog(password, confirmation) {
+    fireEvent.change(screen.getByLabelText("Current password"), {
+      target: { value: password },
+    });
+    fireEvent.change(screen.getByLabelText(/Type DELETE to confirm/), {
+      target: { value: confirmation },
+    });
+  }
+
+  it("requires the password and DELETE before deleting the account", async () => {
+    const { dialog } = await openDeleteDialog();
+    const submit = within(dialog).getByRole("button", {
+      name: "Permanently delete account",
+    });
+
+    expect(dialog).toHaveTextContent("This cannot be undone.");
+    expect(dialog).toHaveTextContent(
+      "preferences, watchlist, matches, and notification history",
+    );
+    expect(dialog).toHaveTextContent("email notifications will stop");
+    expect(screen.getByLabelText("Current password")).toHaveFocus();
+    expect(submit).toBeDisabled();
+    fillDeleteDialog("secure password", "");
+    expect(submit).toBeDisabled();
+    fillDeleteDialog("secure password", "delete");
+    expect(submit).toBeDisabled();
+    fillDeleteDialog("", "DELETE");
+    expect(submit).toBeDisabled();
+    fillDeleteDialog("secure password", "DELETE");
+    expect(submit).toBeEnabled();
+  });
+
+  it("cancels account deletion without touching the account", async () => {
+    const client = createMockHostedApi();
+    const deleteAccount = vi.spyOn(client, "deleteAccount");
+    const { dialog } = await openDeleteDialog({ client });
+    fillDeleteDialog("secure password", "DELETE");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Delete account/ }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(deleteAccount).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    await expect(client.getMe()).resolves.toMatchObject({ email: expect.any(String) });
+  });
+
+  it("clears the account and leaves the app after a confirmed deletion", async () => {
+    const client = createMockHostedApi();
+    const deleteAccount = vi.spyOn(client, "deleteAccount");
+    const logout = vi.spyOn(client, "logout");
+    const unauthorized = vi.fn();
+    window.addEventListener("hosted-api-unauthorized", unauthorized);
+    try {
+      const { dialog } = await openDeleteDialog({ client });
+      fillDeleteDialog("secure password", "DELETE");
+
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Permanently delete account" }),
+      );
+
+      expect(
+        await screen.findByRole("heading", { name: "Sign in to FindSooner" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Your FindSooner account has been deleted.",
+      );
+      expect(deleteAccount).toHaveBeenCalledWith({ password: "secure password" });
+      expect(logout).not.toHaveBeenCalled();
+      expect(unauthorized).not.toHaveBeenCalled();
+      expect(screen.queryByText(/demo@findsooner|@example/)).not.toBeInTheDocument();
+      await expect(client.getMe()).rejects.toMatchObject({ status: 401 });
+      await expect(client.getMatches()).rejects.toMatchObject({ status: 401 });
+    } finally {
+      window.removeEventListener("hosted-api-unauthorized", unauthorized);
+    }
+  });
+
+  it("keeps the session and explains a failed deletion", async () => {
+    const client = createMockHostedApi();
+    client.deleteAccount = vi
+      .fn()
+      .mockRejectedValue(new HostedApiError("Password was not recognized.", 403));
+    const { dialog } = await openDeleteDialog({ client });
+    fillDeleteDialog("wrong password", "DELETE");
+    const submit = within(dialog).getByRole("button", {
+      name: "Permanently delete account",
+    });
+
+    fireEvent.click(submit);
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Password was not recognized.",
+    );
+    expect(submit).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled();
+    expect(screen.getByLabelText("Current password")).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    await expect(client.getMe()).resolves.toMatchObject({ email: expect.any(String) });
+  });
+
+  it("locks the dialog while the deletion request is processing", async () => {
+    const client = createMockHostedApi();
+    let finish;
+    client.deleteAccount = vi.fn(
+      () => new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const { dialog } = await openDeleteDialog({ client });
+    fillDeleteDialog("secure password", "DELETE");
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Permanently delete account" }),
+    );
+
+    const busy = await within(dialog).findByRole("button", {
+      name: "Deleting account…",
+    });
+    expect(busy).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    finish(null);
     expect(
-      screen.getByRole("button", { name: /Delete account/ }),
-    ).toBeDisabled();
-    expect(
-      screen.getByText("Account deletion is not available yet."),
+      await screen.findByRole("heading", { name: "Sign in to FindSooner" }),
     ).toBeInTheDocument();
   });
 
