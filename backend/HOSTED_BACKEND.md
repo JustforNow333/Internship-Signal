@@ -423,6 +423,21 @@ already had an import alert, or any earlier email, is never sent again. With
 nothing eligible no batch is created; an empty company that the catalog
 already holds resolves as `empty`, otherwise it waits for jobs.
 
+A catch-up presents postings as currently open, so it also requires each one to
+be confirmed current (`catch_up.listing_confirmed`). A posting is excluded when
+a successful, complete observation of its own source
+(`hosted_source_observations` keyed by `hosted_jobs.source_key`) was made after
+the posting was last seen, which proves the source no longer lists it. Failed,
+incomplete, and unknown-completeness collections never prove that, so a source
+outage alone excludes nothing until the posting has gone unseen for
+`catch_up.UNCONFIRMED_LISTING_MAX_AGE` (7 days); healthy sources are collected
+every few hours, so the bound only binds when completeness cannot be proven.
+The delivery worker re-checks the same rule before sending a catch-up batch and
+cancels a posting that stopped being confirmed while the digest waited with
+`job_unconfirmed`. None of this closes a job or changes matching: an excluded
+posting still appears on the dashboard. Import alerts are unaffected, since an
+import only notifies postings it has just seen.
+
 Catch-up items for one user join a single pending, never-attempted `catch_up`
 batch for their frequency (serialized by a per-user advisory lock), so
 activating or adding several companies yields one email. Timing follows the

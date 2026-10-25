@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
+from .catch_up import unconfirmed_job_ids
 from .database import HostedDatabase
 from .models import (
     HostedJob,
@@ -65,7 +66,15 @@ BATCH_CANCELLATION_CODES = frozenset(
     }
 )
 ITEM_CANCELLATION_CODES = frozenset(
-    {"match_dismissed", "match_inactive", "job_closed", "match_missing", "job_missing"}
+    {
+        "match_dismissed",
+        "match_inactive",
+        "job_closed",
+        "match_missing",
+        "job_missing",
+        # A catch-up posting no longer confirmed current when its digest is sent.
+        "job_unconfirmed",
+    }
 )
 ERROR_CODES = frozenset(
     {
@@ -344,6 +353,16 @@ class NotificationDeliveryWorker:
                     _cancel_item(item, reason, now)
                 else:
                     valid.append((item, match, job))
+            if batch.kind == CATCH_UP_KIND and valid:
+                # A catch-up presents postings as current; one that stopped
+                # being confirmed while the digest waited is left out.
+                unconfirmed = unconfirmed_job_ids(
+                    db, [job.id for _item, _match, job in valid], now=now
+                )
+                for item, _match, job in valid:
+                    if job.id in unconfirmed:
+                        _cancel_item(item, "job_unconfirmed", now)
+                valid = [row for row in valid if row[2].id not in unconfirmed]
             if not valid:
                 _cancel_batch(batch, "no_valid_items", now)
                 return None

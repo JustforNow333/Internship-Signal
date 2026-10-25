@@ -15,6 +15,12 @@ Resolution re-checks the account (active, verified, not paused, catch-up
 still enabled) and queues the eligible matches through the ordinary durable
 notification batches, so delivery, retries, and leases are shared with
 import alerts. Lifetime item uniqueness means no match is ever sent twice.
+
+A catch-up presents postings as current, so it only includes listings
+confirmed current (``listing_confirmed``): not proven gone by a later complete
+collection of their own source, and seen within ``UNCONFIRMED_LISTING_MAX_AGE``.
+The delivery worker re-checks the same rule before sending. Nothing here closes
+a job; a posting left out still matches on the dashboard.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ import uuid
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, exists, not_, select
 from sqlalchemy.orm import Session
 
 from .match_service import CHUNK_SIZE, is_recent_opening
@@ -32,6 +38,7 @@ from .models import (
     HostedCatchUpRequest,
     HostedJob,
     HostedNotificationItem,
+    HostedSourceObservation,
     User,
     UserJobMatch,
     UserPreference,
@@ -41,6 +48,51 @@ from .notification_enqueue import DELIVERY_FREQUENCIES, enqueue_catch_up_items
 # How long a request waits for a company with no stored jobs to be collected.
 # After that the catch-up lapses rather than becoming an open-ended backlog.
 JOB_WAIT = timedelta(days=7)
+# How long a posting may go unseen before a catch-up stops presenting it as
+# current. Healthy sources are collected every few hours, so this only binds
+# when completeness cannot be proven: the source failed, was incomplete, or
+# never reported completeness. A complete later collection of the posting's
+# own source that no longer lists it excludes it sooner.
+UNCONFIRMED_LISTING_MAX_AGE = timedelta(days=7)
+
+
+def listing_confirmed(now: datetime):
+    """SQL condition: the posting is still confirmed current at ``now``.
+
+    Only a successful, complete observation of the source that owns the job,
+    made after the job was last seen, proves the posting gone; failed,
+    incomplete, and unknown-completeness collections never do.
+    """
+
+    proven_gone = exists().where(
+        HostedSourceObservation.source_key == HostedJob.source_key,
+        HostedSourceObservation.succeeded.is_(True),
+        HostedSourceObservation.complete.is_(True),
+        HostedSourceObservation.observed_at > HostedJob.last_seen_at,
+    )
+    return and_(
+        HostedJob.last_seen_at >= now - UNCONFIRMED_LISTING_MAX_AGE,
+        not_(proven_gone),
+    )
+
+
+def unconfirmed_job_ids(
+    db: Session, job_ids: Iterable[uuid.UUID], *, now: datetime
+) -> set[uuid.UUID]:
+    """The given jobs that are no longer confirmed current at ``now``."""
+
+    unique_ids = list(dict.fromkeys(job_ids))
+    unconfirmed: set[uuid.UUID] = set()
+    for start in range(0, len(unique_ids), CHUNK_SIZE):
+        unconfirmed.update(
+            db.scalars(
+                select(HostedJob.id).where(
+                    HostedJob.id.in_(unique_ids[start : start + CHUNK_SIZE]),
+                    not_(listing_confirmed(now)),
+                )
+            )
+        )
+    return unconfirmed
 
 
 def record_watchlist_catch_ups(
@@ -251,6 +303,7 @@ def _eligible_matches(
             UserJobMatch.no_longer_matches_at.is_(None),
             UserJobMatch.dismissed_at.is_(None),
             HostedJob.is_open.is_(True),
+            listing_confirmed(now),
             ~select(HostedNotificationItem.id)
             .where(HostedNotificationItem.user_job_match_id == UserJobMatch.id)
             .exists(),

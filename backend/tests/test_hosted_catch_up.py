@@ -26,7 +26,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from psycopg import sql
-from sqlalchemy import inspect, select, text
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.engine import make_url
 
 from app.hosted.catalog import CompanyCatalog, PublicCompany
@@ -43,8 +43,10 @@ from app.hosted.match_service import reconcile_user
 from app.hosted.models import (
     HostedCatchUpRequest,
     HostedJob,
+    HostedJobImportRun,
     HostedNotificationBatch,
     HostedNotificationItem,
+    HostedSourceObservation,
     User,
     UserCompanyWatch,
     UserJobMatch,
@@ -275,12 +277,17 @@ def add_job(
     career_level: str = "internship",
     posting_date: date | None = None,
     first_seen_at: datetime | None = None,
+    last_seen_at: datetime | None = None,
+    source_key: str | None = None,
     is_open: bool = True,
     backfill: bool = False,
     description: str = "",
 ) -> uuid.UUID:
     job_id = uuid.uuid4()
-    seen = first_seen_at or hosted.clock()
+    # A stored posting is listed until shown otherwise: by default the last
+    # collection saw it, however long ago it was first seen.
+    listed = last_seen_at or hosted.clock()
+    seen = first_seen_at or listed
     name = dict(COMPANIES)[company_id]
     with hosted.database.session_factory.begin() as db:
         db.add(
@@ -301,8 +308,9 @@ def add_job(
                 deadline=None,
                 is_open=is_open,
                 first_seen_at=seen,
-                last_seen_at=seen,
+                last_seen_at=listed,
                 closed_at=None if is_open else seen,
+                source_key=source_key,
                 first_seen_in_backfill=backfill,
                 source_metadata={"internal": "never-rendered"},
                 created_at=seen,
@@ -1173,3 +1181,207 @@ def test_migration_keeps_existing_notifications_and_queues_nothing(
     finally:
         database.engine.dispose()
         command.upgrade(alembic, "head")
+
+
+# --- listing freshness -------------------------------------------------------
+
+GOOGLE_SOURCE = "direct:google:google"
+
+
+def observe(
+    hosted,
+    source_key: str = GOOGLE_SOURCE,
+    *,
+    at: datetime,
+    succeeded: bool = True,
+    complete: bool | None = True,
+) -> None:
+    """Record one import run in which ``source_key`` reported this outcome."""
+
+    run_id = uuid.uuid4()
+    with hosted.database.session_factory.begin() as db:
+        db.add(
+            HostedJobImportRun(
+                id=run_id,
+                source_fingerprint=uuid.uuid4().hex * 2,
+                source_identifier="hosted-collection.json.gz",
+                source_type="hosted_collection",
+                started_at=at,
+                completed_at=at,
+                status="succeeded",
+                created_at=at,
+                updated_at=at,
+            )
+        )
+        db.flush()
+        db.add(
+            HostedSourceObservation(
+                import_run_id=run_id,
+                source_key=source_key,
+                source_kind="direct",
+                company_name="Google",
+                adapter="google",
+                observed_at=at,
+                attempted=True,
+                succeeded=succeeded,
+                complete=complete if succeeded else None,
+                rows_returned=1 if succeeded else None,
+            )
+        )
+
+
+def queued_titles(hosted) -> list[str]:
+    with hosted.database.session_factory() as db:
+        return sorted(
+            db.scalars(
+                select(HostedJob.title)
+                .join(UserJobMatch, UserJobMatch.job_id == HostedJob.id)
+                .join(
+                    HostedNotificationItem,
+                    HostedNotificationItem.user_job_match_id == UserJobMatch.id,
+                )
+            )
+        )
+
+
+def test_an_old_posting_the_latest_collection_still_lists_is_included(hosted) -> None:
+    add_job(
+        hosted,
+        title="Listed Since Last Month",
+        posting_date=days_ago(30),
+        first_seen_at=NOW - timedelta(days=30),
+    )
+
+    onboard(account(hosted), "google")
+
+    assert queued_titles(hosted) == ["Listed Since Last Month"]
+
+
+def test_a_posting_unseen_for_over_a_week_is_never_emailed(hosted) -> None:
+    add_job(hosted, title="Fresh", posting_date=days_ago(3))
+    add_job(
+        hosted,
+        title="Unseen Eight Days",
+        posting_date=days_ago(20),
+        first_seen_at=NOW - timedelta(days=20),
+        last_seen_at=NOW - timedelta(days=8),
+    )
+    client = account(hosted)
+
+    onboard(client, "google")
+
+    assert queued_titles(hosted) == ["Fresh"]
+    [message] = run_worker(hosted)
+    assert "Unseen Eight Days" not in message.text
+    # It still matches on the dashboard; only the email leaves it out.
+    with hosted.database.session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(UserJobMatch)) == 2
+
+
+def test_a_posting_its_complete_source_no_longer_lists_is_excluded(hosted) -> None:
+    add_job(
+        hosted,
+        title="Removed Yesterday",
+        posting_date=days_ago(5),
+        last_seen_at=NOW - timedelta(days=1),
+        source_key=GOOGLE_SOURCE,
+    )
+    add_job(
+        hosted,
+        title="Still Listed",
+        posting_date=days_ago(5),
+        source_key=GOOGLE_SOURCE,
+    )
+    # A complete collection after the first was last seen, and before the
+    # run that saw the second one, did not list the first.
+    observe(hosted, at=NOW - timedelta(hours=2))
+
+    onboard(account(hosted), "google")
+
+    assert queued_titles(hosted) == ["Still Listed"]
+
+
+@pytest.mark.parametrize(
+    ("succeeded", "complete"),
+    [(False, None), (True, False), (True, None)],
+)
+def test_failed_or_incomplete_collections_never_prove_a_posting_gone(
+    hosted, succeeded, complete
+) -> None:
+    add_job(
+        hosted,
+        title="Temporarily Missing",
+        posting_date=days_ago(5),
+        last_seen_at=NOW - timedelta(days=2),
+        source_key=GOOGLE_SOURCE,
+    )
+    observe(hosted, at=NOW - timedelta(hours=2), succeeded=succeeded, complete=complete)
+
+    onboard(account(hosted), "google")
+
+    assert queued_titles(hosted) == ["Temporarily Missing"]
+
+
+def test_a_recovered_source_makes_its_postings_eligible_again(hosted) -> None:
+    for days in (9, 8, 7):
+        observe(hosted, at=NOW - timedelta(days=days), succeeded=False)
+    add_job(
+        hosted,
+        title="Seen Again After Recovery",
+        posting_date=days_ago(12),
+        first_seen_at=NOW - timedelta(days=12),
+        source_key=GOOGLE_SOURCE,
+    )
+
+    onboard(account(hosted), "google")
+
+    assert queued_titles(hosted) == ["Seen Again After Recovery"]
+
+
+def test_a_daily_digest_drops_a_posting_removed_before_delivery(hosted) -> None:
+    add_job(hosted, title="Removed Before Delivery", posting_date=days_ago(4), source_key=GOOGLE_SOURCE)
+    add_job(hosted, title="Kept Until Delivery", posting_date=days_ago(4), source_key="direct:google:other")
+    client = account(hosted)
+    onboard(client, "google", alert_frequency="daily")
+    assert queued_titles(hosted) == ["Kept Until Delivery", "Removed Before Delivery"]
+
+    hosted.clock.advance(hours=3)
+    observe(hosted, at=hosted.clock())
+    hosted.clock.advance(hours=21)
+    [message] = run_worker(hosted)
+
+    assert message.subject == "Your recent job matches (1)"
+    assert "Kept Until Delivery" in message.text
+    assert "Removed Before Delivery" not in message.text
+    by_title = {}
+    with hosted.database.session_factory() as db:
+        for item, title in db.execute(
+            select(HostedNotificationItem, HostedJob.title)
+            .join(UserJobMatch, UserJobMatch.id == HostedNotificationItem.user_job_match_id)
+            .join(HostedJob, HostedJob.id == UserJobMatch.job_id)
+        ):
+            by_title[title] = (item.status, item.cancellation_reason)
+    assert by_title == {
+        "Kept Until Delivery": ("sent", None),
+        "Removed Before Delivery": ("cancelled", "job_unconfirmed"),
+    }
+
+
+def test_excluded_stale_postings_never_create_late_or_duplicate_alerts(hosted) -> None:
+    add_job(
+        hosted,
+        title="Unseen Ten Days",
+        posting_date=days_ago(15),
+        first_seen_at=NOW - timedelta(days=15),
+        last_seen_at=NOW - timedelta(days=10),
+    )
+    client = account(hosted)
+
+    onboard(client, "google")
+
+    assert batches(hosted) == []
+    assert requests(hosted) == {"google": "empty"}
+    put_watchlist(client, "google")
+    hosted.clock.advance(days=1)
+    assert run_worker(hosted) == []
+    assert items(hosted) == []
