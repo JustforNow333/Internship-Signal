@@ -790,3 +790,118 @@ def test_new_tracks_carry_labels_and_software_membership():
     assert ROLE_TRACK_TO_ROLE["data_science"] == "data_science"
     assert ROLE_TRACK_TO_ROLE["quant_research"] == "quant"
     assert {"data_science", "quant_research"} <= SOFTWARE_ROLE_TRACKS
+
+
+# --- title evidence outranks incidental description keywords ----------------
+
+
+@pytest.mark.parametrize(
+    ("title", "description"),
+    [
+        (
+            "Principal Business Intelligence Analyst",
+            "5+ years of experience in Product Analytics, Growth Analytics, Data "
+            "Science, Business Intelligence, or related fields.",
+        ),
+        (
+            "Senior Data & Systems Analyst, EHS",
+            "Degree in Computer Science, Data Science, Information Systems, or "
+            "Industrial Engineering.",
+        ),
+        (
+            "Senior Security Researcher, Hexagate",
+            "Experience with classic data science / machine learning.",
+        ),
+        (
+            "Sr AI Architect - Conversational AI",
+            "A Master's in Computer Science, Machine Learning, Data Science, or "
+            "Statistics.",
+        ),
+        (
+            "Senior Experience Designer, Internal Experiences",
+            "Understanding of how qualitative and quantitative research inform "
+            "product and design decisions.",
+        ),
+        (
+            "Principal/Transmission Strategy and Planning Expert",
+            "Lead quantitative research for utility transmission planning.",
+        ),
+    ],
+)
+def test_incidental_description_keywords_do_not_assign_new_categories(
+    title,
+    description,
+):
+    got = classify_role(_row(title=title, description=description))
+
+    assert got["role_track"] not in {"data_science", "quant_research", "quant_dev"}
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "track"),
+    [
+        # Generic titles are disambiguated by their duties.
+        ("Summer Analyst", "Apply data science to customer churn models.", "data_science"),
+        (
+            "Summer Analyst",
+            "Conduct quantitative research on systematic trading strategies.",
+            "quant_research",
+        ),
+        (
+            "2027 Trading Summer Analyst",
+            "Help improve how we execute systematic investment strategies and "
+            "use data science to solve trading problems.",
+            "quant_research",
+        ),
+        (
+            "Quantitative Analyst Intern",
+            "Research alpha signals and backtest systematic trading strategies.",
+            "quant_research",
+        ),
+        (
+            "Quantitative Analyst Intern",
+            "Build C++ pricing libraries and low-latency trading infrastructure.",
+            "quant_dev",
+        ),
+        # Engineering titles outrank a data-science team name.
+        (
+            "Staff, Analytics Engineer, GTM Data Science & Analytics",
+            "",
+            "data_engineering",
+        ),
+        ("Data Engineer Intern - Data Science Platform", "", "data_engineering"),
+    ],
+)
+def test_ambiguous_titles_use_responsibilities(title, description, track):
+    got = classify_role(_row(title=title, description=description))
+
+    assert got["role_track"] == track
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "track"),
+    [
+        # Without decisive duties the existing default stays.
+        ("Quantitative Analyst Intern", "", "quant_dev"),
+        ("Markets Quantitative Analyst Summer Internship", "", "quant_dev"),
+        (
+            "Quantitative Analyst Intern",
+            "Research trading signals and maintain the production code that runs them.",
+            "quant_dev",
+        ),
+        ("Trading Summer Analyst", "", "unknown"),
+        (
+            "Sales & Trading Summer Analyst",
+            "Learn systematic trading strategies alongside the desk.",
+            "non_technical",
+        ),
+    ],
+)
+def test_ambiguous_quant_titles_without_decisive_duties_keep_their_default(
+    title,
+    description,
+    track,
+):
+    got = classify_role(_row(title=title, description=description))
+
+    assert got["role_track"] == track

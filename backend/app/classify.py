@@ -282,8 +282,10 @@ SOFTWARE_TITLE_PATTERNS = [
     ("full_stack", r"\bfull[- ]?stack\b"),
     ("frontend", r"\bfront[- ]?end\b|\bui engineer\b|\bweb developer\b"),
     ("platform_infra", r"\bplatform software\b|\binfrastructure software\b|\bsite reliability\b|\bsre\b"),
+    # An engineering role noun outranks a data-science team name in a title.
+    ("data_engineering", r"\bdata engineer(ing)?\b|\bdata infrastructure\b|\bdata pipeline"),
     ("data_science", r"\bdata science\b"),
-    ("data_engineering", r"\bdata engineer(ing)?\b|\bdata analy(st|tics)\b|\bdata infrastructure\b|\bdata pipeline"),
+    ("data_engineering", r"\bdata analy(st|tics)\b"),
     ("ml_ai", r"machine[- ]learning (engineer|engineering|intern)|\bml\b|\bml engineer\b|\bai engineer\b|\ba\.?\s*i\.?\s+integration\b|\bai[- ]integration\b|deep learning|computer vision|\bnlp\b|\bllms?\b|\bpytorch\b|\btensorflow\b"),
     ("quant_dev", r"\bquant(itative)? (developer|engineer|analyst)"),
     # Sales-and-trading desks are client-facing, not quantitative trading.
@@ -306,20 +308,56 @@ TITLE_ONLY_ROLE_TERMS = {
         r"\bstatistical model(?:l)?ing\b|\bexperimentation (?:analyst|scientist)s?\b"
     ),
     "quant_research": r"\bquant(?:itative)? (?:traders?|researchers?|strategists?)\b",
+    "data_engineering": r"\banalytics engineer(?:ing)?\b",
 }
 TITLE_SOFTWARE_PATTERNS = [
     (track, f"{pattern}|{TITLE_ONLY_ROLE_TERMS[track]}" if track in TITLE_ONLY_ROLE_TERMS else pattern)
     for track, pattern in SOFTWARE_TITLE_PATTERNS
 ]
 
-# A bare "Quant Intern" names no discipline; trading or research duties in the
-# posting decide it. Without them the ordinary software rules apply.
-GENERIC_QUANT_TITLE_RE = re.compile(r"\bquant(?:itative)? intern(?:ship)?\b", re.I)
-QUANT_RESEARCH_CONTEXT_RE = re.compile(
-    r"\balpha\b|\btrading (?:strateg(?:y|ies)|signals?)\b|\bstatistical arbitrage\b|"
-    r"\bmarket[- ]making\b|\bbacktest(?:s|ing)?\b|\bsystematic (?:trading|strateg(?:y|ies))\b",
+# A bare "Quant Intern" or a non-sales "Trading Analyst" names no discipline;
+# trading or research duties in the posting decide it. Without them the
+# ordinary rules apply.
+AMBIGUOUS_QUANT_TITLE_RE = re.compile(
+    r"\bquant(?:itative)? intern(?:ship)?\b|"
+    r"(?<!sales and )(?<!sales & )\btrading (?:summer )?analyst\b",
     re.I,
 )
+QUANT_RESEARCH_CONTEXT_RE = re.compile(
+    r"\balpha\b|\btrading (?:strateg(?:y|ies)|signals?)\b|\bstatistical arbitrage\b|"
+    r"\bmarket[- ]making\b|\bbacktest(?:s|ing)?\b|"
+    r"\bsystematic (?:trading|invest\w*|strateg(?:y|ies))\b",
+    re.I,
+)
+# A "Quantitative Analyst" title stays quant development unless its duties are
+# trading or research and none of them are building software.
+QUANT_ANALYST_TITLE_RE = re.compile(r"\bquant(?:itative)? analyst\b", re.I)
+QUANT_DEV_CONTEXT_RE = re.compile(
+    r"\bsoftware\b|\bdevelopers?\b|\bproduction code\b|\bc\+\+|\blow[- ]latency\b|"
+    r"\binfrastructure\b|\blibrar(?:y|ies)\b|\bcode ?base\b",
+    re.I,
+)
+# Words that leave a title without any discipline of its own. Only such a
+# title lets description keywords assign data science or quant trading and
+# research; a specific title ("Business Intelligence Analyst") keeps them out.
+GENERIC_TITLE_WORDS = frozenset(
+    {
+        "a", "an", "and", "the", "of", "for", "in", "to", "s",
+        "intern", "interns", "internship", "internships", "co", "op", "coop",
+        "summer", "winter", "spring", "fall", "autumn", "off", "cycle",
+        "analyst", "analysts", "associate", "associates", "program", "programme",
+        "graduate", "grad", "student", "students", "trainee", "placement",
+        "undergraduate", "undergrad", "phd", "ms", "msc", "mba", "bs", "ba",
+        "master", "masters", "bachelor", "bachelors", "university", "campus",
+        "early", "career", "careers", "entry", "level", "new", "current",
+        "full", "time", "part", "rotational", "rotation", "multiple", "team", "teams",
+    }
+)
+
+
+def _is_generic_title(title: str) -> bool:
+    words = re.findall(r"[a-z]+", title.lower())
+    return bool(words) and all(word in GENERIC_TITLE_WORDS for word in words)
 
 NON_SWE_TITLE_PATTERNS = [
     ("customer_experience", r"customer experience engineer|customer support engineer|technical support engineer"),
@@ -687,21 +725,29 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
         evidence = [f'title: "{hit}"']
         if body_software_hits:
             evidence.append(f'"{body_software_hits[0][1]}"')
+        research_duties = (
+            QUANT_RESEARCH_CONTEXT_RE.search(body)
+            if track == "quant_dev" and QUANT_ANALYST_TITLE_RE.search(title)
+            else None
+        )
+        if research_duties and not QUANT_DEV_CONTEXT_RE.search(body):
+            track = "quant_research"
+            evidence.append(f'trading/research duties: "{research_duties.group(0)}"')
         return _finish_role(track, 0.82 + (0.05 if software_evidence else 0), evidence, software_evidence or [hit], non_swe_evidence)
 
-    generic_quant = GENERIC_QUANT_TITLE_RE.search(title)
+    ambiguous_quant = AMBIGUOUS_QUANT_TITLE_RE.search(title)
     quant_research_context = (
-        QUANT_RESEARCH_CONTEXT_RE.search(body) if generic_quant else None
+        QUANT_RESEARCH_CONTEXT_RE.search(body) if ambiguous_quant else None
     )
-    if generic_quant and quant_research_context:
+    if ambiguous_quant and quant_research_context:
         return _finish_role(
             "quant_research",
             0.7,
             [
-                f'title: "{generic_quant.group(0)}"',
+                f'title: "{ambiguous_quant.group(0)}"',
                 f'trading/research duties: "{quant_research_context.group(0)}"',
             ],
-            software_evidence or [generic_quant.group(0)],
+            software_evidence or [ambiguous_quant.group(0)],
             non_swe_evidence,
         )
 
@@ -786,6 +832,13 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
             non_swe_evidence,
         )
 
+    if not _is_generic_title(title):
+        # A description names degrees, teams, and colleagues as often as the
+        # role itself, so it never pulls a specific title into these categories.
+        body_software_hits = [
+            hit for hit in body_software_hits
+            if hit[0] not in {"data_science", "quant_research"}
+        ]
     if body_software_hits or strong_software:
         track = body_software_hits[0][0] if body_software_hits else "general_swe"
         return _finish_role(track, 0.58, [f'"{body_software_hits[0][1]}"'] if body_software_hits else ["strong software context"], software_evidence, non_swe_evidence)
