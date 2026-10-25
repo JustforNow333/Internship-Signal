@@ -571,3 +571,102 @@ def test_audit_nearby_negative_controls_remain_excluded(
     got = classify_role(_row(title=title, description=description))
 
     assert got["role_track"] == expected_track
+
+
+# Exact titles that GitHub backstop feeds publish without a description, from
+# the production coverage audit where every one of them became invalid_role.
+@pytest.mark.parametrize(
+    ("title", "track", "role"),
+    [
+        ("Data Scientist Intern", "data_engineering", "data_science"),
+        ("Sector Data Scientist Intern", "data_engineering", "data_science"),
+        ("Data Scientist Intern - Product Analytics", "data_engineering", "data_science"),
+        ("AI Applied Scientist Intern", "ml_ai", "ml_ai"),
+        ("Applied Scientist Intern", "ml_ai", "ml_ai"),
+        ("Applied Science Intern - Gen AI & Large Language Models", "ml_ai", "ml_ai"),
+        ("Researcher Intern - Coreai", "ml_ai", "ml_ai"),
+        ("Quantitative Trader Intern - Quantitative Trader", "quant_dev", "quant"),
+        (
+            "Quantitative Strategist Intern - Americas - The Core Quantitative Group",
+            "quant_dev",
+            "quant",
+        ),
+        ("AI Intern", "ml_ai", "ml_ai"),
+        (
+            "Artificial Intelligence Intern - Tax - Tax Technology and Transformation",
+            "ml_ai",
+            "ml_ai",
+        ),
+        (
+            "Technology Summer Analyst Intern - Application Development",
+            "general_swe",
+            "swe",
+        ),
+        ("Technology Analyst Intern - Application Development", "general_swe", "swe"),
+    ],
+)
+def test_title_only_backstop_titles_name_their_discipline(title, track, role):
+    got = classify_role(_row(title=title))
+
+    assert got["role_track"] == track
+    assert got["role"] == role
+
+
+@pytest.mark.parametrize(
+    ("title", "expected_track"),
+    [
+        # Research or science without an AI/ML qualifier names no discipline.
+        ("Applied Research Intern", "unknown"),
+        ("Researcher Intern", "unknown"),
+        ("Research Scientist Intern", "unknown"),
+        ("Quantum Applied Science Intern - Quantum Technologies team", "unknown"),
+        ("Quantum Applied Scientist Intern", "unknown"),
+        ("AI Marketing Research Intern", "non_technical"),
+        # Banking and investment programs that merely mention quantitative work.
+        ("Quantitative Master’s Intern - Investments - Global Capital Markets", "unknown"),
+        ("Summer Associate Intern - Corporate Finance - Quantitative Finance", "unknown"),
+        ("Economics Intern - Structural IO", "unknown"),
+        ("Operations Research Intern", "unknown"),
+        # AI as a product or audience, not the role.
+        ("AI Marketing Intern", "non_technical"),
+        ("AI Sales Intern", "non_technical"),
+        ("AI Trainer Intern", "unknown"),
+        ("Data & AI Intern - Analyst, Operations", "unknown"),
+        ("Technology Summer Analyst Intern - Production Support", "unknown"),
+        ("Business Application Analyst Intern", "unknown"),
+        ("People Analytics Intern", "unknown"),
+        ("GPU Intern", "unknown"),
+        ("Panasonic Transformation Group Intern", "unknown"),
+        ("Data Governance Intern", "unknown"),
+    ],
+)
+def test_title_only_ambiguous_titles_stay_unadmitted(title, expected_track):
+    got = classify_role(_row(title=title))
+
+    assert got["role_track"] == expected_track
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "expected_track"),
+    [
+        (
+            "Business Operations Intern",
+            "Partner with data scientists, applied scientists, AI researchers, "
+            "and quantitative traders on reporting.",
+            "non_technical",
+        ),
+        (
+            "Finance Intern",
+            "Support application development budgets and AI intern onboarding.",
+            "unknown",
+        ),
+    ],
+)
+def test_title_only_role_phrases_are_not_read_from_descriptions(
+    title,
+    description,
+    expected_track,
+):
+    got = classify_role(_row(title=title, description=description))
+
+    assert got["role_track"] == expected_track

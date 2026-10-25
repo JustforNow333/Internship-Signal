@@ -431,6 +431,31 @@ SCOPED_ROLE_TITLE_PATTERNS = [
     ("technical_product", r"digital experience product ownership"),
 ]
 
+# Last-resort title disciplines from the production backstop audit, where feed
+# rows carry no description. They apply only to a role nothing else classified,
+# so no existing title or description verdict changes. Research and science
+# need an explicit AI/ML qualifier; physical-science and market-research titles
+# stay out.
+TITLE_DISCIPLINE_FALLBACK_PATTERNS = [
+    ("data_engineering", r"\bdata scientists?\b"),
+    (
+        "ml_ai",
+        r"^(?!.*\b(?:quantum|physics|physical|chemi\w*|materials?|bio\w*)\b)"
+        r".*\bapplied scientists?\b",
+    ),
+    (
+        "ml_ai",
+        r"^(?=.*(?:\bai\b|\bml\b|machine learning|deep learning|"
+        r"artificial intelligence|\bllms?\b|large language models?|\bnlp\b|"
+        r"computer vision|\bcore ?ai\b))"
+        r"(?!.*\b(?:market(?:ing)?|consumer|survey|sales)\b)"
+        r".*\b(?:applied science|research(?:ers?)?|scientists?)\b",
+    ),
+    ("ml_ai", r"^\W*(?:ai|artificial intelligence) intern(?:ship)?\b"),
+    ("quant_dev", r"\bquant(?:itative)? (?:trader|strategist)s?\b"),
+    ("general_swe", r"\bapplication development\b"),
+]
+
 
 def _hits(patterns, text: str) -> list[tuple[str, str]]:
     found = []
@@ -721,5 +746,16 @@ def classify_role(row: dict, *, analysis_context=None) -> dict:
     if body_non_swe_hits:
         track, hit = body_non_swe_hits[0]
         return _finish_role(track, 0.55, [f'"{hit}"'], software_evidence, non_swe_evidence)
+
+    fallback_title_hits = _hits(TITLE_DISCIPLINE_FALLBACK_PATTERNS, title)
+    if fallback_title_hits:
+        track, hit = fallback_title_hits[0]
+        return _finish_role(
+            track,
+            0.72,
+            [f'title discipline: "{hit}"'],
+            software_evidence or ([hit] if track in SOFTWARE_ROLE_TRACKS else []),
+            non_swe_evidence,
+        )
 
     return _finish_role("unknown", 0.2, ["No clear role signals in the title or description."], software_evidence, non_swe_evidence)
