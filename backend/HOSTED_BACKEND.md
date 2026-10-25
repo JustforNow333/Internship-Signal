@@ -944,6 +944,32 @@ npm run build
 Never point `HOSTED_TEST_DATABASE_URL` at staging, production, watcher state, or
 a database containing data that must be retained.
 
+## Python dependencies
+
+`backend/requirements.txt` lists the direct dependencies with compatible
+version ranges. `backend/constraints.txt` pins every installed package, direct
+and transitive, to an exact version resolved on Linux with Python 3.11. The
+root `requirements.txt` installs the first under the second, and it is what
+both GitHub Actions and Railway (Railpack, via `railpack.json`) install, so CI
+tests exactly the set production runs. CI fails if the installed packages and
+the pins differ in any way.
+
+Constraints cap versions without installing anything, so platform-specific
+pins (such as `uvloop`, which uvicorn skips on Windows) do not affect local
+Windows installs.
+
+To change dependencies on purpose, edit `backend/requirements.txt` if a direct
+dependency changes, then regenerate the pins on Linux with Python 3.11 from the
+unconstrained file, keeping the header comment:
+
+```bash
+python3.11 -m venv /tmp/deps && /tmp/deps/bin/pip install -r backend/requirements.txt
+/tmp/deps/bin/pip freeze --exclude pip --exclude setuptools
+```
+
+Review the version changes, then submit them in their own pull request so CI
+runs the full suite on the new set before Railway deploys it.
+
 ## Environment variables
 
 - `HOSTED_DATABASE_URL` (required for hosted persistence and Alembic; when it
