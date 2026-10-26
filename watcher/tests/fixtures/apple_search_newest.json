@@ -1,0 +1,902 @@
+{
+ "_comment": "Captured 2026-10-26 from Apple's anonymous POST /api/v1/search (sort=newest, locale en-us). Job summaries are truncated to 240 characters and no request credentials are stored. first_page is page 1 as served: evergreen PIPE-* rows first, carrying request-time postDateInGMT values. tied_family is two distinct postings of one requisition family sharing an identical postDateInGMT, the tie that reorders across a page boundary between requests. empty_envelope is the exact response Apple returns past the last page and, transiently, for in-range pages.",
+ "first_page": {
+  "res": {
+   "totalRecords": 6245,
+   "talentLimitDetails": {},
+   "talentRolesInfoById": {},
+   "searchResults": [
+    {
+     "id": "PIPE-114438210",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. At Apple, we believe inclusion is a shared responsibility and we work together to foste",
+     "locations": [
+      {
+       "postLocationId": "postLocation-JPNC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Japan",
+       "metro": "",
+       "region": "",
+       "name": "Japan",
+       "countryID": "iso-country-JPN",
+       "level": 1
+      }
+     ],
+     "positionId": "114438210",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "JP-Technical Specialist",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869823857Z",
+     "transformedPostingTitle": "jp-technical-specialist",
+     "reqId": "PIPE-114438210",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438210",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438102",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-JPNC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Japan",
+       "metro": "",
+       "region": "",
+       "name": "Japan",
+       "countryID": "iso-country-JPN",
+       "level": 1
+      }
+     ],
+     "positionId": "114438102",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "JP-Operations Expert",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869831914Z",
+     "transformedPostingTitle": "jp-operations-expert",
+     "reqId": "PIPE-114438102",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438102",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-200313970",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-INDC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "India",
+       "metro": "",
+       "region": "",
+       "name": "India",
+       "countryID": "iso-country-IND",
+       "level": 1
+      }
+     ],
+     "positionId": "200313970",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "IN-Business Expert",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869833112Z",
+     "transformedPostingTitle": "in-business-expert",
+     "reqId": "PIPE-200313970",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-200313970",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-200314033",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-INDC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "India",
+       "metro": "",
+       "region": "",
+       "name": "India",
+       "countryID": "iso-country-IND",
+       "level": 1
+      }
+     ],
+     "positionId": "200314033",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "IN-Operations Expert",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869834179Z",
+     "transformedPostingTitle": "in-operations-expert",
+     "reqId": "PIPE-200314033",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-200314033",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-200314003",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-INDC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "India",
+       "metro": "",
+       "region": "",
+       "name": "India",
+       "countryID": "iso-country-IND",
+       "level": 1
+      }
+     ],
+     "positionId": "200314003",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "IN-Business Pro",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869835853Z",
+     "transformedPostingTitle": "in-business-pro",
+     "reqId": "PIPE-200314003",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-200314003",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-200314010",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-INDC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "India",
+       "metro": "",
+       "region": "",
+       "name": "India",
+       "countryID": "iso-country-IND",
+       "level": 1
+      }
+     ],
+     "positionId": "200314010",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "IN-Expert",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869837297Z",
+     "transformedPostingTitle": "in-expert",
+     "reqId": "PIPE-200314010",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-200314010",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-200314117",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-INDC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "India",
+       "metro": "",
+       "region": "",
+       "name": "India",
+       "countryID": "iso-country-IND",
+       "level": 1
+      }
+     ],
+     "positionId": "200314117",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "IN - Specialist: Full-time and Part-time",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869838323Z",
+     "transformedPostingTitle": "in-specialist-full-time-and-part-time",
+     "reqId": "PIPE-200314117",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-200314117",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438164",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-TURC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Türkiye",
+       "metro": "",
+       "region": "",
+       "name": "Turkiye",
+       "countryID": "iso-country-TUR",
+       "level": 1
+      }
+     ],
+     "positionId": "114438164",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "TR - Specialist: Seasonal, Part-time",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869839283Z",
+     "transformedPostingTitle": "tr-specialist-seasonal-part-time",
+     "reqId": "PIPE-114438164",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438164",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438225",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-ARE",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "United Arab Emirates",
+       "metro": "",
+       "region": "",
+       "name": "United Arab Emirates",
+       "countryID": "iso-country-ARE",
+       "level": 1
+      }
+     ],
+     "positionId": "114438225",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "UAE - Specialist: Seasonal, Part-time ",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869840284Z",
+     "transformedPostingTitle": "uae-specialist-seasonal-part-time",
+     "reqId": "PIPE-114438225",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 45,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438225",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438095",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-ITAC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Italy",
+       "metro": "",
+       "region": "",
+       "name": "Italy",
+       "countryID": "iso-country-ITA",
+       "level": 1
+      }
+     ],
+     "positionId": "114438095",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "IT - Specialist (Sales)",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869841334Z",
+     "transformedPostingTitle": "it-specialist-sales",
+     "reqId": "PIPE-114438095",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438095",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438056",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-ESPC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Spain",
+       "metro": "",
+       "region": "",
+       "name": "Spain",
+       "countryID": "iso-country-ESP",
+       "level": 1
+      }
+     ],
+     "positionId": "114438056",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "ES - Specialist: Seasonal, Part-time",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869842359Z",
+     "transformedPostingTitle": "es-specialist-seasonal-part-time",
+     "reqId": "PIPE-114438056",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438056",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438043",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-DEU",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Germany",
+       "metro": "",
+       "region": "",
+       "name": "Germany",
+       "countryID": "iso-country-DEU",
+       "level": 1
+      }
+     ],
+     "positionId": "114438043",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "DE - Specialist: Seasonal, Full-time and Part-time",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869843254Z",
+     "transformedPostingTitle": "de-specialist-seasonal-full-time-and-part-time",
+     "reqId": "PIPE-114438043",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438043",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438017",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-CHEC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Switzerland",
+       "metro": "",
+       "region": "",
+       "name": "Switzerland",
+       "countryID": "iso-country-CHE",
+       "level": 1
+      }
+     ],
+     "positionId": "114438017",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "CH-Specialist (m/f/d)",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869844370Z",
+     "transformedPostingTitle": "ch-specialist-m-f-d",
+     "reqId": "PIPE-114438017",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 42,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438017",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438340",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-AUT",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Austria",
+       "metro": "",
+       "region": "",
+       "name": "Austria",
+       "countryID": "iso-country-AUT",
+       "level": 1
+      }
+     ],
+     "positionId": "114438340",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "AT-Specialist (m/f/d)",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869845666Z",
+     "transformedPostingTitle": "at-specialist-m-f-d",
+     "reqId": "PIPE-114438340",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 38.5,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438340",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438069",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-FRAC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "France",
+       "metro": "",
+       "region": "",
+       "name": "France",
+       "countryID": "iso-country-FRA",
+       "level": 1
+      }
+     ],
+     "positionId": "114438069",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "FR - Specialist: Fixed Term Contracts, Full-time and Part-time",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869847020Z",
+     "transformedPostingTitle": "fr-specialist-fixed-term-contracts-full-time-and-part-time",
+     "reqId": "PIPE-114438069",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 35,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438069",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438251",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-BELC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Belgium",
+       "metro": "",
+       "region": "",
+       "name": "Belgium",
+       "countryID": "iso-country-BEL",
+       "level": 1
+      }
+     ],
+     "positionId": "114438251",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "BE-Specialist: Full-Time, Part-Time, and Part-Time Temporary",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869848046Z",
+     "transformedPostingTitle": "be-specialist-full-time-part-time-and-part-time-temporary",
+     "reqId": "PIPE-114438251",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 35,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438251",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438119",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-NLD",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Netherlands",
+       "metro": "",
+       "region": "",
+       "name": "Netherlands",
+       "countryID": "iso-country-NLD",
+       "level": 1
+      }
+     ],
+     "positionId": "114438119",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "NL - Specialist: Seasonal, Part-time ",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869848989Z",
+     "transformedPostingTitle": "nl-specialist-seasonal-part-time",
+     "reqId": "PIPE-114438119",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 38,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438119",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438132",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-SWEC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Sweden",
+       "metro": "",
+       "region": "",
+       "name": "Sweden",
+       "countryID": "iso-country-SWE",
+       "level": 1
+      }
+     ],
+     "positionId": "114438132",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "SE - Specialist: Seasonal, Part-time ",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869849884Z",
+     "transformedPostingTitle": "se-specialist-seasonal-part-time",
+     "reqId": "PIPE-114438132",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 38.25,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438132",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438326",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-KOR",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Korea, Republic of",
+       "metro": "",
+       "region": "",
+       "name": "Korea (Republic of)",
+       "countryID": "iso-country-KOR",
+       "level": 1
+      }
+     ],
+     "positionId": "114438326",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "KR-Specialist: Seasonal, Part-Time",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869850745Z",
+     "transformedPostingTitle": "kr-specialist-seasonal-part-time",
+     "reqId": "PIPE-114438326",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438326",
+     "isMultiLocation": false,
+     "postExternal": true
+    },
+    {
+     "id": "PIPE-114438004",
+     "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a cultur",
+     "locations": [
+      {
+       "postLocationId": "postLocation-CANC",
+       "city": "",
+       "stateProvince": "",
+       "countryName": "Canada",
+       "metro": "",
+       "region": "",
+       "name": "Canada",
+       "countryID": "iso-country-CAN",
+       "level": 1
+      }
+     ],
+     "positionId": "114438004",
+     "postingDate": "Oct 26, 2026",
+     "postingTitle": "CA - Specialist: Seasonal, Part-time",
+     "localeInfo": {
+      "languageCode": "en_US",
+      "dateFormat": "MMM D, YYYY",
+      "defaultLocaleCode": "en-us"
+     },
+     "postDateInGMT": "2026-10-26T05:22:29.869851721Z",
+     "transformedPostingTitle": "ca-specialist-seasonal-part-time",
+     "reqId": "PIPE-114438004",
+     "managedPipelineRole": true,
+     "standardWeeklyHours": 40,
+     "team": {
+      "teamName": "Apple Retail",
+      "teamID": "teamsAndSubTeams-APPST",
+      "teamCode": "APPST"
+     },
+     "type": "PIPE",
+     "homeOffice": false,
+     "jobPositionId": "PIPE-114438004",
+     "isMultiLocation": false,
+     "postExternal": true
+    }
+   ]
+  }
+ },
+ "tied_family": [
+  {
+   "id": "200652930-0157",
+   "jobSummary": "Imagine what you could do here.  At Apple, new ideas have a way of becoming extraordinary products, services, and customer experiences very quickly.  Bring passion and dedication to your job and there's no telling what you could accomplish!",
+   "locations": [
+    {
+     "postLocationId": "postLocation-AST",
+     "city": "",
+     "stateProvince": "",
+     "countryName": "United States of America",
+     "metro": "",
+     "region": "",
+     "name": "Austin",
+     "countryID": "iso-country-USA",
+     "level": 5
+    }
+   ],
+   "positionId": "200652930",
+   "postingDate": "Mar 20, 2026",
+   "postingTitle": "Project / Program Manager, WW BPR - Special Projects",
+   "localeInfo": {
+    "languageCode": "en_US",
+    "dateFormat": "MMM D, YYYY",
+    "defaultLocaleCode": "en-us"
+   },
+   "postDateInGMT": "2026-03-20T21:18:55.665Z",
+   "transformedPostingTitle": "project-program-manager-ww-bpr-special-projects",
+   "reqId": "200652930-0157",
+   "managedPipelineRole": false,
+   "standardWeeklyHours": 40,
+   "team": {
+    "teamName": "Operations and Supply Chain",
+    "teamID": "teamsAndSubTeams-OPMFG",
+    "teamCode": "OPMFG"
+   },
+   "type": "PIPE",
+   "homeOffice": false,
+   "jobPositionId": "PIPE-200652930",
+   "isMultiLocation": true,
+   "postExternal": true
+  },
+  {
+   "id": "200652930-3956",
+   "jobSummary": "Imagine what you could do here.  At Apple, new ideas have a way of becoming extraordinary products, services, and customer experiences very quickly.  Bring passion and dedication to your job and there's no telling what you could accomplish!",
+   "locations": [
+    {
+     "postLocationId": "postLocation-SVL",
+     "city": "",
+     "stateProvince": "",
+     "countryName": "United States of America",
+     "metro": "",
+     "region": "",
+     "name": "Sunnyvale",
+     "countryID": "iso-country-USA",
+     "level": 5
+    }
+   ],
+   "positionId": "200652930",
+   "postingDate": "Mar 20, 2026",
+   "postingTitle": "Project / Program Manager, WW BPR - Special Projects",
+   "localeInfo": {
+    "languageCode": "en_US",
+    "dateFormat": "MMM D, YYYY",
+    "defaultLocaleCode": "en-us"
+   },
+   "postDateInGMT": "2026-03-20T21:18:55.665Z",
+   "transformedPostingTitle": "project-program-manager-ww-bpr-special-projects",
+   "reqId": "200652930-3956",
+   "managedPipelineRole": false,
+   "standardWeeklyHours": 40,
+   "team": {
+    "teamName": "Operations and Supply Chain",
+    "teamID": "teamsAndSubTeams-OPMFG",
+    "teamCode": "OPMFG"
+   },
+   "type": "PIPE",
+   "homeOffice": false,
+   "jobPositionId": "PIPE-200652930",
+   "isMultiLocation": true,
+   "postExternal": true
+  }
+ ],
+ "empty_envelope": {
+  "res": {
+   "searchResults": [],
+   "totalRecords": 0,
+   "talentLimitDetails": {},
+   "talentRolesInfoById": {}
+  }
+ }
+}

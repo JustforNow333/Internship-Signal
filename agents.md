@@ -305,6 +305,12 @@ into a general utility module.
 - Retain valid postings from mixed malformed payloads and emit one bounded
   warning. Nonempty all-malformed payloads fail. Paginated sources reject
   repeated pages.
+- Apple is direct-complete only from one official `newest` walk in which every
+  response, including bounded tie-repair re-reads, reports one unchanged
+  `totalRecords` and the unique posting ids reach it. Its zero-total empty
+  envelope is retried boundedly and never accepted as an empty board; a moved
+  total restarts from page one (at most three walks) and pages are never mixed
+  across walks. `locationAsc` and the Students team filter are not usable.
 - Adapter tests use saved fixtures and never the network. Verify live endpoints
   manually before adding or changing an adapter, then save a safe fixture.
 - `watcher.detect` is manual-only and must never fabricate ATS settings.

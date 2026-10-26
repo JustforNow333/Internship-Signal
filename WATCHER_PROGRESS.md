@@ -1579,6 +1579,35 @@ This file tracks completed watcher steps and the next handoff target.
      passed. No frontend file was changed for Lam, so the conditional frontend
      test/build step was not required.
 
+54. Apple single-walk reliability fix (2026-10-26):
+   - Apple had failed every production collection (0 of 152 audited runs) with
+     `apple total changed during a sort crawl`. A live re-audit found three
+     causes rather than one: postings close every few minutes, so about one
+     walk in three sees the total move and the roughly 620 requests of the
+     two-sort crawl almost never fit a stable window; Apple intermittently
+     answers in-range pages with its zero-total past-end envelope (65 of 313
+     pages in one `locationAsc` walk), which the old crawl read as drift; and
+     `locationAsc` ties on whole locations, repeating 331 rows in one walk
+     while contributing nothing `newest` lacked.
+   - The adapter now crawls only `newest`. A walk is complete when every
+     response reports one unchanged total and the unique ids reach it. The
+     rare tie repeats (evergreen `PIPE-*` rows and requisition families sharing
+     one timestamp) are closed by re-reading the surrounding pages under a
+     40-read budget. The empty envelope is retried at most twice per page and
+     12 times per collection and is never accepted as an empty inventory, which
+     also closes a latent bug: the old adapter reported that envelope on page
+     one as a complete, empty board. A moved total or an unclosed gap discards
+     the walk and restarts from page one, at most three walks.
+   - The Students team filter was measured and rejected as a scope: it held 110
+     of 153 intern-titled postings and 4 of 25 new-graduate titles.
+   - Live local comparison in one window: the new adapter completed 3 of 3
+     collections (6,246-6,247 postings, 317-516 requests, one restart, 2 ties
+     repaired each time); the previous adapter failed 2 of 2 with the
+     production error. No production collection was run.
+   - Apple publishes no posting date, so its first successful hosted import
+     must run as an explicit backfill to avoid new-opening alerts for every
+     existing posting.
+
 ## Next
 
 - Use the product coverage report to prioritize degraded direct integrations,
