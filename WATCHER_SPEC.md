@@ -345,6 +345,28 @@ Failed envelopes, non-complete status, malformed identities, unposted rows,
 duplicates/omissions, drift, premature termination, and safety-cap exhaustion
 fail closed.
 
+**Apple** uses its anonymous first-party search: a CSRF token read from the
+`X-Apple-CSRF-Token` header of `GET /api/v1/CSRFToken`, replayed on
+`POST /api/v1/search` with an empty query and filters, locale `en-us`, and the
+official `newest` sort. Pages hold exactly 20 rows, so the page count is
+arithmetic from `totalRecords` and nothing past it is requested. A walk is
+complete only when every response in it reports the same total, every
+non-final page is full, and the unique posting ids reach that total exactly.
+Tied sort keys (evergreen `PIPE-*` rows with request-time dates, and
+requisition families sharing one timestamp) can repeat a posting across a page
+boundary and displace another; the pages around each repeat are re-read under a
+bounded budget, and a repeat is collapsed only when its invariant fields agree.
+Apple's zero-total empty envelope is identical past the end and transiently in
+range, so it is retried a bounded number of times and never accepted as an
+empty inventory. A changed total, more unique ids than the total, or an
+unclosed gap discards the walk and starts a fresh one from page one, at most
+three times; rows are published only from one accepted walk. Restarts and
+retries stay visible as `pagination_restart_recovered` and
+`request_retry_recovered`. The `locationAsc` sort ties on whole locations and
+is not crawled. Apple's posting date is regenerated per request on evergreen
+rows, so none is published, and the Students team filter is not a usable scope
+because most intern-titled postings sit outside it.
+
 **Jane Street** publishes its whole inventory as one anonymous first-party
 document, `GET /jobs/main.json`: a flat array in which every posting carries a
 stable ten-digit integer `id`. Because there is no pagination, the adapter

@@ -1,4 +1,4 @@
-"""Apple's official careers search, enumerated across two verified sorts.
+"""Apple's official careers search, enumerated as one verified ``newest`` walk.
 
 Apple publishes one global inventory behind an anonymous CSRF-guarded search
 API. A token is read from ``GET /api/v1/CSRFToken`` (returned in the
@@ -6,29 +6,50 @@ API. A token is read from ``GET /api/v1/CSRFToken`` (returned in the
 ``POST /api/v1/search``. No cookie, credential, or browser identity is used.
 
 ``totalRecords`` is authoritative and the page size is fixed at 20, so the
-exact page count is arithmetic rather than something to discover. That matters
-because a request past the end answers ``totalRecords: 0`` with no results,
-which is byte-identical to a genuinely empty search: a terminal request can
-never prove completion here, so this adapter never issues one.
+exact page count is arithmetic rather than something to discover. A request
+past the end answers ``totalRecords: 0`` with no results, which is
+byte-identical to a genuinely empty search, so a terminal request can never
+prove completion and this adapter never issues one.
 
-A single offset sort is *not* complete. Apple's ordering is unstable across
-requests wherever the sort key ties, so consecutive pages can repeat a row at
-their boundary while silently dropping a different one, leaving the raw row
-count and ``totalRecords`` both correct. A repository audit measured this
-directly: ``newest`` alone recovered 6,106 of 6,107 postings and ``locationAsc``
-alone recovered 5,471, while the union of exactly those two official sorts
-recovered all 6,107. This module therefore crawls both sorts, validates each
-independently, unions them by stable posting id, and treats the collection as
-complete only when the union size equals the authoritative total. A short union
-fails closed; nothing is inferred, repaired, or back-filled.
+A live audit on 2026-10-26 (about 6,250 postings, roughly 313 pages) found
+three behaviors that the earlier crawl of two unioned sorts could not survive:
 
-Repeated ids across sorts are expected and are collapsed, but only after their
-invariant fields agree. ``postDateInGMT`` (and the ``postingDate`` rendered
-from it) is request-time metadata on ``PIPE-*`` evergreen rows -- the audit saw
-it change between requests for the same posting -- so it is excluded from
-identity comparison and is never published as a posting date.
+* The inventory moves while it is walked. Postings closed every few minutes,
+  so the total changed partway through about one walk in three, and the
+  roughly 620 requests the two-sort crawl needed almost never fit inside one
+  stable window. Offset pages from before and after a change cannot be mixed.
+* Apple intermittently answers an in-range page with that same zero-total
+  empty envelope; one ``locationAsc`` walk received 65 of them in 313 pages.
+  The old crawl read each one as the total changing.
+* Tied sort keys reorder between requests. ``locationAsc`` ties on whole
+  locations and repeated 331 rows in one walk while adding nothing ``newest``
+  lacked, so it is no longer crawled. ``newest`` ties only on evergreen
+  ``PIPE-*`` rows, whose ``postDateInGMT`` is regenerated per request, and on
+  requisition families posted at one identical timestamp: a walk occasionally
+  repeats one such posting across a page boundary and displaces another.
 
-This is deliberately Apple-specific. It is not a generic multi-sort facility.
+Completeness therefore rests on one ``newest`` walk in which every response,
+including repair re-reads, reports one unchanged total, and in which the
+unique posting ids reach that total exactly. A repeated id marks a boundary
+where a tie reordered; the pages around it are re-read under a bounded budget,
+and the walk completes only once the missing ids appear. Each transient empty
+envelope is retried a bounded number of times and is never accepted, because
+an empty Apple inventory cannot be told apart from that anomaly. A changed
+total, or a repair that cannot close the gap, discards the walk and starts a
+fresh one from page one, at most ``MAX_CRAWL_PASSES`` times. Rows are only ever
+published from one accepted walk; nothing is inferred, back-filled, or carried
+over from an abandoned one.
+
+Repeated ids are collapsed only after their invariant fields agree.
+``postDateInGMT`` (and the ``postingDate`` rendered from it) is request-time
+metadata on ``PIPE-*`` rows, so it is excluded from identity comparison and is
+never published as a posting date.
+
+A narrower official slice was measured and rejected: the Students team filter
+held 225 postings but only 110 of 153 intern-titled postings and 4 of 25
+new-graduate titles, so it cannot stand in for the whole inventory.
+
+This is deliberately Apple-specific. It is not a generic recovery facility.
 """
 
 from __future__ import annotations
@@ -49,7 +70,12 @@ from watcher.sources.contracts import (
     TextHttpResponse,
 )
 from watcher.sources.diagnostics import DirectDiagnosticsMixin
-from watcher.sources.retry import DEFAULT_MAX_ATTEMPTS, RequestRetrier, RetryPolicy
+from watcher.sources.retry import (
+    DEFAULT_MAX_ATTEMPTS,
+    RequestRetrier,
+    RetryPolicy,
+    retry_delay,
+)
 from watcher.sources.rows import make_row
 from watcher.sources.sanitize import _safe_url
 from watcher.sources.transport import (
@@ -69,12 +95,10 @@ DETAILS_BASE = f"{BASE_URL}/en-us/details"
 # Apple's search page size is fixed by the service; it is not a request field.
 PAGE_SIZE = 20
 
-# The verified minimum complete set, in crawl order. `newest` has by far the
-# better single-sort recall, so it runs first and `locationAsc` supplies the
-# remainder. Both are official values offered by Apple's own search UI.
+# The one official sort whose ties are rare enough to repair. It is offered by
+# Apple's own search UI.
 SORT_NEWEST = "newest"
-SORT_LOCATION_ASC = "locationAsc"
-REQUIRED_SORTS: tuple[str, ...] = (SORT_NEWEST, SORT_LOCATION_ASC)
+CRAWL_SORT = SORT_NEWEST
 
 LOCALE = "en-us"
 # Ceiling for one collection, sized well above Apple's observed inventory so a
@@ -85,7 +109,19 @@ _MAX_FIELD_LENGTH = 20_000
 _MAX_CSRF_TOKEN_LENGTH = 256
 _CSRF_BODY_LIMIT = 4_096
 
-# Fields that must agree when the same posting id is returned by both sorts.
+# Fresh walks one collection may start. A walk takes about a minute; live
+# measurement saw the total move in roughly one walk in three.
+MAX_CRAWL_PASSES = 3
+# Extra requests for one page that keeps answering with the empty envelope.
+MAX_EMPTY_RETRIES_PER_PAGE = 2
+# Empty-envelope retries one collection may spend across every page and walk.
+MAX_EMPTY_RETRIES = 12
+# Re-reads one walk may spend closing gaps left by tied sort keys, and the
+# rounds they are spread over. Live repairs needed 4 to 24 reads.
+MAX_REPAIR_READS = 40
+MAX_REPAIR_ROUNDS = 4
+
+# Fields that must agree when the same posting id is returned twice.
 # `postDateInGMT`/`postingDate` are excluded on purpose: they are regenerated
 # per request for evergreen `PIPE-*` rows and are not posting identity.
 _INVARIANT_FIELDS: tuple[str, ...] = (
@@ -104,11 +140,15 @@ class AppleDiagnostics:
 
     authoritative_total: int = 0
     requests_made: int = 0
-    sorts_crawled: tuple[str, ...] = ()
-    raw_rows_per_sort: tuple[tuple[str, int], ...] = ()
-    unique_ids_per_sort: tuple[tuple[str, int], ...] = ()
-    duplicate_ids_per_sort: tuple[tuple[str, int], ...] = ()
-    union_unique_ids: int = 0
+    crawl_sort: str = CRAWL_SORT
+    passes_attempted: int = 0
+    restarts: int = 0
+    empty_retries: int = 0
+    walk_rows: int = 0
+    walk_unique_ids: int = 0
+    walk_duplicate_ids: int = 0
+    repair_reads: int = 0
+    repaired_ids: int = 0
     retained_rows: int = 0
     request_attempts: int = 0
     retry_attempts: int = 0
@@ -135,25 +175,22 @@ class _Posting:
 
 
 @dataclass(frozen=True)
-class _SortPass:
-    """One complete single-sort crawl and its own raw counts."""
+class _Walk:
+    """One accepted walk: its total, its counts, and its postings in order."""
 
-    sort: str
     total: int
-    raw_rows: int
+    walk_rows: int
+    walk_unique_ids: int
+    repair_reads: int
     postings: tuple[_Posting, ...]
 
-    @property
-    def unique_ids(self) -> int:
-        return len({posting.posting_id for posting in self.postings})
 
-    @property
-    def duplicate_ids(self) -> int:
-        return self.raw_rows - self.unique_ids
+class _WalkUnstable(Exception):
+    """The current walk cannot prove completeness; a fresh walk may."""
 
 
 class AppleSource(DirectDiagnosticsMixin):
-    """Collect Apple's whole inventory from its two verified official sorts."""
+    """Collect Apple's whole inventory from one verified ``newest`` walk."""
 
     name = "apple"
 
@@ -169,6 +206,8 @@ class AppleSource(DirectDiagnosticsMixin):
     ) -> None:
         self._request_json = request_json
         self._fetch_csrf_token = fetch_csrf_token
+        self._sleeper = sleeper
+        self._jitter = jitter
         self._timeout = timeout
         self._retrier = RequestRetrier(
             policy=RetryPolicy(max_attempts=max_attempts),
@@ -194,11 +233,17 @@ class AppleSource(DirectDiagnosticsMixin):
         return AppleDiagnostics(
             authoritative_total=self._authoritative_total,
             requests_made=self._requests_made,
-            sorts_crawled=tuple(self._sorts_crawled),
-            raw_rows_per_sort=tuple(self._raw_rows_per_sort),
-            unique_ids_per_sort=tuple(self._unique_ids_per_sort),
-            duplicate_ids_per_sort=tuple(self._duplicate_ids_per_sort),
-            union_unique_ids=self._union_unique_ids,
+            crawl_sort=CRAWL_SORT,
+            passes_attempted=self._passes_attempted,
+            restarts=max(0, self._passes_attempted - 1),
+            empty_retries=self._empty_retries,
+            walk_rows=self._walk_rows,
+            walk_unique_ids=self._walk_unique_ids,
+            walk_duplicate_ids=self._walk_rows - self._walk_unique_ids,
+            repair_reads=self._repair_reads,
+            repaired_ids=self._retained_rows - self._walk_unique_ids
+            if self._retained_rows
+            else 0,
             retained_rows=self._retained_rows,
             request_attempts=self.request_attempts,
             retry_attempts=self.retry_attempts,
@@ -240,127 +285,173 @@ class AppleSource(DirectDiagnosticsMixin):
         self._reset_counters()
         self._token = None
 
-        passes: list[_SortPass] = []
-        authoritative_total: int | None = None
-        for sort in REQUIRED_SORTS:
-            sort_pass = self._crawl_sort(sort, expected_total=authoritative_total)
-            if authoritative_total is None:
-                authoritative_total = sort_pass.total
-                self._authoritative_total = authoritative_total
-            passes.append(sort_pass)
-            self._sorts_crawled.append(sort)
-            self._raw_rows_per_sort.append((sort, sort_pass.raw_rows))
-            self._unique_ids_per_sort.append((sort, sort_pass.unique_ids))
-            self._duplicate_ids_per_sort.append((sort, sort_pass.duplicate_ids))
+        walk: _Walk | None = None
+        reason = ""
+        while walk is None:
+            if self._passes_attempted >= MAX_CRAWL_PASSES:
+                raise SourceSchemaError(
+                    f"apple did not complete within {MAX_CRAWL_PASSES} "
+                    f"bounded walks: {reason}"
+                )
+            self._passes_attempted += 1
+            try:
+                walk = self._walk()
+            except _WalkUnstable as exc:
+                # Pages from an abandoned walk are never mixed into a later one.
+                reason = str(exc)
 
-        assert authoritative_total is not None  # REQUIRED_SORTS is non-empty
-        union = self._union(passes)
-        self._union_unique_ids = len(union)
-        if len(union) != authoritative_total:
-            raise SourceSchemaError(
-                "apple union recovered "
-                f"{len(union)} of {authoritative_total} advertised postings"
-            )
-
-        rows = [self._row(posting, company) for posting in union.values()]
+        self._authoritative_total = walk.total
+        self._walk_rows = walk.walk_rows
+        self._walk_unique_ids = walk.walk_unique_ids
+        self._repair_reads = walk.repair_reads
+        rows = [self._row(posting, company) for posting in walk.postings]
         self._retained_rows = len(rows)
-        recovered = bool(self.retry_attempts)
+
+        restarted = self._passes_attempted > 1
+        retried = bool(self.retry_attempts or self._empty_retries)
+        reason_codes = []
+        if retried:
+            reason_codes.append("request_retry_recovered")
+        if restarted:
+            reason_codes.append("pagination_restart_recovered")
+        recovered = retried or restarted
         self._finish_direct_diagnostics(
             rows,
-            duplicate_row_count=sum(item.duplicate_ids for item in passes),
-            failed_request_count=self.retry_attempts,
+            duplicate_row_count=walk.walk_rows - walk.walk_unique_ids,
+            failed_request_count=self.retry_attempts + self._empty_retries,
             degraded=True if recovered else None,
             complete=True if recovered else None,
-            reason_codes=("request_retry_recovered",) if recovered else (),
+            reason_codes=reason_codes,
         )
         return rows
 
-    def _crawl_sort(self, sort: str, *, expected_total: int | None) -> _SortPass:
-        """Walk one sort completely, validating its own page arithmetic."""
+    def _walk(self) -> _Walk:
+        """Walk ``newest`` once, repair tie gaps, and prove the unique count."""
 
-        total, first_page = self._search(sort, page=1)
+        total, first_page = self._search(page=1)
         if total > MAX_TOTAL_RECORDS:
-            raise SourceSchemaError(
-                "apple total exceeds the collection safeguard"
-            )
-        if expected_total is not None and total != expected_total:
-            raise SourceSchemaError(
-                "apple total changed between sorts during collection"
-            )
-        if total == 0:
-            # A genuinely empty search is a valid, complete result; a page with
-            # records alongside a zero total is not.
-            if first_page:
-                raise SourceSchemaError(
-                    "apple reported an empty search while returning records"
-                )
-            return _SortPass(sort=sort, total=0, raw_rows=0, postings=())
-
+            raise SourceSchemaError("apple total exceeds the collection safeguard")
         pages = math.ceil(total / PAGE_SIZE)
-        postings: list[_Posting] = []
-        self._absorb_page(sort, 1, pages, total, first_page, postings)
-        for page in range(2, pages + 1):
-            page_total, records = self._search(sort, page=page)
-            if page_total != total:
-                raise SourceSchemaError(
-                    "apple total changed during a sort crawl"
-                )
-            self._absorb_page(sort, page, pages, total, records, postings)
 
-        if len(postings) != total:
-            raise SourceSchemaError(
-                "apple returned a row count other than its advertised total"
+        by_id: dict[str, _Posting] = {}
+        first_seen_on: dict[str, int] = {}
+        repeats: list[tuple[int, int]] = []
+        walk_rows = 0
+        records = first_page
+        for number in range(1, pages + 1):
+            if number > 1:
+                records = self._page_under(total, number)
+            walk_rows += self._absorb(
+                number, pages, total, records, by_id, first_seen_on, repeats
             )
-        return _SortPass(
-            sort=sort,
+        walk_unique_ids = len(by_id)
+
+        repair_reads = 0
+        rounds = 0
+        while len(by_id) < total and repeats:
+            if rounds >= MAX_REPAIR_ROUNDS or repair_reads >= MAX_REPAIR_READS:
+                break
+            rounds += 1
+            for number in _repair_targets(repeats, pages):
+                if repair_reads >= MAX_REPAIR_READS or len(by_id) >= total:
+                    break
+                repair_reads += 1
+                records = self._page_under(total, number)
+                self._absorb(number, pages, total, records, by_id, first_seen_on, [])
+
+        if len(by_id) > total:
+            raise _WalkUnstable(
+                f"apple listed more postings than its total of {total}"
+            )
+        if len(by_id) < total:
+            raise _WalkUnstable(
+                f"apple walk recovered {len(by_id)} of {total} advertised postings"
+            )
+        return _Walk(
             total=total,
-            raw_rows=len(postings),
-            postings=tuple(postings),
+            walk_rows=walk_rows,
+            walk_unique_ids=walk_unique_ids,
+            repair_reads=repair_reads,
+            postings=tuple(by_id.values()),
         )
 
-    def _absorb_page(
+    def _page_under(self, total: int, number: int) -> list:
+        """Return one page's records, requiring the walk's unchanged total."""
+
+        page_total, records = self._search(page=number)
+        if page_total != total:
+            raise _WalkUnstable("apple total changed during the walk")
+        return records
+
+    def _absorb(
         self,
-        sort: str,
-        page: int,
+        number: int,
         pages: int,
         total: int,
         records: list,
-        postings: list[_Posting],
-    ) -> None:
+        by_id: dict[str, _Posting],
+        first_seen_on: dict[str, int],
+        repeats: list[tuple[int, int]],
+    ) -> int:
         """Validate one page's length against the arithmetic and keep its rows.
 
-        Every page but the last must be exactly full. A short or empty page
-        before the end is truncation, never a terminal signal.
+        Every page but the last must be exactly full. A short or rowless page
+        before the end is truncation, never a terminal signal. A repeated id is
+        collapsed only when its invariant fields agree, and its boundary is
+        remembered so the pages around it can be re-read.
         """
 
-        expected = PAGE_SIZE if page < pages else total - PAGE_SIZE * (pages - 1)
+        expected = PAGE_SIZE if number < pages else total - PAGE_SIZE * (pages - 1)
         if len(records) != expected:
             raise SourceSchemaError(
-                f"apple {sort} page {page} returned {len(records)} of "
+                f"apple {CRAWL_SORT} page {number} returned {len(records)} of "
                 f"{expected} expected records"
             )
-        postings.extend(_posting(record) for record in records)
-
-    def _union(self, passes: Iterable[_SortPass]) -> dict[str, _Posting]:
-        """Union every sort by stable posting id, failing closed on conflict."""
-
-        union: dict[str, _Posting] = {}
-        for sort_pass in passes:
-            for posting in sort_pass.postings:
-                existing = union.get(posting.posting_id)
-                if existing is None:
-                    union[posting.posting_id] = posting
-                elif existing.invariants != posting.invariants:
-                    raise SourceSchemaError(
-                        "apple returned conflicting records for one posting id"
-                    )
-        return union
+        for record in records:
+            posting = _posting(record)
+            existing = by_id.get(posting.posting_id)
+            if existing is None:
+                by_id[posting.posting_id] = posting
+                first_seen_on[posting.posting_id] = number
+                continue
+            if existing.invariants != posting.invariants:
+                raise SourceSchemaError(
+                    "apple returned conflicting records for one posting id"
+                )
+            repeats.append((first_seen_on[posting.posting_id], number))
+        return len(records)
 
     # --- requests ---------------------------------------------------------
 
-    def _search(self, sort: str, *, page: int) -> tuple[int, list]:
-        payload = self._request(self.request_body(page=page, sort=sort))
-        return _search_payload(payload)
+    def _search(self, *, page: int) -> tuple[int, list]:
+        """Return one page, retrying Apple's transient empty envelope.
+
+        Apple answers past the end, and sometimes for an in-range page, with
+        ``totalRecords: 0`` and no results. Apple's inventory is never empty,
+        and the two cases are byte-identical, so the envelope is retried a
+        bounded number of times and never accepted as a result.
+        """
+
+        for attempt in range(1, MAX_EMPTY_RETRIES_PER_PAGE + 2):
+            payload = self._request(self.request_body(page=page, sort=CRAWL_SORT))
+            total, records = _search_payload(payload)
+            if total or records:
+                if not total:
+                    raise SourceSchemaError(
+                        "apple reported an empty search while returning records"
+                    )
+                return total, records
+            if (
+                attempt > MAX_EMPTY_RETRIES_PER_PAGE
+                or self._empty_retries >= MAX_EMPTY_RETRIES
+            ):
+                break
+            self._empty_retries += 1
+            self._sleeper(retry_delay(attempt, self._jitter))
+        raise SourceSchemaError(
+            f"apple answered page {page} with an empty result where postings "
+            "were expected"
+        )
 
     def _request(self, body: dict) -> Any:
         self._requests_made += 1
@@ -468,16 +559,31 @@ class AppleSource(DirectDiagnosticsMixin):
         self._token: str | None = None
         self._requests_made = 0
         self._authoritative_total = 0
-        self._sorts_crawled: list[str] = []
-        self._raw_rows_per_sort: list[tuple[str, int]] = []
-        self._unique_ids_per_sort: list[tuple[str, int]] = []
-        self._duplicate_ids_per_sort: list[tuple[str, int]] = []
-        self._union_unique_ids = 0
+        self._passes_attempted = 0
+        self._empty_retries = 0
+        self._walk_rows = 0
+        self._walk_unique_ids = 0
+        self._repair_reads = 0
         self._retained_rows = 0
         self.last_response_metadata = {}
 
 
 # --- provider-local payload decoding ---------------------------------------
+
+
+def _repair_targets(repeats: Iterable[tuple[int, int]], pages: int) -> list[int]:
+    """Return the pages around each repeated id, in page order.
+
+    A tie that repeats a posting on page ``b`` after page ``a`` displaced some
+    other posting near that boundary, so both pages and their outer neighbors
+    are re-read.
+    """
+
+    targets: set[int] = set()
+    for first, later in repeats:
+        for number in range(max(1, first - 1), min(pages, later + 1) + 1):
+            targets.add(number)
+    return sorted(targets)
 
 
 def _search_payload(payload: Any) -> tuple[int, list]:
