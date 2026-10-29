@@ -108,13 +108,18 @@ def _posting(record, company):
         raise SourceSchemaError('atlassian invalid posting URL')
     texts = []
     for field in ('overview', 'responsibilities', 'qualifications'):
+        # The official board omits all three text fields on some live
+        # postings; absent or null text is empty, any other non-string fails.
         value = record.get(field)
-        if not isinstance(value, str):
+        if value is None:
+            value = ''
+        elif not isinstance(value, str):
             raise SourceSchemaError('atlassian invalid posting text')
         texts.append(html_to_text(value))
     return make_row(
         company=company.name, title=title.strip(), location='; '.join(locations),
-        description='\n\n'.join(texts[:2]), requirements=texts[2], source_url=url,
+        description='\n\n'.join(t for t in texts[:2] if t),
+        requirements=texts[2], source_url=url,
         source='direct', source_adapter='atlassian',
         extra={'source_requisition_id': f'atlassian:{posting_id}'},
     )
