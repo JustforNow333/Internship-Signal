@@ -29,6 +29,7 @@ PORTALS = frozenset({
     'campus-americas.icims.com',
     'careers-americas.icims.com',
     'careers-apac-atlassian.icims.com',
+    'globalmobility-careers-atlassian.icims.com',
 })
 
 

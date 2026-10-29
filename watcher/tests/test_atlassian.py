@@ -57,6 +57,30 @@ def test_campus_americas_portal_is_accepted():
     assert source.last_health_diagnostics.complete
 
 
+def test_globalmobility_portal_is_accepted():
+    """Atlassian publishes relocation roles on a globalmobility portal.
+
+    On 2026-10-29 the official all-jobs endpoint served postings 25398 and
+    27067 on globalmobility-careers-atlassian.icims.com (portalId 193343), a
+    portal the allowlist did not carry, so the whole inventory was rejected.
+    """
+
+    data = records()
+    data[0]['portalId'] = data[0]['portalJobPost']['portalId'] = 193343
+    data[0]['portalJobPost']['portalUrl'] = (
+        'https://globalmobility-careers-atlassian.icims.com/jobs/25583/'
+        'sales-development-representative%2c-mid-market-jsm-dach/job'
+    )
+
+    source, rows = fetch(data)
+
+    assert len(rows) == 2
+    assert rows[0]['source_url'].startswith(
+        'https://globalmobility-careers-atlassian.icims.com/jobs/25583/'
+    )
+    assert source.last_health_diagnostics.complete
+
+
 def test_one_unlisted_portal_still_fails_the_whole_inventory():
     """The allowlist keeps its meaning: an off-portal URL is still rejected."""
 
