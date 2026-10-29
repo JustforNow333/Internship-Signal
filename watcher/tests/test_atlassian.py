@@ -99,10 +99,72 @@ def test_invalid_inventory_fails(payload):
         fetch(payload)
 
 
-def test_explicit_empty():
-    source, rows = fetch([])
+def sequenced(*responses):
+    """A request stub that answers each call with the next response."""
+
+    calls = []
+
+    def request(*args):
+        calls.append(args)
+        response = responses[len(calls) - 1]
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    return calls, AtlassianSource(request_json=request)
+
+
+def test_explicit_empty_is_complete_only_once_confirmed():
+    calls, source = sequenced([], [])
+    rows = source.fetch(CompanyCfg(name='Atlassian', ats='atlassian'))
     assert rows == []
+    assert len(calls) == source.request_count == 2
+    assert calls[0] == calls[1] == (AtlassianSource.endpoint(), 'atlassian')
     assert source.last_health_diagnostics.complete
+
+
+def test_transient_empty_contradicted_by_confirmation_fails_closed():
+    """Production accepted [] as a complete board on 2026-10-24.
+
+    The official board held hundreds of postings both before and after, so an
+    unconfirmed empty array is never published, even when the confirmation
+    returns a valid non-empty inventory.
+    """
+
+    calls, source = sequenced([], records())
+    with pytest.raises(SourceSchemaError, match='empty inventory was not confirmed'):
+        source.fetch(CompanyCfg(name='Atlassian', ats='atlassian'))
+    assert len(calls) == 2
+    assert not source.last_health_diagnostics.complete
+
+
+@pytest.mark.parametrize('confirmation', [None, {}, {'jobs': []}, [None]])
+def test_empty_with_malformed_confirmation_fails_closed(confirmation):
+    calls, source = sequenced([], confirmation)
+    with pytest.raises(SourceSchemaError):
+        source.fetch(CompanyCfg(name='Atlassian', ats='atlassian'))
+    assert len(calls) == 2
+    assert not source.last_health_diagnostics.complete
+
+
+def test_empty_with_failed_confirmation_fails_closed():
+    from watcher.sources.contracts import SourceFetchError
+    calls, source = sequenced([], SourceFetchError('unavailable', status_code=503))
+    with pytest.raises(SourceFetchError):
+        source.fetch(CompanyCfg(name='Atlassian', ats='atlassian'))
+    assert len(calls) == 2
+    assert not source.last_health_diagnostics.complete
+
+
+@pytest.mark.parametrize('first', ['records', {}])
+def test_only_an_empty_inventory_is_confirmed(first):
+    calls, source = sequenced(records() if first == 'records' else first, [])
+    if first == 'records':
+        assert len(source.fetch(CompanyCfg(name='Atlassian', ats='atlassian'))) == 2
+    else:
+        with pytest.raises(SourceSchemaError):
+            source.fetch(CompanyCfg(name='Atlassian', ats='atlassian'))
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize('mutation', ['conflict', 'id', 'portal', 'url', 'title', 'locations'])

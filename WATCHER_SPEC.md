@@ -367,6 +367,18 @@ is not crawled. Apple's posting date is regenerated per request on evergreen
 rows, so none is published, and the Students team filter is not a usable scope
 because most intern-titled postings sit outside it.
 
+**Atlassian** publishes its whole inventory as one anonymous first-party array,
+`GET https://www.atlassian.com/endpoint/careers/listings`, which the careers
+UI filters locally. Every posting needs matching positive `id`/`portalId`
+pairs, a nonblank title, string locations, and an `https` iCIMS URL on an
+allowlisted Atlassian portal whose path carries the posting id; one failure
+rejects the whole array. Absent or null `overview`, `responsibilities` and
+`qualifications` are empty text, but any other non-string fails. Identical
+repeats of one id collapse; differing ones fail. The board has answered `[]`
+while holding hundreds of postings, so an empty array is complete only when
+one immediate second request is also `[]`. A non-empty, malformed or failed
+confirmation publishes nothing. `updatedDate` is not a posting date.
+
 **Jane Street** publishes its whole inventory as one anonymous first-party
 document, `GET /jobs/main.json`: a flat array in which every posting carries a
 stable ten-digit integer `id`. Because there is no pagination, the adapter

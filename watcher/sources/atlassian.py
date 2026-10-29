@@ -3,7 +3,8 @@
 The official all-jobs Careers component GETs /endpoint/careers/listings once;
 all search, filters and result counts are computed locally from that array.
 There is no offset, cursor, or server-side result limit in this contract. The
-complete array is the inventory bound, including [] for an empty board. The sampled native
+complete array is the inventory bound; [] is an empty board only when an
+immediate second request also returns []. The sampled native
 iCIMS listing portal redirects to this frontend. Fail on malformed or conflicting records, never silently
 shrink this inventory. No detail requests or updatedDate-as-posted-date mapping.
 """
@@ -48,14 +49,15 @@ class AtlassianSource(DirectDiagnosticsMixin):
     def fetch(self, company: CompanyCfg) -> list[dict]:
         self._begin_direct_diagnostics()
         self.request_count = 0
-        # One bounded attempt. Transport/schema failures propagate; no partial
-        # inventory is published and no retry can mix two inventories.
-        request = self._request_json or get_json_response
-        self.request_count += 1
-        response = request(self.endpoint(), self.name)
-        records = getattr(response, 'payload', response)
-        if not isinstance(records, list) or len(records) > MAX_POSTINGS:
-            raise SourceSchemaError('atlassian invalid inventory array')
+        # One request, plus one confirmation only for []. Transport/schema
+        # failures propagate; no partial inventory is published and no retry
+        # can mix two inventories.
+        records = self._inventory()
+        if not records and self._inventory():
+            # The board once answered [] while holding hundreds of postings.
+            # An empty board is complete only when one immediate second
+            # request is also empty; a contradiction publishes nothing.
+            raise SourceSchemaError('atlassian empty inventory was not confirmed')
         rows, ids, urls = [], {}, set()
         duplicates = 0
         for record in records:
@@ -73,6 +75,15 @@ class AtlassianSource(DirectDiagnosticsMixin):
             rows.append(row)
         self._finish_direct_diagnostics(rows, duplicate_row_count=duplicates)
         return rows
+
+    def _inventory(self):
+        request = self._request_json or get_json_response
+        self.request_count += 1
+        response = request(self.endpoint(), self.name)
+        records = getattr(response, 'payload', response)
+        if not isinstance(records, list) or len(records) > MAX_POSTINGS:
+            raise SourceSchemaError('atlassian invalid inventory array')
+        return records
 
 
 def _posting(record, company):
