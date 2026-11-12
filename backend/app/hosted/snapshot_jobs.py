@@ -69,6 +69,7 @@ def replay_snapshot_jobs(
         jobs = analyzer(
             batch.mutable_rows(),
             today=batch.captured_at.date(),
+            **_fresh_rows_option(analyzer, batch),
         )
     if not isinstance(jobs, list) or any(not isinstance(job, Mapping) for job in jobs):
         raise SnapshotReplayError("snapshot_analysis_invalid")
@@ -79,6 +80,22 @@ def replay_snapshot_jobs(
         batch=batch,
         jobs=tuple(jobs),
     )
+
+
+def _fresh_rows_option(
+    analyzer: Callable[..., list[dict]], batch: CollectionBatch
+) -> dict[str, Callable[[], list[dict]]]:
+    """Let an opted-in analyzer rebuild pristine rows only when it must.
+
+    The replayed batch is immutable, so each ``batch.mutable_rows()`` call
+    returns rows identical to the ones being analyzed. Analyzers that may need
+    them for a fallback receive the factory instead of copying every row up
+    front; any other analyzer is called exactly as before.
+    """
+
+    if getattr(analyzer, "accepts_fresh_rows", False) is True:
+        return {"fresh_rows": batch.mutable_rows}
+    return {}
 
 
 def snapshot_sha256(path: str | Path) -> str:

@@ -13,11 +13,13 @@ import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+from app.hosted import analysis_cache as hosted_cache
 from app.hosted import collect_and_import
 from app.hosted.catalog import CompanyCatalog
 from app.hosted.collect_and_import import main as collect_main
@@ -791,3 +793,95 @@ def test_the_analysis_cache_leaves_imports_matches_and_alerts_identical(
     assert disabled[1]["jobs"] == disabled[1]["matches"] == disabled[1]["items"] == 1
     assert cold[:5] == disabled[:5]
     assert warm[:5] == disabled[:5]
+
+
+def _two_posting_batch(watcher_config, company_name: str, *, identifiers=("1", "2")):
+    rows = [
+        make_row(
+            source="direct",
+            source_adapter="workday",
+            company=company_name,
+            title=title,
+            location="New York, NY",
+            description="Build backend APIs and production services.",
+            requirements="Python and SQL",
+            source_url=f"https://example.com/jobs/collection-{identifier}",
+            date_posted=NOW.date().isoformat(),
+            internship_type="Summer 2027 Internship",
+            extra={"source_requisition_id": f"COLLECT-{identifier}", "active": True},
+        )
+        for identifier, title in zip(
+            identifiers,
+            ("Backend Software Engineer Intern", "Platform Software Engineer Intern"),
+        )
+    ]
+    return CollectionBatch.create(
+        captured_at=NOW,
+        collection_config_fingerprint=collection_config_fingerprint(watcher_config),
+        rows=rows,
+        errors=[],
+        source_attempts=[],
+    )
+
+
+def test_single_copy_analysis_leaves_imports_matches_and_alerts_identical(
+    database, watcher_config, watched_company, tmp_path, monkeypatch, capsys
+) -> None:
+    """Cold, warm, partial, and failed cache runs keep no pristine copy."""
+
+    def forbidden(_value, *_args, **_kwargs):
+        raise AssertionError("cached analysis must not hold a pristine deep copy")
+
+    full = _two_posting_batch(watcher_config, watched_company.name)
+    first_only = _two_posting_batch(
+        watcher_config, watched_company.name, identifiers=("1",)
+    )
+    cache_path = tmp_path / "volume" / "analysis-cache.sqlite"
+    real_cached_analysis = hosted_cache.analyze_rows_with_cache
+
+    def run(batch, *, cache, failing=False):
+        _truncate(database)
+        create_user(database, watched_company.id)
+        if cache is None:
+            monkeypatch.delenv("HOSTED_ANALYSIS_CACHE_PATH", raising=False)
+        else:
+            monkeypatch.setenv("HOSTED_ANALYSIS_CACHE_PATH", str(cache))
+        if failing:
+
+            def mutating_failure(rows, **_kwargs):
+                for row in rows:
+                    row["title"] = "mutated"
+                raise RuntimeError("unexpected cache failure")
+
+            monkeypatch.setattr(
+                hosted_cache, "analyze_rows_with_cache", mutating_failure
+            )
+        else:
+            monkeypatch.setattr(
+                hosted_cache, "analyze_rows_with_cache", real_cached_analysis
+            )
+        assert collect_main([], collector=collector_for(batch)) == 0
+        output = capsys.readouterr().out.splitlines()
+        return (
+            [line for line in output if line.startswith("HOSTED-JOB-IMPORT")],
+            counts(database),
+            _business_rows(database, HostedJob),
+            _business_rows(database, UserJobMatch),
+            _business_rows(database, HostedNotificationItem),
+        ), [line for line in output if "kind=cache" in line]
+
+    baseline, _ = run(full, cache=None)
+    assert baseline[1]["jobs"] == baseline[1]["items"] == 2
+
+    monkeypatch.setattr(hosted_cache, "copy", SimpleNamespace(deepcopy=forbidden))
+    run(first_only, cache=cache_path)  # warms one of the two postings
+    partial, partial_cache = run(full, cache=cache_path)
+    warm, warm_cache = run(full, cache=cache_path)
+    failed, failed_cache = run(full, cache=cache_path, failing=True)
+
+    assert " hits=1 misses=1 " in partial_cache[0]
+    assert " hits=2 misses=0 " in warm_cache[0]
+    assert "enabled=false reason=cache_failed" in failed_cache[0]
+    assert partial == baseline
+    assert warm == baseline
+    assert failed == baseline

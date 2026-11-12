@@ -62,6 +62,7 @@ _VERSION_DOMAIN = b"hosted-static-analysis-cache\x00"
 _VERSION_BYTES = 7
 
 Analyzer = Callable[..., list[dict]]
+RowsFactory = Callable[[], list[dict]]
 
 
 def hosted_analysis_cache_path() -> Path | None:
@@ -103,9 +104,21 @@ def _module_source(name: str) -> bytes:
 
 
 def build_hosted_analyzer(timing: HostedTiming | None = None) -> Analyzer:
-    """Return a ``replay_snapshot_jobs`` analyzer honoring the hosted cache."""
+    """Return a ``replay_snapshot_jobs`` analyzer honoring the hosted cache.
 
-    def analyze(rows: list[dict], *, today: date | None = None) -> list[dict]:
+    The cached path mutates its input (dedupe), so a part-way cache failure
+    must re-analyze pristine rows. ``replay_snapshot_jobs`` passes
+    ``fresh_rows``, which rebuilds them from the immutable replayed snapshot
+    only when that fallback runs, instead of holding a deep copy of every row
+    for the whole analysis. Callers without it keep the pristine-copy fallback.
+    """
+
+    def analyze(
+        rows: list[dict],
+        *,
+        today: date | None = None,
+        fresh_rows: RowsFactory | None = None,
+    ) -> list[dict]:
         path = hosted_analysis_cache_path()
         if path is None:
             return analyze_rows(rows, today=today)
@@ -117,12 +130,14 @@ def build_hosted_analyzer(timing: HostedTiming | None = None) -> Analyzer:
                 timing=timing,
                 reason="fingerprint_unavailable",
             )
-        try:
-            # Dedupe mutates its input, so keep a pristine copy for the
-            # uncached fallback should the cached path fail part-way.
-            pristine = copy.deepcopy(rows)
-        except Exception:  # noqa: BLE001
-            return _uncached(rows, today=today, timing=timing, reason="copy_failed")
+        if fresh_rows is None:
+            try:
+                # Dedupe mutates its input, so keep a pristine copy for the
+                # uncached fallback should the cached path fail part-way.
+                pristine = copy.deepcopy(rows)
+            except Exception:  # noqa: BLE001
+                return _uncached(rows, today=today, timing=timing, reason="copy_failed")
+            fresh_rows = _constant_rows(pristine)
         try:
             result = analyze_rows_with_cache(
                 rows,
@@ -131,17 +146,31 @@ def build_hosted_analyzer(timing: HostedTiming | None = None) -> Analyzer:
                 cache_version=version,
             )
         except Exception as exc:  # noqa: BLE001 - caching must never fail the import
-            return _uncached(
-                pristine,
-                today=today,
-                timing=timing,
-                reason="cache_failed",
-                error=exc,
-            )
-        _record(timing, stats=result.stats)
-        return result.jobs
+            error_type = type(exc).__name__
+        else:
+            _record(timing, stats=result.stats)
+            return result.jobs
+        # Release the partly mutated rows (the exception and its traceback are
+        # already gone) before the fallback analyzes freshly rebuilt rows.
+        del rows
+        return _uncached(
+            fresh_rows(),
+            today=today,
+            timing=timing,
+            reason="cache_failed",
+            error_type=error_type,
+        )
 
+    # Tells ``replay_snapshot_jobs`` this analyzer accepts ``fresh_rows``.
+    analyze.accepts_fresh_rows = True
     return analyze
+
+
+def _constant_rows(rows: list[dict]) -> RowsFactory:
+    def factory() -> list[dict]:
+        return rows
+
+    return factory
 
 
 def _uncached(
@@ -150,12 +179,12 @@ def _uncached(
     today: date | None,
     timing: HostedTiming | None,
     reason: str,
-    error: BaseException | None = None,
+    error_type: str | None = None,
 ) -> list[dict]:
     LOGGER.warning(
         "Hosted analysis cache unavailable (%s%s); using uncached analysis.",
         reason,
-        f": {type(error).__name__}" if error is not None else "",
+        f": {error_type}" if error_type is not None else "",
     )
     _record(timing, reason=reason)
     return analyze_rows(rows, today=today)

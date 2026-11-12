@@ -276,6 +276,12 @@
   leaving reusable benchmark scripts, tests, and fixtures trackable.
 - Keep rebuildable `analysis-cache.sqlite` transactionally independent from
   durable `seen.sqlite`; only the durable database belongs on `watcher-data`.
+- Hosted collection holds one full row copy at a time: release the collected
+  batch once its snapshot is saved, and let cached analysis rebuild fallback
+  rows from the replayed snapshot (`fresh_rows`) instead of deep-copying. Never
+  edit `STATIC_ANALYSIS_MODULES` for hosted memory or telemetry work; any byte
+  change there rewrites the whole persistent cache. `kind=memory` timing is
+  MiB-only and never fails a run.
 - BrassRing is anonymous-session only: bootstrap the official TGNewUI board
   page for cookies, request token, encrypted session value, and partner/site
   context; never hardcode transient values or add authentication. Force

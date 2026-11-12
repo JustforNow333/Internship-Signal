@@ -160,6 +160,10 @@ def _run(
         # path rather than handing unvalidated rows to the importer.
         with timing.stage("snapshot_save"):
             save_collection_snapshot(batch, snapshot)
+        # The import replays only the saved snapshot. Releasing the collected
+        # batch keeps a second full copy of every row out of memory during the
+        # analysis and import that follow.
+        del batch
         result = import_snapshot_into_hosted(
             snapshot,
             database_url=database_url,
