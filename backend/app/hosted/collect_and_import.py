@@ -39,6 +39,7 @@ from watcher.collection_snapshot import (
 )
 from watcher.config import DEFAULT_WATCHLIST_PATH, WatcherConfig, load_watchlist
 
+from . import memory_telemetry
 from .database import database_url_from_env
 from .import_snapshot import (
     BACKFILL_FLAG,
@@ -104,6 +105,10 @@ def main(
 
     args = build_parser().parse_args(argv)
     timing = HostedTiming()
+    try:
+        timing.use_memory_sampler(memory_telemetry.sample_memory)
+    except Exception:  # noqa: BLE001 - telemetry must never change the run
+        pass
     exit_code = 1
     try:
         exit_code = _run(args, collector=collector, timing=timing)
