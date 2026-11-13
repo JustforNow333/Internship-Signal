@@ -766,6 +766,44 @@ or any cache error logs one warning naming only a reason and exception type and
 runs the normal uncached analysis with identical results; it never fails the
 import. To roll back, unset the variable; deleting the file is optional.
 
+**Analysis-cache housekeeping (off by default).** Each code-version change
+orphans every existing cache row: lookups never read another version, and the
+30-day retention only removes those rows a month later.
+`HOSTED_ANALYSIS_CACHE_PRUNE` controls early pruning
+(`app.hosted.cache_housekeeping`), which runs once at the start of
+`collect_and_import`, before collection and long before the analysis opens the
+cache:
+
+- `off` (default; blank or unknown values also mean off, and unknown values
+  are reported as `reason=invalid_mode`): the file is never opened.
+- `report`: opens the file read-only and counts what `on` would delete.
+- `on`: deletes eligible rows.
+
+A row is eligible only if its `cache_version` is not the current code version
+and it was last accessed more than 48 hours ago, so rolling back to the
+previous deployment shortly after a deploy still finds that version warm.
+Current-version rows are never deleted or modified. Work is bounded per run:
+windows of 500 index entries walked once in `(last_accessed_at, rowid)`
+order; at most 25,000 deletions, 250,000 examined entries, and 60 seconds; a
+batch starts only with at least 160 MiB free (128 MiB reserve plus the 32 MiB
+journal cap); and a batch whose rollback journal exceeds 32 MiB is rolled back
+instead of committed. Each batch is its own `BEGIN IMMEDIATE` transaction:
+earlier batches stay committed, a failing batch rolls back alone, a held lock
+skips after one second, and the next run resumes. A missing file is never
+created, and a missing code version, an unexpected schema, a missing access
+index, corruption, or any error becomes a status and reason, never a failed
+run. Deleted rows return pages to SQLite's freelist for reuse by later cache
+writes; the file does not shrink (`auto_vacuum` is off).
+
+One `HOSTED-TIMING kind=housekeeping cache=analysis` line reports `mode`,
+`status` (`ok`, `partial`, `skipped`, `failed`), `reason`, `examined`,
+`eligible`, `deleted`, `batches`, `seconds`, `page_size`, `pages`,
+`freelist_before`, `freelist_after`, `reusable_mb`, `journal_peak_kb`, and
+`disk_free_mb`, plus a `cache_housekeeping` stage and memory line. It contains
+no paths, versions, or fingerprints. In `off` mode nothing is printed. To roll
+back, set the variable to `off` or unset it. Deleted rows are rebuilt by
+normal cold analysis if their version is ever deployed again.
+
 **Import audit.** After a committed import, both this command and the offline
 snapshot CLI print two bounded `HOSTED-AUDIT` lines (`app.hosted.import_audit`).
 `kind=summary` splits this run's new matches into new openings, the subset
@@ -1016,6 +1054,8 @@ runs the full suite on the new set before Railway deploys it.
 - `VITE_HOSTED_API_BASE_URL` (optional with a same-origin proxy)
 - `HOSTED_ANALYSIS_CACHE_PATH` (optional; unset or blank disables the hosted
   analysis cache, which is the default; see "Analysis cache" above)
+- `HOSTED_ANALYSIS_CACHE_PRUNE` (optional; `off` by default, `report`, or
+  `on`; see "Analysis-cache housekeeping" above)
 - `HOSTED_IDENTITY_SHADOW_ENABLED` (optional; off unless `1`, `true`, `yes`,
   or `on`; see "Identity and source-evidence shadow tracking" above)
 - `HOSTED_IDENTITY_RESOLUTION_ENABLED` (optional; off unless explicitly true,

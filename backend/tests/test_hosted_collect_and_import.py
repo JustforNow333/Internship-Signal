@@ -885,3 +885,99 @@ def test_single_copy_analysis_leaves_imports_matches_and_alerts_identical(
     assert partial == baseline
     assert warm == baseline
     assert failed == baseline
+
+
+def test_cache_housekeeping_modes_leave_imports_matches_and_alerts_identical(
+    database, watcher_config, watched_company, tmp_path, monkeypatch, capsys
+) -> None:
+    """Off, report, on, and failing pruning change nothing but obsolete rows."""
+
+    import sqlite3
+
+    from app.hosted import cache_housekeeping
+
+    batch = _two_posting_batch(watcher_config, watched_company.name)
+    cache_path = tmp_path / "volume" / "analysis-cache.sqlite"
+    real_prune = cache_housekeeping.run_cache_housekeeping
+    obsolete_version = 7_123_456_789
+
+    def plant_obsolete_rows() -> None:
+        # Copy every current entry under an obsolete version, last accessed
+        # ten days ago: past the 48-hour grace period but inside the deployed
+        # 30-day retention, as a deploy would leave behind.
+        from watcher.source_health import iso_utc
+
+        stale = iso_utc(datetime.now(UTC) - timedelta(days=10))
+        with sqlite3.connect(cache_path) as connection:
+            connection.execute(
+                "insert or ignore into analysis_cache select "
+                "'old-' || fingerprint, ?, artifact_json, created_at, ? "
+                "from analysis_cache where cache_version <> ?",
+                (obsolete_version, stale, obsolete_version),
+            )
+
+    def cache_versions() -> dict[int, int]:
+        with sqlite3.connect(cache_path) as connection:
+            return dict(
+                connection.execute(
+                    "select cache_version, count(*) from analysis_cache group by 1"
+                ).fetchall()
+            )
+
+    def run(mode, *, failing=False):
+        _truncate(database)
+        create_user(database, watched_company.id)
+        monkeypatch.setenv("HOSTED_ANALYSIS_CACHE_PATH", str(cache_path))
+        if mode is None:
+            monkeypatch.delenv(cache_housekeeping.MODE_ENV, raising=False)
+        else:
+            monkeypatch.setenv(cache_housekeeping.MODE_ENV, mode)
+        if failing:
+
+            def broken(*_args, **_kwargs):
+                raise sqlite3.OperationalError("database or disk is full")
+
+            monkeypatch.setattr(cache_housekeeping, "run_cache_housekeeping", broken)
+        else:
+            monkeypatch.setattr(cache_housekeeping, "run_cache_housekeeping", real_prune)
+        assert collect_main([], collector=collector_for(batch)) == 0
+        output = capsys.readouterr().out.splitlines()
+        return (
+            [line for line in output if line.startswith("HOSTED-JOB-IMPORT")],
+            counts(database),
+            _business_rows(database, HostedJob),
+            _business_rows(database, UserJobMatch),
+            _business_rows(database, HostedNotificationItem),
+        ), output
+
+    baseline, _ = run(None)  # cold: writes the current-version entries
+    assert baseline[1]["jobs"] == baseline[1]["items"] == 2
+    current_version = hosted_cache.hosted_static_cache_version()
+    plant_obsolete_rows()
+    assert cache_versions() == {current_version: 2, obsolete_version: 2}
+
+    off, off_out = run("off")
+    assert not [line for line in off_out if "housekeeping" in line]
+    assert cache_versions() == {current_version: 2, obsolete_version: 2}
+
+    report, report_out = run("report")
+    assert any(
+        " kind=housekeeping cache=analysis mode=report status=ok " in line
+        and " eligible=2 deleted=0 " in line
+        for line in report_out
+    )
+    assert cache_versions() == {current_version: 2, obsolete_version: 2}
+
+    failed, failed_out = run("on", failing=True)
+    assert any("status=failed reason=operationalerror" in line for line in failed_out)
+    assert cache_versions() == {current_version: 2, obsolete_version: 2}
+
+    pruned, pruned_out = run("on")
+    assert any(" mode=on status=ok " in line and " deleted=2 " in line for line in pruned_out)
+    assert cache_versions() == {current_version: 2}
+    # Current entries survive pruning, so the next run is fully warm.
+    warm, warm_out = run("on")
+    assert any(" kind=cache cache=analysis " in line and " hits=2 misses=0 " in line
+               for line in warm_out)
+
+    assert off == report == failed == pruned == warm == baseline

@@ -39,7 +39,7 @@ from watcher.collection_snapshot import (
 )
 from watcher.config import DEFAULT_WATCHLIST_PATH, WatcherConfig, load_watchlist
 
-from . import memory_telemetry
+from . import cache_housekeeping, memory_telemetry
 from .database import database_url_from_env
 from .import_snapshot import (
     BACKFILL_FLAG,
@@ -139,6 +139,14 @@ def _run(
             file=sys.stderr,
         )
         return 1
+
+    # Optional pruning of obsolete analysis-cache versions runs first: the
+    # process holds no rows yet and the cache is not opened again until the
+    # analysis. It is off by default and can never fail or alter the run.
+    try:
+        cache_housekeeping.run_for_collection(timing)
+    except Exception:  # noqa: BLE001 - defensive; the call never raises
+        pass
 
     # A private temporary directory, never a repository path, so a runtime
     # snapshot can never be committed and never outlives the run.

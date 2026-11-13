@@ -32,6 +32,7 @@ PREFIX = "HOSTED-TIMING"
 
 # Canonical emission order. Only recorded stages are emitted.
 STAGE_ORDER = (
+    "cache_housekeeping",
     "direct_collection",
     "github_collection",
     "collection",
@@ -85,6 +86,7 @@ class HostedTiming:
         self._concurrency: dict[str, object] | None = None
         self._families: list[str] = []
         self._analysis_cache: dict[str, object] | None = None
+        self._housekeeping: dict[str, object] | None = None
         self._memory_sampler: MemorySampler | None = None
         self._memory: dict[str, dict[str, int]] = {}
 
@@ -169,6 +171,14 @@ class HostedTiming:
         except Exception:  # noqa: BLE001
             self._analysis_cache = None
 
+    def record_cache_housekeeping(self, result: object) -> None:
+        """Capture one cache-housekeeping pass (counts and fixed tokens only)."""
+
+        try:
+            self._housekeeping = _housekeeping_fields(result)
+        except Exception:  # noqa: BLE001
+            self._housekeeping = None
+
     def lines(self, *, exit_code: int) -> list[str]:
         lines: list[str] = []
         try:
@@ -189,6 +199,13 @@ class HostedTiming:
                     f"{PREFIX} kind=cache cache=analysis "
                     + " ".join(
                         f"{key}={value}" for key, value in self._analysis_cache.items()
+                    )
+                )
+            if self._housekeeping is not None:
+                lines.append(
+                    f"{PREFIX} kind=housekeeping cache=analysis "
+                    + " ".join(
+                        f"{key}={value}" for key, value in self._housekeeping.items()
                     )
                 )
             for stage in (*STAGE_ORDER, "total"):
@@ -257,6 +274,34 @@ def _concurrency_fields(config: object, stats: object | None) -> dict[str, objec
         )
         fields["observed_workday"] = _count(getattr(metrics, "max_observed_workday", 0))
     return fields
+
+
+def _housekeeping_fields(result: object) -> dict[str, object]:
+    # Counts, page/byte totals, seconds, and fixed tokens: never the cache
+    # path, the code version, fingerprints, or job content.
+    def count(name: str) -> int:
+        value = getattr(result, name, 0)
+        return max(0, int(value or 0))
+
+    page_size = count("page_size")
+    disk_free = getattr(result, "disk_free_bytes", None)
+    return {
+        "mode": safe_token(getattr(result, "mode", "")),
+        "status": safe_token(getattr(result, "status", "")),
+        "reason": safe_token(getattr(result, "reason", "") or "none"),
+        "examined": count("examined"),
+        "eligible": count("eligible"),
+        "deleted": count("deleted"),
+        "batches": count("batches"),
+        "seconds": _seconds(getattr(result, "seconds", 0.0)),
+        "page_size": page_size,
+        "pages": count("page_count"),
+        "freelist_before": count("freelist_before"),
+        "freelist_after": count("freelist_after"),
+        "reusable_mb": f"{count('freelist_after') * page_size / 2**20:.1f}",
+        "journal_peak_kb": count("journal_peak_bytes") // 1024,
+        "disk_free_mb": "unknown" if disk_free is None else max(0, int(disk_free)) // 2**20,
+    }
 
 
 def _analysis_cache_fields(stats: object | None, *, reason: str) -> dict[str, object]:
