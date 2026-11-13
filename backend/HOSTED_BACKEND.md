@@ -742,7 +742,13 @@ titles, or user data, never enable the watcher's verbose INFO logging, and
 never change the exit status. When the analysis cache below is configured, one
 `kind=cache cache=analysis` line adds its rows, hits, misses, invalid entries,
 writes, hit rate, and lookup/static/scoring seconds, or `enabled=false` with a
-fixed `reason` when that run fell back to uncached analysis.
+fixed `reason` when that run fell back to uncached analysis. Before the final
+`stage=total` line, `kind=memory` lines report whole-MiB readings taken at the
+end of each timed stage and at the run total: process resident memory and its
+high-water mark (`rss_mb`, `hwm_mb` from `/proc/self/status`) and, where the
+container exposes them, cgroup `cgroup_current_mb`, `cgroup_peak_mb`,
+`cgroup_anon_mb`, and reclaimable page cache `cgroup_file_mb` (cgroup v2, with
+a v1 fallback). Unavailable readings are omitted; sampling never fails a run.
 
 **Analysis cache (off by default).** Setting `HOSTED_ANALYSIS_CACHE_PATH`, for
 example to `/data/analysis-cache.sqlite`, lets snapshot replay reuse the

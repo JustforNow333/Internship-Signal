@@ -7,6 +7,10 @@ companies. Every line carries only fixed stage names, low-cardinality ATS
 family names, counts, and seconds - never company names, URLs, titles, or user
 data.
 
+When a memory sampler is configured (the scheduled command uses
+``app.hosted.memory_telemetry``), each timed stage and the run total also
+report bounded ``kind=memory`` MiB readings.
+
 Telemetry is strictly best effort: recording or emitting it can never change
 collection, snapshot, import, matching, or notification behaviour, and can
 never fail or alter the exit status of the command.
@@ -17,9 +21,12 @@ from __future__ import annotations
 import re
 import sys
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from typing import TextIO
+
+# The only memory fields ever emitted, in emission order.
+from .memory_telemetry import MEMORY_FIELDS
 
 PREFIX = "HOSTED-TIMING"
 
@@ -39,6 +46,7 @@ STAGE_ORDER = (
 )
 # Bounds the family lines one run can print, whatever the configuration.
 MAX_FAMILY_LINES = 64
+MemorySampler = Callable[[], Mapping[str, object]]
 
 _SAFE_TOKEN_RE = re.compile(r"[^a-z0-9_]+")
 
@@ -77,6 +85,34 @@ class HostedTiming:
         self._concurrency: dict[str, object] | None = None
         self._families: list[str] = []
         self._analysis_cache: dict[str, object] | None = None
+        self._memory_sampler: MemorySampler | None = None
+        self._memory: dict[str, dict[str, int]] = {}
+
+    def use_memory_sampler(self, sampler: MemorySampler | None) -> None:
+        """Sample memory at the end of every timed stage and at emission."""
+
+        self._memory_sampler = sampler if callable(sampler) else None
+
+    def sample_memory(self, stage: str) -> None:
+        """Record one bounded memory reading for ``stage``. Never raises."""
+
+        sampler = self._memory_sampler
+        if sampler is None:
+            return
+        try:
+            reading = dict(sampler())
+            fields = {
+                name: int(reading[name])
+                for name in MEMORY_FIELDS
+                if name in reading
+                and isinstance(reading[name], int)
+                and not isinstance(reading[name], bool)
+                and reading[name] >= 0
+            }
+            if fields:
+                self._memory[safe_token(stage)] = fields
+        except Exception:  # noqa: BLE001 - telemetry must never raise
+            pass
 
     def _now(self) -> float | None:
         try:
@@ -104,6 +140,7 @@ class HostedTiming:
             ended = self._now()
             if started is not None and ended is not None:
                 self.record(stage, ended - started)
+            self.sample_memory(stage)
 
     def record_collection(self, config: object, stats: object | None) -> None:
         """Capture concurrency settings and in-memory collection aggregates."""
@@ -154,6 +191,15 @@ class HostedTiming:
                         f"{key}={value}" for key, value in self._analysis_cache.items()
                     )
                 )
+            for stage in (*STAGE_ORDER, "total"):
+                if stage in self._memory:
+                    lines.append(
+                        f"{PREFIX} kind=memory stage={stage} "
+                        + " ".join(
+                            f"{key}={value}"
+                            for key, value in self._memory[stage].items()
+                        )
+                    )
             ended = self._now()
             total = (
                 ended - self._started
@@ -169,6 +215,7 @@ class HostedTiming:
         return lines
 
     def emit(self, *, exit_code: int, stream: TextIO | None = None) -> None:
+        self.sample_memory("total")
         try:
             target = stream if stream is not None else sys.stdout
             for line in self.lines(exit_code=exit_code):
