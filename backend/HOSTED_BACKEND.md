@@ -766,6 +766,25 @@ or any cache error logs one warning naming only a reason and exception type and
 runs the normal uncached analysis with identical results; it never fails the
 import. To roll back, unset the variable; deleting the file is optional.
 
+**Chunked cache transactions.** SQLite's rollback journal holds a copy of every
+page a transaction changes until it commits. The deployed cache refreshes
+`last_accessed_at` for every hit in one transaction and upserts every new
+artifact in another, which needs roughly 4 KB of free volume space per row
+(about 514 MB for 130,000 hits). The hosted analyzer therefore passes
+`app.hosted.chunked_cache.ChunkedAnalysisCache` as the cache factory: it calls
+the same deployed lookup and store methods on consecutive chunks of
+`HOSTED_ANALYSIS_CACHE_CHUNK_ROWS` keys (default 10,000, about 40 MB of
+journal each), so no fingerprinted module or cache entry changes. Hits,
+fingerprints, and analyzed jobs are identical. If any lookup chunk fails, the
+whole lookup reports no hits and the run re-analyzes every row, exactly as a
+single failed transaction does; chunks that already committed only keep a
+newer `last_accessed_at`. Store chunks commit independently, and every
+committed row is a correct artifact under its own fingerprint. The
+`kind=cache` line adds `chunk_rows`, `lookup_chunks`, `store_chunks`, and
+`chunk_failure` (`none`, `lookup`, `store`). `0` or `off` restores the exact
+single-transaction call; an unparseable value uses the default and logs only
+`invalid_chunk_rows`.
+
 **Analysis-cache housekeeping (off by default).** Each code-version change
 orphans every existing cache row: lookups never read another version, and the
 30-day retention only removes those rows a month later.
@@ -1054,6 +1073,8 @@ runs the full suite on the new set before Railway deploys it.
 - `VITE_HOSTED_API_BASE_URL` (optional with a same-origin proxy)
 - `HOSTED_ANALYSIS_CACHE_PATH` (optional; unset or blank disables the hosted
   analysis cache, which is the default; see "Analysis cache" above)
+- `HOSTED_ANALYSIS_CACHE_CHUNK_ROWS` (optional; 10,000 by default, `0` or
+  `off` for one transaction; see "Chunked cache transactions" above)
 - `HOSTED_ANALYSIS_CACHE_PRUNE` (optional; `off` by default, `report`, or
   `on`; see "Analysis-cache housekeeping" above)
 - `HOSTED_IDENTITY_SHADOW_ENABLED` (optional; off unless `1`, `true`, `yes`,

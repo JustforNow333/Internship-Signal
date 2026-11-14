@@ -288,6 +288,12 @@
   past the 48-hour grace period, in bounded committed batches before
   collection. It never touches current-version rows, never raises, and never
   shrinks the file; compaction is a separate, unapproved change.
+- Hosted cache lookups and stores go through
+  `app.hosted.chunked_cache.ChunkedAnalysisCache` (the `cache_factory` of
+  `analyze_rows_with_cache`), which calls the deployed methods on chunks of
+  `HOSTED_ANALYSIS_CACHE_CHUNK_ROWS` keys (default 10,000; `0` = one
+  transaction) to bound the rollback journal. Any failed lookup chunk means no
+  hits, as before; never change fingerprinted modules for this.
 - BrassRing is anonymous-session only: bootstrap the official TGNewUI board
   page for cookies, request token, encrypted session value, and partner/site
   context; never hardcode transient values or add authentication. Force

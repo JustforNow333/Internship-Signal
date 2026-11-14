@@ -163,13 +163,26 @@ class HostedTiming:
         except Exception:  # noqa: BLE001
             self._families = []
 
-    def record_analysis_cache(self, stats: object | None, *, reason: str = "") -> None:
+    def record_analysis_cache(
+        self,
+        stats: object | None,
+        *,
+        reason: str = "",
+        chunking: object | None = None,
+    ) -> None:
         """Capture hosted analysis-cache counters, or why the cache was skipped."""
 
         try:
             self._analysis_cache = _analysis_cache_fields(stats, reason=reason)
         except Exception:  # noqa: BLE001
             self._analysis_cache = None
+            return
+        if stats is None or chunking is None:
+            return
+        try:
+            self._analysis_cache.update(_chunk_fields(chunking))
+        except Exception:  # noqa: BLE001 - telemetry must never raise
+            pass
 
     def record_cache_housekeeping(self, result: object) -> None:
         """Capture one cache-housekeeping pass (counts and fixed tokens only)."""
@@ -322,6 +335,17 @@ def _analysis_cache_fields(stats: object | None, *, reason: str) -> dict[str, ob
         "lookup_seconds": _seconds(getattr(stats, "lookup_seconds", 0.0)),
         "static_seconds": _seconds(getattr(stats, "static_analysis_seconds", 0.0)),
         "scoring_seconds": _seconds(getattr(stats, "scoring_seconds", 0.0)),
+    }
+
+
+def _chunk_fields(chunking: object) -> dict[str, object]:
+    # Counts and a fixed failure token only.
+    failure = getattr(chunking, "failure", "none")
+    return {
+        "chunk_rows": _count(getattr(chunking, "chunk_rows", 0)),
+        "lookup_chunks": _count(getattr(chunking, "lookup_chunks", 0)),
+        "store_chunks": _count(getattr(chunking, "store_chunks", 0)),
+        "chunk_failure": failure if failure in ("none", "lookup", "store") else "none",
     }
 
 
