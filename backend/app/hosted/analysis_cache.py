@@ -30,6 +30,7 @@ from pathlib import Path
 from backend.app.ingest import STATIC_ANALYSIS_ARTIFACT_SCHEMA_VERSION, analyze_rows
 from watcher.analysis_cache import STATIC_ANALYSIS_CACHE_VERSION, analyze_rows_with_cache
 
+from . import chunked_cache
 from .timing import HostedTiming
 
 LOGGER = logging.getLogger(__name__)
@@ -138,17 +139,33 @@ def build_hosted_analyzer(timing: HostedTiming | None = None) -> Analyzer:
             except Exception:  # noqa: BLE001
                 return _uncached(rows, today=today, timing=timing, reason="copy_failed")
             fresh_rows = _constant_rows(pristine)
+        # Bounded transactions keep each rollback journal to one chunk; a
+        # chunk size of 0 makes exactly the deployed single-transaction call.
+        chunk_rows, chunk_reason = chunked_cache.chunk_rows_setting()
+        if chunk_reason:
+            LOGGER.warning(
+                "Hosted analysis cache chunk setting ignored (%s); using %d rows.",
+                chunk_reason,
+                chunk_rows,
+            )
+        chunk_stats = chunked_cache.ChunkStats(chunk_rows=chunk_rows)
+        factory_kwargs = (
+            {"cache_factory": chunked_cache.chunked_cache_factory(chunk_rows, chunk_stats)}
+            if chunk_rows
+            else {}
+        )
         try:
             result = analyze_rows_with_cache(
                 rows,
                 db_path=path,
                 today=today,
                 cache_version=version,
+                **factory_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - caching must never fail the import
             error_type = type(exc).__name__
         else:
-            _record(timing, stats=result.stats)
+            _record(timing, stats=result.stats, chunking=chunk_stats)
             return result.jobs
         # Release the partly mutated rows (the exception and its traceback are
         # already gone) before the fallback analyzes freshly rebuilt rows.
@@ -195,10 +212,11 @@ def _record(
     *,
     stats: object | None = None,
     reason: str = "",
+    chunking: object | None = None,
 ) -> None:
     if timing is None:
         return
     try:
-        timing.record_analysis_cache(stats, reason=reason)
+        timing.record_analysis_cache(stats, reason=reason, chunking=chunking)
     except Exception:  # noqa: BLE001 - telemetry must never raise
         pass
