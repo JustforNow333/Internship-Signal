@@ -154,6 +154,10 @@ def lookup_keys() -> list[str]:
         ("-5", (10_000, "invalid_chunk_rows")),
         ("1e4", (10_000, "invalid_chunk_rows")),
         ("ten", (10_000, "invalid_chunk_rows")),
+        # str.isdigit() accepts these, but int() rejects or misreads them.
+        ("\u00b2", (10_000, "invalid_chunk_rows")),
+        ("\u0661\u0660", (10_000, "invalid_chunk_rows")),
+        pytest.param("9" * 5000, (10_000, "invalid_chunk_rows"), id="over-int-digit-limit"),
     ],
 )
 def test_chunk_setting_defaults_to_ten_thousand_and_zero_disables(monkeypatch, raw, expected):
@@ -362,6 +366,9 @@ def test_chunked_store_writes_exactly_what_the_deployed_store_writes(tmp_path, p
     assert written == expected == 25
     assert dump(chunked_path) == dump(deployed_path)
     assert stats.store_chunks == -(-len(artifacts) // chunk_rows)
+    # A chunk holding only invalid artifacts (chunk_rows=1 isolates both bad
+    # ones) is skipped exactly as deployed, and is not a store failure.
+    assert stats.failure == "none"
     assert integrity(chunked_path) == "ok"
     with ChunkedAnalysisCache(chunked_path, cache_version=VERSION, chunk_rows=chunk_rows) as cache:
         assert cache.store_many({}, accessed_at=LOOKUP) == 0
@@ -394,6 +401,43 @@ def test_a_failing_store_chunk_keeps_earlier_chunks_and_the_retry_completes(tmp_
     with AnalysisCache(reference, cache_version=VERSION) as cache:
         assert cache.store_many(artifacts, accessed_at=LOOKUP) == 30
     assert dump(path) == dump(reference)
+
+
+def test_a_failed_lookup_then_failed_restore_reports_both(tmp_path, pool):
+    # The disk-full path chunking exists for: a failed lookup makes the run
+    # re-store every row, and that re-store failing too must stay visible.
+    path = build(tmp_path / "cache.sqlite", pool)
+    stats = ChunkStats(chunk_rows=10)
+    keys = [fp(i) for i in range(40)]
+    with ChunkedAnalysisCache(
+        path, cache_version=VERSION, chunk_rows=10, stats=stats,
+        after_chunk=make_read_only_after("lookup", 1),
+    ) as cache:
+        assert cache.lookup_many(keys, accessed_at=LOOKUP).failed
+        cache._conn.execute("pragma query_only = 1")
+        assert cache.store_many(
+            {fp(i): pool[0] for i in range(40, 50)}, accessed_at=LOOKUP
+        ) == 0
+    assert stats.failure == "lookup_and_store"
+    assert integrity(path) == "ok"
+
+
+def test_chunk_failure_tokens_fit_the_timing_line():
+    for failure in ("none", "lookup", "store", "lookup_and_store"):
+        timing = HostedTiming()
+        stats = ChunkStats(chunk_rows=5, lookup_chunks=2, store_chunks=1, failure=failure)
+        timing.record_analysis_cache(object(), chunking=stats)
+        fields = cache_fields(timing)
+        assert fields["chunk_failure"] == failure
+
+
+def test_a_malformed_chunk_setting_never_fails_the_analyzer(tmp_path, monkeypatch):
+    path = tmp_path / "volume" / "cache.sqlite"
+    monkeypatch.setenv(hosted_cache.CACHE_PATH_ENV, str(path))
+    monkeypatch.setenv(chunked_cache.CHUNK_ENV, "\u00b2")
+    timing = HostedTiming()
+    assert analyze(timing) == uncached()
+    assert cache_fields(timing)["chunk_rows"] == "10000"
 
 
 # --- hosted analyzer end to end ---------------------------------------------

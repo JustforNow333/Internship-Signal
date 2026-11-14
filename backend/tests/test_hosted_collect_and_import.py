@@ -995,8 +995,9 @@ def test_chunked_cache_lookups_leave_imports_matches_and_alerts_identical(
     batch = _two_posting_batch(watcher_config, watched_company.name)
     cache_path = tmp_path / "volume" / "analysis-cache.sqlite"
     real_lookup = AnalysisCache.lookup_many
+    real_store = AnalysisCache.store_many
 
-    def run(chunk_rows, *, failing=False, cache=True):
+    def run(chunk_rows, *, failing=False, cache=True, failing_store_chunk=None):
         _truncate(database)
         create_user(database, watched_company.id)
         if cache:
@@ -1015,6 +1016,15 @@ def test_chunked_cache_lookups_leave_imports_matches_and_alerts_identical(
             monkeypatch.setattr(AnalysisCache, "lookup_many", fails)
         else:
             monkeypatch.setattr(AnalysisCache, "lookup_many", real_lookup)
+        store_calls = {"n": 0}
+
+        def store(self, artifacts, **kwargs):
+            store_calls["n"] += 1
+            if store_calls["n"] == failing_store_chunk:
+                return 0  # the deployed store's result for a failed transaction
+            return real_store(self, artifacts, **kwargs)
+
+        monkeypatch.setattr(AnalysisCache, "store_many", store)
         assert collect_main([], collector=collector_for(batch)) == 0
         output = capsys.readouterr().out.splitlines()
         cache_lines = [line for line in output if " kind=cache cache=analysis " in line]
@@ -1047,4 +1057,18 @@ def test_chunked_cache_lookups_leave_imports_matches_and_alerts_identical(
     assert any(" hits=2 misses=0 " in line and " chunk_failure=none" in line
                for line in recovered_lines), recovered_lines
 
+    # Partial store: the first chunk commits and the second fails. The run's
+    # own results come from memory, and the next run reuses the committed
+    # artifact and re-analyzes only the missing one.
+    cache_path.unlink()
+    partial, partial_lines = run("1", failing_store_chunk=2)
+    assert any(" hits=0 misses=2 invalid=0 writes=1 " in line and " store_chunks=2 "
+               "chunk_failure=store" in line for line in partial_lines), partial_lines
+    refill, refill_lines = run("1")
+    assert any(" hits=1 misses=1 invalid=0 writes=1 " in line and " chunk_failure=none" in line
+               for line in refill_lines), refill_lines
+    full, full_lines = run("1")
+    assert any(" hits=2 misses=0 " in line for line in full_lines), full_lines
+
     assert cold == warm == default_warm == unchunked == failed == recovered == baseline
+    assert partial == refill == full == baseline

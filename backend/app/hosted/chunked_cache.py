@@ -33,12 +33,14 @@ unparseable value uses the default and logs only a fixed reason.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from backend.app.ingest import static_analysis_artifact_is_valid
 from watcher.analysis_cache import (
     STATIC_ANALYSIS_CACHE_VERSION,
     AnalysisCache,
@@ -60,7 +62,7 @@ class ChunkStats:
     chunk_rows: int
     lookup_chunks: int = 0
     store_chunks: int = 0
-    failure: str = "none"  # none, lookup, store
+    failure: str = "none"  # none, lookup, store, lookup_and_store
 
 
 def chunk_rows_setting(value: str | None = None) -> tuple[int, str]:
@@ -72,8 +74,13 @@ def chunk_rows_setting(value: str | None = None) -> tuple[int, str]:
         return DEFAULT_CHUNK_ROWS, ""
     if text == "off":
         return 0, ""
-    if text.isdigit():
-        return int(text), ""
+    # ASCII digits only: str.isdigit() also accepts characters such as "²"
+    # that int() rejects, and int() rejects more than 4,300 digits.
+    if text.isascii() and text.isdigit():
+        try:
+            return int(text), ""
+        except ValueError:
+            pass
     return DEFAULT_CHUNK_ROWS, "invalid_chunk_rows"
 
 
@@ -137,10 +144,11 @@ class ChunkedAnalysisCache(AnalysisCache):
             self._count("store")
             chunk = dict(items[start:start + self.chunk_rows])
             stored = super().store_many(chunk, accessed_at=when)
-            if stored == 0:
-                # The deployed store returns 0 when its transaction failed
-                # (or every artifact was invalid). Later chunks still try:
-                # each is independent and bounded.
+            if stored == 0 and _has_storable(chunk):
+                # The deployed store returns 0 both when its transaction
+                # failed and when it had nothing valid to write; only the
+                # first is a failure. Later chunks still try: each is
+                # independent and bounded.
                 self._fail("store")
             written += stored
             self._notify("store", index)
@@ -154,12 +162,33 @@ class ChunkedAnalysisCache(AnalysisCache):
                 self.stats.store_chunks += 1
 
     def _fail(self, kind: str) -> None:
-        if self.stats is not None and self.stats.failure == "none":
-            self.stats.failure = kind
+        # A run looks up before it stores, so a failed lookup followed by a
+        # failed re-store (the disk-full path) reports both.
+        if self.stats is None or self.stats.failure in (kind, "lookup_and_store"):
+            return
+        self.stats.failure = kind if self.stats.failure == "none" else "lookup_and_store"
 
     def _notify(self, kind: str, index: int) -> None:
         if self._after_chunk is not None:
             self._after_chunk(kind, index, self)
+
+
+def _has_storable(chunk: Mapping[str, Mapping[str, object]]) -> bool:
+    """Whether the deployed ``store_many`` would have written any artifact.
+
+    Mirrors its validity and encoding checks, and runs only after a chunk
+    wrote nothing, so the normal path never serializes twice.
+    """
+
+    for artifact in chunk.values():
+        if not static_analysis_artifact_is_valid(artifact):
+            continue
+        try:
+            json.dumps(artifact, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError):
+            continue
+        return True
+    return False
 
 
 def chunked_cache_factory(

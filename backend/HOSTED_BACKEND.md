@@ -781,9 +781,11 @@ single failed transaction does; chunks that already committed only keep a
 newer `last_accessed_at`. Store chunks commit independently, and every
 committed row is a correct artifact under its own fingerprint. The
 `kind=cache` line adds `chunk_rows`, `lookup_chunks`, `store_chunks`, and
-`chunk_failure` (`none`, `lookup`, `store`). `0` or `off` restores the exact
-single-transaction call; an unparseable value uses the default and logs only
-`invalid_chunk_rows`.
+`chunk_failure` (`none`, `lookup`, `store`, or `lookup_and_store` when a
+failed lookup's full re-store also fails); a chunk that wrote nothing only
+because every artifact in it was invalid is not a failure. `0` or `off`
+restores the exact single-transaction call; any other value that is not plain
+ASCII digits uses the default and logs only `invalid_chunk_rows`.
 
 **Analysis-cache housekeeping (off by default).** Each code-version change
 orphans every existing cache row: lookups never read another version, and the

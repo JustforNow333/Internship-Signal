@@ -345,7 +345,7 @@ def _chunk_fields(chunking: object) -> dict[str, object]:
         "chunk_rows": _count(getattr(chunking, "chunk_rows", 0)),
         "lookup_chunks": _count(getattr(chunking, "lookup_chunks", 0)),
         "store_chunks": _count(getattr(chunking, "store_chunks", 0)),
-        "chunk_failure": failure if failure in ("none", "lookup", "store") else "none",
+        "chunk_failure": failure if failure in ("none", "lookup", "store", "lookup_and_store") else "none",
     }
 
 
