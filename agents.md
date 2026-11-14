@@ -587,6 +587,12 @@ git status --short --ignored
   edit `STATIC_ANALYSIS_MODULES` for hosted memory or telemetry work; any byte
   change there rewrites the whole persistent cache. `kind=memory` timing is
   MiB-only and never fails a run.
+- Hosted cache housekeeping (`app.hosted.cache_housekeeping`,
+  `HOSTED_ANALYSIS_CACHE_PRUNE=off|report|on`, default off) only deletes rows
+  whose `cache_version` differs from the current code version and that are
+  past the 48-hour grace period, in bounded committed batches before
+  collection. It never touches current-version rows, never raises, and never
+  shrinks the file; compaction is a separate, unapproved change.
 - BrassRing is anonymous-session only: bootstrap the official TGNewUI board
   page for cookies, request token, encrypted session value, and partner/site
   context; never hardcode transient values or add authentication. Force
