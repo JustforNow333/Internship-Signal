@@ -25,12 +25,21 @@ export class HostedApiError extends Error {
   }
 }
 
-async function loadAllMatches(call) {
+// Mirrors the backend's bounds in backend/app/hosted/schemas.py.
+const MATCH_PAGE_LIMIT = 50;
+const MATCH_PAGE_MAX_LIMIT = 100;
+const MATCH_MAX_OFFSET = 10_000;
+
+/**
+ * Follow `has_more` from the first page of one view to its last.
+ * `fetchPage` resolves `{ items, limit, offset, has_more }` with UI-ready items.
+ */
+async function loadAllPages(fetchPage, view) {
   const matches = [];
-  let page = await call("/api/matches");
+  let page = await fetchPage({ view });
 
   while (true) {
-    const items = normalizeMatchList(page);
+    const items = page?.items || [];
     matches.push(...items);
     if (page?.has_more !== true) return matches;
 
@@ -45,10 +54,13 @@ async function loadAllMatches(call) {
     ) {
       throw new HostedApiError("Match response pagination is invalid.", 502);
     }
-    page = await call(
-      `/api/matches${matchQuery({ limit, offset: offset + items.length })}`,
-    );
+    page = await fetchPage({ view, limit, offset: offset + items.length });
   }
+}
+
+function normalizeMatchPage(page) {
+  if (Array.isArray(page)) return { items: normalizeMatchList(page), has_more: false };
+  return { ...page, items: normalizeMatchList(page) };
 }
 
 function errorMessage(body, fallback) {
@@ -102,6 +114,8 @@ export function createHttpHostedApi({
 } = {}) {
   const call = (path, options) =>
     request(baseUrl.replace(/\/$/, ""), path, options);
+  const getMatchPage = (params) =>
+    call(`/api/matches${matchQuery(params)}`).then(normalizeMatchPage);
   return {
     mode: "live",
     listCompanies: () => call("/api/companies"),
@@ -155,7 +169,11 @@ export function createHttpHostedApi({
     getMatches: (params) =>
       params
         ? call(`/api/matches${matchQuery(params)}`).then(normalizeMatchList)
-        : loadAllMatches(call),
+        : loadAllPages(getMatchPage),
+    // One page of a view, keeping the pagination envelope.
+    getMatchPage,
+    // Every match in one view (active, saved, dismissed, ...), across pages.
+    getMatchView: (view) => loadAllPages(getMatchPage, view),
     getMatch: (id) =>
       call(`/api/matches/${encodeURIComponent(id)}`).then(normalizeMatch),
     updateMatch: (id, changes) =>
@@ -172,6 +190,16 @@ export function createHttpHostedApi({
 }
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
+// Demo records use the normalized UI shape; these mirror the backend's
+// view filters (backend/app/hosted/router.py::_match_view_filters).
+function mockViewIncludes(view, match) {
+  if (view === "saved") return Boolean(match.saved);
+  if (view === "dismissed") return Boolean(match.dismissed);
+  if (view === "historical") return Boolean(match.no_longer_matches_at);
+  if (view === "all") return true;
+  return !match.dismissed && !match.no_longer_matches_at;
+}
 
 export function createMockHostedApi({
   latency = 0,
@@ -203,6 +231,46 @@ export function createMockHostedApi({
       if (latency > 0) setTimeout(finish, latency);
       else queueMicrotask(finish);
     });
+
+  // Same view filters, ordering, bounds, and envelope as GET /api/matches.
+  // A `matches.<view>` failure targets one view; `matches` fails them all.
+  const mockMatchPage = ({
+    view = "active",
+    limit = MATCH_PAGE_LIMIT,
+    offset = 0,
+  } = {}) => {
+    if (!MATCH_VIEWS.includes(view))
+      return Promise.reject(
+        new HostedApiError("Unsupported match view.", 400),
+      );
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > MATCH_PAGE_MAX_LIMIT ||
+      !Number.isInteger(offset) ||
+      offset < 0 ||
+      offset > MATCH_MAX_OFFSET
+    )
+      return Promise.reject(
+        new HostedApiError("Match pagination is out of range.", 422),
+      );
+    const selected = state.matches
+      .filter((match) => mockViewIncludes(view, match))
+      .sort(
+        (a, b) =>
+          String(b.detected_at).localeCompare(String(a.detected_at)) ||
+          String(b.id).localeCompare(String(a.id)),
+      );
+    const items = selected.slice(offset, offset + limit);
+    const key = failures[`matches.${view}`] ? `matches.${view}` : "matches";
+    return respond(key, {
+      items,
+      limit,
+      offset,
+      total: selected.length,
+      has_more: offset + items.length < selected.length,
+    });
+  };
 
   return {
     mode: "mock",
@@ -250,26 +318,39 @@ export function createMockHostedApi({
       state.watchlist = clone(input.companies || input.watchlist || []);
       return respond("updateWatchlist", state.watchlist);
     },
-    getMatches: () => respond("matches", state.matches),
+    getMatches: (params) =>
+      params
+        ? mockMatchPage(params).then((page) => page.items)
+        : loadAllPages(mockMatchPage),
+    getMatchPage: (params) => mockMatchPage(params),
+    getMatchView: (view) => loadAllPages(mockMatchPage, view),
     getMatch: (id) =>
       respond(
         "match",
         state.matches.find((match) => match.id === id) || null,
       ),
+    // The change is applied to demo state only once the response succeeds, so
+    // a simulated failure leaves every view exactly as it was.
     updateMatch: (id, changes) => {
       const match = state.matches.find((item) => item.id === id);
-      if (match) {
-        const stamp = new Date().toISOString();
-        if (changes.saved != null) {
-          match.saved = changes.saved;
-          match.saved_at = changes.saved ? stamp : null;
-        }
-        if (changes.dismissed != null) {
-          match.dismissed = changes.dismissed;
-          match.dismissed_at = changes.dismissed ? stamp : null;
-        }
+      const stamp = new Date().toISOString();
+      const patch = {};
+      if (changes.saved != null) {
+        patch.saved = changes.saved;
+        patch.saved_at = changes.saved ? stamp : null;
       }
-      return respond("updateMatch", match);
+      if (changes.dismissed != null) {
+        patch.dismissed = changes.dismissed;
+        patch.dismissed_at = changes.dismissed ? stamp : null;
+      }
+      const result = respond("updateMatch", match ? { ...match, ...patch } : null);
+      result.then(
+        () => {
+          if (match) Object.assign(match, patch);
+        },
+        () => {},
+      );
+      return result;
     },
     requestCompany: (input) =>
       respond("requestCompany", {
