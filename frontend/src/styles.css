@@ -758,6 +758,18 @@ button.danger:hover { background: #9f3021; color: white; }
 .remote-tag { padding: 1px 6px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-faint); font-size: 9px; }
 .career-stage-tag { padding: 1px 7px; border: 1px solid var(--line-strong); border-radius: 99px; color: var(--ink-soft); font-size: 9.5px; font-weight: 650; white-space: nowrap; }
 .match-drawer .drawer-head .career-stage-tag { margin-left: 7px; }
+.match-status-tag { padding: 1px 7px; border: 1px solid var(--line-strong); border-radius: 99px; color: var(--ink-faint); font-size: 9.5px; font-weight: 650; white-space: nowrap; }
+.match-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* Results can be long: keep Undo and action errors in view below the sticky header. */
+.match-notice, .match-action-error { position: sticky; top: 83px; z-index: 15; box-shadow: var(--shadow); }
+.match-views { display: flex; gap: 6px; margin-bottom: 14px; }
+.match-views button { padding: 6px 14px; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--ink-soft); font-size: 12px; }
+.match-views button.active { border-color: var(--line-strong); color: var(--ink); font-weight: 650; }
+.match-deadline { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: -6px 0 10px; color: var(--ink-soft); font-size: 11.5px; }
+.drawer-deadline { margin: 6px 0 0; color: var(--ink-soft); font-size: 12.5px; }
+.drawer-deadline time { color: inherit; font-size: inherit; }
+.deadline-today { color: var(--sig-mid); font-weight: 650; }
+.deadline-passed { color: var(--sig-low); }
 .match-reason { display: flex; gap: 7px; color: var(--ink-soft); font-size: 11.5px; }
 .match-reason span { color: var(--sig-high); }
 .match-reason p { margin: 0; }
@@ -894,6 +906,7 @@ button.danger:hover { background: #9f3021; color: white; }
   .confirmation-card { padding: 38px 22px; }
   .confirmation-summary { flex-direction: column; }
   .app-header { position: static; }
+  .match-notice, .match-action-error { top: 10px; }
   .app-header-inner { min-height: 62px; }
   .app-nav { display: none; }
   .account-button { margin-left: auto; }

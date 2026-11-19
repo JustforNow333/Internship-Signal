@@ -1,20 +1,32 @@
 import { useEffect, useRef } from "react";
 import { careerLevelLabel } from "./matchModel.js";
 import { freshnessFor, relativeDetection } from "./ui.jsx";
+import { deadlineInfo } from "./utils.js";
 
 export default function MatchDrawer({ match, onClose }) {
   const closeRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const open = Boolean(match);
+  // Focus moves into the drawer once when it opens (not on every re-render)
+  // and returns to the element that opened it when it closes.
   useEffect(() => {
-    if (!match) return undefined;
+    if (!open) return undefined;
+    const opener = document.activeElement;
     closeRef.current?.focus();
-    const onKeyDown = (event) => event.key === "Escape" && onClose();
+    const onKeyDown = (event) =>
+      event.key === "Escape" && onCloseRef.current();
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [match, onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      if (opener?.isConnected && opener !== document.body) opener.focus();
+    };
+  }, [open]);
 
   if (!match) return null;
   const freshness = freshnessFor(match.detected_at);
   const stage = careerLevelLabel(match.career_level);
+  const deadline = deadlineInfo(match.deadline);
   return (
     <>
       <div className="drawer-scrim" onClick={onClose} />
@@ -45,6 +57,18 @@ export default function MatchDrawer({ match, onClose }) {
           <time dateTime={match.detected_at}>
             {relativeDetection(match.detected_at)}
           </time>
+          <p className={`drawer-deadline deadline-${deadline?.id || "none"}`}>
+            {deadline ? (
+              <>
+                Deadline{" "}
+                <time dateTime={deadline.dateTime}>{deadline.date}</time>
+                <span> · </span>
+                <span>{deadline.status}</span>
+              </>
+            ) : (
+              "No deadline listed"
+            )}
+          </p>
           {match.source_url && (
             <a
               className="button-link primary-link drawer-apply"

@@ -212,13 +212,25 @@ export default function App({ client = hostedApi, initialPath }) {
       const updated = await client.updateMatch(matchId, changes);
       setResource((current) => {
         if (!current.data) return current;
+        const known = current.data.matches.some(
+          (match) => match.id === matchId,
+        );
+        // A restored match may never have been in the loaded (active) list;
+        // add it when it meets the API's default filter, as a reload would.
+        const joinsActive =
+          !known &&
+          updated &&
+          !updated.dismissed &&
+          !updated.no_longer_matches_at;
         return {
           ...current,
           data: {
             ...current.data,
-            matches: current.data.matches.map((match) =>
-              match.id === matchId ? { ...match, ...updated } : match,
-            ),
+            matches: joinsActive
+              ? [...current.data.matches, updated]
+              : current.data.matches.map((match) =>
+                  match.id === matchId ? { ...match, ...updated } : match,
+                ),
           },
         };
       });
@@ -357,7 +369,11 @@ export default function App({ client = hostedApi, initialPath }) {
             />
           )}
           {appPath === "/app/matches" && (
-            <MatchesPage matches={data.matches} updateMatch={updateMatch} />
+            <MatchesPage
+              matches={data.matches}
+              updateMatch={updateMatch}
+              loadMatchView={client.getMatchView}
+            />
           )}
           {appPath === "/app/watchlist" && (
             <WatchlistPage

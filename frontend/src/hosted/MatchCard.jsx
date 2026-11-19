@@ -1,5 +1,6 @@
 import { careerLevelLabel } from "./matchModel.js";
 import { freshnessFor, relativeDetection } from "./ui.jsx";
+import { deadlineInfo } from "./utils.js";
 
 export default function MatchCard({
   match,
@@ -7,18 +8,30 @@ export default function MatchCard({
   saved = false,
   onToggleSaved,
   onDismiss,
+  onRestore,
+  busy = false,
   compact = false,
+  labels = [],
 }) {
   const freshness = freshnessFor(match.detected_at);
   const stage = careerLevelLabel(match.career_level);
+  const deadline = deadlineInfo(match.deadline);
   return (
-    <article className={`match-card ${compact ? "compact" : ""}`}>
+    <article
+      className={`match-card ${compact ? "compact" : ""}`}
+      data-match-id={match.id}
+    >
       <div className="match-card-main">
         <div className="match-topline">
           <span className={`freshness freshness-${freshness.id}`}>
             {freshness.label}
           </span>
           {stage && <span className="career-stage-tag">{stage}</span>}
+          {labels.map((label) => (
+            <span key={label} className="match-status-tag">
+              {label}
+            </span>
+          ))}
           <time dateTime={match.detected_at}>
             {relativeDetection(match.detected_at)}
           </time>
@@ -32,6 +45,13 @@ export default function MatchCard({
           {match.location}
           {match.remote && <span className="remote-tag">Remote eligible</span>}
         </p>
+        {deadline && (
+          <p className={`match-deadline deadline-${deadline.id}`}>
+            Deadline <time dateTime={deadline.dateTime}>{deadline.date}</time>
+            <span>·</span>
+            <span>{deadline.status}</span>
+          </p>
+        )}
         <div className="match-reason">
           <span aria-hidden="true">✓</span>
           <p>{match.why[0]}</p>
@@ -42,6 +62,7 @@ export default function MatchCard({
           <button
             className={`save-button ${saved ? "saved" : ""}`}
             aria-pressed={saved}
+            disabled={busy}
             onClick={() => onToggleSaved(match.id)}
           >
             {saved ? "★ Saved" : "☆ Save"}
@@ -50,9 +71,15 @@ export default function MatchCard({
         {onDismiss && (
           <button
             className="dismiss-button"
+            disabled={busy}
             onClick={() => onDismiss(match.id)}
           >
             Dismiss
+          </button>
+        )}
+        {onRestore && (
+          <button disabled={busy} onClick={() => onRestore(match.id)}>
+            Restore
           </button>
         )}
         <button onClick={() => onOpen(match)}>View details</button>
