@@ -271,7 +271,7 @@ def test_phase2_migration_creates_postgresql_tables_and_jsonb(
             "SELECT version_num FROM alembic_version"
         ).scalar_one()
     assert source_metadata_type == "jsonb"
-    assert revision == "20261025_0010"
+    assert revision == "20261119_0011"
     database.dispose()
 
 

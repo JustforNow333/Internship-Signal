@@ -203,6 +203,33 @@ Authenticated endpoints are `GET /api/matches`, `GET /api/matches/{id}`, and
 `PATCH /api/matches/{id}`. Every lookup is ownership-scoped; another user's ID
 returns the ordinary not-found response.
 
+Match responses include nullable `saved_at`, `dismissed_at`, and `applied_at`.
+`GET /api/matches` accepts `view` = `active` (default: current, undismissed),
+`saved`, `dismissed`, `historical`, `applied`, or `all`; any other view is HTTP
+400. `view=applied` lists every owned match with `applied_at` set, including
+dismissed, closed, and no-longer-matching ones. Every view uses the same
+`matched_at DESC, id DESC` order, `limit` (1–100, default 50) and `offset`
+(0–10,000) bounds, and `{items, limit, offset, total, has_more}` envelope.
+
+`PATCH /api/matches/{id}` accepts strict-boolean `saved`, `dismissed`, and
+`applied` (strings and numbers are rejected), plus optional `applied_at`. At
+least one of `saved`, `dismissed`, or `applied` is required. `applied=true`
+sets `applied_at` to server time when it is unset and keeps the original date
+on repeat marking; `applied=false` clears it. Undo restores the exact date by
+sending `applied=true` with the original `applied_at`, which must be a
+timezone-aware ISO 8601 datetime string no later than server now. It is
+accepted only with `applied=true` and cannot be `null`. Invalid payloads return
+HTTP 422 and change nothing. Alembic revision `20261119_0011` adds the nullable
+`applied_at` column and the partial index
+`ix_hosted_user_job_matches_user_applied`.
+
+Saved, Dismissed, and Applied are independent. Applied changes never touch
+`saved_at`, `dismissed_at`, `matched_at`, `last_matched_at`,
+`no_longer_matches_at`, or reasons, and save/dismiss never touch `applied_at`.
+An applied match that is still active and undismissed stays in the active view.
+Applied status never creates, cancels, or changes notifications and never
+affects matching or reconciliation, which preserve `applied_at`.
+
 ### Career levels
 
 Alembic revision `20260926_0007` adds `hosted_jobs.career_level` (NOT NULL,

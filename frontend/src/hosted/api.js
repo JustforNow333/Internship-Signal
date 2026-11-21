@@ -1,7 +1,14 @@
 import { makeHostedFixtures } from "./fixtures.js";
 import { normalizeMatch, normalizeMatchList } from "./matchModel.js";
 
-export const MATCH_VIEWS = ["active", "saved", "dismissed", "historical", "all"];
+export const MATCH_VIEWS = [
+  "active",
+  "saved",
+  "dismissed",
+  "historical",
+  "applied",
+  "all",
+];
 
 // Destructive requests carry this header. A cross-site page cannot add it
 // without a CORS preflight, which the API grants only to the hosted frontend.
@@ -197,8 +204,37 @@ function mockViewIncludes(view, match) {
   if (view === "saved") return Boolean(match.saved);
   if (view === "dismissed") return Boolean(match.dismissed);
   if (view === "historical") return Boolean(match.no_longer_matches_at);
+  if (view === "applied") return Boolean(match.applied_at);
   if (view === "all") return true;
   return !match.dismissed && !match.no_longer_matches_at;
+}
+
+// ISO 8601 date-time carrying an explicit UTC offset, like the backend's
+// MatchUpdate.applied_at validator (backend/app/hosted/schemas.py).
+const AWARE_ISO_DATETIME =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/i;
+
+// Mirrors MatchUpdate + the router's future-date check: applied is a strict
+// boolean; applied_at is only allowed (and never null) with applied=true, must
+// be timezone-aware, and may not be later than now. Returns an error message.
+function mockAppliedError(changes, now) {
+  const hasApplied = Object.prototype.hasOwnProperty.call(changes, "applied");
+  const hasAppliedAt = Object.prototype.hasOwnProperty.call(
+    changes,
+    "applied_at",
+  );
+  if (hasApplied && typeof changes.applied !== "boolean")
+    return "applied must be a boolean.";
+  if (!hasAppliedAt) return null;
+  if (changes.applied !== true)
+    return "applied_at is only accepted with applied=true.";
+  const value = changes.applied_at;
+  if (typeof value !== "string" || !AWARE_ISO_DATETIME.test(value))
+    return "applied_at must be an ISO 8601 datetime with a UTC offset.";
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return "applied_at must be an ISO 8601 datetime.";
+  if (time > now) return "applied_at cannot be in the future.";
+  return null;
 }
 
 export function createMockHostedApi({
@@ -333,7 +369,11 @@ export function createMockHostedApi({
     // a simulated failure leaves every view exactly as it was.
     updateMatch: (id, changes) => {
       const match = state.matches.find((item) => item.id === id);
-      const stamp = new Date().toISOString();
+      const now = Date.now();
+      const appliedError = mockAppliedError(changes, now);
+      if (appliedError)
+        return Promise.reject(new HostedApiError(appliedError, 422));
+      const stamp = new Date(now).toISOString();
       const patch = {};
       if (changes.saved != null) {
         patch.saved = changes.saved;
@@ -342,6 +382,14 @@ export function createMockHostedApi({
       if (changes.dismissed != null) {
         patch.dismissed = changes.dismissed;
         patch.dismissed_at = changes.dismissed ? stamp : null;
+      }
+      // Applied is independent of save/dismiss. Repeat marking keeps the
+      // original date; a supplied applied_at (Undo) is kept as the exact string.
+      if (changes.applied != null) {
+        patch.applied = changes.applied;
+        if (!changes.applied) patch.applied_at = null;
+        else if (changes.applied_at != null) patch.applied_at = changes.applied_at;
+        else patch.applied_at = match?.applied_at || stamp;
       }
       const result = respond("updateMatch", match ? { ...match, ...patch } : null);
       result.then(

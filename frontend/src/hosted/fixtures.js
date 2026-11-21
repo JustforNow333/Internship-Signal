@@ -280,8 +280,10 @@ export function makeHostedFixtures() {
   ].map((match) => ({
     saved: false,
     dismissed: false,
+    applied: false,
     saved_at: null,
     dismissed_at: null,
+    applied_at: null,
     no_longer_matches_at: null,
     is_open: true,
     ...match,

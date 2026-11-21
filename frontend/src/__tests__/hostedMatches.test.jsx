@@ -459,7 +459,7 @@ describe("hosted match view pagination (demo client)", () => {
   it("rejects unsupported views and out-of-range pagination like the API", async () => {
     const api = createMockHostedApi();
 
-    await expect(api.getMatchView("applied")).rejects.toMatchObject({
+    await expect(api.getMatchView("archived")).rejects.toMatchObject({
       status: 400,
     });
     await expect(api.getMatchPage({ limit: 0 })).rejects.toMatchObject({

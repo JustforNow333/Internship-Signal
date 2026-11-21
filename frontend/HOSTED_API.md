@@ -39,9 +39,25 @@ Company objects expose only `id`, `name`, optional `aliases`, `coverage`, and
 evidence) `delayed`. ATS tokens, Workday configuration, source URLs, health
 details, notes, and alumni data are never part of this response.
 
-Phase 1 intentionally has no job matching endpoint. In live mode the adapter
-returns an empty matches collection so account, preference, and watchlist pages
-remain usable. Mock mode retains match fixtures for UI regression tests.
+Match endpoints (`GET /api/matches`, `GET /api/matches/{id}`,
+`PATCH /api/matches/{id}`) require authentication and are ownership-scoped:
+another user's match is HTTP 404. Match objects include nullable `saved_at`,
+`dismissed_at`, and `applied_at`. `GET /api/matches` accepts `view` =
+`active` (default), `saved`, `dismissed`, `historical`, `applied`, or `all`
+(otherwise HTTP 400), with `limit`/`offset` paging, `matched_at DESC` order, and
+an `{items, limit, offset, total, has_more}` envelope; `getMatchView(view)`
+loads every page. `view=applied` returns every applied match, including
+dismissed, closed, and no-longer-matching ones.
+
+`PATCH` accepts strict-boolean `saved`, `dismissed`, and `applied`, with at
+least one present. `applied=true` stamps server time once and keeps the
+original date on repeat; `applied=false` clears it. Undo after unmarking sends
+`applied=true` with the original `applied_at` string, which must be a
+timezone-aware ISO 8601 datetime no later than server now. It cannot be `null`
+and is accepted only with `applied=true`. Invalid payloads are HTTP 422 and
+change nothing. Saved, Dismissed, and Applied are independent, and Applied
+never affects notifications or matching. Mock mode implements the same views,
+validation, and Applied semantics on demo fixtures.
 
 `DELETE /api/me` permanently deletes the signed-in account. The adapter's
 `deleteAccount({password})` sends the current password and the

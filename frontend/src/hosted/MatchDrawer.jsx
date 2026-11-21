@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { careerLevelLabel } from "./matchModel.js";
 import { freshnessFor, relativeDetection } from "./ui.jsx";
-import { deadlineInfo } from "./utils.js";
+import { appliedDateInfo, deadlineInfo } from "./utils.js";
 
 export default function MatchDrawer({ match, onClose }) {
   const closeRef = useRef(null);
@@ -27,6 +27,7 @@ export default function MatchDrawer({ match, onClose }) {
   const freshness = freshnessFor(match.detected_at);
   const stage = careerLevelLabel(match.career_level);
   const deadline = deadlineInfo(match.deadline);
+  const applied = appliedDateInfo(match.applied_at);
   return (
     <>
       <div className="drawer-scrim" onClick={onClose} />
@@ -67,6 +68,15 @@ export default function MatchDrawer({ match, onClose }) {
               </>
             ) : (
               "No deadline listed"
+            )}
+          </p>
+          <p className={`drawer-applied ${applied ? "applied" : ""}`}>
+            {applied ? (
+              <time dateTime={applied.dateTime}>
+                {`Applied ${applied.date}`}
+              </time>
+            ) : (
+              "Not marked applied"
             )}
           </p>
           {match.source_url && (
