@@ -745,7 +745,7 @@ button.danger:hover { background: #9f3021; color: white; }
 .inbox-body > small { margin-top: 8px; font-size: 8.5px; }
 .match-card { display: grid; grid-template-columns: 1fr auto; gap: 20px; margin-bottom: 10px; padding: 18px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--paper-raised); box-shadow: var(--shadow); transition: border-color .12s, transform .12s; }
 .match-card:hover { border-color: #a8c7bc; transform: translateY(-1px); }
-.match-topline { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.match-topline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; margin-bottom: 6px; }
 .match-topline time, .match-drawer time { color: var(--ink-faint); font-size: 10.5px; }
 .freshness { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 99px; font-size: 9.5px; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
 .freshness-just { background: var(--sig-high-wash); color: var(--sig-high); }
@@ -777,6 +777,10 @@ button.danger:hover { background: #9f3021; color: white; }
 .match-actions button, .match-actions .button-link { padding: 7px 10px; font-size: 11.5px; white-space: nowrap; }
 .save-button { border-color: transparent; background: transparent; }
 .save-button.saved { color: var(--sig-mid); }
+.applied-button.applied { border-color: var(--sig-mid); color: var(--sig-mid); }
+.match-applied-tag { padding: 1px 7px; border: 1px solid var(--sig-mid); border-radius: 99px; color: var(--sig-mid); font-size: 9.5px; font-weight: 650; white-space: nowrap; }
+.drawer-applied { margin: 4px 0 0; color: var(--ink-soft); font-size: 12.5px; }
+.drawer-applied.applied, .drawer-applied time { color: var(--sig-mid); font-size: inherit; }
 .dismiss-button { border-color: transparent; background: transparent; color: var(--ink-faint); }
 .match-drawer .drawer-head { padding: 24px 25px; }
 .match-drawer .drawer-head h2 { margin-top: 10px; padding-right: 25px; font-size: 27px; }

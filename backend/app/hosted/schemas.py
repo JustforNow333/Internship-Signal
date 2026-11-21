@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -249,7 +249,7 @@ class CompanyRequestResponse(BaseModel):
     created_at: datetime
 
 
-MATCH_VIEWS = ("active", "saved", "dismissed", "historical", "all")
+MATCH_VIEWS = ("active", "saved", "dismissed", "historical", "applied", "all")
 MATCH_PAGE_LIMIT = 50
 MATCH_PAGE_MAX_LIMIT = 100
 MATCH_MAX_OFFSET = 10_000
@@ -281,6 +281,7 @@ class MatchResponse(BaseModel):
     no_longer_matches_at: datetime | None
     saved_at: datetime | None
     dismissed_at: datetime | None
+    applied_at: datetime | None
 
 
 class MatchListResponse(BaseModel):
@@ -292,16 +293,40 @@ class MatchListResponse(BaseModel):
 
 
 class MatchUpdate(BaseModel):
-    """Only user-owned save/dismiss state may be changed by a client."""
+    """Only user-owned save/dismiss/applied state may be changed by a client."""
 
     model_config = ConfigDict(extra="forbid")
 
-    # StrictBool keeps "yes"/1 from being coerced into a save or dismiss.
+    # StrictBool keeps "yes"/1 from being coerced into a save, dismiss or apply.
     saved: StrictBool | None = None
     dismissed: StrictBool | None = None
+    applied: StrictBool | None = None
+    # Only with applied=true (Undo restores the original date). The router
+    # rejects values later than server now, which this model cannot know.
+    applied_at: datetime | None = None
+
+    @field_validator("applied_at", mode="before")
+    @classmethod
+    def applied_at_is_aware_iso_text(cls, value: object) -> datetime:
+        # Pydantic's lax datetime parsing accepts epoch numbers and naive or
+        # date-only text; require an explicit, timezone-aware ISO datetime.
+        if not isinstance(value, str):
+            raise ValueError("applied_at must be an ISO 8601 datetime string.")
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            raise ValueError("applied_at must be an ISO 8601 datetime.") from None
+        if parsed.utcoffset() is None:
+            raise ValueError("applied_at must include a UTC offset.")
+        try:
+            return parsed.astimezone(UTC)
+        except OverflowError:
+            raise ValueError("applied_at is out of range.") from None
 
     @model_validator(mode="after")
     def at_least_one_change(self) -> MatchUpdate:
-        if self.saved is None and self.dismissed is None:
-            raise ValueError("Provide saved or dismissed.")
+        if self.saved is None and self.dismissed is None and self.applied is None:
+            raise ValueError("Provide saved, dismissed or applied.")
+        if "applied_at" in self.model_fields_set and self.applied is not True:
+            raise ValueError("applied_at is only accepted with applied=true.")
         return self

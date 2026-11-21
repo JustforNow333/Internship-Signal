@@ -1094,7 +1094,9 @@ def test_existing_accounts_get_no_historical_email_without_a_new_watch(
 
 
 def _row_snapshot(database: HostedDatabase) -> dict[str, list[str]]:
-    removed = "ARRAY['kind', 'source_catch_up_id']"
+    # applied_at (20261119_0011) is absent below that revision; callers check
+    # it is NULL at head with _assert_no_applied_matches.
+    removed = "ARRAY['kind', 'source_catch_up_id', 'applied_at']"
     with database.engine.connect() as connection:
         return {
             table: list(
@@ -1116,6 +1118,16 @@ def _row_snapshot(database: HostedDatabase) -> dict[str, list[str]]:
         }
 
 
+def _assert_no_applied_matches(database: HostedDatabase) -> None:
+    with database.engine.connect() as connection:
+        assert connection.scalar(
+            text(
+                "SELECT count(*) FROM hosted_user_job_matches "
+                "WHERE applied_at IS NOT NULL"
+            )
+        ) == 0
+
+
 def test_migration_keeps_existing_notifications_and_queues_nothing(
     hosted, catch_up_postgres_url
 ) -> None:
@@ -1132,6 +1144,7 @@ def test_migration_keeps_existing_notifications_and_queues_nothing(
         import_final_jobs(hosted, [final_job(1, posted=hosted.clock().date())], "a")
         assert len(run_worker(hosted)) == 1
         populated = _row_snapshot(database)
+        _assert_no_applied_matches(database)
         database.engine.dispose()
 
         command.downgrade(alembic, "20261011_0008")
@@ -1143,6 +1156,7 @@ def test_migration_keeps_existing_notifications_and_queues_nothing(
         command.upgrade(alembic, "head")
         command.check(alembic)
         assert _row_snapshot(database) == populated
+        _assert_no_applied_matches(database)
         with database.engine.connect() as connection:
             assert connection.execute(
                 text("SELECT DISTINCT kind FROM hosted_notification_batches")
@@ -1177,7 +1191,7 @@ def test_migration_keeps_existing_notifications_and_queues_nothing(
         with database.engine.connect() as connection:
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20261025_0010"
+            ) == "20261119_0011"
     finally:
         database.engine.dispose()
         command.upgrade(alembic, "head")

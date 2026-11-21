@@ -1,12 +1,13 @@
 import { careerLevelLabel } from "./matchModel.js";
 import { freshnessFor, relativeDetection } from "./ui.jsx";
-import { deadlineInfo } from "./utils.js";
+import { appliedDateInfo, deadlineInfo } from "./utils.js";
 
 export default function MatchCard({
   match,
   onOpen,
   saved = false,
   onToggleSaved,
+  onToggleApplied,
   onDismiss,
   onRestore,
   busy = false,
@@ -16,6 +17,7 @@ export default function MatchCard({
   const freshness = freshnessFor(match.detected_at);
   const stage = careerLevelLabel(match.career_level);
   const deadline = deadlineInfo(match.deadline);
+  const applied = appliedDateInfo(match.applied_at);
   return (
     <article
       className={`match-card ${compact ? "compact" : ""}`}
@@ -32,6 +34,11 @@ export default function MatchCard({
               {label}
             </span>
           ))}
+          {applied && (
+            <time className="match-applied-tag" dateTime={applied.dateTime}>
+              {`Applied ${applied.date}`}
+            </time>
+          )}
           <time dateTime={match.detected_at}>
             {relativeDetection(match.detected_at)}
           </time>
@@ -66,6 +73,16 @@ export default function MatchCard({
             onClick={() => onToggleSaved(match.id)}
           >
             {saved ? "★ Saved" : "☆ Save"}
+          </button>
+        )}
+        {onToggleApplied && (
+          <button
+            className={`applied-button ${applied ? "applied" : ""}`}
+            aria-pressed={Boolean(applied)}
+            disabled={busy}
+            onClick={() => onToggleApplied(match.id)}
+          >
+            {applied ? "Applied" : "Mark applied"}
           </button>
         )}
         {onDismiss && (

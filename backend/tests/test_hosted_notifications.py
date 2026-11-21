@@ -1668,6 +1668,8 @@ _IDENTITY_JOB_COLUMNS = (
 )
 # Added by 20261022_0009; absent from the pre-identity schema as well.
 _CATCH_UP_COLUMNS = ("kind", "source_catch_up_id")
+# Added by 20261119_0011; checked to be NULL by _assert_no_applied_matches.
+_APPLIED_COLUMNS = ("applied_at",)
 _EXISTING_TABLES = (
     "hosted_users",
     "hosted_user_preferences",
@@ -1688,7 +1690,12 @@ def _existing_rows(database: HostedDatabase) -> dict[str, list[str]]:
     removed = (
         "ARRAY["
         + ", ".join(
-            f"'{name}'" for name in (*_IDENTITY_JOB_COLUMNS, *_CATCH_UP_COLUMNS)
+            f"'{name}'"
+            for name in (
+                *_IDENTITY_JOB_COLUMNS,
+                *_CATCH_UP_COLUMNS,
+                *_APPLIED_COLUMNS,
+            )
         )
         + "]"
     )
@@ -1704,6 +1711,16 @@ def _existing_rows(database: HostedDatabase) -> dict[str, list[str]]:
             )
             for table in _EXISTING_TABLES
         }
+
+
+def _assert_no_applied_matches(database: HostedDatabase) -> None:
+    with database.engine.connect() as connection:
+        assert connection.scalar(
+            text(
+                "SELECT count(*) FROM hosted_user_job_matches "
+                "WHERE applied_at IS NOT NULL"
+            )
+        ) == 0
 
 
 def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
@@ -1740,6 +1757,7 @@ def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
         )
         assert second.counters.jobs_updated == 2
         populated_at_head = _existing_rows(database)
+        _assert_no_applied_matches(database)
 
         command.downgrade(alembic, _PRE_IDENTITY_REVISION)
         with database.engine.connect() as connection:
@@ -1755,6 +1773,7 @@ def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
 
         command.upgrade(alembic, "head")
         assert _existing_rows(database) == before
+        _assert_no_applied_matches(database)
         with database.engine.connect() as connection:
             new_values = connection.execute(
                 text(
@@ -1790,10 +1809,12 @@ def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
             ) == 0
 
         populated = _existing_rows(database)
+        _assert_no_applied_matches(database)
         command.downgrade(alembic, _PRE_IDENTITY_REVISION)
         assert _existing_rows(database) == populated
         command.upgrade(alembic, "head")
         assert _existing_rows(database) == populated
+        _assert_no_applied_matches(database)
     finally:
         command.upgrade(alembic, "head")
         database.dispose()

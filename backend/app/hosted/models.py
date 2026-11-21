@@ -374,6 +374,12 @@ class UserJobMatch(TimestampMixin, Base):
             postgresql_where=text("dismissed_at IS NOT NULL"),
         ),
         Index(
+            "ix_hosted_user_job_matches_user_applied",
+            "user_id",
+            "applied_at",
+            postgresql_where=text("applied_at IS NOT NULL"),
+        ),
+        Index(
             "ix_hosted_user_job_matches_user_historical",
             "user_id",
             "no_longer_matches_at",
@@ -407,6 +413,8 @@ class UserJobMatch(TimestampMixin, Base):
     )
     saved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Independent of saved/dismissed and never set or cleared by matching.
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class HostedJobImportRun(TimestampMixin, Base):

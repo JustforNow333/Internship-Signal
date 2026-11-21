@@ -83,6 +83,23 @@ export function deadlineInfo(value, { now = new Date(), timeZone } = {}) {
   };
 }
 
+/**
+ * The calendar date (in the viewer's time zone, or `timeZone`) of an
+ * applied_at timestamp, or null when it is missing or unparseable.
+ */
+export function appliedDateInfo(value, { timeZone } = {}) {
+  if (typeof value !== "string" || !value) return null;
+  const instant = new Date(value);
+  if (!Number.isFinite(instant.getTime())) return null;
+  const date = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  }).format(instant);
+  return { date, dateTime: value };
+}
+
 export function newestFirst(items) {
   return [...items].sort(
     (left, right) => new Date(right.detected_at) - new Date(left.detected_at),

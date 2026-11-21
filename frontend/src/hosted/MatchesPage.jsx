@@ -36,12 +36,20 @@ const VIEWS = [
     emptyTitle: "No dismissed matches",
     emptyHint: "Matches you dismiss are kept here.",
   },
+  {
+    id: "applied",
+    label: "Applied",
+    emptyTitle: "No applied matches yet",
+    emptyHint:
+      "Matches you mark applied stay here, even after a posting closes, stops matching, or is dismissed.",
+  },
 ];
 
 // Whether a match still belongs in a loaded view after a change.
 function belongsInView(view, match) {
   if (view === "saved") return Boolean(match.saved);
   if (view === "dismissed") return Boolean(match.dismissed);
+  if (view === "applied") return Boolean(match.applied_at);
   return true;
 }
 
@@ -60,7 +68,8 @@ function eligibilityLabels(match, view) {
   const labels = [];
   if (match.is_open === false) labels.push("Closed");
   if (match.no_longer_matches_at) labels.push("No longer matches");
-  if (view === "saved" && match.dismissed) labels.push("Dismissed");
+  if ((view === "saved" || view === "applied") && match.dismissed)
+    labels.push("Dismissed");
   return labels;
 }
 
@@ -266,6 +275,27 @@ export default function MatchesPage({ matches, updateMatch, loadMatchView }) {
       );
     return applyChange(id, { saved: !saved });
   };
+  // Applied is independent of Saved and Dismissed. Unmarking from Applied
+  // removes the card; its Undo sends back the exact original applied_at.
+  const toggleApplied = (id) => {
+    const match = available.find((item) => item.id === id);
+    const appliedAt = match?.applied_at || null;
+    if (view === "applied" && appliedAt)
+      return runCardAction(
+        id,
+        { applied: false },
+        {
+          notice: (updated) => ({
+            kind: "unapplied",
+            id,
+            title: updated.title,
+            appliedAt,
+          }),
+          focus: { undo: true, cards: neighbours(id) },
+        },
+      );
+    return applyChange(id, { applied: !appliedAt });
+  };
   const dismissMatch = (id) => {
     setSelectedId(null);
     return runCardAction(
@@ -298,7 +328,11 @@ export default function MatchesPage({ matches, updateMatch, loadMatchView }) {
   const undoNotice = async () => {
     const current = notice;
     const changes =
-      current.kind === "unsaved" ? { saved: true } : { dismissed: false };
+      current.kind === "unsaved"
+        ? { saved: true }
+        : current.kind === "unapplied"
+          ? { applied: true, applied_at: current.appliedAt }
+          : { dismissed: false };
     const startView = viewRef.current;
     const source = document.activeElement;
     const updated = await applyChange(current.id, changes);
@@ -470,7 +504,9 @@ export default function MatchesPage({ matches, updateMatch, loadMatchView }) {
               ? `Dismissed “${notice.title}”.`
               : notice.kind === "unsaved"
                 ? `Removed “${notice.title}” from Saved.`
-                : notice.stillMatches
+                : notice.kind === "unapplied"
+                  ? `Removed “${notice.title}” from Applied.`
+                  : notice.stillMatches
                   ? `Restored “${notice.title}” to Active.`
                   : `Restored “${notice.title}”. It no longer matches your preferences, so it isn’t shown in Active.`}
           </span>
@@ -506,6 +542,7 @@ export default function MatchesPage({ matches, updateMatch, loadMatchView }) {
               onOpen={(item) => setSelectedId(item.id)}
               saved={Boolean(match.saved)}
               onToggleSaved={toggleSaved}
+              onToggleApplied={toggleApplied}
               onDismiss={view === "active" ? dismissMatch : undefined}
               onRestore={view === "dismissed" ? restoreMatch : undefined}
               busy={pending.has(match.id)}

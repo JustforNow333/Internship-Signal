@@ -704,6 +704,7 @@ def _match_response(match: UserJobMatch, job: HostedJob) -> MatchResponse:
         no_longer_matches_at=match.no_longer_matches_at,
         saved_at=match.saved_at,
         dismissed_at=match.dismissed_at,
+        applied_at=match.applied_at,
     )
 
 
@@ -714,6 +715,9 @@ def _match_view_filters(view: str):
         return (UserJobMatch.dismissed_at.is_not(None),)
     if view == "historical":
         return (UserJobMatch.no_longer_matches_at.is_not(None),)
+    if view == "applied":
+        # Every applied match the caller owns, whatever its other states.
+        return (UserJobMatch.applied_at.is_not(None),)
     if view == "all":
         return ()
     # The default view is the user's current, undismissed matches.
@@ -790,12 +794,26 @@ def update_match(
 ) -> MatchResponse:
     match, job = _owned_match(db, identity.user.id, match_id)
     now = services.clock()
-    # Save and dismiss are independent states: the current frontend exposes a
-    # save toggle only, so dismissing never silently clears a save.
+    # Validate before changing anything so a rejected request writes nothing.
+    if payload.applied_at is not None and payload.applied_at > now:
+        raise HTTPException(
+            status_code=422, detail="applied_at cannot be in the future."
+        )
+    # Save, dismiss and applied are independent states: the current frontend
+    # exposes a save toggle only, so dismissing never silently clears a save.
     if payload.saved is not None:
         match.saved_at = now if payload.saved else None
     if payload.dismissed is not None:
         match.dismissed_at = now if payload.dismissed else None
+    if payload.applied is not None:
+        if not payload.applied:
+            match.applied_at = None
+        elif payload.applied_at is not None:
+            # Undo restores the original date the client kept.
+            match.applied_at = payload.applied_at
+        elif match.applied_at is None:
+            # Repeat marking keeps the original applied date.
+            match.applied_at = now
     match.updated_at = now
     db.commit()
     return _match_response(match, job)

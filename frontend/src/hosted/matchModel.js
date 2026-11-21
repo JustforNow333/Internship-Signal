@@ -64,8 +64,10 @@ export function normalizeMatch(record) {
     no_longer_matches_at: record.no_longer_matches_at || null,
     saved_at: record.saved_at || null,
     dismissed_at: record.dismissed_at || null,
+    applied_at: record.applied_at || null,
     saved: Boolean(record.saved_at),
     dismissed: Boolean(record.dismissed_at),
+    applied: Boolean(record.applied_at),
     source_url: record.application_url || "",
   };
   const why = (record.match_reasons || [])
