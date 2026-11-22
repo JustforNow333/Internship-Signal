@@ -69,6 +69,12 @@ posting labels such as `Posted Yesterday` are retained as an unknown
 jobs are skipped with bounded reason codes, while a malformed final-job
 collection fails the import.
 
+The mapper also keeps the existing classifier's `student_eligibility` verdict
+from each final job as a bounded `hosted_jobs.student_eligibility` object (see
+[Education eligibility](#education-eligibility)). It is part of the mapped
+business values, so a re-import that changes the verdict updates it through the
+ordinary change detection; job identity, lifecycle, and dedupe are unchanged.
+
 Structural final-job failures remain a broad `invalid_final_jobs` CLI error.
 Operator failure records append only an allowlisted structural subreason and
 never posting data or source identifiers.
@@ -262,6 +268,75 @@ The frontend does not expose career stages yet. User reconciliation prefilters
 candidate jobs in SQL by watched company, selected career levels, selected
 roles, and open status before the pure matcher applies location and season, and
 it loads posting text only when a United States location preference needs it.
+
+### Education eligibility
+
+Alembic revision `20261121_0012` adds `hosted_user_preferences.education_level`
+and `class_standing` (NOT NULL, server default `not_specified`, checked against
+the allowed ids) and nullable JSON `hosted_jobs.student_eligibility`. Existing
+accounts read as `not_specified` and keep their match results.
+
+Preferences: `education_level` is `not_specified`, `undergraduate`, `masters`,
+or `doctoral`; `class_standing` is `not_specified`, `first_year`, `sophomore`,
+`junior`, or `senior`. Both are self-reported only and never inferred from
+email, school, graduation dates, or any other signal. Every preferences
+response includes both. On `PUT /api/preferences` both are optional: an
+omitted field keeps the stored value, so older clients never erase it, except
+that when the resulting level is not `undergraduate` and `class_standing` is
+omitted, the stored standing becomes `not_specified`. Wrong types, `null`,
+unknown ids, or an explicit standing other than `not_specified` with a
+non-undergraduate level (including a standing-only update against a stored
+non-undergraduate level) are HTTP 422 and change nothing. Changing either
+value reconciles the user like the other matching preferences.
+
+Import: the mapper stores `{exclusion_reason, degree_level, evidence_source,
+evidence}` (strings or `null`; control characters replaced by spaces; `evidence` at most
+300 characters) when the final job's `student_eligibility` is a valid mapping
+with a recognized or `null` reason, and NULL otherwise. The classifier reads a
+bare `MS` in phrases such as `MS SQL Server` or `MS Office` as a Master's
+requirement. Only when the stored verdict is `graduate_only`, the hosted mapper
+rewrites `MS` before SQL, Server, Office, Excel, Azure, Teams, Dynamics,
+Windows, Access, Exchange, SharePoint, Outlook, or 365 to `Microsoft` in a copy
+of the title, requirements, and description and re-runs the existing
+classifier on that copy; a genuine Master's requirement in the same posting
+still yields `graduate_only`. The shared classifier itself is unchanged, so the
+watcher keeps its own behavior.
+
+Matching applies education only to jobs whose `career_level` is `internship`,
+after the season check, and adds no reason codes. Using the classifier's
+`exclusion_reason`:
+
+| Education level | Excluded reasons |
+| --- | --- |
+| `not_specified` | none |
+| `undergraduate` | `phd_only`, `graduate_only`; also `freshman_only` when standing is `sophomore`, `junior`, or `senior` |
+| `masters` | `phd_only` |
+| `doctoral` | none |
+
+Undergraduates with `first_year` or `not_specified` standing keep
+`freshman_only` postings. `returning_intern_only` never excludes, because
+FindSooner has no employment-history profile to compare it with. A NULL,
+malformed, or unknown verdict is unknown and always permissive, and preferred,
+mixed, negated, and ambiguous evidence is already eligible in the classifier.
+The classifier still reports some mixed postings as restricted ("Master's or
+PhD" and "MS/PhD" as `phd_only`, "BS, MS" as `graduate_only`), so a
+`phd_only` or `graduate_only` verdict never excludes a level that its stored
+`evidence` names (bachelor's/undergraduate terms for `undergraduate`, master's
+terms such as MS, MBA or MFE for `masters`). Other career levels are never filtered by education. Reconciliation only loads
+the column; it adds no query scans.
+
+Losing education eligibility behaves like any other lost match: the row is
+kept, only `no_longer_matches_at` is stamped, and `saved_at`, `dismissed_at`,
+`applied_at`, `matched_at`, and reasons are untouched; regaining eligibility
+reactivates the same row. The active view drops ineligible rows, while saved,
+dismissed, applied, and historical views keep their documented behavior.
+Notification guarantees are unchanged: preference reconciliation never
+enqueues, and a re-import that only adds or changes a verdict, or repeats the
+same postings, creates no items; genuinely new eligible openings still notify
+once.
+
+No backfill command is provided. The next ordinary import repopulates every
+posting it observes; rows it does not touch keep NULL and stay permissive.
 
 ### Career-stage shadow backfill
 

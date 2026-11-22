@@ -25,6 +25,26 @@ export const CAREER_LEVEL_OPTIONS = [
 
 export const DEFAULT_CAREER_LEVELS = ["internship"];
 
+// IDs match the backend's hosted education preferences exactly. They are only
+// ever chosen by the user; nothing is inferred from other profile data.
+export const EDUCATION_LEVEL_OPTIONS = [
+  { id: "not_specified", label: "Not specified" },
+  { id: "undergraduate", label: "Undergraduate" },
+  { id: "masters", label: "Master's" },
+  { id: "doctoral", label: "Doctoral/PhD" },
+];
+
+// Class standing applies only to the undergraduate education level.
+export const CLASS_STANDING_OPTIONS = [
+  { id: "not_specified", label: "Not specified" },
+  { id: "first_year", label: "First-year" },
+  { id: "sophomore", label: "Sophomore" },
+  { id: "junior", label: "Junior" },
+  { id: "senior", label: "Senior" },
+];
+
+export const EDUCATION_NOT_SPECIFIED = "not_specified";
+
 export const ROLE_OPTIONS = [
   {
     id: "software_engineering",

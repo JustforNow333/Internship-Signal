@@ -206,7 +206,7 @@ def test_downgrade_refuses_while_jobs_or_preferences_use_the_new_role(
         with database.engine.connect() as connection:
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20261119_0011"
+            ) == "20261121_0012"
     finally:
         database.engine.dispose()
         command.upgrade(alembic, "head")

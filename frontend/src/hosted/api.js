@@ -347,6 +347,13 @@ export function createMockHostedApi({
     getPreferences: () => respond("preferences", state.preferences),
     updatePreferences: (input) => {
       state.preferences = { ...state.preferences, ...clone(input) };
+      // Like the backend: omitted education fields keep their stored values,
+      // but class standing never survives a non-undergraduate level.
+      if (
+        state.preferences.education_level &&
+        state.preferences.education_level !== "undergraduate"
+      )
+        state.preferences.class_standing = "not_specified";
       return respond("updatePreferences", state.preferences);
     },
     getWatchlist: () => respond("watchlist", state.watchlist),

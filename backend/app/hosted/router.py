@@ -73,6 +73,7 @@ from .schemas import (
     TokenRequest,
     UserResponse,
     WatchlistUpdate,
+    education_standing_conflict,
 )
 from .security import (
     hash_password,
@@ -502,9 +503,40 @@ def _preferences_response(preferences: UserPreference) -> PreferencesResponse:
         alert_frequency=preferences.alert_frequency,
         globally_paused=preferences.globally_paused,
         include_recent_openings=preferences.include_recent_openings,
+        education_level=preferences.education_level,
+        class_standing=preferences.class_standing,
         created_at=preferences.created_at,
         updated_at=preferences.updated_at,
     )
+
+
+def _merged_education(
+    preferences: UserPreference, payload: PreferencesUpdate
+) -> tuple[str, str]:
+    """Resolve the education profile a PUT would store, or raise 422.
+
+    Pure: reads the stored row and the payload and mutates neither, so a
+    rejected request leaves every preference untouched.
+    """
+
+    provided = payload.model_fields_set
+    level = (
+        payload.education_level
+        if "education_level" in provided
+        else preferences.education_level
+    )
+    if "class_standing" in provided:
+        standing = payload.class_standing
+        if education_standing_conflict(level, standing):
+            raise HTTPException(
+                status_code=422,
+                detail="class_standing requires education_level undergraduate.",
+            )
+    elif education_standing_conflict(level, preferences.class_standing):
+        standing = "not_specified"
+    else:
+        standing = preferences.class_standing
+    return level, standing
 
 
 @router.get("/preferences", response_model=PreferencesResponse)
@@ -532,6 +564,10 @@ def put_preferences(
         raise HTTPException(
             status_code=500, detail="Account preferences are unavailable."
         )
+    # Merge the education profile before mutating anything: an omitted field
+    # keeps the stored value so older clients never erase it, except that an
+    # omitted standing resets when the resulting level is not undergraduate.
+    education_level, class_standing = _merged_education(preferences, payload)
     # Alert frequency and the global pause govern Phase 3 delivery only, so
     # they deliberately do not trigger match reconciliation.
     previous_frequency = preferences.alert_frequency
@@ -541,6 +577,8 @@ def put_preferences(
         or list(preferences.preferred_locations) != list(payload.preferred_locations)
         or preferences.include_remote != payload.include_remote
         or preferences.internship_season != payload.internship_season
+        or preferences.education_level != education_level
+        or preferences.class_standing != class_standing
     )
     # Turning the catch-up on admits already-collected recent openings, so it
     # needs a pass. Turning it off never removes matches that were admitted
@@ -556,6 +594,8 @@ def put_preferences(
     preferences.alert_frequency = payload.alert_frequency
     preferences.globally_paused = payload.globally_paused
     preferences.include_recent_openings = payload.include_recent_openings
+    preferences.education_level = education_level
+    preferences.class_standing = class_standing
     now = services.clock()
     preferences.updated_at = now
     if matching_changed or recent_openings_enabled:

@@ -36,6 +36,20 @@ DEFAULT_CAREER_LEVELS_JSON = "[" + ", ".join(
 ) + "]"
 
 
+# Optional self-reported education profile (revision 20261121_0012). Stored
+# ids only; API validation and matching rules live with their owners.
+EDUCATION_LEVELS = ("not_specified", "undergraduate", "masters", "doctoral")
+CLASS_STANDINGS = ("not_specified", "first_year", "sophomore", "junior", "senior")
+EDUCATION_NOT_SPECIFIED = "not_specified"
+_EDUCATION_LEVEL_SQL = ", ".join(f"'{value}'" for value in EDUCATION_LEVELS)
+_CLASS_STANDING_SQL = ", ".join(f"'{value}'" for value in CLASS_STANDINGS)
+
+# A job's stored classifier verdict; Python None persists as SQL NULL (unknown).
+NullableJsonObject = JSON(none_as_null=True).with_variant(
+    JSONB(none_as_null=True), "postgresql"
+)
+
+
 CLOSURE_REASONS = ("source_closed", "deadline_passed", "absent_from_source", "superseded")
 CLOSURE_REASON_SQL_VALUES = ", ".join(f"'{value}'" for value in CLOSURE_REASONS)
 
@@ -152,6 +166,14 @@ class UserPreference(TimestampMixin, Base):
             "alert_frequency IN ('as_detected', 'three_hour', 'daily', 'paused')",
             name="alert_frequency",
         ),
+        CheckConstraint(
+            f"education_level IN ({_EDUCATION_LEVEL_SQL})",
+            name="education_level",
+        ),
+        CheckConstraint(
+            f"class_standing IN ({_CLASS_STANDING_SQL})",
+            name="class_standing",
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -185,6 +207,20 @@ class UserPreference(TimestampMixin, Base):
     # *new* match row. It is not a matching rule and never expires a match.
     include_recent_openings: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
+    )
+    # Self-reported only, never inferred. Rows created before revision
+    # 20261121_0012 read as not_specified, which excludes nothing.
+    education_level: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=EDUCATION_NOT_SPECIFIED,
+        server_default=EDUCATION_NOT_SPECIFIED,
+    )
+    class_standing: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=EDUCATION_NOT_SPECIFIED,
+        server_default=EDUCATION_NOT_SPECIFIED,
     )
 
     user: Mapped[User] = relationship(back_populates="preferences")
@@ -315,6 +351,12 @@ class HostedJob(TimestampMixin, Base):
     )
     source_metadata: Mapped[dict[str, object]] = mapped_column(
         JsonObject, nullable=False, default=dict
+    )
+    # Bounded copy of the classifier's student_eligibility verdict (revision
+    # 20261121_0012). NULL means unknown and is always permissive; rows
+    # imported before the revision stay NULL until re-imported.
+    student_eligibility: Mapped[dict[str, object] | None] = mapped_column(
+        NullableJsonObject, nullable=True
     )
     # Identity and lifecycle evidence (revision 20261011_0008), not yet read or
     # written. Deferred, with server-side defaults only, so no current SELECT or

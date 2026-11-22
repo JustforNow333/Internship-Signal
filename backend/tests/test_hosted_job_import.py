@@ -271,7 +271,7 @@ def test_phase2_migration_creates_postgresql_tables_and_jsonb(
             "SELECT version_num FROM alembic_version"
         ).scalar_one()
     assert source_metadata_type == "jsonb"
-    assert revision == "20261119_0011"
+    assert revision == "20261121_0012"
     database.dispose()
 
 
@@ -2044,3 +2044,211 @@ def test_source_observation_constraints(import_service) -> None:
             text("DELETE FROM hosted_job_import_runs WHERE id = :id"), {"id": run_id}
         )
         assert connection.scalar(text("SELECT count(*) FROM hosted_source_observations")) == 0
+
+
+# Stage 3 (AC4): the classifier verdict final_jobs already carries is persisted
+# on hosted_jobs.student_eligibility through the ordinary import path. These
+# read the column with SQL so a JSON ``null`` cannot pass for SQL NULL.
+
+PHD_ONLY_VERDICT = {
+    "eligible": False,
+    "exclusion_reason": "phd_only",
+    "degree_level": "phd",
+    "evidence_source": "requirements",
+    "evidence": "Currently enrolled in a PhD program",
+}
+FRESHMAN_ONLY_VERDICT = {
+    "eligible": False,
+    "exclusion_reason": "freshman_only",
+    "degree_level": None,
+    "evidence_source": "title",
+    "evidence": "Freshman",
+}
+ELIGIBLE_VERDICT = {
+    "eligible": True,
+    "exclusion_reason": None,
+    "degree_level": None,
+    "evidence_source": None,
+    "evidence": None,
+}
+
+
+def _stored_eligibility(database: HostedDatabase) -> list[tuple]:
+    with database.engine.connect() as connection:
+        return [
+            tuple(row)
+            for row in connection.execute(
+                text(
+                    "SELECT id, student_eligibility, student_eligibility IS NULL, "
+                    "jsonb_typeof(student_eligibility) FROM hosted_jobs"
+                )
+            )
+        ]
+
+
+def _lifecycle(database: HostedDatabase) -> tuple:
+    with database.session_factory() as db:
+        stored = db.scalar(select(HostedJob))
+        return (
+            stored.id,
+            stored.watcher_job_id,
+            stored.first_seen_at,
+            stored.created_at,
+            stored.last_seen_at,
+            stored.updated_at,
+            stored.is_open,
+            stored.closed_at,
+        )
+
+
+def _counters(result) -> tuple[int, int, int, int]:
+    counters = result.counters
+    return (
+        counters.jobs_inserted,
+        counters.jobs_updated,
+        counters.jobs_unchanged,
+        counters.jobs_skipped,
+    )
+
+
+def test_import_persists_bounded_student_eligibility(import_service) -> None:
+    service, database, clock = import_service
+    verdict = {
+        **PHD_ONLY_VERDICT,
+        "evidence": "PhD " + "x" * 400,
+        "trace": {"ignored": True},
+    }
+    result = import_jobs(service, [final_job(student_eligibility=verdict)], "a")
+
+    assert result.outcome == "imported"
+    assert _counters(result) == (1, 0, 0, 0)
+    [(_, stored, is_null, json_type)] = _stored_eligibility(database)
+    assert (is_null, json_type) == (False, "object")
+    assert stored == {
+        "exclusion_reason": "phd_only",
+        "degree_level": "phd",
+        "evidence_source": "requirements",
+        "evidence": ("PhD " + "x" * 400)[:300],
+    }
+    assert len(stored["evidence"]) == 300
+
+
+def test_eligibility_only_change_updates_the_same_job(import_service) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job(student_eligibility=PHD_ONLY_VERDICT)], "a")
+    (job_id, watcher_id, first_seen, created, _, _, is_open, closed) = _lifecycle(
+        database
+    )
+
+    clock.advance(hours=1)
+    result = import_jobs(
+        service, [final_job(student_eligibility=FRESHMAN_ONLY_VERDICT)], "b"
+    )
+
+    assert _counters(result) == (0, 1, 0, 0)
+    assert _lifecycle(database) == (
+        job_id,
+        watcher_id,
+        first_seen,
+        created,
+        clock(),
+        clock(),
+        is_open,
+        closed,
+    )
+    assert is_open is True and closed is None
+    [(stored_id, stored, is_null, _)] = _stored_eligibility(database)
+    assert stored_id == job_id and is_null is False
+    assert stored == {
+        "exclusion_reason": "freshman_only",
+        "degree_level": None,
+        "evidence_source": "title",
+        "evidence": "Freshman",
+    }
+
+    # An eligible verdict is a real value too, distinct from unknown (NULL).
+    clock.advance(hours=1)
+    result = import_jobs(
+        service, [final_job(student_eligibility=ELIGIBLE_VERDICT)], "c"
+    )
+    assert _counters(result) == (0, 1, 0, 0)
+    [(stored_id, stored, is_null, json_type)] = _stored_eligibility(database)
+    assert (stored_id, is_null, json_type) == (job_id, False, "object")
+    assert stored == {
+        "exclusion_reason": None,
+        "degree_level": None,
+        "evidence_source": None,
+        "evidence": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        pytest.param({}, id="missing"),
+        pytest.param({"student_eligibility": None}, id="none"),
+        pytest.param({"student_eligibility": "phd_only"}, id="not-a-mapping"),
+        pytest.param(
+            {"student_eligibility": {**PHD_ONLY_VERDICT, "exclusion_reason": "x"}},
+            id="unknown-reason",
+        ),
+        pytest.param(
+            {"student_eligibility": {**PHD_ONLY_VERDICT, "eligible": True}},
+            id="contradictory",
+        ),
+        pytest.param(
+            {"student_eligibility": {**PHD_ONLY_VERDICT, "evidence": 7}},
+            id="wrong-type",
+        ),
+    ],
+)
+def test_missing_or_malformed_eligibility_becomes_sql_null(
+    import_service, replacement
+) -> None:
+    service, database, clock = import_service
+    import_jobs(service, [final_job(student_eligibility=PHD_ONLY_VERDICT)], "a")
+    job_id, *_ = _lifecycle(database)
+
+    clock.advance(hours=1)
+    result = import_jobs(service, [final_job(**replacement)], "b")
+
+    assert _counters(result) == (0, 1, 0, 0)
+    [(stored_id, stored, is_null, json_type)] = _stored_eligibility(database)
+    assert (stored_id, stored, is_null, json_type) == (job_id, None, True, None)
+
+    # Staying unknown is not a change.
+    clock.advance(hours=1)
+    repeated = import_jobs(service, [final_job(**replacement)], "c")
+    assert _counters(repeated) == (0, 0, 1, 0)
+    assert _stored_eligibility(database)[0][2] is True
+
+
+def test_repeated_imports_with_eligibility_are_unchanged(import_service) -> None:
+    service, database, clock = import_service
+    job = final_job(student_eligibility=PHD_ONLY_VERDICT)
+    import_jobs(service, [job], "a")
+    before = _stored_eligibility(database)
+    (job_id, _, first_seen, created, _, _, _, _) = _lifecycle(database)
+
+    for fingerprint in "bc":
+        clock.advance(hours=1)
+        result = import_jobs(
+            service, [final_job(student_eligibility=PHD_ONLY_VERDICT)], fingerprint
+        )
+        assert result.outcome == "imported"
+        assert _counters(result) == (0, 0, 1, 0)
+
+    assert _stored_eligibility(database) == before
+    after = _lifecycle(database)
+    assert (after[0], after[2], after[3]) == (job_id, first_seen, created)
+    assert after[4] == clock()
+
+    # Replaying an already-imported source changes nothing at all.
+    replay = import_jobs(service, [job], "c")
+    assert replay.outcome == "already_imported"
+    assert _lifecycle(database) == after
+    assert _stored_eligibility(database) == before
+    with database.session_factory() as db:
+        assert len(db.scalars(select(HostedJob)).all()) == 1
+        runs = db.scalars(select(HostedJobImportRun)).all()
+    assert len(runs) == 3

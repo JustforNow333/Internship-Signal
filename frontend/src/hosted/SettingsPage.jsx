@@ -12,12 +12,18 @@ import {
   SuccessNotice,
   Toggle,
 } from "./ui.jsx";
-import { careerLevelsOrDefault, toggleSelection } from "./utils.js";
+import EducationFields from "./EducationFields.jsx";
+import {
+  careerLevelsOrDefault,
+  educationOrDefault,
+  toggleSelection,
+} from "./utils.js";
 
 function withCareerLevels(preferences) {
   return {
     ...preferences,
     career_levels: careerLevelsOrDefault(preferences.career_levels),
+    ...educationOrDefault(preferences),
   };
 }
 
@@ -152,6 +158,16 @@ export default function SettingsPage({
             {!form.career_levels.length && (
               <p className="scan-note">Select at least one career stage.</p>
             )}
+          </section>
+          <section className="settings-card">
+            <div className="settings-card-heading">
+              <span aria-hidden="true">✎</span>
+              <div>
+                <h2>Education</h2>
+                <p>Skip internships that clearly require a different degree.</p>
+              </div>
+            </div>
+            <EducationFields value={form} onChange={setForm} />
           </section>
           <section className="settings-card">
             <div className="settings-card-heading">

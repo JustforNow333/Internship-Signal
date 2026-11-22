@@ -4,10 +4,12 @@ import {
   ALERT_FREQUENCIES,
   CAREER_LEVEL_OPTIONS,
   DEFAULT_CAREER_LEVELS,
+  EDUCATION_NOT_SPECIFIED,
   LOCATION_OPTIONS,
   ROLE_OPTIONS,
   SEASON_OPTIONS,
 } from "./constants.js";
+import EducationFields from "./EducationFields.jsx";
 import { alertFrequencyLabel, Brand, Toggle } from "./ui.jsx";
 import { toggleSelection } from "./utils.js";
 
@@ -289,6 +291,11 @@ function AlertsStep({
           </small>
         )}
       </label>
+      <fieldset className="preference-section">
+        <legend>Education</legend>
+        <p>Skip internships that clearly require a different degree.</p>
+        <EducationFields value={preferences} onChange={setPreferences} />
+      </fieldset>
       <div className="preference-section">
         <Toggle
           label="Include recent openings"
@@ -436,6 +443,8 @@ export default function Onboarding({
     preferred_locations: ["United States"],
     include_remote: true,
     internship_season: "Summer 2027",
+    education_level: EDUCATION_NOT_SPECIFIED,
+    class_standing: EDUCATION_NOT_SPECIFIED,
     alert_frequency: "as_detected",
     globally_paused: false,
     include_recent_openings: true,

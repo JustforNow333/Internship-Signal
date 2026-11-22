@@ -304,6 +304,8 @@ export function makeHostedFixtures() {
       preferred_locations: ["United States", "New York, NY"],
       include_remote: true,
       internship_season: "Summer 2027",
+      education_level: "not_specified",
+      class_standing: "not_specified",
       alert_frequency: "as_detected",
       globally_paused: false,
       include_recent_openings: true,
