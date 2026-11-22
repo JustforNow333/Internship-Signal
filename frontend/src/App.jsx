@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hostedApi } from "./hosted/api.js";
 import AppShell from "./hosted/AppShell.jsx";
 import {
@@ -31,6 +31,26 @@ const PUBLIC_ROUTES = new Set([
   "/verify-email",
 ]);
 const KNOWN_ROUTES = new Set([...PUBLIC_ROUTES, ...APP_ROUTES, "/onboarding"]);
+
+// The preference fields the backend reconciles matches on (see the
+// preferences route); delivery-only fields never change the match list.
+const MATCHING_PREFERENCE_FIELDS = [
+  "role_ids",
+  "career_levels",
+  "preferred_locations",
+  "include_remote",
+  "internship_season",
+  "education_level",
+  "class_standing",
+];
+
+function matchingPreferencesChanged(previous, saved) {
+  if (!previous.include_recent_openings && saved.include_recent_openings)
+    return true;
+  return MATCHING_PREFERENCE_FIELDS.some(
+    (field) => JSON.stringify(previous[field]) !== JSON.stringify(saved[field]),
+  );
+}
 
 function currentPath(initialPath) {
   const path = (initialPath || window.location.pathname).split("?")[0];
@@ -194,12 +214,34 @@ export default function App({ client = hostedApi, initialPath }) {
     resource.data?.companies,
   ]);
 
+  const storedPreferences = useRef(null);
+  storedPreferences.current = resource.data?.preferences ?? null;
+
   const savePreferences = useCallback(
     async (preferences) => {
+      const previous = storedPreferences.current;
       const saved = await client.updatePreferences(preferences);
       setResource((current) =>
         current.data
           ? { ...current, data: { ...current.data, preferences: saved } }
+          : current,
+      );
+      // The backend reconciles matches as part of the save, so a loaded
+      // Active list is stale until it is reloaded. Without a loaded workspace
+      // (onboarding) there is nothing cached to refresh.
+      if (!previous || !matchingPreferencesChanged(previous, saved))
+        return saved;
+      let matches;
+      try {
+        matches = await client.getMatches();
+      } catch {
+        throw new Error(
+          "Your preferences were saved, but your matches could not be refreshed. Reload the page to see your updated matches.",
+        );
+      }
+      setResource((current) =>
+        current.data
+          ? { ...current, data: { ...current.data, matches } }
           : current,
       );
       return saved;
