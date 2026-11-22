@@ -5,9 +5,11 @@ uvicorn app.main:app --reload --port 8000
 """
 
 import json
+import logging
+import os
 from json import JSONDecodeError
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,7 +22,33 @@ from .hosted.services import HostedServices
 from .ingest import process_csv
 from .profile import load_profile
 
+logger = logging.getLogger(__name__)
+
+
+def legacy_api_enabled() -> bool:
+    """Whether to serve the legacy local CSV-analysis API.
+
+    Off unless ``LEGACY_API_ENABLED`` is explicitly true: those routes are
+    unauthenticated and keep every dataset in process memory, so a hosted
+    deployment that never sets the variable never exposes them. An
+    unrecognized value stops startup instead of guessing.
+    """
+
+    raw = os.getenv("LEGACY_API_ENABLED")
+    if raw is None or not raw.strip():
+        return False
+    normalized = raw.strip().casefold()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("LEGACY_API_ENABLED must be true or false")
+
+
 app = FastAPI(title="Internship Signal API", version="1.0.0")
+# Legacy local CSV-analysis routes (upload, sample, datasets, ask, profile).
+# Registered on the app only when legacy_api_enabled(); see the end of file.
+legacy_router = APIRouter()
 MAX_CSV_BYTES = 10 * 1024 * 1024
 MAX_HOSTED_JSON_BYTES = 64 * 1024
 HOSTED_MUTATION_PREFIXES = (
@@ -113,7 +141,7 @@ def _ingest_text(csv_text: str) -> dict:
     }
 
 
-@app.post("/api/ingest")
+@legacy_router.post("/api/ingest")
 async def ingest(request: Request):
     """Accepts either multipart form-data with a `file` field or a JSON body
     {"csv_text": "..."} so the UI can support upload *and* paste."""
@@ -145,7 +173,7 @@ async def ingest(request: Request):
     return _ingest_text(csv_text)
 
 
-@app.get("/api/sample")
+@legacy_router.get("/api/sample")
 def ingest_sample():
     """Loads the bundled demo CSV so the app is useful with zero setup."""
     path = config.SAMPLE_CSV_PATH
@@ -161,7 +189,7 @@ def _dataset_or_404(dataset_id: str) -> dict:
     return ds
 
 
-@app.get("/api/datasets/{dataset_id}/jobs")
+@legacy_router.get("/api/datasets/{dataset_id}/jobs")
 def list_jobs(
     dataset_id: str,
     bucket: str | None = None,
@@ -196,7 +224,7 @@ def list_jobs(
     return {"count": len(jobs), "jobs": jobs}
 
 
-@app.get("/api/datasets/{dataset_id}/jobs/{job_id}")
+@legacy_router.get("/api/datasets/{dataset_id}/jobs/{job_id}")
 def get_job(dataset_id: str, job_id: str):
     _dataset_or_404(dataset_id)
     job = store.get_job(dataset_id, job_id)
@@ -205,13 +233,13 @@ def get_job(dataset_id: str, job_id: str):
     return job
 
 
-@app.get("/api/datasets/{dataset_id}/summary")
+@legacy_router.get("/api/datasets/{dataset_id}/summary")
 def get_summary(dataset_id: str):
     ds = _dataset_or_404(dataset_id)
     return {"summary": ds["summary"], "cleaning_report": ds["cleaning_report"]}
 
 
-@app.post("/api/datasets/{dataset_id}/ask")
+@legacy_router.post("/api/datasets/{dataset_id}/ask")
 async def ask_dataset(dataset_id: str, request: Request):
     ds = _dataset_or_404(dataset_id)
     body = await _json_object(request)
@@ -241,7 +269,7 @@ async def _json_object(request: Request, *, max_bytes: int | None = None) -> dic
     return body
 
 
-@app.get("/api/profile")
+@legacy_router.get("/api/profile")
 def get_profile():
     return load_profile()
 
@@ -249,3 +277,11 @@ def get_profile():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+if legacy_api_enabled():
+    logger.warning(
+        "LEGACY_API_ENABLED is true: serving the unauthenticated legacy "
+        "CSV-analysis API (local development only)"
+    )
+    app.include_router(legacy_router)

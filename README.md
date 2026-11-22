@@ -27,6 +27,8 @@ Requirements: Python 3.10+, Node 18+.
 # Backend — FastAPI on :8000
 pip install -r backend/requirements.txt
 PYTHONPATH=.:backend uvicorn app.main:app --reload --port 8000
+# Legacy CSV-analysis API (off by default; local development only):
+# LEGACY_API_ENABLED=true PYTHONPATH=.:backend uvicorn app.main:app --reload --port 8000
 
 # Frontend — Vite + React on :5173
 cd frontend && npm install && npm run dev
