@@ -36,6 +36,9 @@ from tests.test_hosted_notifications import (  # noqa: F401 - pytest fixtures
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "20261025_0010"
 APPLIED_REVISION = "20261119_0011"
+# 20261121_0012 (education eligibility) now follows 0011 as the single head; it
+# touches neither hosted_user_job_matches nor the applied index.
+HEAD_REVISION = "20261121_0012"
 INDEX_NAME = "ix_hosted_user_job_matches_user_applied"
 EXPECTED_INDEXDEF = (
     f"CREATE INDEX {INDEX_NAME} ON public.hosted_user_job_matches "
@@ -88,7 +91,7 @@ def test_head_schema_has_nullable_timestamptz_applied_at_and_partial_index(
     database,
 ) -> None:
     with database.engine.connect() as connection:
-        assert _revision(connection) == APPLIED_REVISION
+        assert _revision(connection) == HEAD_REVISION
         assert _applied_column(connection) == (
             "timestamp with time zone",
             "YES",
@@ -138,7 +141,7 @@ def test_upgrade_keeps_existing_match_rows_untouched(
         assert len(before) == 4
         database.engine.dispose()
 
-        command.upgrade(alembic, "head")
+        command.upgrade(alembic, APPLIED_REVISION)
         with database.engine.connect() as connection:
             assert _revision(connection) == APPLIED_REVISION
             after = _match_rows(connection)
@@ -147,6 +150,16 @@ def test_upgrade_keeps_existing_match_rows_untouched(
             ).scalars().all()
         assert after == before
         assert applied == [None] * 4
+        database.engine.dispose()
+
+        # Continuing to head (education eligibility) leaves match rows alone too.
+        command.upgrade(alembic, "head")
+        with database.engine.connect() as connection:
+            assert _revision(connection) == HEAD_REVISION
+            assert _match_rows(connection) == before
+            assert connection.execute(
+                text("SELECT applied_at FROM hosted_user_job_matches")
+            ).scalars().all() == [None] * 4
     finally:
         database.engine.dispose()
         command.upgrade(alembic, "head")
@@ -193,7 +206,7 @@ def test_upgrade_downgrade_upgrade_round_trip_has_no_drift(
 
         command.upgrade(alembic, "head")
         with database.engine.connect() as connection:
-            assert _revision(connection) == APPLIED_REVISION
+            assert _revision(connection) == HEAD_REVISION
             assert _applied_column(connection) == (
                 "timestamp with time zone",
                 "YES",

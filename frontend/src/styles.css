@@ -845,6 +845,8 @@ button.danger:hover { background: #9f3021; color: white; }
 .settings-role-grid label.selected > span { border-color: var(--accent); background: var(--accent); color: white; }
 .settings-card .toggle-row { margin-top: 18px; padding-top: 17px; border-top: 1px solid var(--line); }
 .season-field { margin-top: 16px; }
+.education-fields { display: grid; gap: 14px; min-width: 0; }
+.education-help { margin: 0; color: var(--ink-faint); font-size: 12px; }
 .compact-radios { grid-template-columns: 1fr 1fr; }
 .scan-note { padding: 8px 10px; background: var(--paper-sunken); color: var(--ink-faint); font-size: 10.5px; }
 .settings-save { display: flex; justify-content: flex-end; }

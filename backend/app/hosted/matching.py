@@ -12,6 +12,12 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
+from internship_signal.domain.eligibility import (
+    CATEGORICAL_EXCLUSION_REASONS,
+    FRESHMAN_ONLY,
+    GRADUATE_ONLY,
+    PHD_ONLY,
+)
 from watcher.eligibility import OUTSIDE_US, assess_us_location
 
 from .career_level import DEFAULT_CAREER_LEVELS, INTERNSHIP
@@ -59,6 +65,40 @@ _SEASON_ALIASES = {
     "autumn": "fall",
     "winter": "winter",
 }
+# Education rules (Stage 3). Ids mirror models.EDUCATION_LEVELS and
+# models.CLASS_STANDINGS; the database layer is not imported here.
+EDUCATION_NOT_SPECIFIED = "not_specified"
+EDUCATION_UNDERGRADUATE = "undergraduate"
+EDUCATION_MASTERS = "masters"
+EDUCATION_DOCTORAL = "doctoral"
+# Which classifier exclusion reasons each specified education level refuses.
+# doctoral, not_specified and unknown levels refuse nothing, and
+# returning_intern_only never excludes: there is no employment-history profile.
+_EDUCATION_EXCLUSIONS = {
+    EDUCATION_UNDERGRADUATE: frozenset({PHD_ONLY, GRADUATE_ONLY}),
+    EDUCATION_MASTERS: frozenset({PHD_ONLY}),
+}
+# Owner-approved correction to AC7: freshman_only refuses every undergraduate
+# standing past the first year; first_year and not_specified stay eligible.
+_FRESHMAN_EXCLUDED_STANDINGS = frozenset({"sophomore", "junior", "senior"})
+# The classifier reports mixed postings such as "Master's or PhD" or "MS/PhD"
+# as phd_only and "BS, MS" as graduate_only. A degree restriction never
+# excludes a level its own stored evidence names; no other text is read.
+_LEVEL_MENTION_RES = {
+    EDUCATION_UNDERGRADUATE: re.compile(
+        r"\b(?:undergrad(?:uate)?s?|bachelor'?s?|b\.?s\.?c?|b\.?a\.?|b\.?eng)\b",
+        re.IGNORECASE,
+    ),
+    EDUCATION_MASTERS: re.compile(
+        r"\b(?:master'?s?|m\.?s\.?c?|m\.?eng|mba|mfe|mse|mcs|mph|mpa|mfa|mfin)\b",
+        re.IGNORECASE,
+    ),
+}
+# Bounds of the stored verdict shape written by job_mapper.
+_ELIGIBILITY_TEXT_FIELDS = ("degree_level", "evidence_source", "evidence")
+_MAX_ELIGIBILITY_ID_LENGTH = 64
+_MAX_ELIGIBILITY_EVIDENCE_LENGTH = 300
+
 _YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
@@ -75,6 +115,8 @@ class MatchJob:
     remote_status: str = ""
     description: str = ""
     is_open: bool = True
+    # Stored classifier verdict; None (or anything malformed) is unknown.
+    student_eligibility: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +128,8 @@ class MatchPreferences:
     preferred_locations: tuple[str, ...] = ()
     include_remote: bool = True
     internship_season: str = "Any season"
+    education_level: str = EDUCATION_NOT_SPECIFIED
+    class_standing: str = EDUCATION_NOT_SPECIFIED
 
 
 @dataclass(frozen=True)
@@ -123,6 +167,9 @@ def evaluate_match(
     if job.career_level == INTERNSHIP:
         season_reason = _season_reason(job, preferences)
         if season_reason is None:
+            return MatchDecision(False)
+        # Education adds a hard constraint for internships only and no reason.
+        if _education_excludes(job, preferences):
             return MatchDecision(False)
 
     reasons = [
@@ -214,6 +261,62 @@ def _season_reason(job: MatchJob, preferences: MatchPreferences) -> str | None:
     return REASON_SEASON_MATCH
 
 
+def _education_excludes(job: MatchJob, preferences: MatchPreferences) -> bool:
+    """Whether the stored verdict clearly conflicts with the user's education.
+
+    Callers apply this to internships only. Unknown verdicts never exclude.
+    """
+
+    reason = _stored_exclusion_reason(job.student_eligibility)
+    if reason is None:
+        return False
+    level = preferences.education_level
+    if reason in _EDUCATION_EXCLUSIONS.get(level, frozenset()):
+        # Mixed evidence ("Master's or PhD", "MS/PhD", "BS, MS") is ambiguous
+        # for a level it names, so it never excludes that level.
+        mentions = _LEVEL_MENTION_RES.get(level)
+        evidence = job.student_eligibility.get("evidence")
+        return not (
+            mentions is not None
+            and isinstance(evidence, str)
+            and mentions.search(evidence)
+        )
+    return (
+        reason == FRESHMAN_ONLY
+        and level == EDUCATION_UNDERGRADUATE
+        and preferences.class_standing in _FRESHMAN_EXCLUDED_STANDINGS
+    )
+
+
+def _stored_exclusion_reason(value: object) -> str | None:
+    """Return a recognized exclusion reason from a well-formed verdict.
+
+    Anything outside the stored verdict shape is unknown (None) and therefore
+    permissive, even when it names a recognized reason. No classification
+    happens here.
+    """
+
+    if not isinstance(value, Mapping) or "exclusion_reason" not in value:
+        return None
+    reason = value["exclusion_reason"]
+    if not isinstance(reason, str) or reason not in CATEGORICAL_EXCLUSION_REASONS:
+        return None
+    if "eligible" in value and value["eligible"] is not False:
+        return None
+    for name in _ELIGIBILITY_TEXT_FIELDS:
+        text = value.get(name)
+        if text is None:
+            continue
+        limit = (
+            _MAX_ELIGIBILITY_EVIDENCE_LENGTH
+            if name == "evidence"
+            else _MAX_ELIGIBILITY_ID_LENGTH
+        )
+        if not isinstance(text, str) or len(text) > limit:
+            return None
+    return reason
+
+
 def _united_states_compatible(job: MatchJob) -> bool:
     """Reuse the canonical watcher location gate; only explicit foreign fails."""
 
@@ -288,6 +391,8 @@ def preferences_from_model(preferences: object) -> MatchPreferences:
         preferred_locations=tuple(_strings(locations)),
         include_remote=bool(getattr(preferences, "include_remote", True)),
         internship_season=str(getattr(preferences, "internship_season", "") or ""),
+        education_level=_preference_id(preferences, "education_level"),
+        class_standing=_preference_id(preferences, "class_standing"),
     )
 
 
@@ -312,6 +417,9 @@ def job_from_model(job: object, *, include_description: bool = True) -> MatchJob
             else ""
         ),
         is_open=bool(getattr(job, "is_open", False)),
+        student_eligibility=_eligibility_mapping(
+            getattr(job, "student_eligibility", None)
+        ),
     )
 
 
@@ -322,6 +430,15 @@ def needs_job_description(preferences: MatchPreferences) -> bool:
         _normalized(location) in _US_COUNTRY_KEYS
         for location in preferences.preferred_locations
     )
+
+
+def _preference_id(preferences: object, name: str) -> str:
+    value = getattr(preferences, name, None)
+    return value if isinstance(value, str) and value else EDUCATION_NOT_SPECIFIED
+
+
+def _eligibility_mapping(value: object) -> Mapping[str, object] | None:
+    return value if isinstance(value, Mapping) else None
 
 
 def _strings(values: Iterable[object]) -> tuple[str, ...]:

@@ -34,6 +34,33 @@ Preference role IDs are `software_engineering`, `machine_learning_ai`,
 and `other_engineering`. Alert
 frequencies are `as_detected`, `three_hour`, `daily`, and `paused`.
 
+Preferences also carry the optional, self-reported education profile, present
+in every response: `education_level` is `not_specified` (default),
+`undergraduate`, `masters`, or `doctoral`; `class_standing` is `not_specified`
+(default), `first_year`, `sophomore`, `junior`, or `senior`, and is meaningful
+only for `undergraduate`. On `PUT` both are optional: an omitted field keeps the
+stored value, except that an omitted standing becomes `not_specified` when the
+resulting level is not `undergraduate`. Wrong types, `null`, unknown ids, or a
+standing other than `not_specified` with a non-undergraduate level are HTTP 422
+and change nothing. Settings and the onboarding alerts step show an "Education
+level" select (Not specified, Undergraduate, Master's, Doctoral/PhD) in its own
+section, plus a "Class standing" select (Not specified, First-year, Sophomore,
+Junior, Senior) only for Undergraduate; choosing another level resets the
+standing, and payloads always send both fields. Preference objects without the
+fields, or with unknown ids, render as Not specified, and mock mode stores both
+with the same standing reset.
+
+Education filters internships only and never other career levels. An
+undergraduate profile hides internships the classifier marks `phd_only` or
+`graduate_only`, and also `freshman_only` for sophomore, junior, or senior
+standing (not for first-year or Not specified); `masters` hides only
+`phd_only`; `doctoral` and `not_specified` hide nothing. Returning-intern-only
+postings are never hidden because there is no employment-history profile.
+Postings with unknown requirements, including ones imported before the
+education fields existed, are always shown. A hidden match leaves the active
+view but keeps its saved, dismissed, and applied state, and education changes
+never send notifications; see `backend/HOSTED_BACKEND.md` for details.
+
 Company objects expose only `id`, `name`, optional `aliases`, `coverage`, and
 `selectable`. Coverage is `direct`, `backstop`, or (only with reliable current
 evidence) `delayed`. ATS tokens, Workday configuration, source URLs, health

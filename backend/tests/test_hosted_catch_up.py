@@ -1191,7 +1191,7 @@ def test_migration_keeps_existing_notifications_and_queues_nothing(
         with database.engine.connect() as connection:
             assert connection.scalar(
                 text("SELECT version_num FROM alembic_version")
-            ) == "20261119_0011"
+            ) == "20261121_0012"
     finally:
         database.engine.dispose()
         command.upgrade(alembic, "head")

@@ -10,7 +10,13 @@ from dataclasses import dataclass
 from datetime import date
 from urllib.parse import urlsplit
 
+from backend.app.eligibility import analyze_student_eligibility
 from backend.app.normalize import parse_date
+from internship_signal.domain.eligibility import (
+    CATEGORICAL_EXCLUSION_REASONS,
+    GRADUATE_ONLY,
+)
+from internship_signal.domain.jobs import CANONICAL_COLUMNS
 from watcher.filters import is_open
 
 from .career_level import (
@@ -24,6 +30,18 @@ from .catalog import CompanyCatalog
 
 MAX_POSTING_TEXT_LENGTH = 500_000
 MAX_SOURCE_METADATA_BYTES = 4_096
+MAX_ELIGIBILITY_EVIDENCE_LENGTH = 300
+_MAX_ELIGIBILITY_ID_LENGTH = 64
+_ELIGIBILITY_TEXT_FIELDS = ("degree_level", "evidence_source", "evidence")
+# The classifier reads a bare "MS" as a Master's degree, so "MS SQL Server" or
+# "MS Office" can yield a false graduate_only verdict. Only these technology
+# product words are rewritten, and only on a copy of the classifier input.
+_TECHNOLOGY_MS_RE = re.compile(
+    r"\bMS(?=[\s-]+(?:SQL|Server|Office|Excel|Azure|Teams|Dynamics|Windows|"
+    r"Access|Exchange|SharePoint|Outlook|365)\b)",
+    re.IGNORECASE,
+)
+_ELIGIBILITY_INPUT_FIELDS = ("title", "requirements", "description")
 
 _DIRECT_ADAPTERS = frozenset(
     {
@@ -142,6 +160,8 @@ class MappedJob:
     # True only when the source itself marked the posting inactive. A job can
     # also be closed by an expired deadline, which is inference, not a report.
     explicitly_closed: bool = False
+    # Bounded classifier verdict; None means unknown and is always permissive.
+    student_eligibility: dict[str, str | None] | None = None
 
     def business_values(self) -> dict[str, object]:
         return {
@@ -159,6 +179,7 @@ class MappedJob:
             "deadline": self.deadline,
             "is_open": self.is_open,
             "source_metadata": self.source_metadata,
+            "student_eligibility": self.student_eligibility,
         }
 
 
@@ -263,6 +284,7 @@ def _map_final_job(
     open_status = _open_status(job)
     explicitly_closed = job["extra"].get("active") is False
     source_metadata = safe_source_metadata(job.get("extra"))
+    student_eligibility = _hosted_student_eligibility(job)
     return MappedJob(
         watcher_job_id=watcher_job_id,
         company_id=company.id,
@@ -280,7 +302,76 @@ def _map_final_job(
         is_open=open_status,
         source_metadata=source_metadata,
         explicitly_closed=explicitly_closed,
+        student_eligibility=student_eligibility,
     )
+
+
+def normalized_student_eligibility(value: object) -> dict[str, str | None] | None:
+    """Return the bounded four-field verdict, or None when it is unusable.
+
+    Missing, malformed, and unknown classifications are None (unknown, always
+    permissive); nothing is inferred from any other field.
+    """
+
+    if not isinstance(value, Mapping) or "exclusion_reason" not in value:
+        return None
+    reason = value["exclusion_reason"]
+    if reason is not None and (
+        not isinstance(reason, str) or reason not in CATEGORICAL_EXCLUSION_REASONS
+    ):
+        return None
+    if "eligible" in value:
+        eligible = value["eligible"]
+        if not isinstance(eligible, bool) or eligible != (reason is None):
+            return None
+    result: dict[str, str | None] = {"exclusion_reason": reason}
+    for field in _ELIGIBILITY_TEXT_FIELDS:
+        text = value.get(field)
+        if text is not None and not isinstance(text, str):
+            return None
+        result[field] = _eligibility_text(text, field)
+    return result
+
+
+def _eligibility_text(value: str | None, field: str) -> str | None:
+    if value is None:
+        return None
+    text = _CONTROL_RE.sub(" ", value).strip()
+    if not text:
+        return None
+    if field == "evidence":
+        return text[:MAX_ELIGIBILITY_EVIDENCE_LENGTH]
+    return text if len(text) <= _MAX_ELIGIBILITY_ID_LENGTH else None
+
+
+def _hosted_student_eligibility(
+    job: Mapping[str, object],
+) -> dict[str, str | None] | None:
+    stored = normalized_student_eligibility(job.get("student_eligibility"))
+    if stored is None or stored["exclusion_reason"] != GRADUATE_ONLY:
+        return stored
+    # Rebuild the canonical classifier input (canonical columns plus `extra`,
+    # as ingest classified it). Final jobs also carry score outputs such as
+    # `student_eligibility` and `degree_level`, which the classifier would
+    # otherwise read back as structured evidence.
+    rewritten = {
+        field: job[field]
+        for field in (*CANONICAL_COLUMNS, "extra")
+        if field in job
+    }
+    changed = False
+    for field in _ELIGIBILITY_INPUT_FIELDS:
+        text = rewritten.get(field)
+        if isinstance(text, str):
+            replaced = _TECHNOLOGY_MS_RE.sub("Microsoft", text)
+            if replaced != text:
+                rewritten[field] = replaced
+                changed = True
+    if not changed:
+        return stored
+    # Re-run the existing classifier on the copy; the row is never mutated.
+    revised = analyze_student_eligibility(rewritten).decision.as_dict()
+    return normalized_student_eligibility(revised)
 
 
 def _bounded_text(

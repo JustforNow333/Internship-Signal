@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from .career_level import DEFAULT_CAREER_LEVELS, SELECTABLE_CAREER_LEVELS
+from .models import CLASS_STANDINGS, EDUCATION_LEVELS, EDUCATION_NOT_SPECIFIED
 from .security import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, normalized_email
 
 ROLE_IDS = {
@@ -33,6 +34,7 @@ ROLE_IDS = {
     "other_engineering",
 }
 ALERT_FREQUENCIES = {"as_detected", "three_hour", "daily", "paused"}
+EDUCATION_UNDERGRADUATE = "undergraduate"
 
 TrimmedEmail = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=3, max_length=320)
@@ -129,6 +131,12 @@ class PreferencesBase(BaseModel):
     # Defaulted rather than required so a client that predates this field keeps
     # working; the product default is on.
     include_recent_openings: bool = True
+    # Stage 3 education profile. Defaulted so older clients and rows keep the
+    # permissive ``not_specified`` behavior; on PUT the router distinguishes an
+    # omitted field (keep the stored value) from an explicit one through
+    # ``model_fields_set``. Education is never inferred from other fields.
+    education_level: str = EDUCATION_NOT_SPECIFIED
+    class_standing: str = EDUCATION_NOT_SPECIFIED
 
     @field_validator("role_ids")
     @classmethod
@@ -184,9 +192,42 @@ class PreferencesBase(BaseModel):
             raise ValueError("Unsupported alert frequency.")
         return value
 
+    # ``mode="before"`` so null, numbers, booleans and containers are rejected
+    # outright instead of being coerced.
+    @field_validator("education_level", mode="before")
+    @classmethod
+    def valid_education_level(cls, value: object) -> str:
+        if not isinstance(value, str) or value not in EDUCATION_LEVELS:
+            raise ValueError("Unsupported education level.")
+        return value
+
+    @field_validator("class_standing", mode="before")
+    @classmethod
+    def valid_class_standing(cls, value: object) -> str:
+        if not isinstance(value, str) or value not in CLASS_STANDINGS:
+            raise ValueError("Unsupported class standing.")
+        return value
+
+
+def education_standing_conflict(level: str, standing: str) -> bool:
+    """Class standing is only meaningful for undergraduates."""
+
+    return level != EDUCATION_UNDERGRADUATE and standing != EDUCATION_NOT_SPECIFIED
+
 
 class PreferencesUpdate(PreferencesBase):
-    pass
+    @model_validator(mode="after")
+    def consistent_education(self) -> PreferencesUpdate:
+        # Only checkable when both fields are explicit; a standing-only update
+        # is validated by the router against the stored level before any write.
+        explicit = {"education_level", "class_standing"} <= self.model_fields_set
+        if explicit and education_standing_conflict(
+            self.education_level, self.class_standing
+        ):
+            raise ValueError(
+                "class_standing requires education_level undergraduate."
+            )
+        return self
 
 
 class PreferencesResponse(PreferencesBase):

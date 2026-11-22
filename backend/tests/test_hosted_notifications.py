@@ -1670,6 +1670,8 @@ _IDENTITY_JOB_COLUMNS = (
 _CATCH_UP_COLUMNS = ("kind", "source_catch_up_id")
 # Added by 20261119_0011; checked to be NULL by _assert_no_applied_matches.
 _APPLIED_COLUMNS = ("applied_at",)
+# Added by 20261121_0012; checked by _assert_education_columns.
+_EDUCATION_COLUMNS = ("education_level", "class_standing", "student_eligibility")
 _EXISTING_TABLES = (
     "hosted_users",
     "hosted_user_preferences",
@@ -1695,6 +1697,7 @@ def _existing_rows(database: HostedDatabase) -> dict[str, list[str]]:
                 *_IDENTITY_JOB_COLUMNS,
                 *_CATCH_UP_COLUMNS,
                 *_APPLIED_COLUMNS,
+                *_EDUCATION_COLUMNS,
             )
         )
         + "]"
@@ -1721,6 +1724,28 @@ def _assert_no_applied_matches(database: HostedDatabase) -> None:
                 "WHERE applied_at IS NOT NULL"
             )
         ) == 0
+
+
+def _assert_education_columns(
+    database: HostedDatabase, *, freshly_added: bool
+) -> None:
+    """Every preference row reads not_specified; job eligibility is NULL when
+    the column was just (re)created by upgrading through 20261121_0012."""
+
+    with database.engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT DISTINCT education_level, class_standing "
+                "FROM hosted_user_preferences"
+            )
+        ).all() == [("not_specified", "not_specified")]
+        if freshly_added:
+            assert connection.scalar(
+                text(
+                    "SELECT count(*) FROM hosted_jobs "
+                    "WHERE student_eligibility IS NOT NULL"
+                )
+            ) == 0
 
 
 def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
@@ -1758,6 +1783,7 @@ def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
         assert second.counters.jobs_updated == 2
         populated_at_head = _existing_rows(database)
         _assert_no_applied_matches(database)
+        _assert_education_columns(database, freshly_added=False)
 
         command.downgrade(alembic, _PRE_IDENTITY_REVISION)
         with database.engine.connect() as connection:
@@ -1774,6 +1800,7 @@ def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
         command.upgrade(alembic, "head")
         assert _existing_rows(database) == before
         _assert_no_applied_matches(database)
+        _assert_education_columns(database, freshly_added=True)
         with database.engine.connect() as connection:
             new_values = connection.execute(
                 text(
@@ -1810,11 +1837,13 @@ def test_identity_lifecycle_migration_is_additive_on_a_populated_schema(
 
         populated = _existing_rows(database)
         _assert_no_applied_matches(database)
+        _assert_education_columns(database, freshly_added=False)
         command.downgrade(alembic, _PRE_IDENTITY_REVISION)
         assert _existing_rows(database) == populated
         command.upgrade(alembic, "head")
         assert _existing_rows(database) == populated
         _assert_no_applied_matches(database)
+        _assert_education_columns(database, freshly_added=True)
     finally:
         command.upgrade(alembic, "head")
         database.dispose()

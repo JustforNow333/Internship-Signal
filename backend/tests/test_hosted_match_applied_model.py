@@ -23,9 +23,11 @@ APPLIED_REVISION = "20261119_0011"
 INDEX_NAME = "ix_hosted_user_job_matches_user_applied"
 
 
-def test_applied_revision_is_the_single_head_directly_after_0010() -> None:
+def test_applied_revision_follows_0010_directly() -> None:
     scripts = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
-    assert scripts.get_heads() == [APPLIED_REVISION]
+    # 20261121_0012 (education eligibility) now follows it as the single head;
+    # see test_hosted_education_model.
+    assert scripts.get_heads() == ["20261121_0012"]
     assert scripts.get_revision(APPLIED_REVISION).down_revision == PREVIOUS_REVISION
     # Exactly one new revision follows 0010.
     assert [

@@ -1,6 +1,40 @@
-import { CAREER_LEVEL_OPTIONS, DEFAULT_CAREER_LEVELS } from "./constants.js";
+import {
+  CAREER_LEVEL_OPTIONS,
+  CLASS_STANDING_OPTIONS,
+  DEFAULT_CAREER_LEVELS,
+  EDUCATION_LEVEL_OPTIONS,
+  EDUCATION_NOT_SPECIFIED,
+} from "./constants.js";
 
 const CAREER_LEVEL_IDS = new Set(CAREER_LEVEL_OPTIONS.map((option) => option.id));
+const EDUCATION_LEVEL_IDS = new Set(EDUCATION_LEVEL_OPTIONS.map((option) => option.id));
+const CLASS_STANDING_IDS = new Set(CLASS_STANDING_OPTIONS.map((option) => option.id));
+
+// Preferences saved before education existed (or carrying unknown ids) render
+// as Not specified, which applies no education exclusions. Class standing is
+// meaningful only for undergraduates, matching the backend's validation.
+export function educationOrDefault(preferences) {
+  const level = EDUCATION_LEVEL_IDS.has(preferences?.education_level)
+    ? preferences.education_level
+    : EDUCATION_NOT_SPECIFIED;
+  const standing =
+    level === "undergraduate" && CLASS_STANDING_IDS.has(preferences?.class_standing)
+      ? preferences.class_standing
+      : EDUCATION_NOT_SPECIFIED;
+  return { education_level: level, class_standing: standing };
+}
+
+// Changing the level away from undergraduate always clears class standing.
+export function withEducationLevel(preferences, level) {
+  return {
+    ...preferences,
+    education_level: level,
+    class_standing:
+      level === "undergraduate"
+        ? preferences.class_standing || EDUCATION_NOT_SPECIFIED
+        : EDUCATION_NOT_SPECIFIED,
+  };
+}
 
 // Preferences saved before career stages existed have no career_levels; they
 // keep the backend's internship-only default.
