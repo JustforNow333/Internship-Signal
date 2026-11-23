@@ -1,11 +1,29 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app import store
+from app.main import app, legacy_router
 from app.ingest import process_csv
 from tests.conftest import SAMPLE
 
 client = TestClient(app)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def legacy_routes():
+    """Mount the legacy router on the real app, as LEGACY_API_ENABLED does, so
+    its middleware and error handlers apply; remove it afterwards so the rest
+    of the suite sees the default (hosted) route table."""
+
+    registered = len(app.router.routes)
+    app.include_router(legacy_router)
+    app.openapi_schema = None
+    try:
+        yield
+    finally:
+        del app.router.routes[registered:]
+        app.openapi_schema = None
+        store.clear()
 
 
 def _deeply_nested_json(field: str, *, depth: int = 2_000) -> str:
