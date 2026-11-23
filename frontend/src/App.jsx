@@ -281,12 +281,33 @@ export default function App({ client = hostedApi, initialPath }) {
     [client],
   );
 
+  const workspaceLoaded = useRef(false);
+  workspaceLoaded.current = Boolean(resource.data);
+
   const saveWatchlist = useCallback(
     async (entries) => {
+      const loaded = workspaceLoaded.current;
       const saved = await client.updateWatchlist({ companies: entries });
       setResource((current) =>
         current.data
           ? { ...current, data: { ...current.data, watchlist: saved } }
+          : current,
+      );
+      // The backend reconciles matches when the watchlist changes, so a
+      // loaded Active list is stale until it is reloaded. Without a loaded
+      // workspace (onboarding) there is nothing cached to refresh.
+      if (!loaded) return saved;
+      let matches;
+      try {
+        matches = await client.getMatches();
+      } catch {
+        throw new Error(
+          "Your watchlist was saved, but your matches could not be refreshed. Reload the page to see your updated matches.",
+        );
+      }
+      setResource((current) =>
+        current.data
+          ? { ...current, data: { ...current.data, matches } }
           : current,
       );
       return saved;
